@@ -1,18 +1,35 @@
 # portal-ai-server
 
-Portal.ai 패션 추천 AI 서버 — FastAPI 기반 검색 + 리파인 파이프라인. Next.js에서 Vision 분석 완료된 아이템을 받아 Qdrant 벡터 검색 + enum 스코어링 후 product_id 리턴.
+Portal.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인.
 
-## 프로젝트 구조
+`portal/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC → 다양성 캡 → product_id[] 반환**.
+
+상세 문서:
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 전체 그림 + 토폴로지
+- [docs/PATTERNS.md](docs/PATTERNS.md) — 코드 컨벤션
+- [docs/features/](docs/features/) — pipeline / search-engine / observability
+- [docs/infra/](docs/infra/) — env / deployment / cicd
+
+## 책임 분리 (요약)
+
+| 레이어 | 책임 |
+|--------|------|
+| Vercel / `portal/app` | Apify, R2, Vision(GPT-4o-mini), 세션, UI, v4 폴백 |
+| **portal/ai (이 프로젝트)** | **검색 오케스트레이션, enhance_query, Langfuse trace** |
+| Modal | FashionSigLIP 임베딩 (단건 + 배치) |
+| Supabase | pgvector + pgroonga, `search_products_v5` RPC |
+
+## 디렉토리
 
 ```
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS
-├── api/                 # 라우트 (recommend, health)
-├── pipeline/            # 파이프라인 스텝 (enhance, search, response, metadata)
-├── scoring/             # enum 스코어링 (fashion-ai TS → Python 포팅)
-├── providers/           # 외부 서비스 클라이언트 (LLM, embedding, Qdrant)
-└── models/              # Pydantic request/response
-scripts/                 # 배치 스크립트 (임베딩 등)
+├── api/                 # 라우터 (recommend, health)
+├── pipeline/            # state machine (embed → search → diversify)
+├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
+├── observability/       # Langfuse @observe 래퍼
+├── models/              # Pydantic request/response
+└── core/                # config (env)
 ```
 
 ## 기술 스택
@@ -20,81 +37,74 @@ scripts/                 # 배치 스크립트 (임베딩 등)
 | 영역 | 기술 |
 |------|------|
 | 프레임워크 | FastAPI + uvicorn |
-| LLM/임베딩 | LiteLLM → OpenAI / Cohere / Bedrock |
-| 벡터 DB | Qdrant (Docker, dense vector) |
+| LLM | LiteLLM proxy 경유 (httpx) |
+| 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
+| 벡터 DB | **Supabase pgvector + pgroonga** (Qdrant 미사용) |
+| Observability | **Langfuse self-host** |
 | 스키마 | Pydantic v2 |
 | HTTP | httpx (async) |
 | 패키지 | uv |
 | 린트 | ruff |
-| 테스트 | pytest + pytest-asyncio |
-| 컨테이너 | Docker Compose (ai-server + litellm + qdrant + nginx) |
 
 ## 개발 명령어
 
 ```bash
-uv sync                      # 의존성 설치
-uv run uvicorn app.main:app --reload --port 8000  # 로컬 실행
-uv run ruff check .          # 린트
-uv run ruff format .         # 포맷
-uv run pytest                # 테스트
-docker compose up -d         # 전체 스택 기동
+uv sync                                              # 의존성 설치
+uv run uvicorn app.main:app --reload --port 8000     # 로컬 실행
+uv run ruff check . && uv run ruff format .          # 린트 + 포맷
+uv run pytest                                        # 테스트
+docker compose up -d                                 # 로컬 스택 (AI 서버만)
 ```
 
 ## 코딩 컨벤션
 
-- plain async 함수 체인 (LangGraph/LangChain 사용 금지, MVP)
+- **plain async + state → state** (LangGraph 보류, 마이그레이션 비용 0 유지)
 - Pydantic v2 모델로 request/response 정의
-- LLM 호출은 반드시 LiteLLM 프록시 경유 (localhost:4000)
-- 임베딩도 LiteLLM 경유 (프로바이더 교체 용이)
-- ruff로 린트+포맷 (line-length=120)
+- LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
+- 임베딩 호출은 Modal endpoint (`MODAL_EMBED_URL`)
+- Supabase 쿼리는 RPC 함수 호출 (`supabase-py` async)
+- ruff 린트+포맷 (line-length=120)
 
 ## 핵심 파일
 
 | 파일 | 설명 |
 |------|------|
-| `app/main.py` | FastAPI 앱 엔트리포인트 |
-| `app/api/recommend.py` | POST /recommend 메인 엔드포인트 |
-| `app/pipeline/enhance.py` | 쿼리 개선 (리파인 핵심, LLM 호출) |
-| `app/pipeline/search.py` | Qdrant 벡터 검색 + enum 스코어링 결합 |
-| `app/scoring/enum_scorer.py` | 13차원 가중치 스코어링 (TS에서 포팅) |
-| `app/scoring/weights.py` | 스코어링 가중치 상수 |
-| `app/providers/vector.py` | AsyncQdrantClient 래퍼 |
-| `app/providers/llm.py` | LiteLLM 클라이언트 |
-| `app/models/request.py` | RecommendRequest (AnalyzedItem 포함) |
-| `app/models/response.py` | RecommendResponse |
-| `scripts/batch_embed.py` | 26K 상품 임베딩 배치 |
-| `litellm-config.yaml` | LLM/임베딩 모델 라우팅 설정 |
+| `app/main.py` | FastAPI 엔트리포인트 + lifespan (Supabase 워밍업) |
+| `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
+| `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증) |
+| `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
+| `app/pipeline/state.py` | PipelineState 정의 |
+| `app/pipeline/embed.py` | Modal /embed 호출 |
+| `app/pipeline/search.py` | Supabase `search_products_v5` RPC |
+| `app/pipeline/diversify.py` | 다양성 캡 + tolerance |
+| `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
+| `app/providers/database.py` | SupabaseProvider (async, lifespan 워밍업) |
+| `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증 |
+| `app/providers/llm.py` | LiteLLM HTTP |
+| `app/observability/langfuse.py` | `@observe` (no-op fallback) |
+| `app/models/request.py` | RecommendRequest (alias + image_url SSRF 가드) |
+| `app/models/response.py` | RecommendResponse (serialization_alias) |
 
-## 검색 전략
+## 검색 책임 경계 (B 옵션)
 
 ```
-최종 스코어 = vector_score × 0.4 + enum_score × 0.6
+[Postgres RPC] dense(HNSW) + sparse(pgroonga) + RRF → top-50
+       ↓
+[Python] 다양성 캡(브랜드/플랫폼) + tolerance + 최종 정렬 → top-15
 ```
 
-- dense vector: Qdrant 코사인 유사도 (임베딩 API)
-- enum score: 13차원 가중치 (카테고리/색상/핏/소재/스타일/시즌/패턴 등)
-- 다양성: 브랜드 max 2, 플랫폼 max 3, 아이템당 top 7
+## 환경 변수
+
+`.env.example` 참조. 키는 `.env`에 (POC 단계 — 운영 시 Parameter Store 전환 예정).
+
+## 관련 프로젝트
+
+| 프로젝트 | 경로 | 역할 |
+|----------|------|------|
+| portal/app | `/Users/hansangho/Desktop/portal/app` | Next.js 모놀리스 (caller + v4 폴백) |
+| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai-server/` | EC2 docker-compose + Langfuse + Modal 인프라 |
 
 ## 인증 구조
 
 AI 서버는 stateless. 인증 없음.
-Next.js가 세션 관리 + Supabase Auth 담당 → AI 서버에 request body로 전달.
-
-## 환경 변수
-
-`.env.example` 참조. LiteLLM 프록시를 경유하므로 API 키는 LiteLLM 컨테이너에만 설정.
-
-## 상세 참조 문서
-
-| 문서 | 내용 |
-|------|------|
-| `docs/plans/2026-04-10-ai-server-design.md` | AI 서버 설계 스펙 (아키텍처, API, 파이프라인, 벡터 검색) |
-| `docs/plans/26-04-10-ai-server-bootstrap-guide.md` | 부트스트랩 가이드 (참고 프로젝트, 포팅 대상, 구현 순서) |
-
-## 참고 프로젝트
-
-| 프로젝트 | 경로 | 참고 대상 |
-|----------|------|----------|
-| seed-lognia | `/Users/hansangho/Desktop/seed-lognia` | FastAPI 구조, Provider 패턴, Qdrant 사용 |
-| fashion-ai | `/Users/hansangho/Desktop/fashion-ai` | 포팅 원본 (검색 로직, enum, 프롬프트) |
-| aws-infra | `/Users/hansangho/Desktop/aws-infra` | LiteLLM Docker/설정, EC2 셋업 |
+`portal/app`이 세션 + Supabase Auth 담당, AI 서버에 request body로 전달.
