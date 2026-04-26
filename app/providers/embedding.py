@@ -18,7 +18,7 @@ class EmbedProvider:
                 headers["Authorization"] = f"Bearer {settings.MODAL_EMBED_TOKEN}"
             cls._client = httpx.AsyncClient(
                 base_url=settings.MODAL_EMBED_URL,
-                timeout=30.0,
+                timeout=settings.MODAL_EMBED_TIMEOUT,
                 headers=headers,
             )
         return cls._client

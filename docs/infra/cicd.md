@@ -69,7 +69,7 @@ concurrency:
 
 ## deploy.ai.sh — EC2 측 스크립트
 
-`aws-infra/portal-ai-servers/portal-ai-server/scripts/deploy.ai.sh` (EC2 의 `/home/ec2-user/scripts/`).
+`aws-infra/portal-ai-servers/portal-ai/scripts/deploy.ai.sh` (EC2 의 `/home/ec2-user/scripts/`).
 
 흐름:
 1. `.env` 로드 + `IMAGE_TAG` 인자 검증
@@ -106,7 +106,7 @@ aws ecr create-repository --repository-name portal/dev/ai \
   --region ap-northeast-2 --profile portal-ai
 
 # 2. EC2 에 IAM Role 부착 (ECR pull용)
-#    상세: aws-infra/portal-ai-servers/portal-ai-server/CICD.md
+#    상세: aws-infra/portal-ai-servers/portal-ai/CICD.md
 
 # 3. EC2 에 deploy.ai.sh + docker-compose.yml + config/ 배치
 #    상세: docs/infra/deployment.md

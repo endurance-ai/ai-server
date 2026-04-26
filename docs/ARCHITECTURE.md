@@ -148,7 +148,7 @@ confidence-fallback / multi-step retry / human-in-the-loop 등 분기가 실제�
 | [`infra/deployment.md`](infra/deployment.md) | EC2 docker-compose + Modal 배포 |
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
 | `docs/plans/archive/` | 과거 Qdrant 기반 설계 (참고만) |
-| `aws-infra/portal-ai-servers/portal-ai-server/` | EC2 docker-compose 본체 |
+| `aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose 본체 |
 | `portal/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 |
 
 ## 변경 이력

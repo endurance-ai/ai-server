@@ -77,7 +77,7 @@ docs/
 | 프로젝트 | 경로 | 역할 |
 |---------|------|------|
 | portal/app | `/Users/hansangho/Desktop/portal/app` | Next.js 모놀리스 (caller + v4 폴백) |
-| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai-server/` | EC2 docker-compose + Modal 배포 |
+| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose + Modal 배포 |
 
 ## 라이선스
 

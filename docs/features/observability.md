@@ -38,7 +38,7 @@ recommend_pipeline (4.2s)
 
 ## LiteLLM 자동 trace
 
-`aws-infra/portal-ai-servers/portal-ai-server/config/litellm.yaml`:
+`aws-infra/portal-ai-servers/portal-ai/config/litellm.yaml`:
 
 ```yaml
 litellm_settings:

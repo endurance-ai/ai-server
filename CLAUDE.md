@@ -102,7 +102,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | 프로젝트 | 경로 | 역할 |
 |----------|------|------|
 | portal/app | `/Users/hansangho/Desktop/portal/app` | Next.js 모놀리스 (caller + v4 폴백) |
-| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai-server/` | EC2 docker-compose + Langfuse + Modal 인프라 |
+| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose + Langfuse + Modal 인프라 |
 
 ## 인증 구조
 

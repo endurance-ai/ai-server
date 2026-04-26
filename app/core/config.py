@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Modal — FashionSigLIP 임베딩 엔드포인트
     MODAL_EMBED_URL: str = ""
     MODAL_EMBED_TOKEN: str = ""  # Modal proxy auth (optional)
+    MODAL_EMBED_TIMEOUT: float = 90.0  # cold start (모델 GPU 로드) 여유 — warm 시 1초 내
 
     # LiteLLM Proxy — LLM 호출 (enhance_query, future rerank)
     LITELLM_BASE_URL: str = "http://localhost:4000"
