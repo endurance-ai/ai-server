@@ -7,16 +7,20 @@ from fastapi.responses import ORJSONResponse
 
 from app.api import router
 from app.core.config import settings
+from app.providers.database import SupabaseProvider
+from app.providers.embedding import EmbedProvider
 from app.providers.llm import LLMProvider
-from app.providers.vector import VectorProvider
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    # Startup
+    # Startup — 비동기 클라이언트 워밍업으로 첫 요청 race condition 회피
+    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+        await SupabaseProvider.get_client()
     yield
     # Shutdown
-    await VectorProvider.close()
+    await SupabaseProvider.close()
+    await EmbedProvider.close()
     await LLMProvider.close()
 
 

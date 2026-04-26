@@ -7,12 +7,12 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
-    "litellm>=1.60",
-    "qdrant-client>=1.17",
     "pydantic>=2.10",
+    "pydantic-settings>=2.13.1",
     "httpx>=0.28",
     "orjson>=3.10",
-    "pydantic-settings>=2.13.1",
+    "supabase>=2.10",
+    "langfuse>=2.50",
 ]
 
 [dependency-groups]

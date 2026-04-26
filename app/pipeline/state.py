@@ -1,0 +1,33 @@
+from dataclasses import dataclass, field
+from time import perf_counter
+from typing import Any
+
+from app.models.request import RecommendRequest
+
+
+@dataclass
+class PipelineState:
+    """파이프라인이 단계별로 갱신해 나가는 가변 상태.
+    모든 step 함수는 (state) -> state 시그니처로 통일 — 향후 LangGraph 마이그레이션 비용 0.
+    """
+
+    request: RecommendRequest
+
+    # 중간 산출물
+    embedding: list[float] | None = None
+    raw_candidates: list[dict[str, Any]] = field(default_factory=list)
+    final_candidates: list[dict[str, Any]] = field(default_factory=list)
+
+    # 측정
+    counts: dict[str, int] = field(default_factory=dict)
+    latency_ms: dict[str, int] = field(default_factory=dict)
+    _step_starts: dict[str, float] = field(default_factory=dict)
+
+    def start(self, step: str) -> None:
+        self._step_starts[step] = perf_counter()
+
+    def end(self, step: str) -> None:
+        start = self._step_starts.get(step)
+        if start is None:
+            return
+        self.latency_ms[step] = int((perf_counter() - start) * 1000)
