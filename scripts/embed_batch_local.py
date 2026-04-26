@@ -44,7 +44,8 @@ from app.core.config import settings  # noqa: E402
 
 MODEL_ID = "Marqo/marqo-fashionSigLIP"
 PAGE_SIZE = 200
-UPSERT_CHUNK = 100
+UPSERT_CHUNK = 25  # HNSW 인덱스 유지비용 — chunk 크면 Supabase statement_timeout(~8s) 초과
+UPSERT_MIN_CHUNK = 5  # 자동 분할 하한
 
 
 def detect_device() -> str:
@@ -143,17 +144,31 @@ def to_pgvector(values: list[float]) -> str:
     return "[" + ",".join(f"{v:.7f}" for v in values) + "]"
 
 
-def upsert(sb, embeddings: dict[str, list[float]], dry_run: bool = False) -> int:
+def upsert(sb, embeddings: dict[str, list[float]], dry_run: bool = False, chunk_size: int = UPSERT_CHUNK) -> int:
+    """timeout(57014) 감지 시 chunk_size 자동 절반 → 최소 UPSERT_MIN_CHUNK 까지 시도."""
     payload = [{"id": pid, "embedding": to_pgvector(e), "model": MODEL_ID} for pid, e in embeddings.items()]
     if dry_run:
         print(f"  [dry-run] would upsert {len(payload)} rows")
         return len(payload)
+
     total = 0
-    for i in range(0, len(payload), UPSERT_CHUNK):
-        chunk = payload[i : i + UPSERT_CHUNK]
-        res = sb.rpc("bulk_update_product_embeddings", {"payload": chunk}).execute()
-        n = res.data if isinstance(res.data, int) else 0
-        total += n
+    i = 0
+    cur_chunk = chunk_size
+    while i < len(payload):
+        chunk = payload[i : i + cur_chunk]
+        try:
+            res = sb.rpc("bulk_update_product_embeddings", {"payload": chunk}).execute()
+            n = res.data if isinstance(res.data, int) else 0
+            total += n
+            i += cur_chunk
+        except Exception as e:
+            err = str(e)
+            if ("57014" in err or "statement timeout" in err) and cur_chunk > UPSERT_MIN_CHUNK:
+                new_size = max(UPSERT_MIN_CHUNK, cur_chunk // 2)
+                print(f"  [timeout] chunk {cur_chunk} 실패 → {new_size} 로 재시도")
+                cur_chunk = new_size
+                continue
+            raise
     return total
 
 
@@ -170,6 +185,12 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=None, help="N 개만 처리 (테스트용)")
     ap.add_argument("--batch-size", type=int, default=16, help="GPU/MPS 배치 크기 (default 16)")
     ap.add_argument("--download-workers", type=int, default=8, help="이미지 다운로드 동시성 (default 8)")
+    ap.add_argument(
+        "--upsert-chunk",
+        type=int,
+        default=UPSERT_CHUNK,
+        help=f"Supabase RPC 1회 upsert row 수 (default {UPSERT_CHUNK} — HNSW 인덱스 timeout 자동 감소)",
+    )
     ap.add_argument("--dry-run", action="store_true", help="upsert 직전 중단 — 검증용")
     args = ap.parse_args()
 
@@ -219,7 +240,7 @@ def main() -> None:
         encode_dur = time.time() - encode_start
         print(f"  encode:   {len(embs)} on {device} — {encode_dur:.1f}s ({len(embs) / encode_dur:.1f}/s)")
 
-        n = upsert(sb, embs, dry_run=args.dry_run)
+        n = upsert(sb, embs, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
         upserted_total += n
 
         elapsed = time.time() - page_start
