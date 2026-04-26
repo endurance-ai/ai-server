@@ -55,7 +55,7 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 
 ## EC2 docker-compose 측 (LiteLLM/Langfuse 컨테이너 용)
 
-`aws-infra/portal-ai-servers/portal-ai-server/env/.env` 참조. 위의 AI 서버 키 외 추가:
+`aws-infra/portal-ai-servers/portal-ai/env/.env` 참조. 위의 AI 서버 키 외 추가:
 
 | 키 | 용도 |
 |----|------|

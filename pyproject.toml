@@ -12,7 +12,8 @@ dependencies = [
     "httpx>=0.28",
     "orjson>=3.10",
     "supabase>=2.10",
-    "langfuse>=2.50",
+    # Langfuse server (docker-compose) 가 v2 이미지 — Python SDK 도 v2 로 pin (v3 SDK 는 ingestion endpoint 변경됨 → 404)
+    "langfuse>=2.50,<3.0",
 ]
 
 [dependency-groups]
