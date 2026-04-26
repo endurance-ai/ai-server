@@ -308,7 +308,7 @@ services:
 ## 9. 환경 변수
 
 ```bash
-# .env.example
+# .env
 # LiteLLM
 OPENAI_API_KEY=sk-...
 COHERE_API_KEY=...              # 또는 DEEPINFRA_API_KEY

@@ -17,7 +17,7 @@ v4 검색 (폴백)
 
 ```bash
 uv sync
-cp .env.example .env             # 값 채워넣기 — docs/infra/env.md 참고
+# .env 작성 — 키 목록은 docs/infra/env.md 참고
 uv run uvicorn app.main:app --reload --port 8000
 curl http://localhost:8000/health  # liveness (no auth)
 ```

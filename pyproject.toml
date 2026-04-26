@@ -23,6 +23,15 @@ dev = [
     "pytest-asyncio>=0.25",
 ]
 
+# 로컬 배치 임베딩 (`scripts/embed_batch_local.py`) 전용 — 운영 이미지에는 포함 X
+# 설치: `uv sync --group embed` (~5GB 다운로드, Mac M-series 는 MPS 자동 사용)
+embed = [
+    "torch>=2.4",
+    "open-clip-torch>=2.26",
+    "Pillow>=10.0",
+    "tqdm>=4.60",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120
