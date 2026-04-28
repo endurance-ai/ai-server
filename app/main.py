@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,14 @@ from app.core.config import settings
 from app.providers.database import SupabaseProvider
 from app.providers.embedding import EmbedProvider
 from app.providers.llm import LLMProvider
+
+# DIAG: 진단용 logging 셋업 — 검색 파이프라인 분석 끝나면 정리
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s :: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("app").setLevel(logging.DEBUG)
 
 
 @asynccontextmanager

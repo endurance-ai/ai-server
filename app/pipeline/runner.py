@@ -1,3 +1,5 @@
+import logging
+
 from app.models.request import RecommendRequest
 from app.models.response import Candidate, RecommendResponse
 from app.observability.langfuse import observe
@@ -6,13 +8,36 @@ from app.pipeline.embed import embed_step
 from app.pipeline.search import search_step
 from app.pipeline.state import PipelineState
 
+logger = logging.getLogger(__name__)
+
 
 @observe(name="recommend_pipeline")
 async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
+    # 요청 요약 — 어떤 item / 필터로 들어왔는지
+    logger.info(
+        "[STEP 4.2][pipeline] === START === item_id=%s search_query=%r search_query_ko=%r "
+        "subcategory=%s gender=%s brand_filter=%s tolerance=%.2f final_limit=%s",
+        req.item.id,
+        req.item.search_query,
+        req.item.search_query_ko,
+        req.item.subcategory,
+        req.gender,
+        req.brand_filter,
+        req.tolerance,
+        req.final_limit,
+    )
+
     state = PipelineState(request=req)
     state = await embed_step(state)
     state = await search_step(state)
     state = await diversify_step(state)
+
+    # 최종 요약 — 단계별 latency / count
+    logger.info(
+        "[STEP 4.9][pipeline] === END === counts=%s latency_ms=%s",
+        state.counts,
+        state.latency_ms,
+    )
 
     results = [
         Candidate(

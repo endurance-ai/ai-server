@@ -19,10 +19,23 @@ router = APIRouter()
     dependencies=[Depends(verify_internal_token)],
 )
 async def recommend(req: RecommendRequest) -> ORJSONResponse:
+    logger.info(
+        "[STEP 4.1][recommend] 라우터 진입 — item_id=%s subcategory=%s gender=%s tolerance=%.2f hasImage=%s",
+        req.item.id,
+        req.item.subcategory,
+        req.gender,
+        req.tolerance,
+        bool(req.image_url),
+    )
     try:
         resp = await run_pipeline(req)
     except Exception:
         # 내부 예외 메시지(SQL/Modal URL/스택)를 응답에 노출하지 않음 — 로그/Langfuse trace 만 남김
-        logger.exception("recommend pipeline failed item_id=%s", req.item.id)
+        logger.exception("[STEP 4.X][recommend] ❌ pipeline 예외 item_id=%s", req.item.id)
         raise HTTPException(status_code=502, detail="pipeline_failed") from None
+    logger.info(
+        "[STEP 4.10][recommend] ✅ 응답 — item_id=%s results=%d",
+        req.item.id,
+        len(resp.results),
+    )
     return ORJSONResponse(content=resp.model_dump(by_alias=True))
