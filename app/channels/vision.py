@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import re
+import time
 
 from app.core.config import settings
 from app.observability.langfuse import observe
@@ -107,7 +108,7 @@ async def extract(image: str | bytes) -> dict:
     src = "url" if isinstance(image, str) else f"bytes({len(image)}B)"
     logger.info("👁️  [VISION] 🚀 호출 시작 model=%s source=%s", _model(), src)
 
-    t0 = asyncio.get_event_loop().time()
+    t0 = time.perf_counter()
     try:
         resp = await asyncio.wait_for(
             LLMProvider.chat(
@@ -125,7 +126,7 @@ async def extract(image: str | bytes) -> dict:
         logger.warning("👁️  [VISION] LLM 호출 실패: %s", e)
         return dict(_FALLBACK)
 
-    elapsed_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
     try:
         content = resp["choices"][0]["message"]["content"]

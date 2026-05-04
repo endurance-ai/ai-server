@@ -36,13 +36,14 @@ async def telegram_webhook(
         return ORJSONResponse({"ok": True})
 
     adapter = get_adapter()
+    update_id = payload.get("update_id") if isinstance(payload, dict) else None
     try:
         message = await adapter.parse_inbound(payload)
     except ChannelParseError as e:
-        logger.error("telegram parse_inbound error: %s | payload=%s", e, payload)
+        logger.error("telegram parse_inbound error update_id=%s err=%s", update_id, e)
         return ORJSONResponse({"ok": True})
     except Exception:
-        logger.exception("telegram parse_inbound unexpected error | payload=%s", payload)
+        logger.exception("telegram parse_inbound unexpected error update_id=%s", update_id)
         return ORJSONResponse({"ok": True})
 
     logger.info(

@@ -18,11 +18,23 @@ def _ssrf_guard_url(url: str) -> str:
         raise ValueError(f"url has no host: {url}")
     if host in {"localhost", "ip6-localhost", "ip6-loopback"}:
         raise ValueError(f"url host is localhost: {host}")
+    # 단일 라벨 호스트 / .internal / .local / .corp → 회사 내부망 가능성 차단
+    if "." not in host or host.endswith((".internal", ".local", ".corp", ".lan", ".intranet")):
+        raise ValueError(f"url host looks internal: {host}")
+    # IPv6 bracket 표기 정규화
+    bare_host = host.lstrip("[").rstrip("]")
     try:
-        ip = ipaddress.ip_address(host)
+        ip = ipaddress.ip_address(bare_host)
     except ValueError:
         return url
-    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+    if (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    ):
         raise ValueError(f"url host is non-routable: {host}")
     return url
 

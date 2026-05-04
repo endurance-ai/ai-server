@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.channels.schemas import _ssrf_guard_url
+
 logger = logging.getLogger(__name__)
 
 _CACHE: dict[str, tuple[list[str], float]] = {}
@@ -39,12 +41,42 @@ _OG_RE_NAME = re.compile(
 def _get_client() -> httpx.AsyncClient:
     global _client
     if _client is None:
+        # follow_redirects=False — 수동으로 각 hop마다 SSRF 재검증한다
         _client = httpx.AsyncClient(
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={"User-Agent": _UA},
         )
     return _client
+
+
+_MAX_REDIRECTS = 5
+
+
+async def _safe_get(client: httpx.AsyncClient, url: str) -> httpx.Response | None:
+    """SSRF guard를 적용해 redirect 체인을 수동으로 따라간다.
+    각 hop의 호스트가 내부망/링크-로컬/cloud metadata IP면 즉시 중단."""
+    current = url
+    for _ in range(_MAX_REDIRECTS):
+        try:
+            _ssrf_guard_url(current)
+        except ValueError as e:
+            logger.warning("🔗 [LINK] 🛡️  SSRF 차단 url=%s err=%s", current, e)
+            return None
+        try:
+            resp = await client.get(current)
+        except httpx.HTTPError as e:
+            logger.warning("🔗 [LINK] ❌ 페치 실패 url=%s err=%s", current, e)
+            return None
+        if resp.status_code in (301, 302, 303, 307, 308):
+            loc = resp.headers.get("location")
+            if not loc:
+                return resp
+            current = str(httpx.URL(current).join(loc))
+            continue
+        return resp
+    logger.warning("🔗 [LINK] ⚠️  redirect 횟수 초과 (%d) url=%s", _MAX_REDIRECTS, url)
+    return None
 
 
 async def aclose() -> None:
@@ -107,10 +139,8 @@ async def resolve(url: str) -> list[str]:
 
     client = _get_client()
 
-    try:
-        resp = await client.get(url)
-    except httpx.HTTPError as e:
-        logger.warning("🔗 [LINK] 페치 실패 url=%s err=%s", url, e)
+    resp = await _safe_get(client, url)
+    if resp is None:
         _cache_put(url, [])
         return []
 
@@ -134,6 +164,14 @@ async def resolve(url: str) -> list[str]:
         if og_orig != og:
             logger.info("🔗 [LINK]   ↳ 🖼️  pinterest 풀해상도로 치환")
         og = og_orig
+
+    # 추출된 og:image도 SSRF 체크 — Telegram이 이걸 가져갈 거니까
+    try:
+        _ssrf_guard_url(og)
+    except ValueError as e:
+        logger.warning("🔗 [LINK] 🛡️  og:image SSRF 차단 url=%s err=%s", og, e)
+        _cache_put(url, [])
+        return []
 
     logger.info("🔗 [LINK] ✅ 완료 og:image=%s", og)
     _cache_put(url, [og])
