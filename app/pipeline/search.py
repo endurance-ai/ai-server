@@ -21,9 +21,17 @@ async def search_step(state: PipelineState) -> PipelineState:
     req = state.request
     state.start("search")
 
+    # enhance_query (SPEC-PIPELINE-001): status=="ok" 일 때만 정제 쿼리 사용. 그 외 raw.
+    if state.enhance_query_status == "ok" and state.enhanced_query_ko:
+        query_text = state.enhanced_query_ko
+    elif state.enhance_query_status == "ok" and state.enhanced_query:
+        query_text = state.enhanced_query
+    else:
+        query_text = req.item.search_query_ko or req.item.search_query
+
     params = {
         "query_embedding": _embedding_to_pgvector(state.embedding),
-        "query_text": req.item.search_query_ko or req.item.search_query,
+        "query_text": query_text,
         "brand_filter": req.brand_filter,
         # DIAG (임시): gender 매핑 깨짐 ('male' vs DB 'men') + subcategory 100% NULL
         # → 두 hard filter 가 dense 후보 풀을 0으로 만들어 임베딩 검증 불가

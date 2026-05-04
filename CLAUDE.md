@@ -75,6 +75,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
 | `app/pipeline/state.py` | PipelineState 정의 |
 | `app/pipeline/embed.py` | Modal /embed 호출 |
+| `app/pipeline/enhance_query.py` | LLM 기반 sparse 쿼리 정제 (SPEC-PIPELINE-001, feature flag 기본 off) |
 | `app/pipeline/search.py` | Supabase `search_products_v5` RPC |
 | `app/pipeline/diversify.py` | 다양성 캡 + tolerance |
 | `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
