@@ -1,6 +1,10 @@
+import asyncio
+import os
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import ORJSONResponse
 
+from app.channels.factory import backend_name, get_adapter
 from app.core.auth import verify_internal_token
 from app.core.config import settings
 from app.providers.database import SupabaseProvider
@@ -26,6 +30,19 @@ async def health_ready() -> ORJSONResponse:
     all_ok = supabase_ok and modal_ok and litellm_ok
     status_code = 200 if all_ok else 503
 
+    backend = backend_name()
+    bot_username = os.getenv("TELEGRAM_BOT_USERNAME", "")
+    reachable = False
+    if backend == "telegram":
+        try:
+            adapter = get_adapter()
+            me = await asyncio.wait_for(adapter.get_me(), timeout=3.0)
+            if me:
+                reachable = True
+                bot_username = me.get("username") or bot_username
+        except (TimeoutError, Exception):
+            reachable = False
+
     return ORJSONResponse(
         status_code=status_code,
         content={
@@ -33,6 +50,9 @@ async def health_ready() -> ORJSONResponse:
             "supabase": "connected" if supabase_ok else "disconnected",
             "modal_embed": "connected" if modal_ok else "disconnected",
             "litellm": "connected" if litellm_ok else "disconnected",
+            "messenger_backend": backend,
+            "bot_username": bot_username,
+            "reachable": reachable,
             "version": settings.VERSION,
         },
     )
