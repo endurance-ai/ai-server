@@ -353,6 +353,11 @@ These do not block SPEC approval but should be answered before code is written:
 2. Pipeline returns top-15 — should the bot send strictly the top 4 ordered, or apply a small re-rank for visual diversity in the chat? P0 default: top-4 ordered (no re-rank).
 3. Should the bot acknowledge inbound photo before vision/pipeline finishes (Telegram `sendChatAction("typing")` or a "Looking…" pre-reply), or stay silent until the opener? P0 default: send `sendChatAction("typing")` once, no pre-text.
 
+## Future Scope (post-demo, separate SPEC)
+
+- **Waitlist mode (post-IR, pre-launch).** When the bot is not yet open to public traffic, any inbound message (e.g., `hello`, link share, photo) MUST trigger a polite "service is still in development — we'll reach out when ready" reply, AND persist the sender's `chat_id` + `username` + first-touch timestamp to a waitlist store (Supabase table TBD). A single env flag (`BOT_MODE=waitlist|live`, default `live`) toggles between this and the demo/scenario flow. Out of scope for SPEC-MSG-001; tracked here so the next SPEC inherits the requirement.
+- **Direct photo upload path** (Telegram `getFile` bytes → search). Currently dead-ends at the search step because the pipeline requires `image_url`. Resolution options live in Open Question 1 above; will be picked up in a follow-up SPEC after 5/7 demo.
+
 ---
 
 ## Cross-References
