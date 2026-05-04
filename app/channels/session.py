@@ -7,10 +7,11 @@ machine. For the demo we run `--workers 1`. Post-demo migration target is Redis.
 
 import asyncio
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,17 +21,14 @@ class SessionState(StrEnum):
     LINK_RESOLUTION = "link_resolution"
     AWAITING_IMAGE_PICK = "awaiting_image_pick"
     VISION_PROCESSING = "vision_processing"
+    AWAITING_ITEM_PICK = "awaiting_item_pick"
     AWAITING_INTENT = "awaiting_intent"
     SEARCHING = "searching"
     RESULTS_SENT = "results_sent"
 
 
 def _ttl_seconds() -> float:
-    raw = os.getenv("SESSION_TTL_SECONDS", "1800")
-    try:
-        return float(raw)
-    except ValueError:
-        return 1800.0
+    return float(settings.SESSION_TTL_SECONDS)
 
 
 @dataclass
@@ -38,6 +36,8 @@ class Session:
     chat_id: int
     state: SessionState = SessionState.IDLE
     image_url: str | None = None
+    detected_items: list[dict] = field(default_factory=list)
+    selected_item_index: int | None = None
     vision_keywords: list[str] = field(default_factory=list)
     vision_item: str | None = None
     user_intent: str | None = None

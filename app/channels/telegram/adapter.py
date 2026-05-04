@@ -34,7 +34,8 @@ class TelegramAdapter(MessengerAdapter):
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=10.0)
+            # 일반 호출 5s. sendPhoto는 별도 timeout으로 짧게 잡음 (per-request override)
+            self._client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=3.0))
         return self._client
 
     def _bot_url(self, method: str) -> str:
@@ -48,13 +49,25 @@ class TelegramAdapter(MessengerAdapter):
             await self._client.aclose()
             self._client = None
 
-    async def _post(self, method: str, payload: dict, retry_429: bool = True) -> dict | None:
+    async def _post(
+        self,
+        method: str,
+        payload: dict,
+        retry_429: bool = True,
+        timeout: float | None = None,
+    ) -> dict | None:
         client = self._get_client()
         url = self._bot_url(method)
         try:
-            resp = await client.post(url, json=payload)
+            if timeout is not None:
+                resp = await client.post(url, json=payload, timeout=timeout)
+            else:
+                resp = await client.post(url, json=payload)
+        except httpx.TimeoutException:
+            logger.warning("telegram %s ⏱️  타임아웃 (Telegram이 이미지를 가져오지 못함)", method)
+            return None
         except httpx.HTTPError as e:
-            logger.error("telegram %s http error: %s", method, e)
+            logger.error("telegram %s ❌ http error: %r", method, e)
             return None
         if resp.status_code == 429 and retry_429:
             try:
@@ -62,11 +75,16 @@ class TelegramAdapter(MessengerAdapter):
                 retry_after = float(body.get("parameters", {}).get("retry_after", 1.0))
             except Exception:
                 retry_after = 1.0
-            logger.warning("telegram %s 429, retry_after=%.1fs", method, retry_after)
+            logger.warning("telegram %s ⚠️  429 rate-limited retry_after=%.1fs", method, retry_after)
             await asyncio.sleep(retry_after)
-            return await self._post(method, payload, retry_429=False)
+            return await self._post(method, payload, retry_429=False, timeout=timeout)
         if resp.status_code >= 400:
-            logger.error("telegram %s status=%d body=%s", method, resp.status_code, resp.text[:300])
+            try:
+                err_body = resp.json()
+                desc = err_body.get("description", "")
+            except Exception:
+                desc = resp.text[:200]
+            logger.warning("telegram %s ❌ status=%d desc=%s", method, resp.status_code, desc)
             return None
         try:
             return resp.json()
@@ -79,7 +97,10 @@ class TelegramAdapter(MessengerAdapter):
         elapsed = int((time.perf_counter() - t0) * 1000)
         logger.info("telegram send_text chat=%s elapsed_ms=%d", _hash_chat_id(chat_id), elapsed)
 
-    async def send_card(self, chat_id: int, card: BotCard) -> None:
+    async def send_card(self, chat_id: int, card: BotCard) -> bool:
+        """카드 전송. 성공=True, 실패=False.
+        sendPhoto timeout 4s — Telegram이 이미지 URL을 가져오는 데 실패하면 빠르게 다음 후보로.
+        """
         t0 = time.perf_counter()
         payload = {
             "chat_id": chat_id,
@@ -89,12 +110,45 @@ class TelegramAdapter(MessengerAdapter):
                 "inline_keyboard": [[{"text": card.button_text, "url": str(card.button_url)}]],
             },
         }
-        await self._post("sendPhoto", payload)
+        if card.parse_mode:
+            payload["parse_mode"] = card.parse_mode
+        result = await self._post("sendPhoto", payload, timeout=4.0)
         elapsed = int((time.perf_counter() - t0) * 1000)
-        logger.info("telegram send_card chat=%s elapsed_ms=%d", _hash_chat_id(chat_id), elapsed)
+        ok = bool(result and result.get("ok"))
+        logger.info(
+            "telegram send_card chat=%s elapsed_ms=%d ok=%s",
+            _hash_chat_id(chat_id), elapsed, ok,
+        )
+        return ok
 
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         await self._post("sendChatAction", {"chat_id": chat_id, "action": action})
+
+    async def send_text_with_buttons(
+        self,
+        chat_id: int,
+        text: str,
+        buttons: list[tuple[str, str]],
+    ) -> None:
+        """Send a text message with a row of inline callback buttons.
+        `buttons` = list of (label, callback_data). Single row, max 4 buttons.
+        """
+        t0 = time.perf_counter()
+        row = [{"text": label, "callback_data": data} for label, data in buttons[:4]]
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": {"inline_keyboard": [row]},
+        }
+        await self._post("sendMessage", payload)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        logger.info("telegram send_buttons chat=%s elapsed_ms=%d", _hash_chat_id(chat_id), elapsed)
+
+    async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
+        body: dict = {"callback_query_id": callback_query_id}
+        if text:
+            body["text"] = text
+        await self._post("answerCallbackQuery", body)
 
     async def get_me(self) -> dict:
         client = self._get_client()
@@ -120,6 +174,26 @@ class TelegramAdapter(MessengerAdapter):
         return resp.content
 
     async def parse_inbound(self, payload: dict) -> ChannelMessage:
+        cbq = payload.get("callback_query")
+        if isinstance(cbq, dict):
+            cbq_message = cbq.get("message") or {}
+            chat = cbq_message.get("chat") or {}
+            chat_id = chat.get("id")
+            if not isinstance(chat_id, int):
+                raise ChannelParseError("callback_query missing chat.id")
+            from_user = cbq.get("from") or {}
+            return ChannelMessage(
+                chat_id=chat_id,
+                from_user_id=from_user.get("id") if isinstance(from_user.get("id"), int) else None,
+                from_username=from_user.get("username") if isinstance(from_user.get("username"), str) else None,
+                text=None,
+                photo_file_id=None,
+                urls=[],
+                callback_data=str(cbq.get("data") or ""),
+                callback_query_id=str(cbq.get("id") or ""),
+                received_at=datetime.now(tz=UTC),
+            )
+
         message = payload.get("message") or payload.get("edited_message") or payload.get("channel_post")
         if not message or not isinstance(message, dict):
             raise ChannelParseError("payload has no message")
@@ -150,6 +224,8 @@ class TelegramAdapter(MessengerAdapter):
             ents = message.get(entities_key) or []
             if not isinstance(ents, list):
                 continue
+            base_utf16 = base_text.encode("utf-16-le") if base_text else b""
+            base_utf16_units = len(base_utf16) // 2
             for ent in ents:
                 if not isinstance(ent, dict):
                     continue
@@ -157,8 +233,12 @@ class TelegramAdapter(MessengerAdapter):
                 if etype == "url":
                     offset = int(ent.get("offset") or 0)
                     length = int(ent.get("length") or 0)
-                    if base_text and 0 <= offset < len(base_text) and length > 0:
-                        urls.append(base_text[offset : offset + length])
+                    if base_utf16 and 0 <= offset < base_utf16_units and length > 0:
+                        chunk = base_utf16[offset * 2 : (offset + length) * 2]
+                        try:
+                            urls.append(chunk.decode("utf-16-le"))
+                        except UnicodeDecodeError:
+                            continue
                 elif etype == "text_link":
                     href = ent.get("url")
                     if isinstance(href, str):

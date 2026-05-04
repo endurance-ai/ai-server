@@ -90,16 +90,18 @@ def _cache_put(url: str, images: list[str]) -> None:
 
 
 async def resolve(url: str) -> list[str]:
-    """Resolve a URL to a list of image URLs. Returns [] on any failure."""
+    """URL → 이미지 URL 리스트 변환. 실패 시 [] 반환 (예외 던지지 않음)."""
     cached = _cache_get(url)
     if cached is not None:
+        logger.info("🔗 [LINK] 캐시 히트 url=%s images=%d", url, len(cached))
         return cached
 
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
+    logger.info("🔗 [LINK] 시작 host=%s url=%s", host, url)
 
     if _is_instagram(host):
-        logger.info("instagram resolution deferred to P2 url=%s", url)
+        logger.info("🔗 [LINK] ⏭️  인스타그램은 P2 (현재 미지원) → []")
         _cache_put(url, [])
         return []
 
@@ -108,24 +110,31 @@ async def resolve(url: str) -> list[str]:
     try:
         resp = await client.get(url)
     except httpx.HTTPError as e:
-        logger.warning("link_resolver fetch failed url=%s err=%s", url, e)
+        logger.warning("🔗 [LINK] 페치 실패 url=%s err=%s", url, e)
         _cache_put(url, [])
         return []
 
     if resp.status_code >= 400:
-        logger.warning("link_resolver bad status url=%s status=%d", url, resp.status_code)
+        logger.warning("🔗 [LINK] 응답 에러 url=%s status=%d", url, resp.status_code)
         _cache_put(url, [])
         return []
 
     final_host = (resp.url.host or "").lower()
+    if str(resp.url) != url:
+        logger.info("🔗 [LINK]   ↳ 🔁 리다이렉트 → %s", str(resp.url))
+
     og = _extract_og_image(resp.text)
     if not og:
-        logger.warning("link_resolver no og:image url=%s final=%s", url, str(resp.url))
+        logger.warning("🔗 [LINK] og:image 못 찾음 final=%s body_len=%d", str(resp.url), len(resp.text))
         _cache_put(url, [])
         return []
 
     if _is_pinterest(host) or final_host.endswith("pinterest.com"):
-        og = _pinterest_originals(og)
+        og_orig = _pinterest_originals(og)
+        if og_orig != og:
+            logger.info("🔗 [LINK]   ↳ 🖼️  pinterest 풀해상도로 치환")
+        og = og_orig
 
+    logger.info("🔗 [LINK] ✅ 완료 og:image=%s", og)
     _cache_put(url, [og])
     return [og]

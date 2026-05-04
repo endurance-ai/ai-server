@@ -36,6 +36,8 @@ class ChannelMessage(BaseModel):
     text: str | None = None
     photo_file_id: str | None = None
     urls: list[HttpUrl] = Field(default_factory=list)
+    callback_data: str | None = None
+    callback_query_id: str | None = None
     received_at: datetime
 
     model_config = {"strict": False}
@@ -61,6 +63,7 @@ class BotCard(BaseModel):
     caption: str
     button_text: str = "View"
     button_url: HttpUrl
+    parse_mode: str | None = None  # 예: "HTML" / "MarkdownV2"
 
 
 class BotReply(BaseModel):

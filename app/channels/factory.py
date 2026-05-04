@@ -1,10 +1,10 @@
 """MessengerAdapter factory — env-driven selection."""
 
 import logging
-import os
 
 from app.channels.adapter import MessengerAdapter
 from app.channels.telegram.adapter import TelegramAdapter
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,9 @@ class _StubAdapter(MessengerAdapter):
     async def send_text(self, chat_id: int, text: str) -> None:
         self._raise()
 
-    async def send_card(self, chat_id, card) -> None:
+    async def send_card(self, chat_id, card) -> bool:
         self._raise()
+        return False
 
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         self._raise()
@@ -37,12 +38,12 @@ class _StubAdapter(MessengerAdapter):
 
 
 def build_adapter() -> MessengerAdapter:
-    backend = os.getenv("MESSENGER_BACKEND", "telegram").lower().strip()
+    backend = settings.MESSENGER_BACKEND.lower().strip()
     if backend not in _ACCEPTED:
         raise ValueError(f"MESSENGER_BACKEND must be one of {sorted(_ACCEPTED)}; got {backend!r}")
     if backend == "telegram":
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        api_base = os.getenv("TELEGRAM_API_BASE", "https://api.telegram.org")
+        token = settings.TELEGRAM_BOT_TOKEN
+        api_base = settings.TELEGRAM_API_BASE
         if not token:
             logger.warning(
                 "MESSENGER_BACKEND=telegram but TELEGRAM_BOT_TOKEN is not set; adapter will fail on first call"
@@ -75,4 +76,4 @@ async def reset_adapter() -> None:
 
 
 def backend_name() -> str:
-    return os.getenv("MESSENGER_BACKEND", "telegram").lower().strip()
+    return settings.MESSENGER_BACKEND.lower().strip()

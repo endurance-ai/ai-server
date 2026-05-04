@@ -20,7 +20,11 @@ async def setup_webhook(adapter: TelegramAdapter, public_url: str, secret: str) 
         logger.info("setup_webhook skipped: missing public_url or secret")
         return
 
-    payload = {"url": public_url, "secret_token": secret}
+    payload = {
+        "url": public_url,
+        "secret_token": secret,
+        "allowed_updates": ["message", "callback_query"],
+    }
     resp = await adapter._post("setWebhook", payload)  # noqa: SLF001
     if resp and resp.get("ok"):
         logger.info("telegram setWebhook ok url=%s", public_url)
