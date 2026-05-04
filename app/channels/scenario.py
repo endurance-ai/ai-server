@@ -135,7 +135,8 @@ async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: lis
     chat_hash = _hash_chat_id(chat_id)
     logger.info(
         "🎁 [CARDS] 📦 후보 %d개 → 송출 시작 (목표 %d장)",
-        len(candidates), _MAX_CARDS,
+        len(candidates),
+        _MAX_CARDS,
     )
     # 후보 전체를 순회하며 _MAX_CARDS 만큼 성공시까지 시도 (실패 카드는 스킵)
     for c in candidates:
@@ -336,7 +337,10 @@ async def _send_picker(adapter: MessengerAdapter, chat_id: int, items: list[dict
 
 
 async def _handle_item_pick(
-    adapter: MessengerAdapter, session: Session, message: ChannelMessage, chat_hash: str,
+    adapter: MessengerAdapter,
+    session: Session,
+    message: ChannelMessage,
+    chat_hash: str,
 ) -> None:
     try:
         idx = int(message.callback_data.split(":", 1)[1])
@@ -368,7 +372,9 @@ async def _select_item(
     store.update(session)
     logger.info(
         "🎯 [PICK] ✅ 아이템 선택됨 idx=%d label=%s keywords=%s",
-        idx, session.vision_item, session.vision_keywords,
+        idx,
+        session.vision_item,
+        session.vision_keywords,
     )
     logger.info("💬 [OPENER] 📤 의도 질문 송출")
     await adapter.send_text(chat_id, OPENER_TMPL.format(item=session.vision_item))
@@ -405,6 +411,7 @@ async def _run_search(adapter: MessengerAdapter, session: Session, chat_hash: st
         req.item.category,
     )
     import time as _t
+
     t0 = _t.perf_counter()
     try:
         resp = await run_pipeline(req)

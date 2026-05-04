@@ -27,14 +27,7 @@ def _ssrf_guard_url(url: str) -> str:
         ip = ipaddress.ip_address(bare_host)
     except ValueError:
         return url
-    if (
-        ip.is_loopback
-        or ip.is_private
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    ):
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
         raise ValueError(f"url host is non-routable: {host}")
     return url
 

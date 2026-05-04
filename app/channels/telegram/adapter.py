@@ -117,7 +117,9 @@ class TelegramAdapter(MessengerAdapter):
         ok = bool(result and result.get("ok"))
         logger.info(
             "telegram send_card chat=%s elapsed_ms=%d ok=%s",
-            _hash_chat_id(chat_id), elapsed, ok,
+            _hash_chat_id(chat_id),
+            elapsed,
+            ok,
         )
         return ok
 
