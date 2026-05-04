@@ -4,11 +4,18 @@ LANGFUSE_PUBLIC_KEY/SECRET_KEY가 비어있거나 langfuse 라이브러리 impor
 v2(`langfuse.decorators.observe`) / v3(`langfuse.observe`) 양쪽 호환.
 """
 
+import os
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar
 
 from app.core.config import settings
+
+# langfuse SDK가 os.environ을 직접 읽기 때문에 settings 값을 환경변수로 미리 주입한다.
+for _k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
+    _v = getattr(settings, _k, "")
+    if _v and not os.environ.get(_k):
+        os.environ[_k] = str(_v)
 
 P = ParamSpec("P")
 R = TypeVar("R")

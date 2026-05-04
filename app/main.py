@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -7,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 
 from app.api import router
+from app.channels import link_resolver
+from app.channels.factory import get_adapter, reset_adapter
+from app.channels.session import init_store, shutdown_store
+from app.channels.telegram.adapter import TelegramAdapter
+from app.channels.telegram.webhook import setup_webhook
 from app.core.config import settings
 from app.providers.database import SupabaseProvider
 from app.providers.embedding import EmbedProvider
@@ -26,8 +32,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Startup — 비동기 클라이언트 워밍업으로 첫 요청 race condition 회피
     if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
         await SupabaseProvider.get_client()
+
+    await init_store()
+    adapter = get_adapter()
+
+    public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()
+    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+    if isinstance(adapter, TelegramAdapter) and public_url and secret:
+        try:
+            await setup_webhook(adapter, public_url, secret)
+        except Exception:
+            logging.getLogger(__name__).exception("setup_webhook failed")
+
     yield
+
     # Shutdown
+    await shutdown_store()
+    await reset_adapter()
+    await link_resolver.aclose()
     await SupabaseProvider.close()
     await EmbedProvider.close()
     await LLMProvider.close()

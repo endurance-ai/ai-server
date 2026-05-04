@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     # SSRF 가드 — 콤마 구분 호스트 suffix 매칭. 비어있으면 검증 skip (dev).
     ALLOWED_IMAGE_HOSTS: str = ""
 
+    # Messenger channel (SPEC-MSG-001)
+    MESSENGER_BACKEND: str = "telegram"
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_BOT_USERNAME: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+    TELEGRAM_API_BASE: str = "https://api.telegram.org"
+    TELEGRAM_PUBLIC_URL: str = ""
+    VISION_MODEL: str = "gpt-4o-mini"
+    BOT_LANGUAGE: str = "en"
+    SESSION_TTL_SECONDS: int = 1800
+
     @property
     def allowed_image_hosts(self) -> list[str]:
         return [h.strip() for h in self.ALLOWED_IMAGE_HOSTS.split(",") if h.strip()]
