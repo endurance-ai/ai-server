@@ -36,3 +36,12 @@ htmlcov/
 
 # uv
 .python-version
+
+# MoAI runtime artifacts (per-developer, not shared)
+.moai/state/
+.moai/logs/
+.moai/reports/
+.moai/learning/
+.moai/evolution/
+.moai/docs/
+HANDOFF.md
