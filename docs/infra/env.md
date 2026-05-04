@@ -25,6 +25,22 @@
 ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflarestorage.com
 ```
 
+## Telegram 메신저 채널 (SPEC-MSG-001)
+
+| 키 | 용도 | 기본 |
+|----|------|-----|
+| `MESSENGER_BACKEND` | 활성 어댑터 (`telegram` \| `bluebubbles` \| `sendblue`) | `telegram` |
+| `TELEGRAM_BOT_TOKEN` | Bot API 인증 토큰 (`@BotFather` 발급) | 필수 |
+| `TELEGRAM_WEBHOOK_SECRET` | `X-Telegram-Bot-Api-Secret-Token` 검증값 (랜덤 32+ chars) | 필수 |
+| `TELEGRAM_PUBLIC_URL` | webhook 등록용 공개 HTTPS URL (dev: Cloudflare Tunnel) | 필수 |
+| `TELEGRAM_API_BASE` | Bot API base URL (셀프호스트 테스트 시 override) | `https://api.telegram.org` |
+| `TELEGRAM_BOT_USERNAME` | 봇 username (로그/health 노출용) | `kiko_fashion_ai_bot` |
+| `VISION_MODEL` | Vision 추출에 사용할 LiteLLM 모델 명칭 | `gpt-4o-mini` |
+| `BOT_LANGUAGE` | 봇 응답 언어 (`ko` / `en`) | `ko` |
+| `SESSION_TTL_SECONDS` | 인메모리 세션 만료 시간 (초) | `1800` |
+
+> dev 환경에서는 Cloudflare Tunnel(`cloudflared tunnel --url http://localhost:8000`)로 `TELEGRAM_PUBLIC_URL` 확보.
+
 ## Langfuse
 
 | 키 | 용도 | 설정 시점 |
