@@ -1,7 +1,7 @@
 ---
 id: SPEC-PIPELINE-001
-version: 0.1.0
-status: draft
+version: 1.0.0
+status: completed
 created: 2026-05-04
 updated: 2026-05-04
 author: hchsa77@gmail.com
@@ -14,6 +14,7 @@ issue_number: 4
 ## HISTORY
 
 - 2026-05-04: 초안 작성 (manager-spec).
+- 2026-05-04: 구현 완료 (manager-ddd). 9개 파일 변경(+778 LOC), 21개 신규 테스트(15 unit + 6 integration), enhance_query.py 커버리지 94%, ruff 0 error, pytest 29/29 pass. 모든 EARS 요구사항(REQ-PIPELINE-001~005) 구현. SPEC status: draft → completed (Level 1 spec-first).
 
 ---
 
@@ -163,3 +164,61 @@ The pipeline **shall** execute `enhance_query_step` immediately before `search_s
 - `docs/PATTERNS.md` — 코드 컨벤션 (plain async, Pydantic v2)
 - `app/providers/llm.py` — 미사용 LLMProvider (본 SPEC 에서 첫 사용처)
 - portal/app `RecommendItem` 스키마 — `search_query` / `search_query_ko` 출처
+
+---
+
+## 13. Implementation Notes (Sync Phase)
+
+### 구현 결과 요약
+
+- **신규 파일** (3): `app/pipeline/enhance_query.py`, `tests/test_enhance_query.py` (15 cases), `tests/test_pipeline_with_enhance.py` (6 cases)
+- **수정 파일** (6): `app/pipeline/state.py` / `runner.py` / `search.py`, `app/core/config.py`, `CLAUDE.md`, `docs/features/pipeline.md`
+- **신규 의존성**: 없음 (httpx, pydantic v2 기존 의존 재사용)
+- **신규 디렉토리**: 없음
+
+### 구현된 폴백 경로 (REQ-PIPELINE-003)
+
+`enhance_query_step` 은 모든 실패 경로에서 raw 쿼리로 폴백하고 호출자에 예외를 전파하지 않는다.
+
+| `fallback_reason` | 트리거 |
+|---|---|
+| `disabled` | `ENHANCE_QUERY_ENABLED=false` (status="disabled", LLM 미호출) |
+| `skipped` | `search_query`, `search_query_ko` 둘 다 빈 문자열 (LLM 미호출) |
+| `timeout` | `asyncio.TimeoutError` (`ENHANCE_QUERY_TIMEOUT_MS` 초과) |
+| `http_4xx` / `http_5xx` | `httpx.HTTPStatusError` (LiteLLM 측 응답 오류) |
+| `network_error` | `httpx.RequestError` (커넥션 / DNS 오류) |
+| `empty` | `choices[0].message.content` falsy |
+| `parse_error` | `json.loads` 실패 + `re.search(r'\{.*\}', ...)` 정규식 폴백도 실패 |
+| `missing_keys` | JSON 파싱 성공했으나 `refined_ko` 또는 `refined_en` 누락 |
+| `length_invalid` | refined 길이 < 1 자 또는 > 200 자 |
+| `unknown` | 그 외 예상 못한 예외 (top-level catch-all) |
+| `exception` | runner.py `asyncio.gather(return_exceptions=True)` 에서 enhance 측 예외 격리 |
+
+### 기본값 (안전 롤아웃)
+
+운영 배포 시 `ENHANCE_QUERY_ENABLED=False` 로 코드만 먼저 머지된다 (backward compatibility 100%). 다음 단계는 별도 운영 검증 후 .env 에서 `True` 로 토글:
+
+1. Langfuse 대시보드에서 `pipeline.enhance_query` trace 도달 확인 (mock 모드)
+2. `ENHANCE_QUERY_ENABLED=true` 로 켠 뒤 fallback 비율, latency, 검색 품질 메트릭 모니터
+3. 이상 시 즉시 false 로 롤백 (코드 변경 없이)
+
+### 품질 게이트 결과
+
+| 지표 | 목표 | 결과 |
+|------|------|------|
+| `app/pipeline/enhance_query.py` coverage | ≥ 90% | **94%** |
+| `ruff check` | 0 error | **0 error** |
+| `ruff format --check` | 0 diff | **0 diff** |
+| `pytest` (full) | all pass | **29/29 pass** |
+| Backward compatibility | flag off → identical raw query path | **OK** (integration test 검증) |
+
+### 확인된 회귀 / 일탈
+
+없음. 기존 8개 테스트(test_health, test_config) 모두 그대로 통과. 8개 deprecation warning 은 본 SPEC 이전부터 존재 (FastAPI ORJSONResponse, supabase-py timeout/verify 파라미터).
+
+### 후속 작업 (별도 SPEC 후보)
+
+- 운영 트래픽에서 fallback 비율 분석 후 LLM 모델/프롬프트 튜닝
+- rerank 단계 추가 (현재 sparse 입력 품질만 다룸)
+- 영구 캐싱 (동일 item 재요청 빈번 시)
+- 배치 추천 엔드포인트

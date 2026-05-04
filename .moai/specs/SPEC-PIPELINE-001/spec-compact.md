@@ -1,7 +1,7 @@
 ---
 id: SPEC-PIPELINE-001
-version: 0.1.0
-status: draft
+version: 1.0.0
+status: completed
 created: 2026-05-04
 updated: 2026-05-04
 author: hchsa77@gmail.com
