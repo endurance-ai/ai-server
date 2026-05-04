@@ -1,10 +1,13 @@
+import asyncio
 import logging
 
+from app.core.config import settings
 from app.models.request import RecommendRequest
 from app.models.response import Candidate, RecommendResponse
 from app.observability.langfuse import observe
 from app.pipeline.diversify import diversify_step
 from app.pipeline.embed import embed_step
+from app.pipeline.enhance_query import enhance_query_step
 from app.pipeline.search import search_step
 from app.pipeline.state import PipelineState
 
@@ -28,7 +31,31 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
     )
 
     state = PipelineState(request=req)
-    state = await embed_step(state)
+
+    # @MX:WARN: [AUTO] embed_step 과 enhance_query_step 을 asyncio.gather 로 병렬 실행.
+    # @MX:REASON: 두 단계는 동일 state 인스턴스를 공유하지만 갱신 필드가 분리(embedding vs enhanced_*)되어 race 없음.
+    #             enhance_query_step 은 어떤 예외도 raise 하지 않도록 설계됨 — 방어적으로 return_exceptions=True 적용.
+    if settings.PIPELINE_PARALLEL_ENABLED:
+        results = await asyncio.gather(
+            embed_step(state),
+            enhance_query_step(state),
+            return_exceptions=True,
+        )
+        embed_result = results[0]
+        enhance_result = results[1]
+        # embed 측 예외는 기존 동작대로 전파 (추천 응답 생성 불가).
+        if isinstance(embed_result, BaseException):
+            raise embed_result
+        # enhance 측 예외는 폴백 — state 만 갱신하고 통과.
+        if isinstance(enhance_result, BaseException):
+            logger.warning("[pipeline] enhance_query_step 예외 격리 — %r", enhance_result)
+            state.enhance_query_status = "fallback"
+            state.enhanced_query = None
+            state.enhanced_query_ko = None
+    else:
+        state = await embed_step(state)
+        state = await enhance_query_step(state)
+
     state = await search_step(state)
     state = await diversify_step(state)
 

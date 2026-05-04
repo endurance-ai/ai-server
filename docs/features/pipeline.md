@@ -12,9 +12,12 @@ flowchart TD
     AUTH -->|invalid| E401([401 unauthorized])
 
     EMBED["embed_step<br/>Modal /embed (FashionSigLIP)"]
+    ENHANCE["enhance_query_step<br/>LiteLLM (gpt-4o-mini)<br/>flag: ENHANCE_QUERY_ENABLED"]
+    AUTH -->|valid| ENHANCE
     EMBED --> SEARCH
+    ENHANCE --> SEARCH
 
-    SEARCH["search_step<br/>Supabase RPC search_products_v5"]
+    SEARCH["search_step<br/>Supabase RPC search_products_v5<br/>(query_text = enhanced_ko if status=ok else raw)"]
     SEARCH --> DIVERSIFY
 
     DIVERSIFY["diversify_step<br/>brand cap + platform cap + tolerance"]
@@ -25,7 +28,7 @@ flowchart TD
     classDef ext fill:#6a1b9a,color:#fff
     classDef err fill:#c62828,color:#fff
 
-    class EMBED,SEARCH,DIVERSIFY step
+    class EMBED,ENHANCE,SEARCH,DIVERSIFY step
     class REQ,RES data
     class AUTH ext
     class E401 err
@@ -73,12 +76,25 @@ state.embedding = await EmbedProvider.embed_image_url(state.request.image_url)
 | 단건 latency (cold, scale-to-zero) | ~10~17초 |
 | 실패 시 | `pipeline_failed` 502 → Next.js 가 v4 폴백 |
 
+### 1.5 `enhance_query_step` — `app/pipeline/enhance_query.py` (SPEC-PIPELINE-001)
+
+LLM(LiteLLM 프록시 경유 gpt-4o-mini)으로 raw `search_query` / `search_query_ko` 를 pgroonga BM25 친화적인 정제 쿼리로 변환한다. `embed_step` 과 `asyncio.gather` 로 병렬 실행 (PIPELINE_PARALLEL_ENABLED=true 기본).
+
+| 항목 | 값 |
+|------|---|
+| feature flag | `ENHANCE_QUERY_ENABLED` (기본 `false` — 안전 롤아웃) |
+| 모델 | `gpt-4o-mini` (LITELLM_BASE_URL 라우팅) |
+| 타임아웃 | `ENHANCE_QUERY_TIMEOUT_MS=1500` (ms) |
+| max_tokens | 200 / temperature 0.2 |
+| 출력 | `state.enhanced_query`, `state.enhanced_query_ko`, `state.enhance_query_status` (`ok`/`fallback`/`disabled`/`skipped`) |
+| 폴백 [HARD] | timeout / 5xx / 4xx / network / empty / parse_error / length_invalid 모두 raw 쿼리 사용 (raise 금지) |
+
 ### 2. `search_step` — `app/pipeline/search.py`
 
 ```python
 rows = await SupabaseProvider.rpc("search_products_v5", {
     "query_embedding": _embedding_to_pgvector(state.embedding),
-    "query_text": req.item.search_query_ko or req.item.search_query,
+    "query_text": state.enhanced_query_ko if state.enhance_query_status == "ok" else (req.item.search_query_ko or req.item.search_query),
     "brand_filter": req.brand_filter,
     "gender_filter": [req.gender] if req.gender else None,
     "subcategory_filter": req.item.subcategory,

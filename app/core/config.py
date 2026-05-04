@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     SEARCH_PLATFORM_CAP: int = 3  # 다양성: 플랫폼당 최대
     SEARCH_FINAL_LIMIT: int = 15  # 최종 응답 개수
 
+    # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
+    # 안전 롤아웃: 기본 False. 운영 검증 후 .env 에서 true 로 전환.
+    ENHANCE_QUERY_ENABLED: bool = False
+    ENHANCE_QUERY_MODEL: str = "gpt-4o-mini"
+    ENHANCE_QUERY_TIMEOUT_MS: int = 1500
+    ENHANCE_QUERY_MAX_TOKENS: int = 200
+    ENHANCE_QUERY_TEMPERATURE: float = 0.2
+    # embed + enhance_query 병렬 실행 (asyncio.gather). false 시 sequential.
+    PIPELINE_PARALLEL_ENABLED: bool = True
+
     # 보안
     # Next.js → AI 서버 shared secret. 비어있으면 인증 skip (dev). 운영에선 반드시 설정.
     INTERNAL_API_TOKEN: str = ""
