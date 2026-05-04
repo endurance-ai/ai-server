@@ -6,7 +6,7 @@ created: 2026-05-04
 updated: 2026-05-04
 author: hchsa77@gmail.com
 priority: medium
-issue_number: 0
+issue_number: 4
 ---
 
 # SPEC-PIPELINE-001: enhance_query LLM 단계 도입 (sparse 검색 쿼리 보강)
