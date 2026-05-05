@@ -280,9 +280,7 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
             return
         if msg.callback_query_id and hasattr(ctx.adapter, "answer_callback_query"):
             await ctx.adapter.answer_callback_query(msg.callback_query_id, None)
-        await _select_item(
-            ctx.adapter, ctx.session, idx, ctx.chat_hash, msg.callback_query_id, store=ctx.store
-        )
+        await _select_item(ctx.adapter, ctx.session, idx, ctx.chat_hash, msg.callback_query_id, store=ctx.store)
         return
 
     # AWAITING_ITEM_PICK + text → digit-based selection
@@ -291,9 +289,7 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
         idx = int(digit_match) - 1
         if 0 <= idx < len(ctx.session.detected_items):
             logger.info("🎬 [SCENARIO] ➡️  분기: 텍스트로 아이템 선택 idx=%d", idx)
-            await _select_item(
-                ctx.adapter, ctx.session, idx, ctx.chat_hash, callback_query_id=None, store=ctx.store
-            )
+            await _select_item(ctx.adapter, ctx.session, idx, ctx.chat_hash, callback_query_id=None, store=ctx.store)
             return
 
     logger.info("🎬 [SCENARIO] ⚠️  유효한 번호 아님 → 재안내")
@@ -368,9 +364,7 @@ async def handle_new_image(ctx: HandlerContext) -> None:
 
     if len(items) == 1:
         logger.info("🎯 [PICK] 단일 아이템 → picker 생략 label=%s", items[0].get("label"))
-        await _select_item(
-            ctx.adapter, ctx.session, 0, ctx.chat_hash, callback_query_id=None, store=ctx.store
-        )
+        await _select_item(ctx.adapter, ctx.session, 0, ctx.chat_hash, callback_query_id=None, store=ctx.store)
         return
 
     logger.info("🎯 [PICK] 📤 멀티 아이템 picker 송출 (%d개)", len(items))

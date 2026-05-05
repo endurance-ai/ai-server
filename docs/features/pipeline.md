@@ -2,7 +2,7 @@
 
 > `POST /recommend` 의 단일 진입점. Phase A(Qdrant) 폐기 후 v5 (Modal embed + Supabase RPC) 로 재구현.
 >
-> **SPEC-MSG-001**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. `app/channels/scenario.py`가 image_url을 준비한 후 `run_pipeline()` 을 직접 호출 — `POST /recommend` 는 Next.js 전용, 채널 경로는 webhook → scenario → runner 순.
+> **SPEC-MSG-001**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. 채널 경로는 `webhook → scenario → RecommendationPort → PipelineRecommendationPort → runner` 순 — `scenario`는 `RecommendationPort` Protocol만 참조하며 `pipeline.runner` 직접 import 없음. `POST /recommend` 는 Next.js 전용 진입점.
 
 ## 데이터 흐름
 

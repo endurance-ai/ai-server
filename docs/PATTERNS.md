@@ -78,7 +78,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await LLMProvider.close()
 ```
 
-## 4. 외부 호출 컨벤션
+## 4. Port 패턴 (채널-파이프라인 결합도 분리)
+
+채널 레이어(`app/channels/`)와 파이프라인(`app/pipeline/`)은 `Protocol` 기반 Port로 결합도를 분리한다.
+
+```python
+# app/channels/recommendation.py
+class RecommendationPort(Protocol):
+    async def recommend(self, req: ChannelRecommendationRequest) -> ChannelRecommendationResult: ...
+
+class PipelineRecommendationPort:
+    """in-process 구현체. lazy import 로 pipeline.runner 참조."""
+    async def recommend(self, req: ChannelRecommendationRequest) -> ChannelRecommendationResult:
+        from app.pipeline.runner import run_pipeline  # lazy — 채널 모듈 임포트 시 runner 로드 안 함
+        ...
+```
+
+채널 시나리오(`scenario.py`)는 `RecommendationPort`만 참조 — `pipeline.runner`를 직접 import하지 않는다. 나중에 파이프라인을 별도 프로세스/서비스로 분리하더라도 scenario 코드는 무변화.
+
+Port 등록/조회는 모듈 수준 `set_port` / `get_port` 함수로 단순하게 관리.
+
+## 5-A. 외부 호출 컨벤션
 
 | 호출 | 경유 |
 |------|------|
@@ -88,7 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 **원칙:** 외부 라이브러리 직접 import 하지 않고 Provider 메서드를 통해 호출 — 테스트 시 mock 주입이 쉽고, 모델/엔드포인트 교체 시 변경점이 한 곳.
 
-## 5. 관측성 — `@observe`
+## 5-B. 관측성 — `@observe`
 
 Langfuse `@observe` 데코레이터로 함수 단위 trace. `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` 미설정 시 **no-op 자동 폴백** (테스트/dev 안전).
 
