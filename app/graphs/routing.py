@@ -154,3 +154,15 @@ def _route_after_search(state: WorkingState) -> str:
     if state.candidates:
         return "send_results"
     return "respond"
+
+
+def _route_after_critique(state: WorkingState) -> str:
+    """Skip search when no delta was produced (stale callback / empty text).
+
+    REQ-COMPAT-001: a stale `crit:*` callback (parse_callback returns None)
+    must NOT trigger a re-search — the toast is the only user-visible side
+    effect, and the graph terminates at respond.
+    """
+    if state.critique_delta is None:
+        return "respond"
+    return "search_node"

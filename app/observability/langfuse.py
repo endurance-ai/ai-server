@@ -63,3 +63,47 @@ else:
             return wrapper
 
         return decorator
+
+
+# ── SPEC-AGENT-001 / REQ-OBSV-002 ──────────────────────────────────────────
+# Optional Langfuse `CallbackHandler` factory for nested LLM tracing inside
+# LangGraph nodes (`respond`, `ask_clarify`).
+#
+# Important compatibility note: Langfuse 2.x's `langfuse.callback.CallbackHandler`
+# imports `from langchain.callbacks.base import BaseCallbackHandler`, which only
+# exists on langchain < 1.0. Once langchain is bumped to 1.x (required by
+# langgraph 1.x via langchain-core 1.3+), the legacy import path goes away and
+# the handler can no longer be constructed against this Langfuse major version.
+#
+# The function below tries to import the handler and returns `None` on any
+# import / construction failure. The graph's RunnableConfig.callbacks list
+# stays empty in that case — REQ-OBSV-002 acceptance #4 explicitly allows the
+# no-op fallback. The trace tree still records the parent `@observe` span and
+# the LiteLLM dashboard remains authoritative for cost (REQ-OBSV-004).
+
+
+def build_callback_handler(
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Any | None:
+    """Return a Langfuse `CallbackHandler` for the current webhook, or `None`
+    when keys are absent OR when the host langchain version no longer exports
+    the legacy callback base class. Callers pass the result into
+    `RunnableConfig.callbacks` — `None` falls through to no-op nicely.
+    """
+    if not _ENABLED:
+        return None
+    try:
+        from langfuse.callback import CallbackHandler  # type: ignore[import-not-found]
+    except Exception:
+        # langchain 1.x removed `langchain.callbacks.base.BaseCallbackHandler`
+        # which langfuse v2's CallbackHandler depends on. Until the host
+        # bumps to langfuse v3 (server-side incompatible) or langchain
+        # restores the legacy module, the nested-tracing path is no-op.
+        return None
+    try:
+        return CallbackHandler(session_id=session_id, user_id=user_id, metadata=metadata or {})
+    except Exception:
+        return None

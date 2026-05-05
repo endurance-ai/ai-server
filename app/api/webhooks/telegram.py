@@ -1,19 +1,39 @@
-"""Telegram webhook endpoint — verifies secret token, normalizes payload, kicks off scenario."""
+"""Telegram webhook endpoint — verifies secret token, normalizes payload,
+invokes the LangGraph fashion bot.
 
+SPEC-AGENT-001 (REQ-MIGR-004): replaces the prior call to
+`app.channels.scenario.handle(...)` with `await GRAPH.ainvoke(...)`. Channel
+adapter, secret-token verification, HTTP 200/401 contract, and parse error
+handling are all preserved (REQ-COMPAT-009 / SPEC-MSG-001 REQ-MSG-001/002).
+"""
+
+from __future__ import annotations
+
+import hashlib
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 from fastapi.responses import ORJSONResponse
 
-from app.channels import scenario
+from app.channels.adapter import MessengerAdapter
 from app.channels.factory import get_adapter
-from app.channels.schemas import ChannelParseError
+from app.channels.schemas import ChannelMessage, ChannelParseError
 from app.channels.telegram.webhook import verify_secret_token
 from app.core.config import settings
+from app.graphs.fashion_bot import GRAPH
+from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
+from app.graphs.state import InputState
+from app.observability.langfuse import build_callback_handler, observe
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks/telegram", tags=["webhooks"])
+
+
+def _hash_id(value: int | str | None) -> str | None:
+    if value is None:
+        return None
+    return hashlib.sha256(str(value).encode()).hexdigest()[:16]
 
 
 @router.post("")
@@ -53,12 +73,39 @@ async def telegram_webhook(
         [str(u) for u in message.urls],
     )
 
-    background_tasks.add_task(_run_scenario_safe, adapter, message)
+    background_tasks.add_task(_run_graph_safe, adapter, message)
     return ORJSONResponse({"ok": True})
 
 
-async def _run_scenario_safe(adapter, message) -> None:
+@observe(name="fashion_bot_webhook")
+async def _invoke_graph(adapter: MessengerAdapter, message: ChannelMessage) -> None:
+    """Single graph invocation — wrapped by `@observe` so each webhook is a
+    distinct Langfuse trace (REQ-OBSV-001, REQ-AGENT-008)."""
+    token = set_adapter(adapter)
     try:
-        await scenario.handle(adapter, message)
+        input_state = InputState(
+            message=message,
+            chat_id=message.chat_id,
+            from_user_id=message.from_user_id,
+        )
+        session_id = _hash_id(message.chat_id)
+        user_id = _hash_id(message.from_user_id)
+        handler = build_callback_handler(
+            session_id=session_id,
+            user_id=user_id,
+            metadata={
+                "channel": "telegram",
+                "graph": "fashion_bot",
+            },
+        )
+        callbacks = [handler] if handler is not None else []
+        await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+    finally:
+        reset_adapter(token)
+
+
+async def _run_graph_safe(adapter: MessengerAdapter, message: ChannelMessage) -> None:
+    try:
+        await _invoke_graph(adapter, message)
     except Exception:
-        logger.exception("scenario.handle background task failed")
+        logger.exception("fashion_bot graph background task failed")
