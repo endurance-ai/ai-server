@@ -62,13 +62,14 @@ class FakeAdapter:
 
 @dataclass
 class FakeCandidate:
+    id: str = "fake-1"
     image_url: str | None = "https://img.example.com/a.jpg"
     product_url: str | None = "https://shop.example.com/p/1"
     brand: str = "BrandX"
     name: str = "Slim Tee"
     platform: str = "BrandX"
     subcategory: str = "tops"
-    price: int = 49000
+    price: int | None = 49000
 
 
 class StubPort:
@@ -87,13 +88,16 @@ class StubPort:
 
 
 def _msg(chat_id=42, text=None, photo_file_id=None, urls=None, callback_data=None) -> ChannelMessage:
+    # Auto-attach a callback_query_id when a callback_data is provided —
+    # mirrors real Telegram payloads (callback updates always carry an id).
+    cbq_id = "cbq-test-1" if callback_data else None
     return ChannelMessage(
         chat_id=chat_id,
         text=text,
         photo_file_id=photo_file_id,
         urls=urls or [],
         callback_data=callback_data,
-        callback_query_id=None,
+        callback_query_id=cbq_id,
         received_at=datetime.now(tz=UTC),
     )
 
@@ -119,6 +123,23 @@ def stub_port():
 @pytest.fixture(autouse=True)
 def fast_heartbeat(monkeypatch):
     monkeypatch.setattr(scenario, "TYPING_HEARTBEAT_INTERVAL", 0.01)
+
+
+@pytest.fixture(autouse=True)
+def disable_router_llm(monkeypatch):
+    """Default tests run without LiteLLM proxy — keep the router deterministic.
+    Individual tests can re-enable + patch LLMProvider.chat for richer cases."""
+    monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", False)
+
+
+@pytest.fixture
+async def taste_store():
+    from app.channels.taste_profile import InMemoryTasteProfileStore, set_taste_store, shutdown_taste_store
+
+    s = InMemoryTasteProfileStore()
+    set_taste_store(s)
+    yield s
+    await shutdown_taste_store()
 
 
 # ── A1: bytes path is blocked with a friendly message ──────────────────────
@@ -245,7 +266,10 @@ async def test_results_sent_text_triggers_refine_search(store, stub_port):
     assert req.image_url == "https://i.pinimg.com/originals/x.jpg"
     assert req.intent == "in black"
     assert "tee" in req.keywords
-    assert any("refining the picks" in t for _, t in adapter.texts)
+    # New copy from C1 redesign: pre-search summary instead of static "Reading
+    # you" line. Either format is acceptable as long as a refine indicator
+    # was sent before the cards.
+    assert any(("Refining:" in t) or ("refining the picks" in t) for _, t in adapter.texts)
     assert any("Tweak it more" in t for _, t in adapter.texts)
     assert sess.state == SessionState.RESULTS_SENT
 
@@ -262,3 +286,164 @@ async def test_refine_without_prior_context_falls_back_to_nudge(store, stub_port
 
     assert any("photo or a Pinterest link" in t for _, t in adapter.texts)
     assert stub_port.calls == []
+
+
+# ── Critique tap (♥ More / ✕ Less / 💰 Cheaper) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_critique_tap_more_reinforces_taste_and_reruns(store, stub_port, taste_store):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.from_user_id = 7
+    sess.state = SessionState.RESULTS_SENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    sess.vision_keywords = ["tee", "white"]
+    sess.last_results = [FakeCandidate(brand="ami", name="basic tee")]
+    store.update(sess)
+
+    await scenario.handle(adapter, _msg(callback_data="crit:more:0"))
+
+    # taste profile updated for liked brand
+    profile = taste_store.get_or_create("u:7")
+    assert "ami" in profile.liked_brands
+
+    # search re-ran with the anchor's brand boosted
+    assert stub_port.calls
+    req = stub_port.calls[-1]
+    assert "ami" in req.boost_brands
+
+    # callback toast was sent
+    assert adapter.callback_answers
+    _, toast = adapter.callback_answers[-1]
+    assert "more" in (toast or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_critique_tap_less_excludes_brand_and_excludes_shown(store, stub_port, taste_store):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.from_user_id = 7
+    sess.state = SessionState.RESULTS_SENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    sess.last_results = [FakeCandidate(id="p1", brand="Zara", name="cheap tee")]
+    sess.shown_product_ids = ["p1"]
+    store.update(sess)
+
+    await scenario.handle(adapter, _msg(callback_data="crit:less:0"))
+
+    profile = taste_store.get_or_create("u:7")
+    assert "zara" in profile.disliked_brands
+
+    assert stub_port.calls
+    req = stub_port.calls[-1]
+    assert "zara" in req.exclude_brands
+    assert "p1" in req.exclude_product_ids
+
+
+@pytest.mark.asyncio
+async def test_critique_tap_cheap_sets_max_price(store, stub_port, taste_store):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.from_user_id = 7
+    sess.state = SessionState.RESULTS_SENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    sess.last_results = [FakeCandidate(brand="ami", name="tee", price=100000)]
+    store.update(sess)
+
+    await scenario.handle(adapter, _msg(callback_data="crit:cheap:0"))
+
+    assert stub_port.calls
+    req = stub_port.calls[-1]
+    assert req.max_price == 70000  # default ratio 0.7
+
+
+@pytest.mark.asyncio
+async def test_critique_tap_invalid_idx_sends_toast_and_skips_search(store, stub_port, taste_store):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.from_user_id = 7
+    sess.state = SessionState.RESULTS_SENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.last_results = []  # stale / empty
+    store.update(sess)
+
+    msg = ChannelMessage(
+        chat_id=42,
+        callback_data="crit:more:9",
+        callback_query_id="cbq-stale",
+        received_at=datetime.now(tz=UTC),
+    )
+    await scenario.handle(adapter, msg)
+
+    assert stub_port.calls == []
+    assert adapter.callback_answers and "out of date" in adapter.callback_answers[-1][1].lower()
+
+
+# ── Pre-search summary surfaces tweak ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_critique_tap_emits_presearch_summary(store, stub_port, taste_store):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.from_user_id = 7
+    sess.state = SessionState.RESULTS_SENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    sess.last_results = [FakeCandidate(brand="Zara", name="tee", price=50000)]
+    store.update(sess)
+
+    await scenario.handle(adapter, _msg(callback_data="crit:less:0"))
+
+    presearch = [t for _, t in adapter.texts if "Refining:" in t]
+    assert presearch
+    assert "Zara" in presearch[0] or "zara" in presearch[0].lower()
+
+
+# ── Card carries critique buttons ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_sent_cards_carry_critique_buttons(store, stub_port):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.state = SessionState.AWAITING_INTENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    store.update(sess)
+
+    await scenario.handle(adapter, _msg(text="for casual"))
+
+    assert adapter.cards, "expected at least one card sent"
+    _, card = adapter.cards[0]
+    assert card.critique_buttons, "card should carry critique buttons (more/less/cheap)"
+    labels = [lbl for lbl, _ in card.critique_buttons]
+    assert any("More" in lb for lb in labels)
+    assert any("Less" in lb for lb in labels)
+    assert any("Cheaper" in lb for lb in labels)
+
+
+# ── Session caches last_results + accumulates shown_product_ids ────────────
+
+
+@pytest.mark.asyncio
+async def test_session_caches_results_and_accumulates_shown_ids(store, stub_port):
+    adapter = FakeAdapter()
+    sess = store.get_or_create(42)
+    sess.state = SessionState.AWAITING_INTENT
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.vision_item = "white tee"
+    store.update(sess)
+
+    stub_port.candidates = [FakeCandidate(id="p1"), FakeCandidate(id="p2")]
+    await scenario.handle(adapter, _msg(text="something cheaper"))
+
+    sess_after = store.get_or_create(42)
+    assert sess_after.state == SessionState.RESULTS_SENT
+    assert len(sess_after.last_results) == 2
+    assert "p1" in sess_after.shown_product_ids
+    assert "p2" in sess_after.shown_product_ids

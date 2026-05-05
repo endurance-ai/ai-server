@@ -69,6 +69,10 @@ class BotCard(BaseModel):
     button_text: str = "View"
     button_url: HttpUrl
     parse_mode: str | None = None  # 예: "HTML" / "MarkdownV2"
+    # Critique row — one extra inline-keyboard row of callback buttons rendered
+    # below the Shop URL button. Each tuple is (label, callback_data).
+    # Empty list ⇒ no critique row (backward-compatible).
+    critique_buttons: list[tuple[str, str]] = Field(default_factory=list)
 
 
 class BotReply(BaseModel):

@@ -100,15 +100,19 @@ class TelegramAdapter(MessengerAdapter):
     async def send_card(self, chat_id: int, card: BotCard) -> bool:
         """카드 전송. 성공=True, 실패=False.
         sendPhoto timeout 4s — Telegram이 이미지 URL을 가져오는 데 실패하면 빠르게 다음 후보로.
+        critique_buttons 가 있으면 Shop 버튼 아래에 한 줄로 추가 송출 (callback_data 기반).
         """
         t0 = time.perf_counter()
+        rows: list[list[dict]] = [[{"text": card.button_text, "url": str(card.button_url)}]]
+        if card.critique_buttons:
+            rows.append(
+                [{"text": label, "callback_data": data} for label, data in card.critique_buttons[:4]],
+            )
         payload = {
             "chat_id": chat_id,
             "photo": str(card.image_url),
             "caption": card.caption,
-            "reply_markup": {
-                "inline_keyboard": [[{"text": card.button_text, "url": str(card.button_url)}]],
-            },
+            "reply_markup": {"inline_keyboard": rows},
         }
         if card.parse_mode:
             payload["parse_mode"] = card.parse_mode

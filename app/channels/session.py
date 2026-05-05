@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.core.config import settings
 
@@ -45,12 +45,19 @@ def _ttl_seconds() -> float:
 class Session:
     chat_id: int
     state: SessionState = SessionState.IDLE
+    from_user_id: int | None = None  # for taste profile lookup; falls back to chat_id
     image_url: str | None = None
     detected_items: list[dict] = field(default_factory=list)
     selected_item_index: int | None = None
     vision_keywords: list[str] = field(default_factory=list)
     vision_item: str | None = None
     user_intent: str | None = None
+    # Critique support — last results stay around so callbacks (crit:more:2) and
+    # router LLM can reference card 2's brand/price/etc., and so subsequent
+    # searches can exclude already-shown product_ids.
+    last_results: list[Any] = field(default_factory=list)  # list of Candidate-like
+    shown_product_ids: list[str] = field(default_factory=list)
+    last_critique_summary: str | None = None  # for next-turn pre-search confirmation
     last_active: float = field(default_factory=lambda: time.time())
 
 

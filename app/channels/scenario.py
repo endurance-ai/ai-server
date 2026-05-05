@@ -27,13 +27,23 @@ from pydantic import ValidationError
 
 from app.channels import link_resolver, vision
 from app.channels.adapter import MessengerAdapter
+from app.channels.critique import CritiqueDelta
+from app.channels.critique import parse_callback as parse_critique_callback
 from app.channels.recommendation import (
     ChannelRecommendationRequest,
     RecommendationPort,
     get_port,
 )
+from app.channels.router import RoutedDecision, RoutedIntent, TasteUpdate, route_text
 from app.channels.schemas import BotCard, ChannelMessage
 from app.channels.session import Session, SessionState, SessionStore, get_store
+from app.channels.taste_profile import (
+    TasteProfile,
+    TasteProfileStore,
+    get_taste_store,
+    user_key_for,
+)
+from app.core.config import settings
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -58,6 +68,16 @@ TEXT_ONLY = "Send me a photo or a Pinterest link first 📸"
 PICK_INVALID = "Tap one of the buttons above to choose an item 👆"
 TYPING_HEARTBEAT_INTERVAL = 4.0  # Telegram chat action stays for ~5s
 
+# Critique / taste copy
+CRIT_MORE = "♥ More like this"
+CRIT_LESS = "✕ Less like this"
+CRIT_CHEAP = "💰 Cheaper"
+CRIT_NOOP = "Got it — looking at the same recipe but with your tweak ✨"
+TASTE_ACK_TMPL = "Noted: {summary} 📝"
+TASTE_ACK_EMPTY = "Noted 📝"
+NEW_SEARCH_NEEDS_IMAGE = "Sounds good — share a photo or a Pinterest link to start 📸"
+PRESEARCH_REFINE_TMPL = "Refining: {summary} 🔁"
+
 _MAX_CARDS = 5
 _MIN_CARDS = 4
 _MAX_INTENT_LEN = 512  # session storage cap; downstream query is further trimmed to 256 in PipelineRecommendationPort
@@ -67,15 +87,80 @@ def _hash_chat_id(chat_id: int) -> str:
     return hashlib.sha256(str(chat_id).encode()).hexdigest()[:16]
 
 
-def _build_channel_request(image_url: str, intent: str | None, vision_data: dict) -> ChannelRecommendationRequest:
+def _build_channel_request(
+    image_url: str,
+    intent: str | None,
+    vision_data: dict,
+    *,
+    delta: CritiqueDelta | None = None,
+    taste: TasteProfile | None = None,
+    exclude_product_ids: list[str] | None = None,
+) -> ChannelRecommendationRequest:
+    """Compose the request, layering critique deltas + taste profile on top of
+    the base vision signal. Order of precedence on conflicting fields:
+    user critique (this turn) > taste profile (long-term) > vision."""
+    keywords = list(vision_data.get("keywords") or [])
+    color = vision_data.get("color") or None
+    intent_combined = intent
+    exclude_brands: list[str] = []
+    exclude_keywords: list[str] = []
+    boost_brands: list[str] = []
+    boost_keywords: list[str] = []
+    max_price: int | None = None
+    min_price: int | None = None
+
+    if delta is not None:
+        exclude_brands.extend(delta.exclude_brands)
+        exclude_keywords.extend(delta.exclude_keywords)
+        boost_keywords.extend(delta.boost_keywords)
+        max_price = delta.max_price
+        min_price = delta.min_price
+        if delta.color:
+            color = delta.color
+        if delta.extra_intent:
+            extra = delta.extra_intent.strip()
+            base = (intent or "").strip()
+            # Avoid duplication when handlers stored the raw text in both
+            # session.user_intent and delta.extra_intent (router fallback path).
+            if not base:
+                intent_combined = extra
+            elif extra.lower() == base.lower() or extra.lower() in base.lower():
+                intent_combined = base
+            else:
+                intent_combined = f"{base} {extra}"
+
+    if taste is not None:
+        boost_brands.extend(taste.boost_brands(top_n=5))
+        boost_keywords.extend(taste.boost_keywords(top_n=5))
+        # Taste exclude_brands are STRONG — same as delta-supplied. Liked
+        # brands win on conflict because we appended deltas first.
+        exclude_brands.extend(b for b in taste.exclude_brands(threshold=1.5) if b not in boost_brands)
+
     return ChannelRecommendationRequest(
         image_url=image_url,
         item_label=vision_data.get("item"),
-        intent=intent,
-        keywords=list(vision_data.get("keywords") or []),
+        intent=intent_combined,
+        keywords=keywords,
         tolerance=0.5,
-        color=(vision_data.get("color") or None),
+        color=color,
+        exclude_brands=list(dict.fromkeys(b.strip().lower() for b in exclude_brands if b and b.strip())),
+        exclude_keywords=list(dict.fromkeys(k.strip().lower() for k in exclude_keywords if k and k.strip())),
+        exclude_product_ids=list(exclude_product_ids or []),
+        boost_brands=list(dict.fromkeys(b.strip().lower() for b in boost_brands if b and b.strip())),
+        boost_keywords=list(dict.fromkeys(k.strip().lower() for k in boost_keywords if k and k.strip())),
+        max_price=max_price,
+        min_price=min_price,
     )
+
+
+def _critique_buttons_for(idx: int) -> list[tuple[str, str]]:
+    """Inline-keyboard row attached to each result card.
+    callback_data format: crit:{op}:{idx}  (op ∈ more|less|cheap)."""
+    return [
+        (CRIT_MORE, f"crit:more:{idx}"),
+        (CRIT_LESS, f"crit:less:{idx}"),
+        (CRIT_CHEAP, f"crit:cheap:{idx}"),
+    ]
 
 
 def _format_price(price: Any) -> str | None:
@@ -95,7 +180,7 @@ def _html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _candidate_to_card(c: Any) -> BotCard | None:
+def _candidate_to_card(c: Any, idx: int = 0, with_critique: bool = True) -> BotCard | None:
     image_url = getattr(c, "image_url", None)
     product_url = getattr(c, "product_url", None)
     brand = (getattr(c, "brand", "") or "").strip()
@@ -142,13 +227,16 @@ def _candidate_to_card(c: Any) -> BotCard | None:
             button_text=button_label,
             button_url=product_url,
             parse_mode="HTML",
+            critique_buttons=_critique_buttons_for(idx) if with_critique else [],
         )
     except ValidationError:
         return None
 
 
-async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: list) -> int:
-    sent = 0
+async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: list) -> list:
+    """Returns the list of *successfully sent* candidates in send order, so
+    the caller can persist them for callback-resolution + exclude-on-refine."""
+    sent_candidates: list = []
     skipped = 0
     chat_hash = _hash_chat_id(chat_id)
     logger.info(
@@ -156,11 +244,13 @@ async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: lis
         len(candidates),
         _MAX_CARDS,
     )
-    # 후보 전체를 순회하며 _MAX_CARDS 만큼 성공시까지 시도 (실패 카드는 스킵)
+    # idx is the *display* position (0..MAX_CARDS-1) — what the user sees as
+    # "card 1, card 2..." and what callback_data references.
     for c in candidates:
-        if sent >= _MAX_CARDS:
+        if len(sent_candidates) >= _MAX_CARDS:
             break
-        card = _candidate_to_card(c)
+        idx = len(sent_candidates)
+        card = _candidate_to_card(c, idx=idx, with_critique=True)
         if card is None:
             skipped += 1
             logger.warning(
@@ -183,16 +273,16 @@ async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: lis
                 (getattr(c, "name", "") or "")[:40],
             )
             continue
-        sent += 1
+        sent_candidates.append(c)
         logger.info(
             "🎁 [CARDS]   ✅ %d/%d  %s — %s",
-            sent,
+            len(sent_candidates),
             _MAX_CARDS,
             getattr(c, "brand", "?"),
             (getattr(c, "name", "") or "")[:50],
         )
-    logger.info("🎁 [CARDS] 🏁 완료 sent=%d skipped=%d", sent, skipped)
-    return sent
+    logger.info("🎁 [CARDS] 🏁 완료 sent=%d skipped=%d", len(sent_candidates), skipped)
+    return sent_candidates
 
 
 def _is_vision_fallback(items: list[dict]) -> bool:
@@ -283,14 +373,17 @@ class Trigger(StrEnum):
 
     PICK_REQUEST    — picker callback OR digit text in AWAITING_ITEM_PICK
     INTENT_REPLY    — free-text reply while AWAITING_INTENT (no photo)
-    REFINE_REQUEST  — free-text reply while RESULTS_SENT (no photo) — re-runs
-                      search reusing the prior image + item with the new intent
+    CRITIQUE_TAP    — inline-keyboard callback (crit:{op}:{idx}) on a result card
+    REFINE_REQUEST  — free-text reply while RESULTS_SENT (no photo). Now
+                      LLM-routed inside handler — could resolve to refine,
+                      taste-update, new-search-request, or off-topic.
     NEW_IMAGE_INPUT — photo or URL attached
     TEXT_FALLBACK   — text we don't otherwise route (state-dependent reply)
     """
 
     PICK_REQUEST = "pick_request"
     INTENT_REPLY = "intent_reply"
+    CRITIQUE_TAP = "critique_tap"
     REFINE_REQUEST = "refine_request"
     NEW_IMAGE_INPUT = "new_image_input"
     TEXT_FALLBACK = "text_fallback"
@@ -304,6 +397,12 @@ class HandlerContext:
     store: SessionStore
     port: RecommendationPort
     chat_hash: str
+    taste_store: TasteProfileStore | None = None  # None ⇒ taste profile disabled
+
+    def taste(self) -> TasteProfile | None:
+        if self.taste_store is None:
+            return None
+        return self.taste_store.get_or_create(user_key_for(self.session.from_user_id, self.session.chat_id))
 
 
 Handler = Callable[[HandlerContext], Awaitable[None]]
@@ -326,12 +425,12 @@ def classify_input(message: ChannelMessage, session: Session) -> Trigger | None:
     """
     if message.callback_data and message.callback_data.startswith("item:"):
         return Trigger.PICK_REQUEST
+    if message.callback_data and message.callback_data.startswith("crit:"):
+        return Trigger.CRITIQUE_TAP
     if message.text and session.state == SessionState.AWAITING_INTENT and not message.photo_file_id:
         return Trigger.INTENT_REPLY
-    # RESULTS_SENT + text (no photo, no url) → user is iterating on the same
-    # item ("cheaper", "in black", "less casual"). Reuse the cached image_url
-    # + vision_item + vision_keywords with the new intent instead of dropping
-    # to TEXT_FALLBACK ("send me a photo first").
+    # RESULTS_SENT + text (no photo, no url) → ambiguous (refine vs taste-update
+    # vs new-search vs off-topic). Routed via LLM inside the handler.
     if message.text and session.state == SessionState.RESULTS_SENT and not message.photo_file_id and not message.urls:
         return Trigger.REFINE_REQUEST
     if message.photo_file_id or message.urls:
@@ -388,28 +487,12 @@ async def handle_intent_reply(ctx: HandlerContext) -> None:
     # further 256-char cap before dispatch.
     ctx.session.user_intent = (ctx.message.text or "").strip()[:_MAX_INTENT_LEN]
     ctx.session.state = SessionState.SEARCHING
+    # Reset shown_product_ids on a fresh-intent search — the user is committing
+    # to a new query, so it's fine if previous "shown" items resurface.
+    ctx.session.shown_product_ids = []
     ctx.store.update(ctx.session)
     logger.info(
         "🎬 [SCENARIO] ➡️  분기: 의도 수집 완료 → 검색 시작 intent_len=%d",
-        len(ctx.session.user_intent),
-    )
-    await _run_search(ctx.adapter, ctx.session, ctx.chat_hash, port=ctx.port, store=ctx.store)
-
-
-async def handle_refine_request(ctx: HandlerContext) -> None:
-    """Re-search using the same image + selected item but a new intent.
-    Guards against missing prior context (image_url cleared by TTL eviction
-    or prior bytes-only flow); falls back to TEXT_ONLY nudge if so."""
-    if not ctx.session.image_url or not ctx.session.vision_item:
-        logger.info("🎬 [SCENARIO] ⚠️  refine 요청이지만 이전 컨텍스트 없음 → 사진 안내")
-        await ctx.adapter.send_text(ctx.session.chat_id, TEXT_ONLY)
-        return
-    ctx.session.user_intent = (ctx.message.text or "").strip()[:_MAX_INTENT_LEN]
-    ctx.session.state = SessionState.SEARCHING
-    ctx.store.update(ctx.session)
-    logger.info(
-        "🎬 [SCENARIO] ➡️  분기: refine 재검색 item=%s intent_len=%d",
-        ctx.session.vision_item,
         len(ctx.session.user_intent),
     )
     await _run_search(
@@ -418,7 +501,165 @@ async def handle_refine_request(ctx: HandlerContext) -> None:
         ctx.chat_hash,
         port=ctx.port,
         store=ctx.store,
+        taste=ctx.taste(),
+    )
+
+
+def _summarize_delta(delta: CritiqueDelta) -> str:
+    """One-line natural-language summary of a CritiqueDelta for the pre-search
+    confirmation message. Deterministic, no LLM."""
+    bits: list[str] = []
+    if delta.exclude_keywords:
+        bits.append("less " + ", ".join(delta.exclude_keywords[:2]))
+    if delta.exclude_brands:
+        bits.append("not " + ", ".join(delta.exclude_brands[:2]))
+    if delta.boost_keywords:
+        bits.append("more " + ", ".join(delta.boost_keywords[:2]))
+    if delta.color:
+        bits.append(f"in {delta.color}")
+    if delta.max_price is not None:
+        bits.append(f"under ₩{delta.max_price:,}")
+    if delta.min_price is not None:
+        bits.append(f"over ₩{delta.min_price:,}")
+    if not bits and delta.extra_intent:
+        bits.append(delta.extra_intent[:60])
+    return ", ".join(bits) if bits else "your tweak"
+
+
+def _summarize_taste_update(update: TasteUpdate) -> str:
+    bits: list[str] = []
+    if update.liked_brands:
+        bits.append("you like " + ", ".join(update.liked_brands[:3]))
+    if update.disliked_brands:
+        bits.append("you avoid " + ", ".join(update.disliked_brands[:3]))
+    if update.liked_keywords:
+        bits.append("you like " + ", ".join(update.liked_keywords[:3]))
+    if update.disliked_keywords:
+        bits.append("you avoid " + ", ".join(update.disliked_keywords[:3]))
+    return "; ".join(bits)
+
+
+def _apply_taste_update(profile: TasteProfile | None, update: TasteUpdate) -> None:
+    if profile is None:
+        return
+    for b in update.liked_brands:
+        profile.reinforce_liked_brand(b, weight=2.0)  # explicit > implicit
+    for b in update.disliked_brands:
+        profile.reinforce_disliked_brand(b, weight=2.0)
+    if update.liked_keywords:
+        profile.reinforce_liked_keywords(update.liked_keywords, weight=2.0)
+    if update.disliked_keywords:
+        profile.reinforce_disliked_keywords(update.disliked_keywords, weight=2.0)
+
+
+async def handle_refine_request(ctx: HandlerContext) -> None:
+    """RESULTS_SENT + free text → route via LLM (router) into one of:
+        - critique_text   → apply CritiqueDelta + re-search
+        - taste_update    → update TasteProfile, ack
+        - new_search_req  → ask user for an image
+        - off_topic       → soft nudge
+
+    Guards: when image_url / vision_item are missing (TTL eviction), critique
+    paths still need the old context to make sense — fall back to TEXT_ONLY."""
+    text = (ctx.message.text or "").strip()
+    if not text:
+        return
+
+    decision: RoutedDecision = await route_text(text, ctx.session.state, ctx.session.last_results)
+    logger.info("🎬 [SCENARIO] ➡️  refine 라우팅 결과 intent=%s", decision.intent.value)
+
+    if decision.intent == RoutedIntent.TASTE_UPDATE and decision.taste_update is not None:
+        profile = ctx.taste()
+        _apply_taste_update(profile, decision.taste_update)
+        if profile is not None and ctx.taste_store is not None:
+            ctx.taste_store.update(profile)
+        summary = _summarize_taste_update(decision.taste_update)
+        ack = TASTE_ACK_TMPL.format(summary=summary) if summary else TASTE_ACK_EMPTY
+        await ctx.adapter.send_text(ctx.session.chat_id, ack)
+        return
+
+    if decision.intent == RoutedIntent.NEW_SEARCH_REQUEST:
+        await ctx.adapter.send_text(ctx.session.chat_id, NEW_SEARCH_NEEDS_IMAGE)
+        return
+
+    if decision.intent == RoutedIntent.OFF_TOPIC:
+        # Don't drag the user into a search they didn't ask for. Stay quiet
+        # unless we're confident — soft nudge is enough.
+        await ctx.adapter.send_text(ctx.session.chat_id, TEXT_ONLY)
+        return
+
+    # CRITIQUE_TEXT — re-search applying the parsed delta.
+    if not ctx.session.image_url or not ctx.session.vision_item:
+        logger.info("🎬 [SCENARIO] ⚠️  critique 요청이지만 이전 컨텍스트 없음 → 사진 안내")
+        await ctx.adapter.send_text(ctx.session.chat_id, TEXT_ONLY)
+        return
+
+    delta = decision.critique_delta or CritiqueDelta(op="free_text", extra_intent=text[:200])
+    ctx.session.user_intent = text[:_MAX_INTENT_LEN]
+    ctx.session.state = SessionState.SEARCHING
+    ctx.store.update(ctx.session)
+    summary = _summarize_delta(delta)
+    await _run_search(
+        ctx.adapter,
+        ctx.session,
+        ctx.chat_hash,
+        port=ctx.port,
+        store=ctx.store,
         is_refine=True,
+        delta=delta,
+        taste=ctx.taste(),
+        exclude_already_shown=True,
+        presearch_summary=summary,
+    )
+
+
+async def handle_critique_tap(ctx: HandlerContext) -> None:
+    """Inline-keyboard tap on a result card: crit:{op}:{idx}.
+    Resolves the anchor from session.last_results, builds CritiqueDelta,
+    reinforces taste profile (more=liked / less=disliked), re-runs search."""
+    msg = ctx.message
+    cb_id = msg.callback_query_id
+    delta = parse_critique_callback(msg.callback_data or "", ctx.session.last_results)
+    if delta is None or delta.anchor is None:
+        if cb_id and hasattr(ctx.adapter, "answer_callback_query"):
+            await ctx.adapter.answer_callback_query(cb_id, "Out of date — try a fresh search")
+        return
+    if cb_id and hasattr(ctx.adapter, "answer_callback_query"):
+        # Friendly toast confirming the tap was received.
+        toast = {"more": "Finding more like this ✨", "less": "Steering away ✕", "cheap": "Going cheaper 💰"}.get(
+            delta.op, "Got it"
+        )
+        await ctx.adapter.answer_callback_query(cb_id, toast)
+
+    # Reinforce taste profile based on signal direction.
+    profile = ctx.taste()
+    if profile is not None and delta.anchor.brand:
+        if delta.op == "more":
+            profile.reinforce_liked_brand(delta.anchor.brand, weight=1.0)
+        elif delta.op == "less":
+            profile.reinforce_disliked_brand(delta.anchor.brand, weight=1.0)
+        if profile is not None and ctx.taste_store is not None:
+            ctx.taste_store.update(profile)
+
+    if not ctx.session.image_url or not ctx.session.vision_item:
+        logger.info("🎬 [SCENARIO] ⚠️  critique tap이지만 이전 컨텍스트 없음 → 사진 안내")
+        await ctx.adapter.send_text(ctx.session.chat_id, TEXT_ONLY)
+        return
+
+    ctx.session.state = SessionState.SEARCHING
+    ctx.store.update(ctx.session)
+    summary = _summarize_delta(delta)
+    await _run_search(
+        ctx.adapter,
+        ctx.session,
+        ctx.chat_hash,
+        port=ctx.port,
+        store=ctx.store,
+        is_refine=True,
+        delta=delta,
+        taste=ctx.taste(),
+        exclude_already_shown=(delta.op != "more"),  # "more" wants the anchor's neighbors, including some shown ones
+        presearch_summary=summary,
     )
 
 
@@ -514,6 +755,7 @@ async def handle_text_fallback(ctx: HandlerContext) -> None:
 
 TRANSITIONS: dict[tuple[SessionState | None, Trigger], Handler] = {
     (None, Trigger.PICK_REQUEST): handle_pick_request,
+    (None, Trigger.CRITIQUE_TAP): handle_critique_tap,
     (None, Trigger.NEW_IMAGE_INPUT): handle_new_image,
     (SessionState.AWAITING_INTENT, Trigger.INTENT_REPLY): handle_intent_reply,
     (SessionState.RESULTS_SENT, Trigger.REFINE_REQUEST): handle_refine_request,
@@ -536,6 +778,10 @@ async def handle(adapter: MessengerAdapter, message: ChannelMessage) -> None:
     lock = store.lock_for(chat_id)
     async with lock:
         session = store.get_or_create(chat_id)
+        # Capture user identity for taste-profile lookup. Falls back gracefully
+        # when message has no from_user (channel posts, system events).
+        if message.from_user_id and not session.from_user_id:
+            session.from_user_id = message.from_user_id
         logger.info(
             "📥 [INBOUND] chat=%s state=%s text=%r photo=%s urls=%d cb=%s",
             chat_hash,
@@ -568,6 +814,7 @@ async def handle(adapter: MessengerAdapter, message: ChannelMessage) -> None:
             store=store,
             port=get_port(),
             chat_hash=chat_hash,
+            taste_store=get_taste_store() if settings.TASTE_PROFILE_ENABLED else None,
         )
         await handler(ctx)
 
@@ -630,11 +877,18 @@ async def _run_search(
     store: SessionStore | None = None,
     *,
     is_refine: bool = False,
+    delta: CritiqueDelta | None = None,
+    taste: TasteProfile | None = None,
+    exclude_already_shown: bool = False,
+    presearch_summary: str | None = None,
 ) -> None:
     chat_id = session.chat_id
     store = store or get_store()
     port = port or get_port()
-    start_msg = REFINE_START if is_refine else SEARCH_START_TMPL.format(item=session.vision_item or "item")
+    if presearch_summary:
+        start_msg = PRESEARCH_REFINE_TMPL.format(summary=presearch_summary)
+    else:
+        start_msg = REFINE_START if is_refine else SEARCH_START_TMPL.format(item=session.vision_item or "item")
     closer_msg = CLOSER_REFINE if is_refine else CLOSER
 
     if not session.image_url:
@@ -649,7 +903,15 @@ async def _run_search(
         "color": "",
         "keywords": session.vision_keywords,
     }
-    channel_req = _build_channel_request(session.image_url, session.user_intent, vision_data)
+    excl_ids = list(session.shown_product_ids) if exclude_already_shown else []
+    channel_req = _build_channel_request(
+        session.image_url,
+        session.user_intent,
+        vision_data,
+        delta=delta,
+        taste=taste,
+        exclude_product_ids=excl_ids,
+    )
 
     # Surface the search to the user: a one-shot start message + a typing
     # heartbeat that survives the multi-second pipeline call (Telegram clears
@@ -707,7 +969,8 @@ async def _run_search(
         store.update(session)
         return
 
-    sent = await _send_results(adapter, chat_id, candidates)
+    sent_list = await _send_results(adapter, chat_id, candidates)
+    sent = len(sent_list)
     if sent == 0:
         # Photo cards all failed (broken image URLs / hotlink protection / 4s
         # sendPhoto timeout). Search itself succeeded — give the user the
@@ -719,10 +982,20 @@ async def _run_search(
             store.update(session)
             return
         logger.info("🎁 [CARDS] ↩️  사진 송출 0장 → 텍스트 fallback %d개 송출", text_sent)
+        # Text fallback: keep the search candidates so callbacks could still
+        # reference them, but no critique buttons were rendered.
+        sent_list = candidates[:text_sent]
         sent = text_sent
 
     if sent < _MIN_CARDS:
         logger.info("🎁 [CARDS] ⚠️  최소치 미달 sent=%d (min=%d)", sent, _MIN_CARDS)
+
+    # Cache last_results for subsequent critique callbacks + the next refine's
+    # exclude_product_ids list.
+    session.last_results = list(sent_list)
+    new_ids = [str(getattr(c, "id", "")) for c in sent_list if getattr(c, "id", None)]
+    # Accumulate across refines so we don't keep showing the same products.
+    session.shown_product_ids = list(dict.fromkeys(session.shown_product_ids + new_ids))
 
     logger.info("💬 [CLOSER] 📤 마무리 멘트 송출")
     await adapter.send_text(chat_id, closer_msg)
