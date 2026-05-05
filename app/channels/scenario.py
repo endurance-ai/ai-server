@@ -49,6 +49,7 @@ PICK_INVALID = "Tap one of the buttons above to choose an item 👆"
 
 _MAX_CARDS = 5
 _MIN_CARDS = 4
+_MAX_INTENT_LEN = 512  # session storage cap; downstream query is further trimmed to 256 in PipelineRecommendationPort
 
 
 def _hash_chat_id(chat_id: int) -> str:
@@ -236,16 +237,25 @@ Handler = Callable[[HandlerContext], Awaitable[None]]
 def classify_input(message: ChannelMessage, session: Session) -> Trigger | None:
     """Map an inbound message (in current session state) to a Trigger.
 
-    Priority order: callback > image > intent text > pick text > generic text.
+    Priority order:
+        callback ▸ INTENT reply (text in AWAITING_INTENT, no photo) ▸ image ▸
+        pick text ▸ generic text.
+
+    The INTENT branch deliberately runs BEFORE the image branch so that a user
+    answering the opener with text that happens to contain a URL (e.g.
+    "cheaper than https://...") is still treated as intent, matching the
+    pre-refactor behavior where the AWAITING_INTENT if-arm came before the
+    has_url arm.
+
     Returns None for "silently ignore".
     """
     if message.callback_data and message.callback_data.startswith("item:"):
         return Trigger.PICK_REQUEST
+    if message.text and session.state == SessionState.AWAITING_INTENT and not message.photo_file_id:
+        return Trigger.INTENT_REPLY
     if message.photo_file_id or message.urls:
         return Trigger.NEW_IMAGE_INPUT
     if message.text:
-        if session.state == SessionState.AWAITING_INTENT and not message.photo_file_id:
-            return Trigger.INTENT_REPLY
         if session.state == SessionState.AWAITING_ITEM_PICK:
             return Trigger.PICK_REQUEST
         return Trigger.TEXT_FALLBACK
@@ -270,7 +280,9 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
             return
         if msg.callback_query_id and hasattr(ctx.adapter, "answer_callback_query"):
             await ctx.adapter.answer_callback_query(msg.callback_query_id, None)
-        await _select_item(ctx.adapter, ctx.session, idx, ctx.chat_hash, msg.callback_query_id)
+        await _select_item(
+            ctx.adapter, ctx.session, idx, ctx.chat_hash, msg.callback_query_id, store=ctx.store
+        )
         return
 
     # AWAITING_ITEM_PICK + text → digit-based selection
@@ -279,7 +291,9 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
         idx = int(digit_match) - 1
         if 0 <= idx < len(ctx.session.detected_items):
             logger.info("🎬 [SCENARIO] ➡️  분기: 텍스트로 아이템 선택 idx=%d", idx)
-            await _select_item(ctx.adapter, ctx.session, idx, ctx.chat_hash, callback_query_id=None)
+            await _select_item(
+                ctx.adapter, ctx.session, idx, ctx.chat_hash, callback_query_id=None, store=ctx.store
+            )
             return
 
     logger.info("🎬 [SCENARIO] ⚠️  유효한 번호 아님 → 재안내")
@@ -287,14 +301,17 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
 
 
 async def handle_intent_reply(ctx: HandlerContext) -> None:
-    ctx.session.user_intent = (ctx.message.text or "").strip()
+    # Cap stored intent length to bound session memory / Redis key size in
+    # the future. Downstream query in PipelineRecommendationPort applies a
+    # further 256-char cap before dispatch.
+    ctx.session.user_intent = (ctx.message.text or "").strip()[:_MAX_INTENT_LEN]
     ctx.session.state = SessionState.SEARCHING
     ctx.store.update(ctx.session)
     logger.info(
-        "🎬 [SCENARIO] ➡️  분기: 의도 수집 완료 → 검색 시작 intent=%r",
-        ctx.session.user_intent[:80],
+        "🎬 [SCENARIO] ➡️  분기: 의도 수집 완료 → 검색 시작 intent_len=%d",
+        len(ctx.session.user_intent),
     )
-    await _run_search(ctx.adapter, ctx.session, ctx.chat_hash, port=ctx.port)
+    await _run_search(ctx.adapter, ctx.session, ctx.chat_hash, port=ctx.port, store=ctx.store)
 
 
 async def handle_new_image(ctx: HandlerContext) -> None:
@@ -351,7 +368,9 @@ async def handle_new_image(ctx: HandlerContext) -> None:
 
     if len(items) == 1:
         logger.info("🎯 [PICK] 단일 아이템 → picker 생략 label=%s", items[0].get("label"))
-        await _select_item(ctx.adapter, ctx.session, 0, ctx.chat_hash, callback_query_id=None)
+        await _select_item(
+            ctx.adapter, ctx.session, 0, ctx.chat_hash, callback_query_id=None, store=ctx.store
+        )
         return
 
     logger.info("🎯 [PICK] 📤 멀티 아이템 picker 송출 (%d개)", len(items))
@@ -461,8 +480,9 @@ async def _select_item(
     idx: int,
     chat_hash: str,
     callback_query_id: str | None,
+    store: SessionStore | None = None,
 ) -> None:
-    store = get_store()
+    store = store or get_store()
     chat_id = session.chat_id
     item = session.detected_items[idx]
     session.selected_item_index = idx
@@ -485,9 +505,10 @@ async def _run_search(
     session: Session,
     chat_hash: str,
     port: RecommendationPort | None = None,
+    store: SessionStore | None = None,
 ) -> None:
     chat_id = session.chat_id
-    store = get_store()
+    store = store or get_store()
     port = port or get_port()
 
     if not session.image_url:
@@ -505,10 +526,10 @@ async def _run_search(
     channel_req = _build_channel_request(session.image_url, session.user_intent, vision_data)
 
     logger.info(
-        "🔍 [SEARCH] 🚀 파이프라인 호출 item=%s keywords=%s intent=%r",
+        "🔍 [SEARCH] 🚀 파이프라인 호출 item=%s keywords=%s intent_len=%d",
         channel_req.item_label,
         channel_req.keywords,
-        (channel_req.intent or "")[:80],
+        len(channel_req.intent or ""),
     )
     t0 = time.perf_counter()
     try:
