@@ -11,6 +11,7 @@ from app.api import router
 from app.channels import link_resolver
 from app.channels.factory import get_adapter, reset_adapter
 from app.channels.session import init_store, shutdown_store
+from app.channels.taste_profile import init_taste_store, shutdown_taste_store
 from app.channels.telegram.adapter import TelegramAdapter
 from app.channels.telegram.webhook import setup_webhook
 from app.core.config import settings
@@ -34,6 +35,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await SupabaseProvider.get_client()
 
     await init_store()
+    if settings.TASTE_PROFILE_ENABLED:
+        await init_taste_store()
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()
@@ -47,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     yield
 
     # Shutdown
+    await shutdown_taste_store()
     await shutdown_store()
     await reset_adapter()
     await link_resolver.aclose()

@@ -61,6 +61,23 @@ class Settings(BaseSettings):
     BOT_LANGUAGE: str = "en"
     SESSION_TTL_SECONDS: int = 1800
 
+    # Routing-LLM (paraphrase/intent classification + critique parsing)
+    # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
+    ROUTER_MODEL: str = "gpt-4o-mini"
+    ROUTER_TIMEOUT_MS: int = 1500
+    ROUTER_MAX_TOKENS: int = 300
+    # When the deterministic prefilter cannot classify a text message, fall back
+    # to LLM routing. Disable to revert to pure SM behavior (router becomes no-op).
+    ROUTER_LLM_ENABLED: bool = True
+
+    # Long-term taste profile — persistent (in-memory for now; Redis later).
+    # When false, scenario behaves as before (no profile read/write).
+    TASTE_PROFILE_ENABLED: bool = True
+    TASTE_PROFILE_TTL_SECONDS: int = 60 * 60 * 24 * 30  # 30 days
+
+    # Critique — tap-button refinement on result cards
+    CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
+
     @property
     def allowed_image_hosts(self) -> list[str]:
         return [h.strip() for h in self.ALLOWED_IMAGE_HOSTS.split(",") if h.strip()]
