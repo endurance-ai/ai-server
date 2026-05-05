@@ -430,6 +430,122 @@ def test_scenario_module_deleted():
         import app.channels.scenario  # noqa: F401
 
 
+# ── REQ-COMPAT-002 — picker tap → intent reply → search regression ─────────
+
+
+@pytest.mark.asyncio
+async def test_pick_callback_then_intent_text_runs_search(store, taste_store, stub_port, adapter):
+    """REQ-COMPAT-002 — after picker tap (item:0), session is AWAITING_INTENT.
+    Subsequent text reply must run search and dispatch cards. Regression for
+    SPEC-AGENT-001 migration: original `_route_after_pick` routed to
+    `critique_apply` which had no handler for `item:N` callbacks → silent
+    dead-end. Bare picker tap now routes to respond (OPENER prompt) and the
+    next text turn drives the search.
+    """
+    sess = store.get_or_create(42)
+    sess.state = SessionState.AWAITING_ITEM_PICK
+    sess.image_url = "https://i.pinimg.com/originals/x.jpg"
+    sess.detected_items = [
+        {"label": "blue striped sweater", "description": "stripes", "keywords": ["sweater"]},
+        {"label": "white tee", "description": "round neck", "keywords": ["tee"]},
+    ]
+    store.update(sess)
+
+    # Step A: user taps button 1 → callback item:0
+    await _run(make_msg(callback_data="item:0"))
+    sess_a = store.get_or_create(42)
+    assert sess_a.state == SessionState.AWAITING_INTENT, "picker tap must set AWAITING_INTENT"
+    assert sess_a.vision_item == "blue striped sweater"
+    # Search MUST NOT run on bare picker tap (matches original scenario behavior).
+    assert stub_port.calls == [], f"search should not run on bare pick; calls={len(stub_port.calls)}"
+    # Bot must have answered the callback or sent a prompt — never silent dead-end.
+    assert adapter.callback_answers or adapter.texts, "bot must respond to picker tap"
+
+    # Step B: user types intent reply
+    await _run(make_msg(text="20만원 이하로 찾고싶어"))
+    assert stub_port.calls, "search MUST run on AWAITING_INTENT + text"
+    assert adapter.cards, f"cards must be dispatched, got texts={adapter.texts}"
+
+
+@pytest.mark.asyncio
+async def test_full_pinterest_flow_pick_then_intent(store, taste_store, stub_port, adapter, monkeypatch):
+    """REQ-COMPAT-002 — end-to-end: Pinterest URL → vision multi → picker →
+    tap → intent text → search → cards dispatched. Validates that resolve_image
+    + vision_node persist `image_url` / `detected_items` to the session so the
+    later turns can resolve item context.
+    """
+    import app.graphs.nodes.resolve_image as ri
+    import app.graphs.nodes.vision as vn
+
+    async def _resolve_ok(_u):
+        return ["https://i.pinimg.com/originals/x.jpg"]
+
+    async def _vision_multi(_url):
+        return {
+            "items": [
+                {
+                    "label": "blue striped sweater",
+                    "description": "long sleeve crew neck cotton",
+                    "keywords": ["sweater", "stripes"],
+                },
+                {"label": "denim jeans", "description": "slim fit dark wash", "keywords": ["jeans"]},
+                {"label": "leather sneakers", "description": "white low top", "keywords": ["sneakers"]},
+                {"label": "wool beanie", "description": "knit ribbed", "keywords": ["beanie"]},
+            ]
+        }
+
+    monkeypatch.setattr(ri.link_resolver, "resolve", _resolve_ok)
+    monkeypatch.setattr(vn.vision_module, "extract", _vision_multi)
+
+    # Turn 1: Pinterest URL → picker carousel
+    await _run(make_msg(urls=["https://pin.it/abc"]))
+    assert adapter.buttons, "picker must be sent"
+    sess1 = store.get_or_create(42)
+    assert sess1.state == SessionState.AWAITING_ITEM_PICK
+    assert sess1.image_url == "https://i.pinimg.com/originals/x.jpg", "resolve_image must persist image_url to session"
+    assert len(sess1.detected_items) == 4
+
+    # Turn 2: tap button 1 (item:0)
+    await _run(make_msg(callback_data="item:0"))
+    sess2 = store.get_or_create(42)
+    assert sess2.state == SessionState.AWAITING_INTENT
+    assert sess2.vision_item == "blue striped sweater"
+    assert stub_port.calls == [], "no search yet on bare pick"
+
+    # Turn 3: intent reply triggers search + cards
+    await _run(make_msg(text="20만원 이하로 찾고싶어"))
+    assert stub_port.calls, "search MUST run after intent reply"
+    assert adapter.cards, f"cards must be dispatched; got texts={adapter.texts!r}"
+
+
+@pytest.mark.asyncio
+async def test_session_image_url_persisted_after_resolve_vision(store, taste_store, stub_port, adapter, monkeypatch):
+    """REQ-COMPAT-002 — resolve_image + vision_node must persist `image_url`,
+    `vision_item`, `vision_keywords`, and `detected_items` to the session so
+    later refines/critique callbacks (which read sess.image_url) can search.
+    Without this, search_node short-circuits at "no image_url; cannot search".
+    """
+    import app.graphs.nodes.resolve_image as ri
+    import app.graphs.nodes.vision as vn
+
+    async def _resolve_ok(_u):
+        return ["https://i.pinimg.com/originals/x.jpg"]
+
+    async def _vision_single(_url):
+        return {"items": [{"label": "white tee", "description": "round neck slim fit", "keywords": ["tee"]}]}
+
+    monkeypatch.setattr(ri.link_resolver, "resolve", _resolve_ok)
+    monkeypatch.setattr(vn.vision_module, "extract", _vision_single)
+
+    await _run(make_msg(urls=["https://pin.it/abc"]))
+
+    sess = store.get_or_create(42)
+    assert sess.image_url == "https://i.pinimg.com/originals/x.jpg", "image_url must be persisted"
+    assert sess.vision_item == "white tee", "vision_item must be persisted (single-item path)"
+    assert sess.vision_keywords == ["tee"], "vision_keywords must be persisted (single-item path)"
+    assert sess.detected_items, "detected_items must be persisted"
+
+
 # ── REQ-AGENT-008 — one webhook = one graph execution ─────────────────────
 
 

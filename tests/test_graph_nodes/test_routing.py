@@ -202,9 +202,13 @@ def test_vision_empty_routes_to_respond():
 # ── _route_after_pick ──────────────────────────────────────────────────────
 
 
-def test_pick_with_selected_index_routes_to_critique_apply():
+def test_pick_with_selected_index_routes_to_respond():
+    """REQ-COMPAT-002 — bare picker tap routes to respond (OPENER prompt),
+    NOT critique_apply (no delta to apply yet). Search runs only after the
+    user provides intent on the next text turn.
+    """
     s = _state(_msg(callback_data="item:0", callback_query_id="q"), selected_item_index=0)
-    assert _route_after_pick(s) == "critique_apply"
+    assert _route_after_pick(s) == "respond"
 
 
 def test_pick_without_selection_routes_to_end():

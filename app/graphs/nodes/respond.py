@@ -45,6 +45,7 @@ class _Flow(StrEnum):
     NEW_SEARCH_NEED_IMAGE = "new_search_need_image"
     TASTE_ACK = "taste_ack"
     REFINE_NUDGE = "refine_nudge"
+    PICK_OPENER = "pick_opener"
     DEFAULT = "default"
 
 
@@ -62,6 +63,7 @@ _FALLBACKS: dict[_Flow, str] = {
     _Flow.NEW_SEARCH_NEED_IMAGE: "Sounds good — share a photo or a Pinterest link to start 📸",
     _Flow.TASTE_ACK: "Noted 📝",
     _Flow.REFINE_NUDGE: "Send me a photo or a Pinterest link first 📸",
+    _Flow.PICK_OPENER: "Got it 👌\nSame vibe, something cheaper, or a specific color?",
     _Flow.DEFAULT: "Got it.",
 }
 
@@ -69,6 +71,12 @@ _FALLBACKS: dict[_Flow, str] = {
 def _classify_flow(state: WorkingState) -> _Flow:
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)
+
+    # Bare picker tap (REQ-COMPAT-002): user picked an item but hasn't
+    # provided intent yet → ask for vibe/price/color (mirrors original
+    # scenario.OPENER_TMPL). Search runs on the next text turn.
+    if state.selected_item_index is not None and state.critique_delta is None:
+        return _Flow.PICK_OPENER
 
     # Direct photo upload (no urls)
     if msg.photo_file_id and not msg.urls:
@@ -140,7 +148,14 @@ def _user_prompt(state: WorkingState, flow: _Flow) -> str:
     bits.append(f"flow: {flow.value}")
     if state.presearch_summary:
         bits.append(f"presearch_summary: {state.presearch_summary}")
-    if state.detected_items:
+    # For PICK_OPENER use the actual picked item (resolved by index in
+    # detected_items) — matches original scenario's OPENER_TMPL.
+    if flow == _Flow.PICK_OPENER and state.selected_item_index is not None and state.detected_items:
+        idx = state.selected_item_index
+        if 0 <= idx < len(state.detected_items):
+            picked = state.detected_items[idx]
+            bits.append(f"picked_item: {picked.get('label', '')}")
+    elif state.detected_items:
         first = state.detected_items[0]
         bits.append(f"detected_item: {first.get('label', '')}")
     if state.sent_candidates:

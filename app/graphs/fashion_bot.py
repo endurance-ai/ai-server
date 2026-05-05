@@ -65,7 +65,7 @@ _VISION_BRANCHES: dict[str, str] = {
     "respond": "respond",
 }
 
-_PICK_BRANCHES: dict[str, str] = {"critique_apply": "critique_apply", "__end__": END}
+_PICK_BRANCHES: dict[str, str] = {"respond": "respond", "__end__": END}
 
 _SEARCH_BRANCHES: dict[str, str] = {"send_results": "send_results", "respond": "respond"}
 

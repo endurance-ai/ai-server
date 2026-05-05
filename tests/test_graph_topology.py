@@ -62,11 +62,15 @@ def test_topology_conditional_edge_sources_match_spec():
 
 
 def test_topology_pick_item_can_reach_end():
-    """REQ-AGENT-010 — picker-sent-only path bypasses respond."""
+    """REQ-AGENT-010 / REQ-COMPAT-002 — picker-sent-only path bypasses respond,
+    and bare picker tap (item:N) routes to respond (OPENER prompt) — NOT to
+    critique_apply, since there is no critique to apply on a bare pick.
+    """
     g = GRAPH.get_graph()
     pick_targets = {e.target for e in g.edges if e.source == "pick_item"}
     assert "__end__" in pick_targets
-    assert "critique_apply" in pick_targets
+    assert "respond" in pick_targets
+    assert "critique_apply" not in pick_targets
 
 
 def test_topology_no_checkpointer_configured():

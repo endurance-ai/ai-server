@@ -139,14 +139,18 @@ def _route_after_vision(state: WorkingState) -> str:
 
 
 def _route_after_pick(state: WorkingState) -> str:
-    """REQ-AGENT-010 — picker-sent-only path bypasses respond.
+    """REQ-AGENT-010 / REQ-COMPAT-002 — bare picker tap routes to respond.
 
-    When `selected_item_index` is set, the user has tapped a choice within the
-    same webhook → continue to critique_apply. Otherwise the carousel was just
-    sent and we end (waiting for the user's tap on the next webhook).
+    Two cases:
+    - `selected_item_index` set (callback `item:N`): the user has chosen an
+      item; mirror the original scenario by sending the OPENER prompt and
+      waiting for the intent reply. Goes to `respond` (PICK_OPENER flow) —
+      NOT critique_apply, since there's no critique to apply yet.
+    - `selected_item_index` is None: the carousel was just sent on this turn
+      → END so we wait for the user's tap on the next webhook (no respond).
     """
     if state.selected_item_index is not None:
-        return "critique_apply"
+        return "respond"
     return "__end__"
 
 

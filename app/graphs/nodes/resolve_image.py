@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from app.channels import link_resolver
+from app.channels.session import get_store
 from app.graphs.state import WorkingState
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,16 @@ async def resolve_image(state: WorkingState) -> dict:
             breadcrumbs.append(f"resolve_image_error: {type(exc).__name__}: {exc}"[:200])
             continue
         if images:
+            # REQ-COMPAT-002 — persist to session so subsequent turns
+            # (picker tap, intent reply, refine) can run search_node which
+            # reads sess.image_url. Without this, search_node short-circuits
+            # at "no image_url; cannot search".
+            try:
+                sess = get_store().get_or_create(state.chat_id)
+                sess.image_url = images[0]
+                get_store().update(sess)
+            except Exception:
+                logger.exception("[resolve_image] session persist failed")
             breadcrumbs.append(f"resolve_image: ok url={images[0][:80]}")
             return {"image_url": images[0], "log_events": breadcrumbs}
 
