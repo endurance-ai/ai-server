@@ -14,6 +14,7 @@ send_chat_action / run_search). When/if it grows, lift to a TransitionResult
 + executor pattern.
 """
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -41,11 +42,21 @@ PICKER_HEADER = "I see {n} item{s} in this photo 👀\n\n{lines}\n\nWhich one ar
 PICKER_LINE = "{num}  {label} — {desc}"
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
 OPENER_TMPL = "Got it — {item} 👌\nSame vibe, something cheaper, or a specific color?"
+SEARCH_START_TMPL = "On it — hunting for {item}-style picks 🔎"
+REFINE_START = "Reading you — refining the picks 🔁"
 ZERO_RESULT = "Hmm, I couldn't find a match — try another angle or a different photo."
+CARD_RENDER_FAIL = "Found some matches but couldn't render the cards — here are the links:"
 CLOSER = "Tap any to see more like it ✨"
+CLOSER_REFINE = "Tweak it more, or send a new photo whenever 👌"
 LINK_FAIL = "Sorry, couldn't load that. Try sharing the photo directly."
-TEXT_ONLY = "Send me a photo first 📸"
+PHOTO_DIRECT_NOT_SUPPORTED = (
+    "I can't search direct photo uploads yet 🙏\n"
+    "Try sharing a Pinterest / image link instead 📌\n"
+    "(Direct upload support coming soon!)"
+)
+TEXT_ONLY = "Send me a photo or a Pinterest link first 📸"
 PICK_INVALID = "Tap one of the buttons above to choose an item 👆"
+TYPING_HEARTBEAT_INTERVAL = 4.0  # Telegram chat action stays for ~5s
 
 _MAX_CARDS = 5
 _MIN_CARDS = 4
@@ -184,6 +195,67 @@ async def _send_results(adapter: MessengerAdapter, chat_id: int, candidates: lis
     return sent
 
 
+def _is_vision_fallback(items: list[dict]) -> bool:
+    """vision.py returns a single placeholder item ({label:'item', keywords:[]})
+    when the LLM call fails or returns malformed JSON. Detect that shape so
+    handle_new_image can short-circuit instead of pretending we identified
+    something."""
+    if len(items) != 1:
+        return False
+    only = items[0]
+    label = (only.get("label") or "").strip().lower()
+    keywords = only.get("keywords") or []
+    return label == "item" and not keywords
+
+
+async def _typing_heartbeat(adapter: MessengerAdapter, chat_id: int) -> None:
+    """Keep the 'typing' indicator alive while a long-running step (search) is
+    in flight. Telegram clears the indicator after ~5s, so we re-send every
+    TYPING_HEARTBEAT_INTERVAL until cancelled."""
+    try:
+        while True:
+            try:
+                await adapter.send_chat_action(chat_id, "typing")
+            except Exception:
+                pass
+            await asyncio.sleep(TYPING_HEARTBEAT_INTERVAL)
+    except asyncio.CancelledError:
+        return
+
+
+async def _send_text_card_fallback(adapter: MessengerAdapter, chat_id: int, candidates: list, limit: int = 3) -> int:
+    """Plain-text fallback when sendPhoto fails for every candidate (broken
+    image hosts, hotlink protection). Lists product name + brand + URL so the
+    user still gets something actionable."""
+    sent = 0
+    lines = [CARD_RENDER_FAIL]
+    for c in candidates:
+        if sent >= limit:
+            break
+        product_url = getattr(c, "product_url", None)
+        if not product_url:
+            continue
+        brand = (getattr(c, "brand", "") or "").strip()
+        name = (getattr(c, "name", "") or "").strip() or "item"
+        price_str = _format_price(getattr(c, "price", None))
+        bits = [f"• {name}"]
+        if brand:
+            bits.append(f"({brand})")
+        if price_str:
+            bits.append(f"— {price_str}")
+        bits.append(f"\n  {product_url}")
+        lines.append(" ".join(bits))
+        sent += 1
+    if sent == 0:
+        return 0
+    try:
+        await adapter.send_text(chat_id, "\n\n".join(lines))
+    except Exception:
+        logger.exception("🎁 [CARDS] ❌ 텍스트 fallback 송출 실패")
+        return 0
+    return sent
+
+
 async def _resolve_image_for_message(message: ChannelMessage, adapter: MessengerAdapter) -> str | bytes | None:
     """Return either an image URL string, raw bytes, or None on failure."""
     if message.photo_file_id:
@@ -211,12 +283,15 @@ class Trigger(StrEnum):
 
     PICK_REQUEST    — picker callback OR digit text in AWAITING_ITEM_PICK
     INTENT_REPLY    — free-text reply while AWAITING_INTENT (no photo)
+    REFINE_REQUEST  — free-text reply while RESULTS_SENT (no photo) — re-runs
+                      search reusing the prior image + item with the new intent
     NEW_IMAGE_INPUT — photo or URL attached
     TEXT_FALLBACK   — text we don't otherwise route (state-dependent reply)
     """
 
     PICK_REQUEST = "pick_request"
     INTENT_REPLY = "intent_reply"
+    REFINE_REQUEST = "refine_request"
     NEW_IMAGE_INPUT = "new_image_input"
     TEXT_FALLBACK = "text_fallback"
 
@@ -253,6 +328,12 @@ def classify_input(message: ChannelMessage, session: Session) -> Trigger | None:
         return Trigger.PICK_REQUEST
     if message.text and session.state == SessionState.AWAITING_INTENT and not message.photo_file_id:
         return Trigger.INTENT_REPLY
+    # RESULTS_SENT + text (no photo, no url) → user is iterating on the same
+    # item ("cheaper", "in black", "less casual"). Reuse the cached image_url
+    # + vision_item + vision_keywords with the new intent instead of dropping
+    # to TEXT_FALLBACK ("send me a photo first").
+    if message.text and session.state == SessionState.RESULTS_SENT and not message.photo_file_id and not message.urls:
+        return Trigger.REFINE_REQUEST
     if message.photo_file_id or message.urls:
         return Trigger.NEW_IMAGE_INPUT
     if message.text:
@@ -292,8 +373,13 @@ async def handle_pick_request(ctx: HandlerContext) -> None:
             await _select_item(ctx.adapter, ctx.session, idx, ctx.chat_hash, callback_query_id=None, store=ctx.store)
             return
 
-    logger.info("🎬 [SCENARIO] ⚠️  유효한 번호 아님 → 재안내")
-    await ctx.adapter.send_text(ctx.session.chat_id, PICK_INVALID)
+    logger.info("🎬 [SCENARIO] ⚠️  유효한 번호 아님 → picker 재송출")
+    # Re-send the picker so users who scrolled past the buttons get fresh ones,
+    # instead of just nudging "tap above 👆" into the void.
+    if ctx.session.detected_items:
+        await _send_picker(ctx.adapter, ctx.session.chat_id, ctx.session.detected_items)
+    else:
+        await ctx.adapter.send_text(ctx.session.chat_id, PICK_INVALID)
 
 
 async def handle_intent_reply(ctx: HandlerContext) -> None:
@@ -308,6 +394,32 @@ async def handle_intent_reply(ctx: HandlerContext) -> None:
         len(ctx.session.user_intent),
     )
     await _run_search(ctx.adapter, ctx.session, ctx.chat_hash, port=ctx.port, store=ctx.store)
+
+
+async def handle_refine_request(ctx: HandlerContext) -> None:
+    """Re-search using the same image + selected item but a new intent.
+    Guards against missing prior context (image_url cleared by TTL eviction
+    or prior bytes-only flow); falls back to TEXT_ONLY nudge if so."""
+    if not ctx.session.image_url or not ctx.session.vision_item:
+        logger.info("🎬 [SCENARIO] ⚠️  refine 요청이지만 이전 컨텍스트 없음 → 사진 안내")
+        await ctx.adapter.send_text(ctx.session.chat_id, TEXT_ONLY)
+        return
+    ctx.session.user_intent = (ctx.message.text or "").strip()[:_MAX_INTENT_LEN]
+    ctx.session.state = SessionState.SEARCHING
+    ctx.store.update(ctx.session)
+    logger.info(
+        "🎬 [SCENARIO] ➡️  분기: refine 재검색 item=%s intent_len=%d",
+        ctx.session.vision_item,
+        len(ctx.session.user_intent),
+    )
+    await _run_search(
+        ctx.adapter,
+        ctx.session,
+        ctx.chat_hash,
+        port=ctx.port,
+        store=ctx.store,
+        is_refine=True,
+    )
 
 
 async def handle_new_image(ctx: HandlerContext) -> None:
@@ -338,11 +450,18 @@ async def handle_new_image(ctx: HandlerContext) -> None:
         ctx.store.update(ctx.session)
         return
 
-    if isinstance(image, str):
-        ctx.session.image_url = image
-        logger.info("🖼️  [IMAGE] ✅ URL 확보 → vision 단계로 url=%s", image[:120])
-    else:
-        logger.info("🖼️  [IMAGE] ✅ bytes 확보 (%d B) → vision 단계로", len(image))
+    if isinstance(image, bytes):
+        # Direct photo upload: vision works on bytes, but Modal /embed only
+        # accepts URLs — searching would silently dead-end at _run_search.
+        # Fail fast with a clear message instead of burning vision tokens.
+        logger.info("🖼️  [IMAGE] ⛔ 직접 업로드 (%d B) — 검색 불가, 안내 후 종료", len(image))
+        await ctx.adapter.send_text(ctx.session.chat_id, PHOTO_DIRECT_NOT_SUPPORTED)
+        ctx.session.state = SessionState.IDLE
+        ctx.store.update(ctx.session)
+        return
+
+    ctx.session.image_url = image
+    logger.info("🖼️  [IMAGE] ✅ URL 확보 → vision 단계로 url=%s", image[:120])
 
     ctx.session.state = SessionState.VISION_PROCESSING
     ctx.store.update(ctx.session)
@@ -353,8 +472,16 @@ async def handle_new_image(ctx: HandlerContext) -> None:
 
     vision_data = await vision.extract(image)
     items = vision_data.get("items") or []
-    if not items:
-        logger.warning("🎬 [SCENARIO] ❌ vision이 아이템을 못 찾음 → 거절 멘트")
+    if not items or _is_vision_fallback(items):
+        # Either vision returned nothing OR returned its placeholder fallback
+        # (LLM call failed / JSON malformed). Treat both as "couldn't read the
+        # photo" rather than dragging the user through a doomed picker → intent
+        # → search loop.
+        logger.warning(
+            "🎬 [SCENARIO] ❌ vision 인식 실패(items=%d, fallback=%s) → 거절 멘트",
+            len(items),
+            _is_vision_fallback(items) if items else False,
+        )
         await ctx.adapter.send_text(ctx.session.chat_id, ZERO_RESULT)
         ctx.session.state = SessionState.IDLE
         ctx.store.update(ctx.session)
@@ -389,6 +516,7 @@ TRANSITIONS: dict[tuple[SessionState | None, Trigger], Handler] = {
     (None, Trigger.PICK_REQUEST): handle_pick_request,
     (None, Trigger.NEW_IMAGE_INPUT): handle_new_image,
     (SessionState.AWAITING_INTENT, Trigger.INTENT_REPLY): handle_intent_reply,
+    (SessionState.RESULTS_SENT, Trigger.REFINE_REQUEST): handle_refine_request,
     (None, Trigger.TEXT_FALLBACK): handle_text_fallback,
 }
 
@@ -500,10 +628,14 @@ async def _run_search(
     chat_hash: str,
     port: RecommendationPort | None = None,
     store: SessionStore | None = None,
+    *,
+    is_refine: bool = False,
 ) -> None:
     chat_id = session.chat_id
     store = store or get_store()
     port = port or get_port()
+    start_msg = REFINE_START if is_refine else SEARCH_START_TMPL.format(item=session.vision_item or "item")
+    closer_msg = CLOSER_REFINE if is_refine else CLOSER
 
     if not session.image_url:
         logger.warning("🔍 [SEARCH] ❌ 이미지 URL 없음 (bytes만 있음) → 검색 불가 chat=%s", chat_hash)
@@ -519,6 +651,16 @@ async def _run_search(
     }
     channel_req = _build_channel_request(session.image_url, session.user_intent, vision_data)
 
+    # Surface the search to the user: a one-shot start message + a typing
+    # heartbeat that survives the multi-second pipeline call (Telegram clears
+    # the typing indicator after ~5s). Without this users see ~5s of silence
+    # and assume the bot died.
+    try:
+        await adapter.send_text(chat_id, start_msg)
+    except Exception:
+        logger.exception("🔍 [SEARCH] start 메시지 송출 실패 (계속 진행)")
+    heartbeat = asyncio.create_task(_typing_heartbeat(adapter, chat_id))
+
     logger.info(
         "🔍 [SEARCH] 🚀 파이프라인 호출 item=%s keywords=%s intent_len=%d",
         channel_req.item_label,
@@ -527,19 +669,26 @@ async def _run_search(
     )
     t0 = time.perf_counter()
     try:
-        result = await port.recommend(channel_req)
-    except ValidationError:
-        logger.exception("🔍 [SEARCH] ❌ Recommend 요청 빌드 실패 chat=%s", chat_hash)
-        await adapter.send_text(chat_id, ZERO_RESULT)
-        session.state = SessionState.IDLE
-        store.update(session)
-        return
-    except Exception:
-        logger.exception("🔍 [SEARCH] ❌ 파이프라인 실패 chat=%s", chat_hash)
-        await adapter.send_text(chat_id, ZERO_RESULT)
-        session.state = SessionState.IDLE
-        store.update(session)
-        return
+        try:
+            result = await port.recommend(channel_req)
+        except ValidationError:
+            logger.exception("🔍 [SEARCH] ❌ Recommend 요청 빌드 실패 chat=%s", chat_hash)
+            await adapter.send_text(chat_id, ZERO_RESULT)
+            session.state = SessionState.IDLE
+            store.update(session)
+            return
+        except Exception:
+            logger.exception("🔍 [SEARCH] ❌ 파이프라인 실패 chat=%s", chat_hash)
+            await adapter.send_text(chat_id, ZERO_RESULT)
+            session.state = SessionState.IDLE
+            store.update(session)
+            return
+    finally:
+        heartbeat.cancel()
+        try:
+            await heartbeat
+        except (asyncio.CancelledError, Exception):
+            pass
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
     candidates = result.candidates
@@ -560,16 +709,23 @@ async def _run_search(
 
     sent = await _send_results(adapter, chat_id, candidates)
     if sent == 0:
-        await adapter.send_text(chat_id, ZERO_RESULT)
-        session.state = SessionState.IDLE
-        store.update(session)
-        return
+        # Photo cards all failed (broken image URLs / hotlink protection / 4s
+        # sendPhoto timeout). Search itself succeeded — give the user the
+        # links as plain text instead of pretending we found nothing.
+        text_sent = await _send_text_card_fallback(adapter, chat_id, candidates)
+        if text_sent == 0:
+            await adapter.send_text(chat_id, ZERO_RESULT)
+            session.state = SessionState.IDLE
+            store.update(session)
+            return
+        logger.info("🎁 [CARDS] ↩️  사진 송출 0장 → 텍스트 fallback %d개 송출", text_sent)
+        sent = text_sent
 
     if sent < _MIN_CARDS:
         logger.info("🎁 [CARDS] ⚠️  최소치 미달 sent=%d (min=%d)", sent, _MIN_CARDS)
 
     logger.info("💬 [CLOSER] 📤 마무리 멘트 송출")
-    await adapter.send_text(chat_id, CLOSER)
+    await adapter.send_text(chat_id, closer_msg)
     logger.info("🏁 [DONE] 시나리오 1회전 완료 chat=%s sent=%d", chat_hash, sent)
     session.state = SessionState.RESULTS_SENT
     store.update(session)
