@@ -2,18 +2,21 @@
 
 import hashlib
 import logging
-import uuid
+import time
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.channels import link_resolver, vision
 from app.channels.adapter import MessengerAdapter
+from app.channels.recommendation import (
+    ChannelRecommendationRequest,
+    RecommendationPort,
+    get_port,
+)
 from app.channels.schemas import BotCard, ChannelMessage
 from app.channels.session import Session, SessionState, get_store
-from app.models.request import AnalyzedItem, RecommendRequest
 from app.observability.langfuse import observe
-from app.pipeline.runner import run_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +38,14 @@ def _hash_chat_id(chat_id: int) -> str:
     return hashlib.sha256(str(chat_id).encode()).hexdigest()[:16]
 
 
-def _build_query(intent: str | None, keywords: list[str]) -> str:
-    parts = [(intent or "").strip(), " ".join(keywords).strip()]
-    q = " ".join(p for p in parts if p).strip().lower()
-    return q[:256]
-
-
-def _build_recommend_request(image_url: str, intent: str | None, vision_data: dict) -> RecommendRequest:
-    keywords: list[str] = vision_data.get("keywords") or []
-    query = _build_query(intent, keywords)
-    item = AnalyzedItem(
-        id=f"telegram-{uuid.uuid4().hex[:12]}",
-        category=(vision_data.get("item") or "item"),
-        subcategory=None,
-        name=vision_data.get("item"),
-        color_family=(vision_data.get("color") or None),
-        search_query=query or (vision_data.get("item") or "fashion item"),
-        search_query_ko=None,
-    )
-    return RecommendRequest(
-        item=item,
+def _build_channel_request(image_url: str, intent: str | None, vision_data: dict) -> ChannelRecommendationRequest:
+    return ChannelRecommendationRequest(
         image_url=image_url,
+        item_label=vision_data.get("item"),
+        intent=intent,
+        keywords=list(vision_data.get("keywords") or []),
         tolerance=0.5,
+        color=(vision_data.get("color") or None),
     )
 
 
@@ -380,9 +369,15 @@ async def _select_item(
     await adapter.send_text(chat_id, OPENER_TMPL.format(item=session.vision_item))
 
 
-async def _run_search(adapter: MessengerAdapter, session: Session, chat_hash: str) -> None:
+async def _run_search(
+    adapter: MessengerAdapter,
+    session: Session,
+    chat_hash: str,
+    port: RecommendationPort | None = None,
+) -> None:
     chat_id = session.chat_id
     store = get_store()
+    port = port or get_port()
 
     if not session.image_url:
         logger.warning("🔍 [SEARCH] ❌ 이미지 URL 없음 (bytes만 있음) → 검색 불가 chat=%s", chat_hash)
@@ -396,35 +391,33 @@ async def _run_search(adapter: MessengerAdapter, session: Session, chat_hash: st
         "color": "",
         "keywords": session.vision_keywords,
     }
+    channel_req = _build_channel_request(session.image_url, session.user_intent, vision_data)
+
+    logger.info(
+        "🔍 [SEARCH] 🚀 파이프라인 호출 item=%s keywords=%s intent=%r",
+        channel_req.item_label,
+        channel_req.keywords,
+        (channel_req.intent or "")[:80],
+    )
+    t0 = time.perf_counter()
     try:
-        req = _build_recommend_request(session.image_url, session.user_intent, vision_data)
+        result = await port.recommend(channel_req)
     except ValidationError:
-        logger.exception("🔍 [SEARCH] ❌ RecommendRequest 빌드 실패 chat=%s", chat_hash)
+        logger.exception("🔍 [SEARCH] ❌ Recommend 요청 빌드 실패 chat=%s", chat_hash)
         await adapter.send_text(chat_id, ZERO_RESULT)
         session.state = SessionState.IDLE
         store.update(session)
         return
-
-    logger.info(
-        "🔍 [SEARCH] 🚀 파이프라인 호출 query=%r item=%s",
-        req.item.search_query[:80],
-        req.item.category,
-    )
-    import time as _t
-
-    t0 = _t.perf_counter()
-    try:
-        resp = await run_pipeline(req)
     except Exception:
         logger.exception("🔍 [SEARCH] ❌ 파이프라인 실패 chat=%s", chat_hash)
         await adapter.send_text(chat_id, ZERO_RESULT)
         session.state = SessionState.IDLE
         store.update(session)
         return
-    elapsed_ms = int((_t.perf_counter() - t0) * 1000)
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
-    candidates = list(resp.results) if resp and resp.results else []
-    counts = getattr(resp, "counts", {}) if resp else {}
+    candidates = result.candidates
+    counts = result.counts
     logger.info(
         "🔍 [SEARCH] ✅ 완료 elapsed=%dms 결과=%d (counts: %s)",
         elapsed_ms,
