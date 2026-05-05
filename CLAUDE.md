@@ -28,7 +28,7 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, scenario, link_resolver, session, vision
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, scenario, recommendation port, link_resolver, session, vision
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── pipeline/            # state machine (embed → search → diversify)
 ├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
@@ -64,6 +64,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## 코딩 컨벤션
 
 - **plain async + state → state** (LangGraph 보류, 마이그레이션 비용 0 유지)
+- **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 채널은 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
 - 임베딩 호출은 Modal endpoint (`MODAL_EMBED_URL`)
@@ -80,9 +81,10 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
-| `app/channels/scenario.py` | 7-state 시나리오 state machine (inbound → pipeline → outbound) |
+| `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
+| `app/channels/scenario.py` | 7-state 시나리오 state machine — `Trigger` enum + `classify_input` + `TRANSITIONS` dict + handler 4개 (inbound → pipeline → outbound) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
-| `app/channels/session.py` | 인메모리 세션 store (dict + asyncio.Lock, TTL) |
+| `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함 |
 | `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 |
 | `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard) |
 | `app/channels/telegram/webhook.py` | Telegram Update 파싱 |

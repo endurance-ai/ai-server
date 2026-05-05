@@ -44,7 +44,7 @@ graph TB
     subgraph AI["AI Server (EC2 t4g.medium)"]
         REC["POST /recommend"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/channels/<br/>scenario + link_resolver + vision"]
+        CHAN["app/channels/<br/>scenario → RecommendationPort<br/>+ link_resolver + vision"]
         PIPE["pipeline state machine<br/>embed → search → diversify"]
         LITELLM["LiteLLM proxy"]
         LFW["Langfuse web"]
@@ -104,8 +104,9 @@ app/
 │   ├── adapter.py          # MessengerAdapter ABC
 │   ├── factory.py          # MESSENGER_BACKEND 기반 어댑터 팩토리
 │   ├── link_resolver.py    # Pinterest / og:image URL 해석
-│   ├── session.py          # 인메모리 세션 store (dict + asyncio.Lock, TTL)
-│   ├── scenario.py         # 7-state 시나리오 state machine
+│   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
+│   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점)
+│   ├── scenario.py         # 7-state 시나리오 state machine (Trigger enum + classify_input + TRANSITIONS dict + handler 4개)
 │   ├── vision.py           # LiteLLM 경유 Vision 추출
 │   └── telegram/
 │       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard)
@@ -192,3 +193,4 @@ confidence-fallback / multi-step retry / human-in-the-loop 등 분기가 실제�
 |------|------|
 | 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC, GHA + ECR 배포) |
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
+| 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
