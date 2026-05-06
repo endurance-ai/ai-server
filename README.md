@@ -1,84 +1,101 @@
-# kiko-ai-server
+# ai-server
 
-> kiko.ai 패션 추천 AI 서버. FastAPI 기반 검색/리파인 파이프라인.
+> kiko.ai AI search server. FastAPI pipeline over FashionSigLIP embeddings (Modal) + Supabase pgvector/pgroonga hybrid search with RRF.
 
-`portal/app`(Next.js)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC (dense + sparse + RRF) → 다양성 캡 → product 리스트 반환.**
+`endurance-ai/kiko.ai-app` (Next.js) calls `/recommend` after Instagram scrape + Vision analysis. Telegram channel (`@kiko_fashion_ai_bot`) consumes the same pipeline through a LangGraph StateGraph.
 
 ```
-[Vercel / Next.js]                  [EC2 t4g.medium / Docker Compose]              [Modal Serverless]
-─────────────────────               ───────────────────────────────────             ─────────────────
-Apify + R2 + DB                     ai-server (이 프로젝트)                          /embed (FashionSigLIP)
-GPT-4o-mini Vision                  litellm + litellm-db
-세션 / Auth / UI                    langfuse-web + langfuse-db
-v4 검색 (폴백)
+[Vercel / Next.js]              [EC2 / Docker Compose]            [Modal Serverless]
+──────────────────              ──────────────────────            ──────────────────
+Apify + R2 + Vision       →     ai-server (this repo)       ↔    /embed (FashionSigLIP)
+session / auth / UI             LangGraph + LiteLLM
+                                Langfuse self-host
+                                       ↑
+                          Telegram webhook (LangGraph)
 ```
 
-## 빠른 시작
+## Quickstart
 
 ```bash
 uv sync
-# .env 작성 — 키 목록은 docs/infra/env.md 참고
+cp .env.example .env
+# fill in Supabase, Modal, LiteLLM, Telegram keys
 uv run uvicorn app.main:app --reload --port 8000
-curl http://localhost:8000/health  # liveness (no auth)
+curl http://localhost:8000/health
 ```
 
-## 검증
+## Validate
 
 ```bash
 uv run ruff check . && uv run ruff format --check .
 uv run pytest -q
 ```
 
-## 배포
+## Deploy
 
-`dev` 브랜치로 PR merge 시 GitHub Actions가 자동 빌드 + ECR push + EC2 SSH deploy.
-상세는 [`docs/infra/cicd.md`](docs/infra/cicd.md).
+GitHub Actions on `dev` merge → ECR push → SSH deploy to EC2 t4g.medium (docker-compose). See `docs/infra/cicd.md`.
 
-## 디렉토리
+## Layout
 
 ```
 app/
-├── main.py              # FastAPI 엔트리포인트
-├── api/                 # 라우터 (recommend, health)
-├── core/                # config, auth
-├── pipeline/            # state machine (embed → search → diversify)
+├── main.py              # FastAPI entrypoint + lifespan + messenger warmup
+├── api/                 # routers (recommend, health, webhooks/telegram)
+├── channels/            # messenger adapters (telegram), recommendation port, link_resolver, vision, session
+├── graphs/              # LangGraph StateGraph (10 nodes) + routing
+├── pipeline/            # embed → enhance_query → search → diversify
 ├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
-├── observability/       # @observe 래퍼
-└── models/              # Pydantic v2 (request/response)
-
-docs/
-├── ARCHITECTURE.md      # 전체 그림 + 토폴로지
-├── PATTERNS.md          # 코드 컨벤션
-├── features/
-│   ├── pipeline.md      # state machine 상세
-│   ├── search-engine.md # v5 RPC + RRF + 다양성
-│   └── observability.md # Langfuse 통합
-└── infra/
-    ├── env.md           # 환경변수 매트릭스
-    ├── deployment.md    # EC2 docker-compose + Modal
-    └── cicd.md          # GitHub Actions + ECR + SSH
+├── observability/       # Langfuse @observe wrapper
+├── models/              # Pydantic v2 request/response
+└── core/                # config (env)
 ```
 
-## 핵심 기술
+## Responsibility split
 
-| 영역 | 선택 |
-|------|------|
-| 프레임워크 | FastAPI + uvicorn |
-| 벡터/풀텍스트 검색 | Supabase pgvector(HNSW) + pgroonga (Qdrant 미사용) |
-| 이미지 임베딩 | Modal serverless — `Marqo/marqo-fashionSigLIP` (T4) |
-| LLM | LiteLLM proxy 경유 (httpx) |
-| 관측성 | Langfuse self-host (LiteLLM callback + `@observe`) |
-| 스키마 | Pydantic v2 |
-| 패키지/린트/테스트 | uv / ruff / pytest |
-| 컨테이너 | Docker (multi-stage uv) |
+| Layer | Role |
+|-------|------|
+| Vercel / `kiko.ai-app` | Apify, R2, Vision (GPT-4o-mini), session, UI, v4 fallback |
+| **ai-server (this repo)** | search orchestration, enhance_query, Langfuse trace, Telegram webhook + channel adapters |
+| Modal | FashionSigLIP embeddings (single + batch) |
+| Supabase | pgvector + pgroonga, `search_products_v5` RPC |
+| Telegram Bot API | channel transport (treated as a black box) |
 
-## 관련 프로젝트
+## Core stack
 
-| 프로젝트 | 경로 | 역할 |
+| Area | Choice |
+|------|--------|
+| Framework | FastAPI + uvicorn |
+| Agent orchestration | LangGraph >=1.1.10 |
+| LLM | LiteLLM proxy (httpx) + langchain-openai |
+| Embeddings | Modal HTTP endpoint (FashionSigLIP) |
+| Vector DB | Supabase pgvector + pgroonga (no Qdrant) |
+| Observability | Langfuse self-host (LiteLLM callback + `@observe`) |
+| Schema | Pydantic v2 |
+| Package / lint / test | uv / ruff / pytest |
+| Container | Docker (multi-stage uv) |
+
+## Search responsibility
+
+```
+[Postgres RPC] dense (HNSW) + sparse (pgroonga) + RRF → top-50
+       ↓
+[Python] diversity cap (brand/platform) + tolerance + final sort → top-15
+```
+
+## Auth
+
+AI server is stateless — no auth on this side. `kiko.ai-app` owns session + Supabase Auth and passes the resolved context via request body. `/recommend` is gated by `X-Internal-Token`; `/webhooks/telegram` by `X-Telegram-Bot-Api-Secret-Token`.
+
+## Related projects
+
+| Project | Repo | Role |
 |---------|------|------|
-| portal/app | `/Users/hansangho/Desktop/portal/app` | Next.js 모놀리스 (caller + v4 폴백) |
-| aws-infra | `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose + Modal 배포 |
+| kiko.ai-app | endurance-ai/kiko.ai-app | Next.js monolith (caller + v4 fallback) |
+| crawler | endurance-ai/crawler | Cafe24 + Shopify SKU harvester |
+| aws-infra | private | EC2 docker-compose + Langfuse + Modal infra |
 
-## 라이선스
+## Notes
 
-Internal — kiko.ai 팀 전용.
+- Internal — kiko.ai team only.
+- Langfuse SDK pinned to `>=2.50,<3.0` (server is v2 image; v3 SDK changed the ingestion endpoint).
+- LangGraph 1.x requires `langchain-core>=1.3` — pinned together to keep compatibility with `langfuse v2 + langchain` callback wrapping.
