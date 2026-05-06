@@ -1,6 +1,6 @@
-# portal-ai-server
+# kiko-ai-server
 
-> Portal.ai 패션 추천 AI 서버. FastAPI 기반 검색/리파인 파이프라인.
+> kiko.ai 패션 추천 AI 서버. FastAPI 기반 검색/리파인 파이프라인.
 
 `portal/app`(Next.js)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC (dense + sparse + RRF) → 다양성 캡 → product 리스트 반환.**
 
@@ -81,4 +81,4 @@ docs/
 
 ## 라이선스
 
-Internal — Portal.ai 팀 전용.
+Internal — kiko.ai 팀 전용.

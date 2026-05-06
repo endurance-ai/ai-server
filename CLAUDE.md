@@ -1,6 +1,6 @@
-# portal-ai-server
+# kiko-ai-server
 
-Portal.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + Telegram 채널.
+kiko.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + Telegram 채널.
 
 `portal/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC → 다양성 캡 → product_id[] 반환**.
 

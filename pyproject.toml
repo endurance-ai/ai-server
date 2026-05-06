@@ -1,7 +1,7 @@
 [project]
-name = "portal-ai-server"
+name = "kiko-ai-server"
 version = "0.1.0"
-description = "Portal.ai AI Server — FastAPI 기반 패션 추천 검색/리파인 파이프라인"
+description = "kiko.ai AI Server — FastAPI 기반 패션 추천 검색/리파인 파이프라인"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
