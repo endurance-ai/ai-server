@@ -2,9 +2,28 @@
 
 > portal-ai-server 코드 컨벤션. 변경 시 같이 업데이트: 본 문서, `CLAUDE.md`, `docs/ARCHITECTURE.md`.
 
-## 1. plain async + state → state
+## 1. 두 가지 실행 경로
 
-LangGraph **사용 안 함**. 모든 파이프라인 step은 `(state) -> state` 시그니처.
+### 1-A. LangGraph 그래프 노드 (`app/graphs/`) — Telegram webhook 흐름
+
+SPEC-AGENT-001 에서 도입. 10-노드 `StateGraph` 로 대화 흐름을 구성.
+
+```python
+# app/api/webhooks/telegram.py
+from app.graphs.fashion_bot import GRAPH
+from app.observability.langfuse import build_callback_handler
+
+output = await GRAPH.ainvoke(
+    InputState(update=update, adapter=adapter),
+    config={"callbacks": [build_callback_handler(trace_id, session_id, user_id)]},
+)
+```
+
+노드는 `(WorkingState) -> dict` 형태의 순수 async 함수. 전체 그래프: `app/graphs/fashion_bot.py`.
+
+### 1-B. plain async + state → state — 검색 파이프라인 (`app/pipeline/`)
+
+`POST /recommend` 경로. 직선 파이프라인은 그래프 오버헤드 불필요.
 
 ```python
 # app/pipeline/<step>.py
@@ -15,10 +34,6 @@ async def <step>_step(state: PipelineState) -> PipelineState:
     state.end("<step>")
     return state
 ```
-
-이유:
-- portal-ai 의 파이프라인이 직선이라 그래프 오버헤드 불필요
-- 향후 분기/병렬/체크포인트가 필요해지면 LangGraph 마이그레이션 비용은 0 (각 step 함수는 노드로 그대로 wrap 가능)
 
 전체 파이프라인은 `app/pipeline/runner.py` 의 `run_pipeline()` 참조.
 
@@ -94,7 +109,7 @@ class PipelineRecommendationPort:
         ...
 ```
 
-채널 시나리오(`scenario.py`)는 `RecommendationPort`만 참조 — `pipeline.runner`를 직접 import하지 않는다. 나중에 파이프라인을 별도 프로세스/서비스로 분리하더라도 scenario 코드는 무변화.
+그래프 노드(`app/graphs/nodes/search.py`)는 `RecommendationPort`만 참조 — `pipeline.runner`를 직접 import하지 않는다. 나중에 파이프라인을 별도 프로세스/서비스로 분리하더라도 그래프 노드 코드는 무변화.
 
 Port 등록/조회는 모듈 수준 `set_port` / `get_port` 함수로 단순하게 관리.
 
