@@ -78,6 +78,18 @@ class Settings(BaseSettings):
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
 
+    # SPEC-AGENT-001 — LangGraph respond/ask_clarify nodes (LiteLLM 경유 ChatOpenAI)
+    RESPONSE_MODEL: str = "gpt-4o-mini"
+    RESPONSE_TIMEOUT_MS: int = 5000
+    RESPONSE_MAX_TOKENS: int = 200
+    # Vision 결과가 약할 때(짧은 description / ambiguous label) ask_clarify 분기 트리거 임계값
+    ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
+    ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
+
+    @property
+    def ask_clarify_ambiguous_labels(self) -> list[str]:
+        return [s.strip().lower() for s in self.ASK_CLARIFY_AMBIGUOUS_LABELS.split(",") if s.strip()]
+
     @property
     def allowed_image_hosts(self) -> list[str]:
         return [h.strip() for h in self.ALLOWED_IMAGE_HOSTS.split(",") if h.strip()]

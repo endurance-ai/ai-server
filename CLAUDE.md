@@ -4,7 +4,7 @@ Portal.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프�
 
 `portal/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC → 다양성 캡 → product_id[] 반환**.
 
-Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinterest 링크를 DM하면 → webhook → 시나리오 state machine → 동일 파이프라인 → 채널 카드 응답.
+Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinterest 링크를 DM하면 → webhook → **LangGraph StateGraph** (`app/graphs/`) → 동일 파이프라인 → 채널 카드 응답.
 
 상세 문서:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 전체 그림 + 토폴로지
@@ -28,11 +28,13 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, scenario, recommendation port, link_resolver, session, vision
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, vision
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
-├── pipeline/            # state machine (embed → search → diversify)
+├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
+│   └── nodes/           # 10 노드: ingest, resolve_image, vision, pick_item, ask_clarify, critique_apply, search, send_results, taste_update, respond
+├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
 ├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
-├── observability/       # Langfuse @observe 래퍼
+├── observability/       # Langfuse @observe 래퍼 + build_callback_handler
 ├── models/              # Pydantic request/response
 └── core/                # config (env)
 ```
@@ -42,10 +44,11 @@ app/
 | 영역 | 기술 |
 |------|------|
 | 프레임워크 | FastAPI + uvicorn |
-| LLM | LiteLLM proxy 경유 (httpx) |
+| 에이전트 오케스트레이션 | **LangGraph** `>=1.1.10` (SPEC-AGENT-001) |
+| LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드) |
 | 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
 | 벡터 DB | **Supabase pgvector + pgroonga** (Qdrant 미사용) |
-| Observability | **Langfuse self-host** |
+| Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
 | 스키마 | Pydantic v2 |
 | HTTP | httpx (async) |
 | 패키지 | uv |
@@ -63,8 +66,8 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 ## 코딩 컨벤션
 
-- **plain async + state → state** (LangGraph 보류, 마이그레이션 비용 0 유지)
-- **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 채널은 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
+- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 10-노드 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 그래프 노드는 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
 - 임베딩 호출은 Modal endpoint (`MODAL_EMBED_URL`)
@@ -82,7 +85,11 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/channels/scenario.py` | 7-state 시나리오 state machine — `Trigger` enum + `classify_input` + `TRANSITIONS` dict + handler 4개 (inbound → pipeline → outbound) |
+| `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001) |
+| `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델 |
+| `app/graphs/routing.py` | 6개 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search) |
+| `app/graphs/nodes/respond.py` | 자연어 reply 생성 — `ChatOpenAI` (`RESPONSE_MODEL`, `RESPONSE_MAX_TOKENS`, `RESPONSE_TIMEOUT_MS`) |
+| `app/graphs/nodes/ask_clarify.py` | weak-vision 시 clarifying question (vision item 애매 시) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
 | `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함 |
 | `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 |

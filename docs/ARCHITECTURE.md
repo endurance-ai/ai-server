@@ -1,13 +1,13 @@
 # portal-ai-server — 아키텍처
 
 > portal.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-04 (v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가).
+> 마지막 업데이트: 2026-05-05 (v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션).
 
 ## 한 줄 요약
 
 `portal/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase `search_products_v5` RPC (dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
-**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → 시나리오 state machine → 동일 파이프라인 → 채널 응답 카드로 반환.
+**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 10 노드) → 동일 파이프라인 → 채널 응답 카드로 반환.
 
 ## 책임 분리
 
@@ -44,7 +44,7 @@ graph TB
     subgraph AI["AI Server (EC2 t4g.medium)"]
         REC["POST /recommend"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/channels/<br/>scenario → RecommendationPort<br/>+ link_resolver + vision"]
+        CHAN["app/graphs/<br/>LangGraph StateGraph (10 nodes)<br/>+ link_resolver + vision"]
         PIPE["pipeline state machine<br/>embed → search → diversify"]
         LITELLM["LiteLLM proxy"]
         LFW["Langfuse web"]
@@ -106,11 +106,25 @@ app/
 │   ├── link_resolver.py    # Pinterest / og:image URL 해석
 │   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
 │   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점)
-│   ├── scenario.py         # 7-state 시나리오 state machine (Trigger enum + classify_input + TRANSITIONS dict + handler 4개)
 │   ├── vision.py           # LiteLLM 경유 Vision 추출
 │   └── telegram/
 │       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard)
 │       └── webhook.py      # Telegram Update 파싱
+├── graphs/                 # LangGraph StateGraph (SPEC-AGENT-001)
+│   ├── fashion_bot.py      # 그래프 빌드 + 모듈 수준 컴파일 캐시 + build_metadata
+│   ├── state.py            # InputState / WorkingState / OutputState (Pydantic v2)
+│   ├── routing.py          # 6개 조건부 엣지 함수
+│   └── nodes/
+│       ├── ingest.py       # Update 파싱 + 세션 로드
+│       ├── resolve_image.py # Pinterest / pin.it og:image 해석
+│       ├── vision.py       # LiteLLM Vision 패션 아이템 추출
+│       ├── pick_item.py    # 인라인 키보드 picker (콜백 처리)
+│       ├── ask_clarify.py  # weak-vision 시 clarifying question
+│       ├── critique_apply.py # Routing-LLM + critique refinement
+│       ├── search.py       # RecommendationPort → 파이프라인 호출
+│       ├── send_results.py # 검색 결과 카드 전송
+│       ├── taste_update.py # 장기 취향 프로파일 업데이트
+│       └── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL)
 ├── core/
 │   ├── config.py           # Pydantic Settings (env) — 신규 메신저 키 포함
 │   └── auth.py             # verify_internal_token dependency
@@ -156,10 +170,12 @@ app/
 | Modal /embed 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 (sparse-only 모드는 추후 고려) |
 | Supabase RPC 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 |
 
-## LangGraph 도입 시점 (보류)
+## LangGraph (SPEC-AGENT-001 — 도입됨)
 
-confidence-fallback / multi-step retry / human-in-the-loop 등 분기가 실제로 도입될 때.
-지금은 plain async + state → state 형태로 짜서 마이그레이션 비용 0 유지.
+Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 10-노드 `StateGraph` 로 구현.
+`webhook → graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler(...)]})` 단일 호출 (REQ-AGENT-008).
+
+파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
 
 ## 보안
 
@@ -194,3 +210,4 @@ confidence-fallback / multi-step retry / human-in-the-loop 등 분기가 실제�
 | 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC, GHA + ECR 배포) |
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
+| 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |

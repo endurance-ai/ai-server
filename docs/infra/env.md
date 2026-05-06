@@ -60,6 +60,18 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `SEARCH_PLATFORM_CAP` | 3 — 다양성: 플랫폼당 최대 |
 | `SEARCH_FINAL_LIMIT` | 15 — 최종 응답 개수 (`final_limit` 미명시 시 tolerance→target 사용) |
 
+## LangGraph 응답 노드 (SPEC-AGENT-001)
+
+`app/graphs/nodes/respond.py` 와 `ask_clarify.py` 에서 사용. 두 노드는 `langchain-openai.ChatOpenAI` 를 LiteLLM 프록시 (`LITELLM_BASE_URL + "/v1"`) 로 라우팅.
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `RESPONSE_MODEL` | `gpt-4o-mini` | `respond` / `ask_clarify` 모델 id (LiteLLM 경유) |
+| `RESPONSE_TIMEOUT_MS` | `5000` | LLM 호출 timeout — 초과 시 하드코딩 fallback 텍스트 사용 |
+| `RESPONSE_MAX_TOKENS` | `200` | `respond` 출력 토큰 cap (`ask_clarify` 는 코드 내 80 으로 별도 cap) |
+| `ASK_CLARIFY_MIN_DESC_TOKENS` | `3` | vision 결과 description 토큰 수 < 임계 → `ask_clarify` 트리거 (REQ-AGENT-009) |
+| `ASK_CLARIFY_AMBIGUOUS_LABELS` | `item,clothing,thing,piece` | 단일 모호 라벨 denylist — 매칭 시 `ask_clarify` 트리거 |
+
 ## 앱 메타
 
 | 키 | 기본 |
