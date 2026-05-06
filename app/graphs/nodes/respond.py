@@ -123,10 +123,18 @@ def _get_llm() -> Any:
     if _llm is None:
         from langchain_openai import ChatOpenAI
 
+        api_key = settings.LITELLM_MASTER_KEY
+        if not api_key:
+            # Tests inject ChatOpenAI mocks before this path runs; if we reach
+            # here in real runs without a key, surface it explicitly rather
+            # than sending a "stub" string that could match a misconfigured
+            # LiteLLM allow-any policy.
+            logger.warning("respond: LITELLM_MASTER_KEY is empty — using sentinel")
+            api_key = "missing-litellm-master-key"
         _llm = ChatOpenAI(
             model=settings.RESPONSE_MODEL,
             base_url=settings.LITELLM_BASE_URL + "/v1",
-            api_key=settings.LITELLM_MASTER_KEY or "stub",
+            api_key=api_key,
             temperature=0.7,
             max_tokens=settings.RESPONSE_MAX_TOKENS,
             timeout=max(0.1, settings.RESPONSE_TIMEOUT_MS / 1000.0),

@@ -144,9 +144,14 @@ async def send_results(state: WorkingState) -> dict:
 
     try:
         adapter = get_adapter()
-    except RuntimeError:
-        # R9 — let the clear error bubble up.
-        raise
+    except RuntimeError as exc:
+        # Adapter ContextVar must be bound before send_results runs (R9).
+        # An unbound adapter is a programming bug, not a runtime LLM/IO
+        # failure — REQ-AGENT-007 covers the latter. Record a breadcrumb
+        # and end the node cleanly so the webhook still returns 200.
+        logger.error("[send_results] adapter ContextVar not bound: %s", exc)
+        breadcrumbs.append(f"send_results_error: {type(exc).__name__}: adapter unbound")
+        return {"log_events": breadcrumbs}
 
     sent_candidates: list = []
     for c in candidates:

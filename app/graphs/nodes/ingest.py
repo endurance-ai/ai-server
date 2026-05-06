@@ -25,8 +25,11 @@ async def ingest(state: WorkingState) -> dict:
         sess.from_user_id = msg.from_user_id
         get_store().update(sess)
 
+    # Avoid logging raw user text — breadcrumbs flow into Langfuse trace
+    # metadata. Record only structural shape so traces remain useful for
+    # debugging without leaking user content.
     breadcrumbs: list[str] = [
-        f"ingest: state={sess.state.value} text={(msg.text or '')[:40]!r} "
+        f"ingest: state={sess.state.value} text_len={len(msg.text or '')} "
         f"photo={bool(msg.photo_file_id)} urls={len(msg.urls)} cb={msg.callback_data or '—'}"
     ]
 
@@ -45,7 +48,8 @@ async def ingest(state: WorkingState) -> dict:
         decision: RoutedDecision = await route_text(msg.text or "", sess.state, sess.last_results)
     except Exception as exc:  # REQ-AGENT-007 — never propagate
         logger.exception("[ingest] router.route_text raised")
-        breadcrumbs.append(f"ingest_error: {type(exc).__name__}: {exc}"[:200])
+        # Strip exception detail (may carry user text echoed by upstream LLM)
+        breadcrumbs.append(f"ingest_error: {type(exc).__name__}")
         # Soft fallback so the graph can still terminate at respond.
         return {
             "decision": RoutedDecision(intent=RoutedIntent.OFF_TOPIC),
