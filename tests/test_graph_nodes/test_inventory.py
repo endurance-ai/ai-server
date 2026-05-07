@@ -9,9 +9,10 @@ import app.graphs.nodes as nodes_pkg
 
 
 def test_ten_nodes_present():
-    """REQ-AGENT-004 — exactly 10 node modules under app/graphs/nodes/.
+    """REQ-AGENT-004 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001 —
+    12 node modules: original 10 + `evaluator` + `apply_clarify`.
 
-    Excludes the private `_adapter_ctx` (ContextVar plumbing) and __init__.
+    Excludes private modules (`_adapter_ctx`, `_evaluator_models`) and __init__.
     """
     public = []
     for _, name, _ in pkgutil.iter_modules(nodes_pkg.__path__):
@@ -26,11 +27,13 @@ def test_ten_nodes_present():
             "vision",
             "pick_item",
             "ask_clarify",
+            "apply_clarify",
             "critique_apply",
             "search",
             "send_results",
             "taste_update",
             "respond",
+            "evaluator",
         ]
     )
     assert public == expected, f"node inventory drifted: {public}"
@@ -46,11 +49,13 @@ def test_each_node_exposes_async_callable():
         "vision": "vision_node",
         "pick_item": "pick_item",
         "ask_clarify": "ask_clarify",
+        "apply_clarify": "apply_clarify",
         "critique_apply": "critique_apply",
         "search": "search_node",
         "send_results": "send_results",
         "taste_update": "taste_update",
         "respond": "respond",
+        "evaluator": "evaluator",
     }
     for module_name, fn_name in name_map.items():
         mod = importlib.import_module(f"app.graphs.nodes.{module_name}")

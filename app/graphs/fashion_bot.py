@@ -14,8 +14,11 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+from app.core.config import settings
+from app.graphs.nodes.apply_clarify import apply_clarify
 from app.graphs.nodes.ask_clarify import ask_clarify
 from app.graphs.nodes.critique_apply import critique_apply
+from app.graphs.nodes.evaluator import evaluator
 from app.graphs.nodes.ingest import ingest
 from app.graphs.nodes.pick_item import pick_item
 from app.graphs.nodes.resolve_image import resolve_image
@@ -26,6 +29,7 @@ from app.graphs.nodes.taste_update import taste_update
 from app.graphs.nodes.vision import vision_node
 from app.graphs.routing import (
     _route_after_critique,
+    _route_after_evaluator,
     _route_after_ingest,
     _route_after_pick,
     _route_after_resolve,
@@ -44,6 +48,8 @@ logger = logging.getLogger(__name__)
 
 _INGEST_BRANCHES: dict[str, str] = {
     "pick_item": "pick_item",
+    # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-CALLBACK-002 — clarify:* → apply_clarify.
+    "apply_clarify": "apply_clarify",
     "critique_apply": "critique_apply",
     "resolve_image": "resolve_image",
     "router_text": "router_text",
@@ -67,7 +73,17 @@ _VISION_BRANCHES: dict[str, str] = {
 
 _PICK_BRANCHES: dict[str, str] = {"respond": "respond", "__end__": END}
 
-_SEARCH_BRANCHES: dict[str, str] = {"send_results": "send_results", "respond": "respond"}
+_SEARCH_BRANCHES: dict[str, str] = {
+    "send_results": "send_results",
+    "respond": "respond",
+    "evaluator": "evaluator",
+}
+
+_EVALUATOR_BRANCHES: dict[str, str] = {
+    "apply_self_critique": "apply_self_critique",
+    "send_results": "send_results",
+    "respond": "respond",
+}
 
 _CRITIQUE_BRANCHES: dict[str, str] = {"search_node": "search_node", "respond": "respond"}
 
@@ -80,6 +96,53 @@ async def _router_text_passthrough(state: WorkingState) -> dict:
     return {"log_events": ["router_text: pass-through"]}
 
 
+async def _apply_self_critique_passthrough(state: WorkingState) -> dict:
+    """SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-001 — apply the
+    evaluator's `suggested_delta` to `state.critique_delta` (so search_node
+    picks it up via existing `_build_request` path), bump retry counter, and
+    clear `critique_pending_delta` (single-use semantics).
+
+    Translation contract: the evaluator's `CritiqueDelta` (in
+    `_evaluator_models`) speaks the v1 broaden / refine / exclude vocabulary;
+    the search node consumes the LEGACY user-driven `CritiqueDelta` (in
+    `app.channels.critique`). We translate one into the other here so the
+    search_node code stays untouched.
+    """
+    from app.channels.critique import CritiqueDelta as LegacyDelta
+    from app.channels.session import get_store
+
+    pending = state.critique_pending_delta
+    breadcrumbs: list[str] = []
+    if pending is None:
+        breadcrumbs.append("apply_self_critique: no pending delta — passthrough")
+        return {"log_events": breadcrumbs}
+
+    sess = get_store().get_or_create(state.chat_id)
+    # Drop session-level price filters when broaden delta requests it.
+    if pending.drop_min_price:
+        sess.user_intent = sess.user_intent  # noqa: PLW0127 — keep typed
+    # Compose the legacy delta — exclude_brands/keywords/boost_keywords map 1:1.
+    legacy = LegacyDelta(
+        op="free_text",
+        exclude_brands=list(pending.exclude_brands),
+        exclude_keywords=list(pending.exclude_keywords),
+        boost_keywords=list(pending.boost_keywords),
+        color=pending.color_override,
+        max_price=None,  # always None on retry — we BROADEN, never narrow on price
+        min_price=None,
+        extra_intent=None,
+    )
+
+    next_count = (state.critique_retry_count or 0) + 1
+    breadcrumbs.append(f"apply_self_critique: intent={pending.intent} retry_count→{next_count}")
+    return {
+        "critique_delta": legacy,
+        "critique_pending_delta": None,
+        "critique_retry_count": next_count,
+        "log_events": breadcrumbs,
+    }
+
+
 def build_graph() -> Any:
     """Construct and compile a fresh StateGraph instance (test-friendly)."""
     builder = StateGraph(WorkingState)
@@ -90,11 +153,19 @@ def build_graph() -> Any:
     builder.add_node("vision_node", vision_node)
     builder.add_node("pick_item", pick_item)
     builder.add_node("ask_clarify", ask_clarify)
+    # SPEC-CLARIFY-CARDS-001 — apply_clarify 노드 등록.
+    builder.add_node("apply_clarify", apply_clarify)
     builder.add_node("critique_apply", critique_apply)
     builder.add_node("search_node", search_node)
     builder.add_node("send_results", send_results)
     builder.add_node("taste_update", taste_update)
     builder.add_node("respond", respond)
+    # SPEC-AGENTIC-CRITIQUE-001 — register self-critique nodes only when the
+    # feature flag is on (REQ-CRITIQUE-COST-001 — disable produces byte-identical
+    # pre-SPEC topology).
+    if settings.SELF_CRITIQUE_ENABLED:
+        builder.add_node("evaluator", evaluator)
+        builder.add_node("apply_self_critique", _apply_self_critique_passthrough)
 
     builder.add_edge(START, "ingest")
     builder.add_conditional_edges("ingest", _route_after_ingest, _INGEST_BRANCHES)
@@ -102,12 +173,25 @@ def build_graph() -> Any:
     builder.add_conditional_edges("resolve_image", _route_after_resolve, _RESOLVE_BRANCHES)
     builder.add_conditional_edges("vision_node", _route_after_vision, _VISION_BRANCHES)
     builder.add_conditional_edges("pick_item", _route_after_pick, _PICK_BRANCHES)
-    builder.add_conditional_edges("search_node", _route_after_search, _SEARCH_BRANCHES)
+    if settings.SELF_CRITIQUE_ENABLED:
+        builder.add_conditional_edges("search_node", _route_after_search, _SEARCH_BRANCHES)
+        builder.add_conditional_edges("evaluator", _route_after_evaluator, _EVALUATOR_BRANCHES)
+        # apply_self_critique is a passthrough — always loops back to search_node.
+        builder.add_edge("apply_self_critique", "search_node")
+    else:
+        # Pre-SPEC topology: search_node → send_results | respond directly.
+        builder.add_conditional_edges(
+            "search_node",
+            _route_after_search,
+            {"send_results": "send_results", "respond": "respond"},
+        )
     builder.add_conditional_edges("critique_apply", _route_after_critique, _CRITIQUE_BRANCHES)
     builder.add_edge("send_results", "respond")
     builder.add_edge("taste_update", "respond")
     builder.add_edge("respond", END)
     builder.add_edge("ask_clarify", END)
+    # SPEC-CLARIFY-CARDS-001 — apply_clarify 는 항상 search_node 로(unconditional).
+    builder.add_edge("apply_clarify", "search_node")
 
     return builder.compile()
 

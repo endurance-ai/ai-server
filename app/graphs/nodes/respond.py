@@ -67,6 +67,15 @@ _FALLBACKS: dict[_Flow, str] = {
     _Flow.DEFAULT: "Got it.",
 }
 
+# SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — softer reply prefix
+# applied when the self-critique loop exhausted its budget without crossing
+# the score threshold. The user gets a coherent acknowledgment of the
+# difficulty rather than just a delayed empty result.
+_EXHAUSTED_HIT_FALLBACK = "That was a tricky one — here are the closest matches I found ✨"
+_EXHAUSTED_EMPTY_FALLBACK = (
+    "That style was hard to match — couldn't find a great fit. Try another angle or a different photo."
+)
+
 
 def _classify_flow(state: WorkingState) -> _Flow:
     msg = state.message
@@ -154,6 +163,14 @@ _SYSTEM_PROMPT = (
 def _user_prompt(state: WorkingState, flow: _Flow) -> str:
     bits: list[str] = []
     bits.append(f"flow: {flow.value}")
+    # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — let the LLM soften
+    # the tone when self-critique exhausted its retry budget without finding
+    # a high-confidence match.
+    if getattr(state, "critique_exhausted", False):
+        bits.append(
+            "tone_hint: the search was hard — acknowledge the difficulty briefly and "
+            "present results as the closest available match (not a perfect fit)"
+        )
     if state.presearch_summary:
         bits.append(f"presearch_summary: {state.presearch_summary}")
     # For PICK_OPENER use the actual picked item (resolved by index in
@@ -179,6 +196,14 @@ def _user_prompt(state: WorkingState, flow: _Flow) -> str:
 async def respond(state: WorkingState) -> dict:
     flow = _classify_flow(state)
     fallback_text = _FALLBACKS[flow]
+    # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — replace fallback for
+    # the search-flows when the loop exhausted, so even the LLM-failure path
+    # surfaces the softer tone.
+    if getattr(state, "critique_exhausted", False):
+        if flow == _Flow.SEARCH_HIT:
+            fallback_text = _EXHAUSTED_HIT_FALLBACK
+        elif flow in (_Flow.SEARCH_EMPTY, _Flow.VISION_FAIL):
+            fallback_text = _EXHAUSTED_EMPTY_FALLBACK
 
     # Build prompt
     sys_msgs = [SystemMessage(content=_SYSTEM_PROMPT)]

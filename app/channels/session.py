@@ -32,6 +32,9 @@ class SessionState(StrEnum):
     AWAITING_IMAGE_PICK = "awaiting_image_pick"
     VISION_PROCESSING = "vision_processing"
     AWAITING_ITEM_PICK = "awaiting_item_pick"
+    # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-STATE-001 — clarify 카드 발행 후 사용자
+    # 탭 또는 자유 텍스트 답을 기다리는 상태.
+    AWAITING_CLARIFY = "awaiting_clarify"
     AWAITING_INTENT = "awaiting_intent"
     SEARCHING = "searching"
     RESULTS_SENT = "results_sent"
@@ -49,8 +52,19 @@ class Session:
     image_url: str | None = None
     detected_items: list[dict] = field(default_factory=list)
     selected_item_index: int | None = None
+    # Legacy minimal-schema fields — kept for one release per REQ-VISION-COMPAT-003.
+    # Derived from `vision_result.items[selected_item_index]` when v2 schema is active.
     vision_keywords: list[str] = field(default_factory=list)
     vision_item: str | None = None
+    # SPEC-VISION-UNIFY-001 — rich-schema persistence (REQ-VISION-STATE-002).
+    # `vision_result` is stored as `Any` to avoid the Pydantic-v2 import cycle in
+    # this dataclass module; concrete type is `app.channels.vision.VisionResult`.
+    vision_result: Any | None = None
+    vision_selected_item_index: int | None = None
+    vision_outfit_style_node_primary: str | None = None
+    vision_outfit_style_node_secondary: str | None = None
+    vision_outfit_mood_tags: list[str] = field(default_factory=list)
+    vision_outfit_gender: str | None = None
     user_intent: str | None = None
     # Critique support — last results stay around so callbacks (crit:more:2) and
     # router LLM can reference card 2's brand/price/etc., and so subsequent
@@ -58,6 +72,14 @@ class Session:
     last_results: list[Any] = field(default_factory=list)  # list of Candidate-like
     shown_product_ids: list[str] = field(default_factory=list)
     last_critique_summary: str | None = None  # for next-turn pre-search confirmation
+    # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-VALUE-MAPPING-001 — clarify 카드 응답에서
+    # 파생된 sticky boost_keywords. 자기-비평 fast-path가 critique_delta를 갈아치워도
+    # 살아남도록 세션에 저장한다(R6 mitigation).
+    boost_keywords: list[str] = field(default_factory=list)
+    # SPEC-CLARIFY-CARDS-001 — clarify 응답을 한 검색에 한 번만 적용하기 위한 트레이스
+    # (관측 로그용; 다음 turn에서 자연 만료).
+    clarify_axis: str | None = None
+    clarify_value: str | None = None
     last_active: float = field(default_factory=lambda: time.time())
 
 

@@ -52,6 +52,18 @@ class ChannelRecommendationRequest:
     boost_keywords: list[str] = field(default_factory=list)
     max_price: int | None = None
     min_price: int | None = None
+    # SPEC-VISION-UNIFY-001 / REQ-VISION-SEARCH-001 — rich Vision context.
+    # All optional with safe defaults so existing call sites remain unchanged.
+    item_subcategory: str | None = None
+    item_fit: str | None = None
+    item_fabric: str | None = None
+    item_color_family: str | None = None
+    item_search_query_en: str | None = None
+    item_search_query_ko: str | None = None
+    outfit_style_node_primary: str | None = None
+    outfit_style_node_secondary: str | None = None
+    outfit_mood_tags: list[str] = field(default_factory=list)
+    outfit_gender: str | None = None
 
 
 @dataclass(frozen=True)
@@ -121,27 +133,42 @@ class PipelineRecommendationPort:
     """
 
     async def recommend(self, req: ChannelRecommendationRequest) -> ChannelRecommendationResult:
-        from app.models.request import AnalyzedItem, RecommendRequest
+        from app.models.request import AnalyzedItem, RecommendRequest, StyleNode
         from app.pipeline.runner import run_pipeline
 
-        query = _build_query(req.intent, req.keywords, req.boost_keywords, req.exclude_keywords)
+        composed_query = _build_query(req.intent, req.keywords, req.boost_keywords, req.exclude_keywords)
+        # SPEC-VISION-UNIFY-001 / REQ-VISION-SEARCH-002 — rich fields win over
+        # legacy fields when both are present.
+        search_query = req.item_search_query_en or composed_query or (req.item_label or "fashion item")
+        color_family = req.item_color_family or req.color or None
         item = AnalyzedItem(
             id=f"channel-{uuid.uuid4().hex[:12]}",
             category=(req.item_label or "item"),
-            subcategory=None,
+            subcategory=req.item_subcategory,
             name=req.item_label,
-            color_family=req.color or None,
-            search_query=query or (req.item_label or "fashion item"),
-            search_query_ko=None,
+            fit=req.item_fit,
+            fabric=req.item_fabric,
+            color_family=color_family,
+            search_query=search_query,
+            search_query_ko=req.item_search_query_ko,
         )
         # Pull more candidates when we know we'll filter — gives diversify a
         # better pool after exclude_product_ids / exclude_brands shrink it.
         will_filter = bool(req.exclude_product_ids or req.exclude_brands or req.max_price or req.min_price)
+        style_node = None
+        if req.outfit_style_node_primary:
+            style_node = StyleNode(
+                primary=req.outfit_style_node_primary,
+                secondary=req.outfit_style_node_secondary,
+            )
         rec_req = RecommendRequest(
             item=item,
             image_url=req.image_url,
             tolerance=req.tolerance,
             final_limit=30 if will_filter else None,
+            gender=req.outfit_gender,
+            style_node=style_node,
+            mood_tags=list(req.outfit_mood_tags) if req.outfit_mood_tags else None,
         )
         resp = await run_pipeline(rec_req)
         candidates = list(resp.results) if resp and resp.results else []

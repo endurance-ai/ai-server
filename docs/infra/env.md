@@ -69,8 +69,45 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `RESPONSE_MODEL` | `gpt-4o-mini` | `respond` / `ask_clarify` 모델 id (LiteLLM 경유) |
 | `RESPONSE_TIMEOUT_MS` | `5000` | LLM 호출 timeout — 초과 시 하드코딩 fallback 텍스트 사용 |
 | `RESPONSE_MAX_TOKENS` | `200` | `respond` 출력 토큰 cap (`ask_clarify` 는 코드 내 80 으로 별도 cap) |
-| `ASK_CLARIFY_MIN_DESC_TOKENS` | `3` | vision 결과 description 토큰 수 < 임계 → `ask_clarify` 트리거 (REQ-AGENT-009) |
+| `ASK_CLARIFY_MIN_DESC_TOKENS` | `3` | vision 결과 description 토큰 수 < 임계 → `ask_clarify` 트리거 (REQ-AGENT-009, legacy v1) |
 | `ASK_CLARIFY_AMBIGUOUS_LABELS` | `item,clothing,thing,piece` | 단일 모호 라벨 denylist — 매칭 시 `ask_clarify` 트리거 |
+| `ASK_CLARIFY_MIN_QUERY_TOKENS` | `4` | v2: searchQuery 토큰 수 < 임계 → clarify 트리거 (rename of `MIN_DESC_TOKENS`) |
+| `ASK_CLARIFY_AMBIGUOUS_SUBCATEGORIES` | `item,clothing,thing,piece` | v2: subcategory 모호 시 disambiguation 카드 |
+
+## Vision 풍부 스키마 (SPEC-VISION-UNIFY-001)
+
+`app/channels/vision.py` + `vision_prompt.py` — `portal/app` `analyze.ts` 와 동일 JSON 스키마 (styleNode/sensitivityTags/mood/palette/style/items[]).
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `VISION_SCHEMA_V2` | `true` | v2 풍부 스키마 ON/OFF (false 시 legacy minimal label/description 폴백) |
+
+## 자가비평 루프 (SPEC-AGENTIC-CRITIQUE-001)
+
+`app/graphs/nodes/evaluator.py` — `search → evaluator → send_results` Reflexion 루프. 빈 결과 fast-path (필터 drop, LLM 호출 없음) + LLM 평가 (점수 < threshold 시 `CritiqueDelta` 재시도).
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `SELF_CRITIQUE_ENABLED` | `true` | 루프 ON/OFF |
+| `SELF_CRITIQUE_MAX_ITERATIONS` | `2` | 최대 재시도 횟수 (1차 search 제외) |
+| `SELF_CRITIQUE_THRESHOLD` | `0.6` | 통과 점수 (0~1) |
+| `SELF_CRITIQUE_TIMEOUT_S` | `30` | 전체 루프 wall-clock 가드 |
+| `SELF_CRITIQUE_FASTPATH_DROP_FILTERS` | `min_price,max_price,exclude_keywords` | 빈 결과 시 drop 대상 필터 (콤마 구분) |
+| `EVALUATOR_MODEL` | `gpt-4o-mini` | LLM-evaluator 모델 (LiteLLM 경유) |
+| `EVALUATOR_MAX_TOKENS` | `400` | 평가 응답 cap |
+| `EVALUATOR_TEMPERATURE` | `0.2` | 평가 sampling |
+| `EVALUATOR_TIMEOUT_S` | `8` | 단일 평가 호출 timeout |
+
+안전 가드 (FROZEN, env 무관): iteration cap / stagnation (점수 개선 없음) / score regression / wall-clock.
+
+## Clarify 카드 (SPEC-CLARIFY-CARDS-001)
+
+`app/channels/clarify.py` + `app/graphs/nodes/apply_clarify.py` — weak-vision 시 6 axes 결정형 인라인 키보드 (LLM 호출 없음). `clarify:*` callback → `session.boost_keywords` 누적 (sticky).
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `CLARIFY_CARDS_ENABLED` | `true` | 카드 모드 ON/OFF (false 시 legacy 텍스트 질문 폴백) |
+| `CLARIFY_MAX_BUTTONS` | `5` | 카드당 최대 버튼 개수 |
 
 ## 앱 메타
 

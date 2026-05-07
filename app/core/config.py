@@ -86,9 +86,50 @@ class Settings(BaseSettings):
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
 
+    # SPEC-VISION-UNIFY-001 — Rich Vision schema (parity with portal/app analyze.ts)
+    # Master flag for the new rich-schema behavior. When false, falls back to
+    # the pre-migration minimal schema (REQ-VISION-COMPAT-005).
+    VISION_SCHEMA_V2: bool = True
+    # Raised from 600 to fit the rich schema (REQ-VISION-UNIFY-003).
+    VISION_MAX_TOKENS: int = 2500
+    # Raised from 0.2 to match portal/app run-vision.ts (REQ-VISION-UNIFY-003).
+    VISION_TEMPERATURE: float = 0.3
+    # Per-call timeout, raised from 15.0 to fit the larger response.
+    VISION_TIMEOUT_S: float = 30.0
+    # Weak-vision predicate thresholds (REQ-VISION-WEAKVISION-001).
+    # Renames ASK_CLARIFY_MIN_DESC_TOKENS — the legacy var still works for one release.
+    ASK_CLARIFY_MIN_QUERY_TOKENS: int = 4
+    # Extends ASK_CLARIFY_AMBIGUOUS_LABELS — applied to subcategory in v2.
+    ASK_CLARIFY_AMBIGUOUS_SUBCATEGORIES: str = "item,clothing,thing,piece"
+
+    # SPEC-AGENTIC-CRITIQUE-001 — Self-critique loop ──────────────────────
+    SELF_CRITIQUE_ENABLED: bool = True
+    SELF_CRITIQUE_MAX_ITERATIONS: int = 2
+    SELF_CRITIQUE_THRESHOLD: float = 0.6
+    SELF_CRITIQUE_TIMEOUT_S: float = 30.0
+    SELF_CRITIQUE_FASTPATH_DROP_FILTERS: str = "min_price,max_price,exclude_keywords"
+    EVALUATOR_MODEL: str = "gpt-4o-mini"
+    EVALUATOR_MAX_TOKENS: int = 400
+    EVALUATOR_TEMPERATURE: float = 0.2
+    EVALUATOR_TIMEOUT_S: float = 8.0
+
+    # SPEC-CLARIFY-CARDS-001 — Inline-keyboard clarify cards ──────────────
+    # 비활성 시 ask_clarify 는 본 SPEC 이전(자유 텍스트 LLM) 동작으로 회귀.
+    CLARIFY_CARDS_ENABLED: bool = True
+    # 카드당 버튼 상한(skip 포함). 범위 [3, 8].
+    CLARIFY_MAX_BUTTONS: int = 5
+
+    @property
+    def self_critique_fastpath_drop_filters(self) -> list[str]:
+        return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]
+
     @property
     def ask_clarify_ambiguous_labels(self) -> list[str]:
         return [s.strip().lower() for s in self.ASK_CLARIFY_AMBIGUOUS_LABELS.split(",") if s.strip()]
+
+    @property
+    def ask_clarify_ambiguous_subcategories(self) -> list[str]:
+        return [s.strip().lower() for s in self.ASK_CLARIFY_AMBIGUOUS_SUBCATEGORIES.split(",") if s.strip()]
 
     @property
     def allowed_image_hosts(self) -> list[str]:
