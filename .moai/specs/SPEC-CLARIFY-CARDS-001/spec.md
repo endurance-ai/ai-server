@@ -1,7 +1,7 @@
 ---
 id: SPEC-CLARIFY-CARDS-001
 version: 0.1.0
-status: draft
+status: completed
 created: 2026-05-07
 updated: 2026-05-07
 author: hchsa77@gmail.com
@@ -496,3 +496,43 @@ axis=formality value=semi_formal subcategory_override=null boost_keywords=...`).
 SPEC-AGENT-001 (그래프 토폴로지 / 라우팅 계약), SPEC-VISION-UNIFY-001 (rich
 Vision 스키마 — `subcategory` / `fit` / `formality` / `mood` / `style`),
 SPEC-AGENTIC-CRITIQUE-001 (`crit:*` 콜백 패턴 / `boost_keywords` sticky 계약).
+
+---
+
+## Implementation Notes
+
+**구현 완료일**: 2026-05-07
+**Merge**: PR [#12](https://github.com/endurance-ai/ai-server/pull/12), commit `26faa32` on `dev`
+**추가 테스트**: +74 (전체 263 / 263 통과)
+
+### 추가된 파일
+
+- `app/channels/clarify.py` — ClarifyAxis(StrEnum), ClarifyDelta(Pydantic v2), parse_callback, pick_clarify_axis (# @MX:ANCHOR 태그 포함)
+- `app/channels/clarify_values.py` — 축별 enum 값 + keywords/subcategory_override/searchQueryKo_augment 매핑 표
+- `app/graphs/nodes/apply_clarify.py` — ClarifyDelta를 WorkingState에 풀어 넣고 search_node 검색 입력 보강
+- `tests/channels/test_clarify.py` — ClarifyAxis 선택 우선순위, parse_callback, 버튼 라벨 길이 가드, 매핑 표 완전성 단위 테스트
+- `tests/test_graph_nodes/test_apply_clarify.py` — apply_clarify 노드 단위 테스트 (skip 분기, 각 축별 보강 검증)
+- `tests/test_graph_flows.py` (확장) — clarify:* 콜백 E2E 시나리오 2개 이상 추가
+
+### 수정된 파일
+
+- `app/graphs/nodes/ask_clarify.py` — LLM 호출 제거, pick_clarify_axis → 결정론적 인라인 키보드 카드 전송으로 재작성; CLARIFY_CARDS_ENABLED=false 시 기존 LLM 폴백 경로 보존
+- `app/graphs/routing.py` — _route_after_ingest에 clarify:* 콜백 분기 추가
+- `app/graphs/state.py` — WorkingState에 clarify_axis / clarify_value / clarify_applied 필드 추가
+- `app/channels/session.py` — SessionState에 AWAITING_CLARIFY 상태 추가
+- `app/core/config.py` — CLARIFY_CARDS_ENABLED / ASK_CLARIFY_AMBIGUOUS_SUBCATEGORIES 선언
+- `.env.example` — 위 환경변수 문서화
+
+### 이연(Deferred) 항목
+
+- **Langfuse 스팬 attribute 보강** — axis_chosen / axis_candidates_considered / button_count / user_action 4개 structured 로그 라인은 구현되어 있으나 Langfuse 스팬 metadata attribute로는 연결되지 않음. @observe 래퍼 확장이 필요하며 REQ-VISION-OBSV-001 이연과 같은 이유로 별도 observability SPEC에서 처리 예정.
+- **텔레그램 dev 봇 수동 테스트 시나리오 문서** — acceptance.md에 5장 이미지 시나리오(formality weak, fit weak, occasion weak, multi-axis weak, generic_fallback) 명시 필요. PR #12 이후 dev 봇 운영 중 별도 문서화 예정.
+
+### 해소된 Open Questions
+
+- Q1 clarify cap: 세션당 1회(SessionState.AWAITING_CLARIFY로 관리)로 확정
+- Q2 i18n: v1 한국어 라벨만으로 확정
+- Q3 썸네일: 텍스트 카드만으로 확정
+- Q5 apply_clarify: critique_apply와 별도 노드로 확정
+- Q6 우선순위 동점: 1→6 리스트 순서로 확정
+- Q7 boost_keywords sticky: boost_keywords 사용으로 확정

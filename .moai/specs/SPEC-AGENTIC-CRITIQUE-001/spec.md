@@ -1,7 +1,7 @@
 ---
 id: SPEC-AGENTIC-CRITIQUE-001
 version: 0.1.0
-status: draft
+status: completed
 created: 2026-05-07
 updated: 2026-05-07
 author: hchsa77@gmail.com
@@ -1041,3 +1041,42 @@ written:
 - [ ] `ruff check . && ruff format --check .` passes.
 - [ ] `pytest -q` passes at the same or higher count vs pre-SPEC
       baseline.
+
+---
+
+## Implementation Notes
+
+**구현 완료일**: 2026-05-07
+**Merge**: PR [#12](https://github.com/endurance-ai/ai-server/pull/12), commit `26faa32` on `dev`
+**추가 테스트**: +27 (전체 263 / 263 통과)
+
+### 추가된 파일
+
+- `app/graphs/nodes/evaluator.py` — evaluator 노드 본체 (CritiqueScore, CritiqueDelta 모델, fast-path 로직, fail-open 경로, deltas_equivalent 헬퍼)
+- `app/graphs/nodes/evaluator_prompt.py` — 평가자 시스템/유저 프롬프트 상수 모듈
+- `tests/test_graph_nodes/test_evaluator.py` — CritiqueScore 검증, fail-open, fast-path, deltas_equivalent 단위 테스트
+- `tests/test_graph_safety.py` — 반복 한도 캡, stagnation guard, 점수 회귀 guard, 타임아웃 guard 집중 테스트
+
+### 수정된 파일
+
+- `app/graphs/state.py` — WorkingState에 critique_retry_count / critique_trail / critique_pending_delta / critique_exhausted / critique_started_at_ms 추가; OutputState에 critique_exhausted 추가
+- `app/graphs/routing.py` — after_evaluator 조건부 엣지 함수 추가
+- `app/graphs/fashion_bot.py` — evaluator 노드 등록, SELF_CRITIQUE_ENABLED 플래그 기반 토폴로지 분기
+- `app/graphs/nodes/search.py` — _build_request에 critique_pending_delta 소비 및 클리어 로직 추가
+- `app/graphs/nodes/respond.py` — OutputState.critique_exhausted 읽어 완화된 답변 분기
+- `app/graphs/nodes/critique_apply.py` — crit:less 콜백 시 critique_* 상태 필드 리셋 (REQ-CRITIQUE-COMPAT-001)
+- `app/core/config.py` — SELF_CRITIQUE_ENABLED / SELF_CRITIQUE_MAX_ITERATIONS / SELF_CRITIQUE_THRESHOLD / SELF_CRITIQUE_TIMEOUT_S / SELF_CRITIQUE_FASTPATH_DROP_FILTERS / EVALUATOR_MODEL / EVALUATOR_MAX_TOKENS / EVALUATOR_TEMPERATURE / EVALUATOR_TIMEOUT_S 선언
+- `.env.example` — 위 9개 환경변수 문서화
+- `tests/test_graph_flows.py` — 전체 루프 시나리오 추가 (healthy single-shot, fast-path, LLM retry, budget exhaustion, stagnation, score regression, timeout)
+
+### 이연(Deferred) 항목
+
+- **REQ-CRITIQUE-LOOP-SAFETY-002a "점수 회귀 시 이전 이터레이션 결과 복원"** — guard가 올바르게 트리거되어 루프를 종료하지만, 이전 이터레이션의 더 높은 점수 후보 셋을 실제로 되돌려 보내는 swap-back 로직은 미구현. `after_evaluator` 라우팅이 순수 함수여서 별도 finalize 노드가 필요하며 아키텍처 복잡도가 커짐. 후속 SPEC에서 previous_candidates 상태 필드 도입과 함께 구현 예정.
+
+### 해소된 Open Questions
+
+- Q1 텍스트 전용 평가: v1은 텍스트 메타데이터만 사용으로 확정
+- Q2 silent retry: v1은 silent(타이핑 인디케이터 없음)로 확정
+- Q3 고정 임계값: SELF_CRITIQUE_THRESHOLD=0.6으로 확정
+- Q4 crit:more와 evaluator 상호작용: 사용자 명시 신호 우선, evaluator 우회로 확정
+- Q7 crit:less 리셋: critique_apply에서 critique_* 필드 전체 리셋으로 확정

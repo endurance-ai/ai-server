@@ -34,7 +34,7 @@
 
 - `PipelineState` dataclass: `request`, `embedding`, `raw_candidates`, `final_candidates`, `counts`, `latency_ms` 필드.
 - `start(step)` / `end(step)`: `perf_counter` 기반 단계별 latency 측정.
-- 향후 LangGraph 마이그레이션 시 이 dataclass가 Graph State로 교체된다.
+- 웹 경로 전용. Telegram 경로는 `app/graphs/state.py::WorkingState`(Pydantic v2)를 사용한다.
 
 ### app.core.config
 

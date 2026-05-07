@@ -1,7 +1,7 @@
 ---
 id: SPEC-VISION-UNIFY-001
 version: 0.1.0
-status: draft
+status: completed
 created: 2026-05-07
 updated: 2026-05-07
 author: hchsa77@gmail.com
@@ -947,3 +947,42 @@ written:
       with no behavior regression.
 - [ ] `ruff check . && ruff format --check .` passes.
 - [ ] `pytest -q` passes.
+
+---
+
+## Implementation Notes
+
+**구현 완료일**: 2026-05-07
+**Merge**: PR [#12](https://github.com/endurance-ai/ai-server/pull/12), commit `26faa32` on `dev`
+**추가 테스트**: +33 (전체 263 / 263 통과)
+
+### 추가된 파일
+
+- `app/channels/vision_prompt.py` — ANALYZE_SYSTEM_PROMPT / ANALYZE_USER_PROMPT 상수 모듈 (portal/app analyze.ts 동결 사본)
+- `app/channels/clarify.py` — ClarifyAxis, ClarifyDelta, parse_callback (SPEC-CLARIFY-CARDS-001 선행 인프라)
+- `tests/test_graph_nodes/test_vision.py` — rich schema 단위 테스트 (새 VisionResult 모델 포함)
+- `tests/test_vision_schema_parity.py` — 프롬프트 상수 smoke test (isApparel, styleNode, searchQueryKo 등 마커 검증)
+
+### 수정된 파일
+
+- `app/channels/vision.py` — extract() 반환 타입 dict → VisionResult, max_tokens=2500 / temperature=0.3 / timeout=30s, 폴백 경로
+- `app/graphs/state.py` — WorkingState에 vision_result / vision_selected_item / vision_outfit_* 필드 추가
+- `app/channels/session.py` — SessionState에 vision_result / vision_outfit_* 필드 추가, 레거시 vision_item/vision_keywords 유지
+- `app/channels/recommendation.py` — ChannelRecommendationRequest에 item_* / outfit_* 10개 필드 추가
+- `app/graphs/nodes/vision.py` — VisionResult 소비 방식 업데이트
+- `app/graphs/nodes/pick_item.py` — vision_selected_item 전체 구조체 보존
+- `app/graphs/nodes/search.py` — _build_request에서 rich 필드 매핑
+- `app/graphs/routing.py` — _is_weak_vision 규칙 5가지로 재작성
+- `app/core/config.py` — VISION_SCHEMA_V2 / VISION_MAX_TOKENS / VISION_TEMPERATURE / VISION_TIMEOUT_S 등 신규 환경변수 선언
+- `.env.example` — 위 환경변수 문서화
+
+### 이연(Deferred) 항목
+
+- **스냅샷 parity 테스트** — portal/app analyze.ts와 portal/ai vision.extract 결과를 실제 JPEG 픽스처로 비교하는 테스트. LITELLM API 키 및 공유 픽스처 이미지가 필요하여 CI에서 실행 불가. 후속 SPEC 또는 manual QA 시나리오로 처리 예정.
+- **REQ-VISION-OBSV-001 Langfuse 메타데이터 보강** — vision_extract 스팬에 subcategory / fit / colorFamily / searchQueryKo 등 11개 메타데이터 키 추가. @observe 래퍼 확장이 필요하며 현재 no-op 폴백 상태에서 구조 검증이 어려워 이연. 별도 observability 강화 SPEC 또는 Langfuse 연결 안정화 후 진행.
+
+### 해소된 Open Questions
+
+- Q3 Pydantic extra 정책: extra="forbid"로 확정 (프롬프트 드리프트 조기 감지 우선)
+- Q5 _VISION_TIMEOUT: 30초로 확정 (portal/app run-vision.ts 관찰 P95 기준)
+- Q7 vision_outfit_mood_tags: score 기준 상위 5개 레이블로 확정 (REQ-VISION-OBSV-001 cap과 일치)

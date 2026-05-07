@@ -6,8 +6,8 @@ portal-ai는 패션 추천 파이프라인의 검색 오케스트레이션 레�
 
 | 레이어 | 소속 | 책임 |
 |--------|------|------|
-| portal/app (Next.js) | 외부 Caller | Apify 크롤, Cloudflare R2 이미지 저장, GPT-4o-mini Vision 분석, 세션·인증, v4 폴백 |
-| **portal/ai (이 프로젝트)** | **이 레포** | **검색 오케스트레이션 — embed → search → diversify** |
+| portal/app (Next.js) | 외부 Caller | Apify 크롤, Cloudflare R2 이미지 저장, GPT-4o-mini Vision 분석(웹), 세션·인증, v4 폴백 |
+| **kiko.ai AI 서버 (이 프로젝트)** | **이 레포** | **검색 오케스트레이션(웹) + LangGraph Telegram 봇(Vision/Clarify/Critique/Search)** |
 | Modal | 외부 GPU 서비스 | FashionSigLIP 추론 (단건 `/embed`, 배치 `/embed/batch`) |
 | Supabase | 외부 DB | pgvector HNSW 인덱스 + pgroonga BM25 — `search_products_v5` RPC |
 | Langfuse | 외부 관측 | self-hosted trace 저장, 단계별 latency/score 기록 |
@@ -38,16 +38,26 @@ flowchart TD
 
 ## 핵심 설계 패턴
 
-### plain async state machine
+### 이중 진입 경로
 
-파이프라인은 LangGraph 없이 순수 `async def` 체인으로 구성된다. 각 단계 함수는 `(PipelineState) -> PipelineState` 시그니처를 지켜, 향후 LangGraph 마이그레이션 비용을 0으로 유지한다.
+웹 경로(`POST /recommend`)는 plain async state machine(`PipelineState`)으로 직선 파이프라인을 실행한다.
 
 ```
 run_pipeline
-  └─ embed_step(state)   → state.embedding 채움
-  └─ search_step(state)  → state.raw_candidates 채움
-  └─ diversify_step(state) → state.final_candidates 채움
+  └─ embed_step(state)      → state.embedding 채움
+  └─ search_step(state)     → state.raw_candidates 채움
+  └─ diversify_step(state)  → state.final_candidates 채움
 ```
+
+Telegram 경로(`POST /webhooks/telegram`)는 LangGraph StateGraph(`WorkingState`)로 분기·루프·콜백을 처리한다. 12 노드 토폴로지:
+
+```
+ingest → resolve_image → vision → pick_item → ask_clarify? → apply_clarify? →
+  critique_apply → search → evaluator → send_results → taste_update → respond
+                                ↑____________(retry, delta 적용)___|
+```
+
+두 경로는 `RecommendationPort` Protocol(채널-파이프라인 경계)을 통해 동일한 검색 파이프라인을 공유한다.
 
 ### Provider 싱글톤
 
