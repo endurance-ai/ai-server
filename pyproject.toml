@@ -23,6 +23,9 @@ dependencies = [
     # langchain meta-package — langfuse v2 의 CallbackHandler 가 `from langchain.callbacks.base import ...` 로 import 하므로 필요.
     # langchain-core 1.3 과 호환되려면 langchain 1.x 필요.
     "langchain>=1.0,<2.0",
+    "python-dotenv>=1.0.1",
+    "openai>=2.34.0",
+    "umap-learn>=0.5.12",
 ]
 
 [dependency-groups]
@@ -41,6 +44,16 @@ embed = [
     "tqdm>=4.60",
 ]
 
+# 브랜드 텍스트 임베딩 (`scripts/embed_brands_text.py`) 전용.
+# BGE-m3 multilingual (KO/EN 강함) → brand_nodes.embedding (1024-dim, L2-normalized).
+# 설치: `uv sync --group embed-text` (~2GB 첫 다운로드, Mac M-series 는 MPS 자동 사용)
+embed-text = [
+    "torch>=2.4",
+    "sentence-transformers>=3.0",
+    "numpy>=1.26",
+    "tqdm>=4.60",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120
@@ -48,5 +61,17 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# SPEC-VISION-UNIFY-001 — Vision Pydantic models mirror portal/app's camelCase
+# JSON contract (analyze.ts). Renaming would break parity with the verbatim
+# system prompt and the schema documented in run-vision.ts.
+"app/channels/vision.py" = ["N815"]
+# vision_prompt.py is a byte-for-byte port of portal/app/src/lib/prompts/analyze.ts.
+# Line-length / style enforcement would force divergence from the source contract.
+"app/channels/vision_prompt.py" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "no_evaluator_fail_open: opt out of the autouse evaluator-LLM stub (SPEC-AGENTIC-CRITIQUE-001)",
+]

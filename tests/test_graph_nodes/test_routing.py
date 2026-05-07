@@ -220,11 +220,23 @@ def test_pick_without_selection_routes_to_end():
 # ── _route_after_search ────────────────────────────────────────────────────
 
 
-def test_search_with_candidates_routes_to_send_results():
+def test_search_with_candidates_routes_to_send_results(monkeypatch):
+    """SPEC-AGENTIC-CRITIQUE-001 — when self-critique is OFF, the original
+    direct edge `search_node → send_results` is preserved (REQ-CRITIQUE-COST-001)."""
+    monkeypatch.setattr("app.graphs.routing.settings.SELF_CRITIQUE_ENABLED", False)
     s = _state(_msg(), candidates=[object()])
     assert _route_after_search(s) == "send_results"
 
 
-def test_search_empty_routes_to_respond():
+def test_search_empty_routes_to_respond(monkeypatch):
+    monkeypatch.setattr("app.graphs.routing.settings.SELF_CRITIQUE_ENABLED", False)
     s = _state(_msg(), candidates=[])
     assert _route_after_search(s) == "respond"
+
+
+def test_search_routes_to_evaluator_when_self_critique_enabled():
+    """SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-EVAL-001 — default ON path."""
+    s = _state(_msg(), candidates=[object()])
+    assert _route_after_search(s) == "evaluator"
+    s_empty = _state(_msg(), candidates=[])
+    assert _route_after_search(s_empty) == "evaluator"

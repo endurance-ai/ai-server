@@ -76,6 +76,30 @@ class WorkingState(InputState):
     sent_candidates: list[Any] = Field(default_factory=list)
     response_text: str | None = None
     presearch_summary: str | None = None
+    # SPEC-VISION-UNIFY-001 / REQ-VISION-STATE-001 — rich Vision context.
+    # Stored as `Any` to avoid eager import of vision module at state-construction.
+    vision_result: Any | None = None
+    vision_selected_item: Any | None = None
+    vision_outfit_style_node_primary: str | None = None
+    vision_outfit_style_node_secondary: str | None = None
+    vision_outfit_mood_tags: list[str] = Field(default_factory=list)
+    vision_outfit_gender: str | None = None
+    # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-002 — self-critique loop state.
+    # `Any` chosen to avoid eager import of evaluator_models; the node validates types.
+    critique_retry_count: int = 0
+    critique_trail: Annotated[list[dict[str, Any]], _LIST_ADD] = Field(default_factory=list)
+    critique_pending_delta: Any | None = None
+    critique_exhausted: bool = False
+    critique_started_at_ms: float | None = None
+    # Previous iteration's candidates — kept so REQ-CRITIQUE-LOOP-SAFETY-002a
+    # can ship the better-scoring set on score regression.
+    critique_previous_candidates: list[Any] | None = None
+    critique_previous_score: float | None = None
+    # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-STATE-002 — clarify card 추적용 스크래치패드.
+    # `Any`는 ClarifyAxis / ClarifyDelta 의 forward import 사이클을 피하기 위함.
+    clarify_axis: Any | None = None
+    clarify_value: str | None = None
+    clarify_delta: Any | None = None
     # plan.md Q4: capped at 3 producers (vision/critique/search).
     messages: Annotated[list[BaseMessage], _MESSAGES_REDUCER] = Field(default_factory=list)
     log_events: Annotated[list[str], _LIST_ADD] = Field(default_factory=list)
@@ -92,3 +116,5 @@ class OutputState(BaseModel):
     sent_count: int = 0
     final_state: SessionState = SessionState.IDLE
     response_text: str | None = None
+    # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — softens respond reply.
+    critique_exhausted: bool = False

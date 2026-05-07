@@ -30,6 +30,31 @@ from app.graphs.state import WorkingState
 logger = logging.getLogger(__name__)
 
 
+def _selected_vision_item(sess) -> Any | None:
+    """Resolve the picker-selected (or single) VisionItem from session state.
+
+    REQ-VISION-STATE-003 — search_node MUST never see a None vision_selected_item
+    when vision_result.items is non-empty.
+    """
+    rich = sess.vision_result
+    if rich is None:
+        return None
+    try:
+        items = list(rich.items)
+    except Exception:  # noqa: BLE001
+        return None
+    if not items:
+        return None
+    idx = sess.vision_selected_item_index
+    if idx is None and len(items) == 1:
+        idx = 0
+    if idx is None:
+        return None
+    if 0 <= idx < len(items):
+        return items[idx]
+    return None
+
+
 def _build_request(
     sess,
     delta,
@@ -37,7 +62,8 @@ def _build_request(
     exclude_already_shown: bool,
 ) -> ChannelRecommendationRequest:
     """Compose the ChannelRecommendationRequest. Mirrors
-    `scenario._build_channel_request` semantics exactly."""
+    `scenario._build_channel_request` semantics with the addition of rich
+    Vision fields (SPEC-VISION-UNIFY-001 / REQ-VISION-SEARCH-003)."""
     keywords = list(sess.vision_keywords or [])
     color: str | None = None
     intent_combined = sess.user_intent
@@ -47,6 +73,14 @@ def _build_request(
     boost_keywords: list[str] = []
     max_price: int | None = None
     min_price: int | None = None
+
+    # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-VALUE-MAPPING-001 — sticky boost.
+    # sess.boost_keywords 는 clarify 응답에서 누적된 키워드. self-critique
+    # fast-path 가 critique_delta 를 갈아치워도 살아남도록 세션에 두고
+    # 매 검색마다 합산한다(R6 mitigation).
+    sticky_boost = list(getattr(sess, "boost_keywords", None) or [])
+    if sticky_boost:
+        boost_keywords.extend(sticky_boost)
 
     if delta is not None:
         exclude_brands.extend(delta.exclude_brands)
@@ -73,6 +107,15 @@ def _build_request(
 
     excl_ids = list(sess.shown_product_ids) if exclude_already_shown else []
 
+    # SPEC-VISION-UNIFY-001 — populate rich item + outfit fields when available.
+    selected = _selected_vision_item(sess)
+    item_subcategory = selected.subcategory if selected else None
+    item_fit = selected.fit if selected else None
+    item_fabric = selected.fabric if selected else None
+    item_color_family = selected.colorFamily if selected else None
+    item_search_query_en = selected.searchQuery if selected else None
+    item_search_query_ko = selected.searchQueryKo if selected else None
+
     return ChannelRecommendationRequest(
         image_url=sess.image_url,
         item_label=sess.vision_item,
@@ -87,6 +130,16 @@ def _build_request(
         boost_keywords=list(dict.fromkeys(k.strip().lower() for k in boost_keywords if k and k.strip())),
         max_price=max_price,
         min_price=min_price,
+        item_subcategory=item_subcategory or None,
+        item_fit=item_fit or None,
+        item_fabric=item_fabric or None,
+        item_color_family=item_color_family or None,
+        item_search_query_en=item_search_query_en or None,
+        item_search_query_ko=item_search_query_ko or None,
+        outfit_style_node_primary=sess.vision_outfit_style_node_primary,
+        outfit_style_node_secondary=sess.vision_outfit_style_node_secondary,
+        outfit_mood_tags=list(sess.vision_outfit_mood_tags or []),
+        outfit_gender=sess.vision_outfit_gender,
     )
 
 

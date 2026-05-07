@@ -7,15 +7,18 @@ match the SPEC's topology section.
 
 from __future__ import annotations
 
+from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH, build_graph
 
-_EXPECTED_NODES = {
+_EXPECTED_NODES_BASE = {
     "ingest",
     "router_text",
     "resolve_image",
     "vision_node",
     "pick_item",
     "ask_clarify",
+    # SPEC-CLARIFY-CARDS-001 — apply_clarify 노드.
+    "apply_clarify",
     "critique_apply",
     "search_node",
     "send_results",
@@ -28,7 +31,11 @@ _EXPECTED_NODES = {
 
 def test_topology_node_set_matches_spec():
     g = GRAPH.get_graph()
-    assert set(g.nodes.keys()) == _EXPECTED_NODES
+    expected = set(_EXPECTED_NODES_BASE)
+    if settings.SELF_CRITIQUE_ENABLED:
+        # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-EVAL-001
+        expected |= {"evaluator", "apply_self_critique"}
+    assert set(g.nodes.keys()) == expected
 
 
 def test_topology_unconditional_edges_match_spec():
@@ -43,14 +50,17 @@ def test_topology_unconditional_edges_match_spec():
     assert ("taste_update", "respond") in unconditional
     assert ("respond", "__end__") in unconditional
     assert ("ask_clarify", "__end__") in unconditional
+    # SPEC-CLARIFY-CARDS-001 — apply_clarify → search_node (unconditional).
+    assert ("apply_clarify", "search_node") in unconditional
 
 
 def test_topology_conditional_edge_sources_match_spec():
     """REQ-AGENT-005: ingest, resolve_image, vision_node, pick_item, search_node,
-    router_text are all conditional sources."""
+    router_text are all conditional sources. SPEC-AGENTIC-CRITIQUE-001 adds
+    `evaluator` as a conditional source when self-critique is enabled."""
     g = GRAPH.get_graph()
     cond_sources = {e.source for e in g.edges if e.conditional}
-    assert cond_sources == {
+    expected = {
         "ingest",
         "router_text",
         "resolve_image",
@@ -59,6 +69,9 @@ def test_topology_conditional_edge_sources_match_spec():
         "search_node",
         "critique_apply",
     }
+    if settings.SELF_CRITIQUE_ENABLED:
+        expected |= {"evaluator"}
+    assert cond_sources == expected
 
 
 def test_topology_pick_item_can_reach_end():

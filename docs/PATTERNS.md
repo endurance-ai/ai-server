@@ -6,7 +6,7 @@
 
 ### 1-A. LangGraph 그래프 노드 (`app/graphs/`) — Telegram webhook 흐름
 
-SPEC-AGENT-001 에서 도입. 10-노드 `StateGraph` 로 대화 흐름을 구성.
+SPEC-AGENT-001 에서 도입. 12-노드 `StateGraph` 로 대화 흐름을 구성 (SPEC-AGENTIC-CRITIQUE-001 의 `evaluator` + SPEC-CLARIFY-CARDS-001 의 `apply_clarify` 추가).
 
 ```python
 # app/api/webhooks/telegram.py

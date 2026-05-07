@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from app.channels.session import SessionState, get_store
+from app.channels.vision import derive_legacy_keywords, derive_legacy_label
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
 
@@ -81,8 +82,24 @@ async def pick_item(state: WorkingState) -> dict:
 
         item = items[idx]
         sess.selected_item_index = idx
-        sess.vision_item = item.get("label") or "item"
-        sess.vision_keywords = list(item.get("keywords") or [])
+        # SPEC-VISION-UNIFY-001 / REQ-VISION-STATE-003 — preserve full rich
+        # VisionItem when available. `vision_result` is the source of truth;
+        # `detected_items[idx]` is the legacy projection.
+        rich_item = None
+        if sess.vision_result is not None:
+            try:
+                rich_items = list(sess.vision_result.items)
+                if 0 <= idx < len(rich_items):
+                    rich_item = rich_items[idx]
+            except Exception:  # noqa: BLE001
+                rich_item = None
+        if rich_item is not None:
+            sess.vision_selected_item_index = idx
+            sess.vision_item = derive_legacy_label(rich_item) or "item"
+            sess.vision_keywords = derive_legacy_keywords(rich_item)
+        else:
+            sess.vision_item = item.get("label") or "item"
+            sess.vision_keywords = list(item.get("keywords") or [])
         # Note: original scenario sent the OPENER asking for intent. The graph
         # now flows directly to critique_apply → search_node → respond, so we
         # don't re-prompt the user here. Keep AWAITING_INTENT for symmetry with
@@ -93,6 +110,7 @@ async def pick_item(state: WorkingState) -> dict:
         return {
             "selected_item_index": idx,
             "detected_items": items,
+            "vision_selected_item": rich_item,
             "log_events": breadcrumbs,
         }
 

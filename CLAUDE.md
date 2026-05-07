@@ -28,10 +28,10 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, vision
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, vision (+ vision_prompt, clarify, clarify_values)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
-│   └── nodes/           # 10 노드: ingest, resolve_image, vision, pick_item, ask_clarify, critique_apply, search, send_results, taste_update, respond
+│   └── nodes/           # 12 노드: ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond
 ├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
 ├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler
@@ -66,7 +66,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 ## 코딩 컨벤션
 
-- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 10-노드 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 12-노드 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
 - **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 그래프 노드는 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
@@ -88,11 +88,16 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001) |
 | `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델 |
 | `app/graphs/routing.py` | 6개 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search) |
-| `app/graphs/nodes/respond.py` | 자연어 reply 생성 — `ChatOpenAI` (`RESPONSE_MODEL`, `RESPONSE_MAX_TOKENS`, `RESPONSE_TIMEOUT_MS`) |
-| `app/graphs/nodes/ask_clarify.py` | weak-vision 시 clarifying question (vision item 애매 시) |
+| `app/graphs/nodes/respond.py` | 자연어 reply 생성 — `ChatOpenAI` (`RESPONSE_MODEL`, `RESPONSE_MAX_TOKENS`, `RESPONSE_TIMEOUT_MS`). `critique_exhausted` 시 톤 완화 |
+| `app/graphs/nodes/ask_clarify.py` | weak-vision 시 인라인 키보드 카드 생성 (SPEC-CLARIFY-CARDS-001, 6 axes, LLM 호출 없음) |
+| `app/graphs/nodes/apply_clarify.py` | `clarify:*` callback 소비 → `session.boost_keywords` 누적 (SPEC-CLARIFY-CARDS-001) |
+| `app/graphs/nodes/evaluator.py` | search 결과 평가 → 빈 결과 fast-path (필터 drop) / LLM 평가 → `CritiqueDelta` 재시도 (SPEC-AGENTIC-CRITIQUE-001, 최대 2회 + 4 안전 가드) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
 | `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함 |
-| `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 |
+| `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 — v2 schema (SPEC-VISION-UNIFY-001): `styleNode`/`sensitivityTags`/`mood`/`palette`/`style`/`items[]` (subcategory/fit/colorFamily/searchQuery/searchQueryKo). flag: `VISION_SCHEMA_V2` |
+| `app/channels/vision_prompt.py` | Vision v2 schema 프롬프트 + JSON 스키마 정의 (portal/app `analyze.ts` 동치) |
+| `app/channels/clarify.py` | clarify 카드 빌더 (6 axes: category_pick / formality / fit / occasion / subcategory_disambiguation / generic_fallback) |
+| `app/channels/clarify_values.py` | clarify 카드 axis별 옵션 값 + 한글 라벨 매핑 |
 | `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard) |
 | `app/channels/telegram/webhook.py` | Telegram Update 파싱 |
 | `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
@@ -120,6 +125,11 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## 환경 변수
 
 `.env.example` 참조. 키는 `.env`에 (POC 단계 — 운영 시 Parameter Store 전환 예정).
+
+주요 feature flag (상세는 `docs/infra/env.md`):
+- `VISION_SCHEMA_V2` (기본 `true`) — Vision 풍부 스키마 (SPEC-VISION-UNIFY-001)
+- `SELF_CRITIQUE_ENABLED` (기본 `true`) + `SELF_CRITIQUE_MAX_ITERATIONS` / `SELF_CRITIQUE_THRESHOLD` / `SELF_CRITIQUE_TIMEOUT_S` / `SELF_CRITIQUE_FASTPATH_DROP_FILTERS` + `EVALUATOR_MODEL` / `EVALUATOR_MAX_TOKENS` / `EVALUATOR_TEMPERATURE` / `EVALUATOR_TIMEOUT_S` (SPEC-AGENTIC-CRITIQUE-001)
+- `CLARIFY_CARDS_ENABLED` (기본 `true`) + `CLARIFY_MAX_BUTTONS` (SPEC-CLARIFY-CARDS-001)
 
 ## 관련 프로젝트
 

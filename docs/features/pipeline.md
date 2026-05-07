@@ -2,7 +2,7 @@
 
 > `POST /recommend` 의 단일 진입점. Phase A(Qdrant) 폐기 후 v5 (Modal embed + Supabase RPC) 로 재구현.
 >
-> **SPEC-MSG-001 + SPEC-AGENT-001**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. 채널 경로는 `webhook → app/graphs/ (LangGraph StateGraph 10 nodes) → search_node → RecommendationPort → PipelineRecommendationPort → runner` 순 — graph 의 `search_node` 는 `RecommendationPort` Protocol만 참조하며 `pipeline.runner` 직접 import 없음. `POST /recommend` 는 Next.js 전용 진입점.
+> **SPEC-MSG-001 + SPEC-AGENT-001 (+ SPEC-AGENTIC-CRITIQUE-001)**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. 채널 경로는 `webhook → app/graphs/ (LangGraph StateGraph 12 nodes) → search_node → RecommendationPort → PipelineRecommendationPort → runner → evaluator_node → (재시도 시 search_node로 회귀 / 통과 시 send_results)` 순 — graph 의 `search_node` 는 `RecommendationPort` Protocol만 참조하며 `pipeline.runner` 직접 import 없음. `POST /recommend` 는 Next.js 전용 진입점이며 evaluator 루프를 거치지 않음.
 
 ## 데이터 흐름
 

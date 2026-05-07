@@ -1,13 +1,13 @@
 # portal-ai-server — 아키텍처
 
 > portal.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-05 (v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션).
+> 마지막 업데이트: 2026-05-07 (v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001).
 
 ## 한 줄 요약
 
 `portal/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase `search_products_v5` RPC (dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
-**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 10 노드) → 동일 파이프라인 → 채널 응답 카드로 반환.
+**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 12 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환.
 
 ## 책임 분리
 
@@ -44,7 +44,7 @@ graph TB
     subgraph AI["AI Server (EC2 t4g.medium)"]
         REC["POST /recommend"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/graphs/<br/>LangGraph StateGraph (10 nodes)<br/>+ link_resolver + vision"]
+        CHAN["app/graphs/<br/>LangGraph StateGraph (12 nodes)<br/>+ evaluator (Reflexion) + apply_clarify<br/>+ link_resolver + vision (v2 schema)"]
         PIPE["pipeline state machine<br/>embed → search → diversify"]
         LITELLM["LiteLLM proxy"]
         LFW["Langfuse web"]
@@ -106,7 +106,10 @@ app/
 │   ├── link_resolver.py    # Pinterest / og:image URL 해석
 │   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
 │   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점)
-│   ├── vision.py           # LiteLLM 경유 Vision 추출
+│   ├── vision.py           # LiteLLM 경유 Vision 추출 (v2 schema, SPEC-VISION-UNIFY-001)
+│   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (portal/app analyze.ts 동치)
+│   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
+│   ├── clarify_values.py   # clarify axis 옵션 + 한글 라벨
 │   └── telegram/
 │       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard)
 │       └── webhook.py      # Telegram Update 파싱
@@ -119,9 +122,11 @@ app/
 │       ├── resolve_image.py # Pinterest / pin.it og:image 해석
 │       ├── vision.py       # LiteLLM Vision 패션 아이템 추출
 │       ├── pick_item.py    # 인라인 키보드 picker (콜백 처리)
-│       ├── ask_clarify.py  # weak-vision 시 clarifying question
+│       ├── ask_clarify.py  # weak-vision 시 결정형 카드 (6 axes, no LLM, SPEC-CLARIFY-CARDS-001)
+│       ├── apply_clarify.py # clarify:* 콜백 → session.boost_keywords 누적
 │       ├── critique_apply.py # Routing-LLM + critique refinement
 │       ├── search.py       # RecommendationPort → 파이프라인 호출
+│       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001)
 │       ├── send_results.py # 검색 결과 카드 전송
 │       ├── taste_update.py # 장기 취향 프로파일 업데이트
 │       └── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL)
@@ -172,8 +177,12 @@ app/
 
 ## LangGraph (SPEC-AGENT-001 — 도입됨)
 
-Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 10-노드 `StateGraph` 로 구현.
+Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph` 로 구현.
 `webhook → graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler(...)]})` 단일 호출 (REQ-AGENT-008).
+
+핵심 분기:
+- `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) — 빈 결과 시 필터 drop fast-path / LLM 평가 점수 < threshold 시 `CritiqueDelta` 생성 후 search 재진입 (max 2회 + 4 안전 가드: iteration cap / stagnation / score regression / 30s wall-clock)
+- `ask_clarify → apply_clarify` 결정형 카드 (SPEC-CLARIFY-CARDS-001) — weak-vision 시 6 axes 인라인 키보드, callback 수신 시 `session.boost_keywords` 누적 (self-critique fast-path 통과)
 
 파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
 
@@ -211,3 +220,4 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 10-노드 `StateGraph
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
 | 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |
+| 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `portal/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |

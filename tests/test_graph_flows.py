@@ -158,7 +158,8 @@ async def test_multi_item_sends_picker_and_ends(store, taste_store, stub_port, a
 
 @pytest.mark.asyncio
 async def test_weak_vision_routes_to_ask_clarify(store, taste_store, stub_port, adapter, monkeypatch):
-    """Flow #5 / REQ-AGENT-009 — weak vision → ask_clarify (no respond)."""
+    """Flow #5 / REQ-AGENT-009 + SPEC-CLARIFY-CARDS-001 — weak vision → ask_clarify
+    카드 발행(텍스트 메시지가 아닌 인라인 키보드)."""
     msg = make_msg(urls=["https://www.pinterest.com/pin/123/"])
     import app.graphs.nodes.resolve_image as ri
     import app.graphs.nodes.vision as vn
@@ -173,7 +174,34 @@ async def test_weak_vision_routes_to_ask_clarify(store, taste_store, stub_port, 
     monkeypatch.setattr(ri.link_resolver, "resolve", _resolve_ok)
     monkeypatch.setattr(vn.vision_module, "extract", _vision_weak)
 
-    # ask_clarify falls back when LLM raises — patch ask_clarify._llm.
+    await _run(msg)
+    # SPEC-CLARIFY-CARDS-001: 카드 경로 — buttons 발행, texts 는 비어 있음.
+    assert adapter.buttons, f"clarify card must be sent; got buttons={adapter.buttons}"
+    assert not adapter.texts, f"plain text message should not be sent; got {adapter.texts}"
+    chat_id, body, btns = adapter.buttons[0]
+    assert chat_id == 42
+    assert body, "card body must be non-empty"
+    # 마지막 버튼은 항상 skip(REQ-CLARIFY-CARD-002).
+    assert btns[-1][1].endswith(":skip"), f"last button must be skip; got {btns[-1]}"
+
+
+@pytest.mark.asyncio
+async def test_weak_vision_legacy_fallback_when_flag_off(store, taste_store, stub_port, adapter, monkeypatch):
+    """REQ-CLARIFY-COMPAT-002 — CLARIFY_CARDS_ENABLED=false 시 자유 텍스트 폴백."""
+    monkeypatch.setattr("app.graphs.nodes.ask_clarify.settings.CLARIFY_CARDS_ENABLED", False)
+    msg = make_msg(urls=["https://www.pinterest.com/pin/123/"])
+    import app.graphs.nodes.resolve_image as ri
+    import app.graphs.nodes.vision as vn
+
+    async def _resolve_ok(_u):
+        return ["https://i.pinimg.com/originals/x.jpg"]
+
+    async def _vision_weak(_url):
+        return {"items": [{"label": "item", "description": "kind of", "keywords": ["x"]}]}
+
+    monkeypatch.setattr(ri.link_resolver, "resolve", _resolve_ok)
+    monkeypatch.setattr(vn.vision_module, "extract", _vision_weak)
+
     import app.graphs.nodes.ask_clarify as ac
 
     class _Boom:
@@ -184,8 +212,9 @@ async def test_weak_vision_routes_to_ask_clarify(store, taste_store, stub_port, 
 
     await _run(msg)
     assert adapter.texts == [(42, ASK_CLARIFY_FALLBACK)], (
-        f"ask_clarify should send exactly the fallback, got {adapter.texts}"
+        f"ask_clarify legacy fallback expected, got texts={adapter.texts} buttons={adapter.buttons}"
     )
+    assert not adapter.buttons, "card path must NOT fire when flag is off"
 
 
 @pytest.mark.asyncio
