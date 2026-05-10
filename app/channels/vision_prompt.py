@@ -1,20 +1,20 @@
-"""SPEC-VISION-UNIFY-001 — verbatim port of portal/app's ANALYZE_SYSTEM_PROMPT.
+"""SPEC-VISION-UNIFY-001 — verbatim port of kikoai/app's ANALYZE_SYSTEM_PROMPT.
 
-Source of truth: portal/app/src/lib/prompts/analyze.ts (frozen 2026-05-07).
+Source of truth: kikoai/app/src/lib/prompts/analyze.ts (frozen 2026-05-07).
 Auxiliary helpers (`buildNodeReference()`, `buildTagList()`,
 `STYLE_NODE_IDS.join(", ")`, `SENSITIVITY_TAGS.join(", ")`,
 `buildEnumReference()`) are pre-evaluated and inlined as static strings so
 the bot does not depend on the Next.js runtime.
 
-Drift-detection: if portal/app's analyze.ts changes, the byte-for-byte parity
+Drift-detection: if kikoai/app's analyze.ts changes, the byte-for-byte parity
 of this file's prompt SHALL be re-established before merging. Any future
-schema change must start in portal/app and only land here once acceptance
+schema change must start in kikoai/app and only land here once acceptance
 parity tests pass again. See REQ-VISION-UNIFY-001.
 
 Sources (frozen 2026-05-07):
-- portal/app/src/lib/prompts/analyze.ts
-- portal/app/src/lib/fashion-genome.ts
-- portal/app/src/lib/enums/product-enums.ts
+- kikoai/app/src/lib/prompts/analyze.ts
+- kikoai/app/src/lib/fashion-genome.ts
+- kikoai/app/src/lib/enums/product-enums.ts
 """
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ _TAG_LIST_JOINED = ", ".join(SENSITIVITY_TAGS)
 
 
 # ── ANALYZE_SYSTEM_PROMPT (verbatim from analyze.ts, with template literals
-# resolved). Do not edit unless portal/app/src/lib/prompts/analyze.ts changes.
+# resolved). Do not edit unless kikoai/app/src/lib/prompts/analyze.ts changes.
 ANALYZE_SYSTEM_PROMPT = f"""You are an expert AI fashion analyst with deep knowledge of brands, fabrics, and silhouettes.
 Given an outfit photo, analyze every visible clothing item and the overall mood.
 You MUST also classify the outfit into our internal style taxonomy (Style Nodes) for brand matching.

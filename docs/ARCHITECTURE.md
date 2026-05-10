@@ -1,18 +1,18 @@
-# portal-ai-server — 아키텍처
+# kiko-ai-server — 아키텍처
 
-> portal.ai 서비스의 검색/리파인 담당 FastAPI 서버.
+> kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
 > 마지막 업데이트: 2026-05-10 (v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE flow + 구조화 로그).
 
 ## 한 줄 요약
 
-`portal/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
+`kikoai/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
 **Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 12 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환.
 
 ## 책임 분리
 
 ```
-[dev-app EC2 — portal/app + Postgres]         [dev-ai EC2 — portal/ai]                  [Modal]
+[dev-app EC2 — kikoai/app + Postgres]         [dev-ai EC2 — kikoai/ai]                  [Modal]
 ─────────────────────────────────────         ────────────────────────────              ──────────
 Next.js standalone (Auth.js v5)               AI 서버 (FastAPI)                          FashionSigLIP /embed
 Apify 스크래핑 + R2 + Postgres                  ├─ 검색 오케스트레이션                       (T4, scale-to-zero)
@@ -112,7 +112,7 @@ app/
 │   ├── lang.py             # detect_lang / remember_lang / session_lang — KO/EN sticky 언어 감지
 │   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점). Session.lang 필드 포함
 │   ├── vision.py           # LiteLLM 경유 Vision 추출 (v2 schema, SPEC-VISION-UNIFY-001)
-│   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (portal/app analyze.ts 동치)
+│   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (kikoai/app analyze.ts 동치)
 │   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
 │   ├── clarify_values.py   # clarify axis 옵션 + 한글 라벨
 │   └── telegram/
@@ -216,17 +216,17 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph
 | [`infra/deployment.md`](infra/deployment.md) | EC2 docker-compose + Modal 배포 |
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
 | `docs/plans/archive/` | 과거 Qdrant 기반 설계 (참고만) |
-| `aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose 본체 |
-| `portal/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 (디렉토리명 유지 — Supabase CLI 시절 잔재, dev-app Postgres 에 적용됨) |
+| `aws-infra/kiko-ai-servers/portal-ai/` | EC2 docker-compose 본체 |
+| `kikoai/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 (디렉토리명 유지 — Supabase CLI 시절 잔재, dev-app Postgres 에 적용됨) |
 
 ## 변경 이력
 
 | 날짜 | 사건 |
 |------|------|
 | 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC 시절, GHA + ECR 배포) |
-| 2026-05-10 | **SPEC-INFRA-MIGRATE-001 컷오버 완료** — Supabase + Vercel pause. dev-app EC2 단독 운영 (Postgres 16 + pgvector + pgroonga + PostgREST nginx shim). portal/ai 코드 변경 0줄 (env 논리명 유지) |
+| 2026-05-10 | **SPEC-INFRA-MIGRATE-001 컷오버 완료** — Supabase + Vercel pause. dev-app EC2 단독 운영 (Postgres 16 + pgvector + pgroonga + PostgREST nginx shim). kikoai/ai 코드 변경 0줄 (env 논리명 유지) |
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
 | 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |
 | 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
-| 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `portal/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |
+| 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `kikoai/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |

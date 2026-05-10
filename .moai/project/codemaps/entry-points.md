@@ -1,4 +1,4 @@
-# portal-ai 진입점 카탈로그
+# kiko.ai 진입점 카탈로그
 
 ## ASGI 앱
 
@@ -78,6 +78,6 @@ Supabase URL과 SERVICE_ROLE_KEY가 모두 설정된 경우에만 startup 워밍
 | 항목 | 내용 |
 |------|------|
 | `Dockerfile` ENTRYPOINT | `uvicorn app.main:app --host 0.0.0.0 --port 8000` |
-| `docker-compose.yml` 서비스명 | ai (portal-ai 서버) |
+| `docker-compose.yml` 서비스명 | ai (kiko.ai 서버) |
 | 로컬 스택 실행 | `docker compose up -d` |
 | 운영 이미지 | embed 옵션 그룹(torch 등) 미포함 — 경량 이미지 |

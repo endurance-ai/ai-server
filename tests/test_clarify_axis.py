@@ -4,7 +4,7 @@
   1. category_pick → 2. formality → 3. fit → 4. occasion
   → 5. subcategory_disambiguation → 6. generic_fallback
 
-R2 mitigation: portal/app analyze.ts + vision_prompt.py 의 enum 과 동기화 검증.
+R2 mitigation: kikoai/app analyze.ts + vision_prompt.py 의 enum 과 동기화 검증.
 SPEC 기준 시점: 2026-05-07.
 """
 
@@ -135,8 +135,8 @@ def test_pure_function_no_side_effects():
 
 
 # ── R2 schema parity snapshot ──────────────────────────────────────────────
-# Source: vision_prompt.py / portal/app analyze.ts (as of 2026-05-07).
-# 이 상수가 바뀌면 portal/app 과 정합 검증 후 본 테스트도 함께 갱신.
+# Source: vision_prompt.py / kikoai/app analyze.ts (as of 2026-05-07).
+# 이 상수가 바뀌면 kikoai/app 과 정합 검증 후 본 테스트도 함께 갱신.
 
 EXPECTED_VALID_FITS = {"oversized", "relaxed", "regular", "slim", "skinny", "boxy", "cropped", "longline"}
 

@@ -144,7 +144,7 @@ ingest → resolve_image → vision → pick_item → ask_clarify? → critique_
               └─────────► respond
 ```
 
-**Affected modules in portal/ai (this SPEC)**:
+**Affected modules in kikoai/ai (this SPEC)**:
 
 - `app/graphs/nodes/evaluator.py` — NEW. The evaluator node.
 - `app/graphs/nodes/evaluator_prompt.py` — NEW. The evaluator's system /
@@ -740,7 +740,7 @@ SPEC:
    critique stays as-is.
 4. **Changes to the search RPC `search_products_v5`.** No SQL changes,
    no scoring changes, no ranking changes.
-5. **Changes to portal/app's web `/recommend` flow.** Web is single-shot;
+5. **Changes to kikoai/app's web `/recommend` flow.** Web is single-shot;
    self-critique is Telegram-bot-only.
 6. **A vision-based evaluator.** v1 evaluator runs on text metadata only.
 7. **A typing-indicator UX touch** ("잠깐만요, 더 좋은 결과 찾는 중…")
@@ -819,7 +819,7 @@ and MUST NOT be implemented as part of this SPEC:
 4. **Changes to the search pipeline RPC (`search_products_v5`)**, the
    embedding model, the diversity capper, or the `enhance_query` feature
    flag. Only the loop AROUND the pipeline is added.
-5. **Changes to portal/app's web `/recommend` flow.** Web stays
+5. **Changes to kikoai/app's web `/recommend` flow.** Web stays
    single-shot; self-critique is Telegram-bot-only. The shared
    `RecommendRequest` DTO is unchanged.
 6. **Vision-based evaluator**. The v1 evaluator runs on text metadata
@@ -931,7 +931,7 @@ written:
   Currently kept (behind the flag) for the regression-test toggle. A
   follow-up SPEC removes it once the feature has stabilized.
 - **Cross-channel parity with web.** If self-critique proves valuable,
-  port it to portal/app's web `/recommend` flow. (Currently web is
+  port it to kikoai/app's web `/recommend` flow. (Currently web is
   single-shot by design.)
 - **Episodic feedback signal.** When a user dwells on / clicks one of
   the retry-derived candidates, record this as positive signal for the
@@ -951,7 +951,7 @@ written:
     and `WorkingState.vision_selected_item` as read-only inputs).
   - SPEC-PIPELINE-001 (search pipeline being looped — RPC and scoring
     unchanged; only the loop around it is added).
-- **Affected modules in portal/ai**:
+- **Affected modules in kikoai/ai**:
   - `app/graphs/nodes/evaluator.py` (NEW),
     `app/graphs/nodes/evaluator_prompt.py` (NEW),
     `app/graphs/state.py` (state extension),
@@ -976,7 +976,7 @@ written:
   - `tests/test_recommendation_port.py` (extended for new delta-derived
     `RecommendRequest` fields if `plan.md` opts to thread fields through
     the port DTO rather than via state-only).
-- **Project context**: `/Users/hansangho/desktop/portal/ai/CLAUDE.md`.
+- **Project context**: `/Users/hansangho/desktop/kikoai/ai/CLAUDE.md`.
 - **PR baseline**: SPEC-VISION-UNIFY-001 (just merged) provides the rich
   Vision schema that the evaluator consumes. SPEC-AGENT-001 (PR #11,
   commit `f0a7f03`) provides the 10-node LangGraph this SPEC extends.

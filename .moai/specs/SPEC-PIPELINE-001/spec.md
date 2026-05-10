@@ -20,7 +20,7 @@ issue_number: 4
 
 ## 1. Overview (개요)
 
-portal-ai 추천 파이프라인에 **LLM 기반 쿼리 정제 단계(enhance_query)** 를 도입한다. portal/app(Vision)이 생성한 raw 검색 쿼리(`search_query`, `search_query_ko`)를 Supabase `search_products_v5` RPC 의 sparse 채널(pgroonga BM25)에 더 적합한 형태로 보강해 sparse 정확도를 끌어올리는 것이 목적이다.
+kiko.ai 추천 파이프라인에 **LLM 기반 쿼리 정제 단계(enhance_query)** 를 도입한다. kikoai/app(Vision)이 생성한 raw 검색 쿼리(`search_query`, `search_query_ko`)를 Supabase `search_products_v5` RPC 의 sparse 채널(pgroonga BM25)에 더 적합한 형태로 보강해 sparse 정확도를 끌어올리는 것이 목적이다.
 
 현재 파이프라인은 `embed → search → diversify` 의 plain async state-machine 으로 동작하며, sparse 채널의 입력 품질이 raw 쿼리의 형태(불필요한 수식어, 비표준 토큰, 한·영 혼용)에 직접 의존하고 있다. dense 채널(이미지 임베딩, FashionSigLIP)은 본 SPEC 의 영향을 받지 않는다.
 
@@ -142,7 +142,7 @@ The pipeline **shall** execute `enhance_query_step` immediately before `search_s
 
 - **영구 캐싱 / Redis 도입**: POC 범위 외. 향후 별도 SPEC.
 - **dense(이미지) 임베딩 변경**: Modal FashionSigLIP 호출 그대로 유지.
-- **portal/app Vision 호출 변경**: raw 쿼리 생성 책임은 portal/app 에 그대로 둠.
+- **kikoai/app Vision 호출 변경**: raw 쿼리 생성 책임은 kikoai/app 에 그대로 둠.
 - **다국어 자동 언어 감지**: 현재 `search_query` (en) + `search_query_ko` (ko) 양쪽을 받는 구조 유지.
 - **rerank 스텝 추가**: 별도 SPEC 으로 분리. 본 SPEC 은 sparse 입력 품질 개선만 다룸.
 - **프롬프트 자체의 동적 최적화 / 자가 학습**: 정적 프롬프트 1종으로 시작.
@@ -163,7 +163,7 @@ The pipeline **shall** execute `enhance_query_step` immediately before `search_s
 - `docs/features/pipeline.md` — 현행 state-machine 설명
 - `docs/PATTERNS.md` — 코드 컨벤션 (plain async, Pydantic v2)
 - `app/providers/llm.py` — 미사용 LLMProvider (본 SPEC 에서 첫 사용처)
-- portal/app `RecommendItem` 스키마 — `search_query` / `search_query_ko` 출처
+- kikoai/app `RecommendItem` 스키마 — `search_query` / `search_query_ko` 출처
 
 ---
 

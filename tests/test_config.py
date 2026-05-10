@@ -4,7 +4,7 @@ from app.core.config import Settings
 def test_settings_defaults():
     """기본값으로 Settings 생성 가능해야 한다. .env 영향 배제 (_env_file=None)."""
     s = Settings(_env_file=None)
-    assert s.PROJECT_NAME == "portal-ai-server"
+    assert s.PROJECT_NAME == "kiko-ai-server"
     assert s.ENVIRONMENT == "development"
     assert s.LITELLM_BASE_URL == "http://localhost:4000"
     assert s.SEARCH_DEFAULT_K == 50

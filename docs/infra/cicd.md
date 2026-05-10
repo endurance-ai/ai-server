@@ -69,7 +69,7 @@ concurrency:
 
 ## deploy.ai.sh — EC2 측 스크립트
 
-`aws-infra/portal-ai-servers/portal-ai/scripts/deploy.ai.sh` (EC2 의 `/home/ec2-user/scripts/`).
+`aws-infra/kiko-ai-servers/portal-ai/scripts/deploy.ai.sh` (EC2 의 `/home/ec2-user/scripts/`).
 
 흐름:
 1. `.env` 로드 + `IMAGE_TAG` 인자 검증
@@ -93,7 +93,7 @@ GHA IAM 사용자 권한 (최소): `AmazonEC2ContainerRegistryFullAccess`, 또�
 
 ## GitHub Environment
 
-`portal/ai` repo → Settings → Environments → **`portal-dev`** 등록. 워크플로우의 `environment: portal-dev` 와 일치.
+`kikoai/ai` repo → Settings → Environments → **`portal-dev`** 등록. 워크플로우의 `environment: portal-dev` 와 일치.
 
 (필요 시) Required reviewers / branch protection 추가.
 
@@ -103,15 +103,15 @@ GHA IAM 사용자 권한 (최소): `AmazonEC2ContainerRegistryFullAccess`, 또�
 # 1. ECR 리포 생성
 aws ecr create-repository --repository-name portal/dev/ai \
   --image-tag-mutability MUTABLE --image-scanning-configuration scanOnPush=true \
-  --region ap-northeast-2 --profile portal-ai
+  --region ap-northeast-2 --profile kiko.ai
 
 # 2. EC2 에 IAM Role 부착 (ECR pull용)
-#    상세: aws-infra/portal-ai-servers/portal-ai/CICD.md
+#    상세: aws-infra/kiko-ai-servers/portal-ai/CICD.md
 
 # 3. EC2 에 deploy.ai.sh + docker-compose.yml + config/ 배치
 #    상세: docs/infra/deployment.md
 
-# 4. portal/ai repo Secrets / Environment 등록 (위 표)
+# 4. kikoai/ai repo Secrets / Environment 등록 (위 표)
 ```
 
 ## 트러블슈팅
@@ -128,9 +128,9 @@ aws ecr create-repository --repository-name portal/dev/ai \
 
 ## 워크플로우 동기화
 
-`aws-infra/.github/workflows/portal/*.yml` 가 SoT. `portal/ai/.github/workflows/*.yml` 은 같은 내용을 복사.
+`aws-infra/.github/workflows/portal/*.yml` 가 SoT. `kikoai/ai/.github/workflows/*.yml` 은 같은 내용을 복사.
 
 변경 시:
 1. aws-infra 측 수정
-2. `cp aws-infra/.github/workflows/portal/{ci.yml,deploy-dev.yml} portal/ai/.github/workflows/`
+2. `cp aws-infra/.github/workflows/portal/{ci.yml,deploy-dev.yml} kikoai/ai/.github/workflows/`
 3. 양쪽 같이 커밋 (본 repo + aws-infra repo PR 별도)

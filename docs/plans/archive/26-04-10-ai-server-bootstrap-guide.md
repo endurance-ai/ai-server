@@ -1,4 +1,4 @@
-# Portal.ai AI Server — 부트스트랩 가이드
+# kiko.ai AI Server — 부트스트랩 가이드
 
 > 새 세션/프로젝트에서 이 문서 하나만 보고 AI 서버 구축을 시작할 수 있도록 작성된 가이드.
 > 설계 스펙, 참고 프로젝트, 포팅 대상 코드, 인프라 설정을 한 곳에 정리.
@@ -7,7 +7,7 @@
 
 ## 1. 뭘 만드는가
 
-패션 추천 서비스(portal.ai)의 **검색 + 리파인 파이프라인**을 담당하는 FastAPI AI 서버.
+패션 추천 서비스(kiko.ai)의 **검색 + 리파인 파이프라인**을 담당하는 FastAPI AI 서버.
 
 - Next.js(프론트+백)에서 Vision 분석 완료 후, 구조화된 아이템을 AI 서버에 전달
 - AI 서버는 쿼리 개선(리파인) + Qdrant 벡터 검색 + 결과 정리 후 product_id 리턴
@@ -39,7 +39,7 @@ Next.js (Vercel, 추후 EC2 이관)
 ## 3. 새 프로젝트 구조 (권장)
 
 ```
-portal-ai-server/
+kiko-ai-server/
 ├── app/
 │   ├── main.py                 # FastAPI 앱 + 미들웨어 + CORS
 │   ├── api/
@@ -81,7 +81,7 @@ portal-ai-server/
 **경로:** `/Users/hansangho/Desktop/seed-lognia`
 
 seed-lognia는 LangGraph + FastAPI 기반 RAG/AgenticRAG 서버.
-portal.ai AI 서버는 LangGraph를 쓰지 않지만, FastAPI 구조와 프로바이더 패턴을 참고.
+kiko.ai AI 서버는 LangGraph를 쓰지 않지만, FastAPI 구조와 프로바이더 패턴을 참고.
 
 | 참고 대상 | 파일 | 가져올 것 |
 |-----------|------|----------|
@@ -94,7 +94,7 @@ portal.ai AI 서버는 LangGraph를 쓰지 않지만, FastAPI 구조와 프로�
 | Docker 설정 | `Dockerfile` | Python FastAPI 컨테이너 빌드 |
 | 환경 변수 | `.env.example` | 필요한 env 변수 목록 참고 |
 
-**주의:** seed-lognia의 LangGraph 그래프(`app/graphs/`)는 참고만. portal.ai MVP는 plain async 함수.
+**주의:** seed-lognia의 LangGraph 그래프(`app/graphs/`)는 참고만. kiko.ai MVP는 plain async 함수.
 
 ### 4-2. aws-infra (인프라 설정)
 
@@ -102,11 +102,11 @@ portal.ai AI 서버는 LangGraph를 쓰지 않지만, FastAPI 구조와 프로�
 
 | 참고 대상 | 파일 | 용도 |
 |-----------|------|------|
-| LiteLLM Docker Compose | `portal-ai-servers/portal-litellm/docker/docker-compose.yml` | LiteLLM 컨테이너 설정 참고 |
-| LiteLLM 설정 | `portal-ai-servers/portal-litellm/config/litellm.yaml` | 모델 라우팅 설정 참고 |
-| LiteLLM 환경 변수 | `portal-ai-servers/portal-litellm/env/.env.example` | API 키 등 |
-| GPU 배치 스크립트 | `portal-ai-servers/portal-gpu-batch/scripts/` | Spot 인스턴스 관련 (Phase 0) |
-| 셋업 스크립트 | `portal-ai-servers/portal-litellm/scripts/setup.sh` | EC2 초기 설정 참고 |
+| LiteLLM Docker Compose | `kiko-ai-servers/portal-litellm/docker/docker-compose.yml` | LiteLLM 컨테이너 설정 참고 |
+| LiteLLM 설정 | `kiko-ai-servers/portal-litellm/config/litellm.yaml` | 모델 라우팅 설정 참고 |
+| LiteLLM 환경 변수 | `kiko-ai-servers/portal-litellm/env/.env.example` | API 키 등 |
+| GPU 배치 스크립트 | `kiko-ai-servers/portal-gpu-batch/scripts/` | Spot 인스턴스 관련 (Phase 0) |
+| 셋업 스크립트 | `kiko-ai-servers/portal-litellm/scripts/setup.sh` | EC2 초기 설정 참고 |
 
 ### 4-3. fashion-ai (현재 Next.js 프로젝트, 로직 포팅 원본)
 
@@ -350,4 +350,4 @@ SUPABASE_SERVICE_ROLE_KEY=...
 - **임베딩 프로바이더는 아직 미확정.** Cohere embed-v4 vs DeepInfra BGE-M3 중 테스트 후 결정.
   LiteLLM 경유하면 코드 변경 없이 교체 가능.
 - **t4g.medium (4GB RAM) 제약.** 메모리 배분: AI Server 1.5GB + LiteLLM 512MB + Qdrant 512MB + OS 1GB.
-- **AWS 프로필: `portal-ai`.** EC2, 보안그룹 등 모두 이 프로필로 작업.
+- **AWS 프로필: `kiko.ai`.** EC2, 보안그룹 등 모두 이 프로필로 작업.

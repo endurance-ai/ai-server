@@ -1,12 +1,12 @@
-# portal-ai 시스템 개요
+# kiko.ai 시스템 개요
 
 ## 시스템 경계
 
-portal-ai는 패션 추천 파이프라인의 검색 오케스트레이션 레이어다. portal/app(Next.js 모놀리스)이 분석을 마친 단일 아이템 정보를 POST 요청으로 전달하면, 이미지 임베딩 → 벡터+키워드 하이브리드 검색 → 다양성 필터링을 거쳐 product_id 리스트를 반환한다.
+kiko.ai는 패션 추천 파이프라인의 검색 오케스트레이션 레이어다. kikoai/app(Next.js 모놀리스)이 분석을 마친 단일 아이템 정보를 POST 요청으로 전달하면, 이미지 임베딩 → 벡터+키워드 하이브리드 검색 → 다양성 필터링을 거쳐 product_id 리스트를 반환한다.
 
 | 레이어 | 소속 | 책임 |
 |--------|------|------|
-| portal/app (Next.js) | 외부 Caller | Apify 크롤, Cloudflare R2 이미지 저장, GPT-4o-mini Vision 분석(웹), 세션·인증, v4 폴백 |
+| kikoai/app (Next.js) | 외부 Caller | Apify 크롤, Cloudflare R2 이미지 저장, GPT-4o-mini Vision 분석(웹), 세션·인증, v4 폴백 |
 | **kiko.ai AI 서버 (이 프로젝트)** | **이 레포** | **검색 오케스트레이션(웹) + LangGraph Telegram 봇(Vision/Clarify/Critique/Search)** |
 | Modal | 외부 GPU 서비스 | FashionSigLIP 추론 (단건 `/embed`, 배치 `/embed/batch`) |
 | Supabase | 외부 DB | pgvector HNSW 인덱스 + pgroonga BM25 — `search_products_v5` RPC |
@@ -17,8 +17,8 @@ portal-ai는 패션 추천 파이프라인의 검색 오케스트레이션 레�
 
 ```mermaid
 flowchart TD
-    APP["portal/app\n(Next.js)"]:::external
-    AI["portal-ai\nFastAPI ASGI"]:::core
+    APP["kikoai/app\n(Next.js)"]:::external
+    AI["kiko.ai\nFastAPI ASGI"]:::core
     MODAL["Modal\nFashionSigLIP"]:::external
     SUPA["Supabase\npgvector + pgroonga"]:::external
     LF["Langfuse\nself-host"]:::external

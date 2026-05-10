@@ -31,7 +31,7 @@ class ClarifyOption:
     label_ko: str
     keywords_to_boost: list[str] = field(default_factory=list)
     subcategory_override: str | None = None
-    # mixedCase 는 portal/app `searchQueryKo` 와 의도적으로 일치.
+    # mixedCase 는 kikoai/app `searchQueryKo` 와 의도적으로 일치.
     searchQueryKo_augment: str | None = None  # noqa: N815
 
 
@@ -49,7 +49,7 @@ AXIS_PROMPTS_KO: dict[str, str] = {
 # ── 축별 옵션 매핑 (skip 제외) ──────────────────────────────────────────────
 #
 # Korean labels: 일반 한글 + 영문 공통 단어만(REQ-CLARIFY-CARD-003 / R4).
-# subcategory_override 값은 vision_prompt.py / portal/app analyze.ts 의 enum 과
+# subcategory_override 값은 vision_prompt.py / kikoai/app analyze.ts 의 enum 과
 # 일관되도록 영문 snake_case 로 둔다(R2 mitigation: snapshot test).
 
 # 1) category_pick — 단일 아이템이지만 대분류가 약할 때.

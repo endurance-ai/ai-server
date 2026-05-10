@@ -1,6 +1,6 @@
-# tech.md — portal-ai 기술 스택
+# tech.md — kiko.ai 기술 스택
 
-portal-ai 의 런타임, 의존성, 외부 서비스, 환경변수, 빌드/배포, 개발 명령, 알려진 제약조건을 정리한다.
+kiko.ai 의 런타임, 의존성, 외부 서비스, 환경변수, 빌드/배포, 개발 명령, 알려진 제약조건을 정리한다.
 
 ---
 
@@ -67,7 +67,7 @@ portal-ai 의 런타임, 의존성, 외부 서비스, 환경변수, 빌드/배�
 - 진입점: `SupabaseProvider.rpc("search_products_v5", params)`
 - 클라이언트: `supabase-py` async, lifespan 에서 singleton 워밍업.
 - 제약: HNSW 타임아웃 위험. 배치 처리 시 chunk 크기 25 이하, 타임아웃 시 자동 분할 재시도.
-- 의존: `portal/app/supabase/migrations/030_search_products_v5.sql` 스키마에 강하게 결합. RPC 스키마 변경 시 portal-ai 코드 동시 수정 필요.
+- 의존: `kikoai/app/supabase/migrations/030_search_products_v5.sql` 스키마에 강하게 결합. RPC 스키마 변경 시 kiko.ai 코드 동시 수정 필요.
 
 ### LiteLLM proxy
 
@@ -154,7 +154,7 @@ GitHub Actions → ECR push → EC2 SSH 배포.
 - 빌드 아키텍처: `linux/arm64` 네이티브 러너 (EC2 t4g.medium arm64 대응)
 - ECR: AWS ECR 에 이미지 push
 - 배포: EC2 SSH 접속 → `docker compose pull && docker compose up -d`
-- 인프라 정의: `aws-infra/portal-ai-servers/portal-ai/` (별도 레포)
+- 인프라 정의: `aws-infra/kiko-ai-servers/portal-ai/` (별도 레포)
 
 ### 운영 환경
 
@@ -207,7 +207,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 ### Modal 콜드스타트
 
 - 현상: FashionSigLIP GPU 컨테이너가 scale-to-zero 상태일 때 `/embed` 첫 호출이 최대 90초 소요.
-- 대응: `MODAL_EMBED_TIMEOUT=90` 으로 타임아웃 설정. 현재 콜드스타트 실패 시 502 → portal/app v4 폴백.
+- 대응: `MODAL_EMBED_TIMEOUT=90` 으로 타임아웃 설정. 현재 콜드스타트 실패 시 502 → kikoai/app v4 폴백.
 - 미래 개선: sparse-only 폴백 모드 (Priority High 로드맵 항목).
 
 ### Supabase HNSW 타임아웃
@@ -225,4 +225,4 @@ select = ["E", "F", "I", "N", "W", "UP"]
 ### Supabase RPC 스키마 의존
 
 - 현상: `search_products_v5` RPC 파라미터/반환 스키마가 변경되면 `app/pipeline/search.py` 가 즉시 영향을 받음.
-- 대응: RPC 스키마 변경 시 portal-ai 코드와 동시 배포 필요. 마이그레이션 파일: `portal/app/supabase/migrations/030_search_products_v5.sql`.
+- 대응: RPC 스키마 변경 시 kiko.ai 코드와 동시 배포 필요. 마이그레이션 파일: `kikoai/app/supabase/migrations/030_search_products_v5.sql`.

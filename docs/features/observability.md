@@ -38,7 +38,7 @@ recommend_pipeline (4.2s)
 
 ## LiteLLM 자동 trace
 
-`aws-infra/portal-ai-servers/portal-ai/config/litellm.yaml`:
+`aws-infra/kiko-ai-servers/portal-ai/config/litellm.yaml`:
 
 ```yaml
 litellm_settings:
@@ -48,7 +48,7 @@ litellm_settings:
 
 → `gpt-4o-mini`, `nova-lite` 등 모든 LLM 호출이 자동 trace. 코드 수정 0줄.
 
-`portal/app` 의 Vision 분석(`/api/find/analyze-post`) 도 LiteLLM 경유로 호출되면 동일하게 trace 됨 — `portal/app/.env`에 `LITELLM_BASE_URL` + `LITELLM_API_KEY` 설정 시 활성.
+`kikoai/app` 의 Vision 분석(`/api/find/analyze-post`) 도 LiteLLM 경유로 호출되면 동일하게 trace 됨 — `kikoai/app/.env`에 `LITELLM_BASE_URL` + `LITELLM_API_KEY` 설정 시 활성.
 
 ## 환경변수
 
@@ -62,7 +62,7 @@ litellm_settings:
 
 1. EC2 docker-compose up → `http://<EIP>:3000` 접속
 2. **Sign up** (첫 가입자 = admin) — `NEXTAUTH_SECRET`/`SALT` 가 `.env` 에 설정돼있어야 함
-3. **New Project** → 이름 `portal-ai`
+3. **New Project** → 이름 `kiko.ai`
 4. **Settings → API Keys → Create new** → public/secret 발급
 5. EC2 `.env` 의 `LANGFUSE_PUBLIC_KEY`/`SECRET_KEY` 채우기
 6. `docker compose restart ai-server litellm` → 양쪽 컨테이너가 새 키로 trace 송출

@@ -1,4 +1,4 @@
-# portal-ai 모듈 책임 및 공개 인터페이스
+# kiko.ai 모듈 책임 및 공개 인터페이스
 
 ## 모듈 일람
 
@@ -28,7 +28,7 @@
 
 - `lifespan`: asynccontextmanager. 시작 시 `SupabaseProvider.get_client()` 워밍업(첫 요청 race condition 방지), 종료 시 세 Provider 모두 `close()`.
 - `app`: `default_response_class=ORJSONResponse` 설정으로 직렬화 성능 확보.
-- CORS: `allow_origins=["*"]` (stateless, 세션은 portal/app이 관리).
+- CORS: `allow_origins=["*"]` (stateless, 세션은 kikoai/app이 관리).
 
 ### app.pipeline.state
 
@@ -45,10 +45,10 @@
 
 ### app.models.request
 
-- `AnalyzedItem`: portal/app이 GPT-4o-mini Vision으로 검출한 단일 아이템. `searchQuery`/`searchQueryKo` camelCase alias 지원.
+- `AnalyzedItem`: kikoai/app이 GPT-4o-mini Vision으로 검출한 단일 아이템. `searchQuery`/`searchQueryKo` camelCase alias 지원.
 - `RecommendRequest`: `image_url` SSRF 가드 내장 (`@field_validator`). `tolerance` 범위 0.0~1.0. `final_limit` 범위 1~50.
 
 ### app.models.response
 
-- `Candidate`: `imageUrl`, `productUrl`, `denseRank`, `sparseRank` serialization_alias (camelCase) — portal/app 컨벤션 맞춤.
+- `Candidate`: `imageUrl`, `productUrl`, `denseRank`, `sparseRank` serialization_alias (camelCase) — kikoai/app 컨벤션 맞춤.
 - `RecommendResponse`: `itemId`, `latencyMs` camelCase alias. `counts` 딕셔너리로 단계별 후보 수 노출.

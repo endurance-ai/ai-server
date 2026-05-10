@@ -43,7 +43,7 @@ class ClarifyDelta:
     value: str
     keywords_to_boost: list[str] = field(default_factory=list)
     subcategory_override: str | None = None
-    # mixedCase 는 portal/app `searchQueryKo` 와 의도적으로 일치.
+    # mixedCase 는 kikoai/app `searchQueryKo` 와 의도적으로 일치.
     searchQueryKo_augment: str | None = None  # noqa: N815
     raw_callback: str = ""
     is_skip: bool = False

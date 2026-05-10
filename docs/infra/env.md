@@ -76,7 +76,7 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 
 ## Vision 풍부 스키마 (SPEC-VISION-UNIFY-001)
 
-`app/channels/vision.py` + `vision_prompt.py` — `portal/app` `analyze.ts` 와 동일 JSON 스키마 (styleNode/sensitivityTags/mood/palette/style/items[]).
+`app/channels/vision.py` + `vision_prompt.py` — `kikoai/app` `analyze.ts` 와 동일 JSON 스키마 (styleNode/sensitivityTags/mood/palette/style/items[]).
 
 | 키 | 기본 | 용도 |
 |----|-----|-----|
@@ -113,14 +113,14 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 
 | 키 | 기본 |
 |----|-----|
-| `PROJECT_NAME` | `portal-ai-server` |
+| `PROJECT_NAME` | `kiko-ai-server` |
 | `VERSION` | `0.1.0` (`pyproject.toml` 와 별개) |
 | `ENVIRONMENT` | `development` |
 | `DEBUG` | `False` |
 
 ## EC2 docker-compose 측 (LiteLLM/Langfuse 컨테이너 용)
 
-`aws-infra/portal-ai-servers/portal-ai/env/.env` 참조. 위의 AI 서버 키 외 추가:
+`aws-infra/kiko-ai-servers/portal-ai/env/.env` 참조. 위의 AI 서버 키 외 추가:
 
 | 키 | 용도 |
 |----|------|

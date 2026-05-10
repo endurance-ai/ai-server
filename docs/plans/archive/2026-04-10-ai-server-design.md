@@ -1,4 +1,4 @@
-# Portal.ai AI Server 설계 스펙
+# kiko.ai AI Server 설계 스펙
 
 > Next.js에서 검색 + 리파인 로직을 분리하여
 > FastAPI 기반 AI 서버로 이관한다. Vision 분석은 Next.js에 유지.
@@ -25,7 +25,7 @@
 ## 1. 아키텍처 개요
 
 ```
-┌─ EC2 (portal-ai-server, t4g.medium, 같은 인스턴스) ───────────┐
+┌─ EC2 (kiko-ai-server, t4g.medium, 같은 인스턴스) ───────────┐
 │                                                                 │
 │  ┌─ nginx ──────────────────────────────────────────────────┐  │
 │  │  port 443 (HTTPS, 외부 진입점)                            │  │
@@ -123,7 +123,7 @@
 | 항목 | 값 |
 |------|------|
 | 인스턴스 | t4g.medium (ARM, 2 vCPU, 4GB RAM) |
-| AWS 계정 | portal-ai |
+| AWS 계정 | kiko.ai |
 | 리전 | ap-northeast-2 (Seoul) |
 | OS | Amazon Linux 2023 / Ubuntu 22.04 ARM |
 

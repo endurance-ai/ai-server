@@ -1,5 +1,5 @@
 # 로컬 개발용 docker-compose.
-# 운영 EC2 스택(LiteLLM + Langfuse 포함)은 aws-infra/portal-ai-servers/portal-ai-server/ 참조.
+# 운영 EC2 스택(LiteLLM + Langfuse 포함)은 aws-infra/kiko-ai-servers/kiko-ai-server/ 참조.
 
 services:
   ai-server:

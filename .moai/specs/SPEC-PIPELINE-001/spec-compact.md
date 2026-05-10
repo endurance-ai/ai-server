@@ -64,7 +64,7 @@ type: spec-compact
 
 - 영구 캐싱 / Redis 도입 (별도 SPEC)
 - dense(이미지) 임베딩 변경 (Modal FashionSigLIP 그대로)
-- portal/app Vision 호출 변경 (raw 쿼리 생성 책임은 portal/app)
+- kikoai/app Vision 호출 변경 (raw 쿼리 생성 책임은 kikoai/app)
 - 다국어 자동 언어 감지 (ko/en 둘 다 받는 구조 유지)
 - rerank 스텝 추가 (별도 SPEC)
 - 프롬프트 자가 학습 / 동적 최적화 (정적 프롬프트 1종)

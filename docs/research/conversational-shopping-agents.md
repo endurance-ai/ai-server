@@ -1,6 +1,6 @@
 # Conversational Shopping Agents — Research Synthesis
 
-> **Purpose**: inform the redesign of `portal/ai`'s Telegram fashion bot (currently a 7-state SM in `app/channels/scenario.py`) toward a more natural, extensible conversation model.
+> **Purpose**: inform the redesign of `kikoai/ai`'s Telegram fashion bot (currently a 7-state SM in `app/channels/scenario.py`) toward a more natural, extensible conversation model.
 >
 > **Date**: 2026-05-05
 > **Caveat on noscroll.com**: The user cited noscroll.com as primary inspiration. Investigation revealed noscroll.com is a **SMS news-digest bot**, not a fashion product. We treat it as a *philosophy* reference (text-only, sample-first, negatives matter, conversation-as-UI), not a feature blueprint. Pending user confirmation that this interpretation is correct.

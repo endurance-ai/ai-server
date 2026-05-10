@@ -1,11 +1,11 @@
 # Project Interview
 
-Existing project — portal-ai (Portal.ai 패션 추천 AI 서버)
+Existing project — kiko.ai (kiko.ai 패션 추천 AI 서버)
 
 ## Round 1: Ownership and Purpose
 
 Question: 이 프로젝트의 현재 소유/목적 단계는?
-Answer: 활발 개발 중인 제품. POC/초기 운영 단계이며 portal/app(Next.js)과 연동되어 추천 파이프라인 개선을 지속 중. 문서는 현재 구조 + 단기 로드맵을 반영한다.
+Answer: 활발 개발 중인 제품. POC/초기 운영 단계이며 kikoai/app(Next.js)과 연동되어 추천 파이프라인 개선을 지속 중. 문서는 현재 구조 + 단기 로드맵을 반영한다.
 
 ## Round 2: Constraints and Non-Goals
 
@@ -15,7 +15,7 @@ Answer: 성능/외부 의존 제약을 명시한다.
 - Supabase HNSW 타임아웃 → 배치 chunk 25 + 자동 분할 재시도
 - Langfuse v2 lock (서버 v2 이미지 호환, SDK <3.0)
 - Supabase RPC `search_products_v5` 의존 (DB 스키마 변경 시 영향)
-- Non-goals: 세션/인증(portal/app 책임), Vision 분석(GPT-4o-mini, portal/app 책임), 배치 추천
+- Non-goals: 세션/인증(kikoai/app 책임), Vision 분석(GPT-4o-mini, kikoai/app 책임), 배치 추천
 
 ## Round 3: Documentation Priority
 

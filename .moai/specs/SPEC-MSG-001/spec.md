@@ -27,9 +27,9 @@ issue_number: null
 
 ## Goal
 
-Enable a user to send a fashion photo (with optional text or Pinterest link) via a chat channel (Telegram first; iMessage (BlueBubbles) deferred to post-IR P3) to a Portal.ai bot, and receive 4–5 recommended product cards back in-channel. The bot conversation is the demo surface for a 20-second English IR pitch video targeted at D2SF (YC-style) by 2026-05-07.
+Enable a user to send a fashion photo (with optional text or Pinterest link) via a chat channel (Telegram first; iMessage (BlueBubbles) deferred to post-IR P3) to a kiko.ai bot, and receive 4–5 recommended product cards back in-channel. The bot conversation is the demo surface for a 20-second English IR pitch video targeted at D2SF (YC-style) by 2026-05-07.
 
-The AI server (this project, `portal/ai`) is the orchestration brain: it ingests inbound channel events, runs vision extraction, drives the existing search pipeline (`app/pipeline/runner.py`), and replies through the channel adapter. Channel transport (Telegram Bot API at `https://api.telegram.org`) is operated by Telegram itself — this SPEC treats it as a black box reachable over HTTPS, authenticated by `TELEGRAM_BOT_TOKEN` and a per-deploy `TELEGRAM_WEBHOOK_SECRET`.
+The AI server (this project, `kikoai/ai`) is the orchestration brain: it ingests inbound channel events, runs vision extraction, drives the existing search pipeline (`app/pipeline/runner.py`), and replies through the channel adapter. Channel transport (Telegram Bot API at `https://api.telegram.org`) is operated by Telegram itself — this SPEC treats it as a black box reachable over HTTPS, authenticated by `TELEGRAM_BOT_TOKEN` and a per-deploy `TELEGRAM_WEBHOOK_SECRET`.
 
 ## Non-Goals
 
@@ -50,7 +50,7 @@ The AI server (this project, `portal/ai`) is the orchestration brain: it ingests
 | Product / Founder (hchsa77@gmail.com) | IR pitch owner; final demo content; intent-prompt copy approval |
 | AI Server Owner (this SPEC) | `app/channels/`, webhook routing, scenario state machine, vision call, pipeline glue, observability |
 | Infra / Bot Operator | Telegram bot ownership (`@kiko_fashion_ai_bot`), webhook URL registration via `setWebhook`, secret rotation, post-demo token revocation |
-| portal/app (Next.js) team | Out of scope for this SPEC; no changes required |
+| kikoai/app (Next.js) team | Out of scope for this SPEC; no changes required |
 | Modal team | Out of scope; existing `/embed` endpoint reused unchanged |
 
 ---
@@ -105,7 +105,7 @@ app/channels/
 ├── session.py              # in-memory session store + 30-min TTL + asyncio.Lock
 ├── scenario.py             # 7-state machine (REQ-MSG-005)
 ├── vision.py               # GPT-4o-mini via LITELLM_BASE_URL
-├── link_resolver.py        # pin.it / pinterest.com / generic og:image (P0); instagram via portal/app (P2)
+├── link_resolver.py        # pin.it / pinterest.com / generic og:image (P0); instagram via kikoai/app (P2)
 ├── telegram/               # P0 — fully wired
 │   ├── __init__.py
 │   ├── adapter.py          # TelegramAdapter(MessengerAdapter)
@@ -179,7 +179,7 @@ RESULTS_SENT ──► IDLE (on next photo OR 30-min TTL)
 **Acceptance criteria**:
 - For `pin.it/*`, follow the redirect to `pinterest.com/pin/{id}`, then parse the `<meta property="og:image">` tag and return `[og_image_url]`.
 - For other domains (excluding instagram.com), apply the same generic og:image extraction path.
-- For `instagram.com/p/*` and `instagram.com/reel/*`, the P0 implementation returns `[]` (treated as resolution-failed; the bot replies with the polite error message described in REQ-MSG-005). P2 will route to portal/app's existing extraction service via HTTP — see REQ-MSG-011.
+- For `instagram.com/p/*` and `instagram.com/reel/*`, the P0 implementation returns `[]` (treated as resolution-failed; the bot replies with the polite error message described in REQ-MSG-005). P2 will route to kikoai/app's existing extraction service via HTTP — see REQ-MSG-011.
 - HTTP timeout = 8 s per request; on timeout returns `[]`, logged at WARN.
 - Returns `list[str]` (may be empty); never raises to the caller.
 
@@ -267,9 +267,9 @@ RESULTS_SENT ──► IDLE (on next photo OR 30-min TTL)
 - The `/health` (liveness) endpoint is unchanged and does NOT call Telegram.
 - For `MESSENGER_BACKEND=bluebubbles` or `sendblue` (P3 stubs), the response reports `messenger_backend` accordingly and `reachable=false`, with no exception raised.
 
-### REQ-MSG-011 — Instagram resolver via portal/app extraction service [P2]
+### REQ-MSG-011 — Instagram resolver via kikoai/app extraction service [P2]
 
-**WHEN** an `instagram.com/p/*` or `instagram.com/reel/*` URL is received and the P2 path is enabled, **THE SYSTEM SHALL** make an HTTP call to portal/app's existing Instagram extraction route `POST /api/instagram/fetch-post` (file: `portal/app/src/app/api/instagram/fetch-post/route.ts`, request `{input: <url-or-shortcode>}`, response includes `slides[].r2Url`/`slides[].originalUrl`) and return `list[str]` of image URLs from the post (prefer `r2Url`, fall back to `originalUrl`).
+**WHEN** an `instagram.com/p/*` or `instagram.com/reel/*` URL is received and the P2 path is enabled, **THE SYSTEM SHALL** make an HTTP call to kikoai/app's existing Instagram extraction route `POST /api/instagram/fetch-post` (file: `kikoai/app/src/app/api/instagram/fetch-post/route.ts`, request `{input: <url-or-shortcode>}`, response includes `slides[].r2Url`/`slides[].originalUrl`) and return `list[str]` of image URLs from the post (prefer `r2Url`, fall back to `originalUrl`).
 
 **Acceptance criteria**:
 - Out of scope for the 5/7 demo; documented as a P2 hand-off only.
@@ -366,9 +366,9 @@ These do not block SPEC approval but should be answered before code is written:
 - LiteLLM proxy contract: `app/providers/llm.py` (vision call follows same `LITELLM_BASE_URL` pattern).
 - Auth / health pattern: `app/core/auth.py`, `app/api/health.py` (REQ-MSG-010 extends `/health/ready`).
 - Observability pattern: `app/observability/langfuse.py` (REQ-MSG-009 reuses `@observe`).
-- Project context: `/Users/hansangho/Desktop/portal/ai/CLAUDE.md` — AI server is stateless and reuses LiteLLM + Modal + Supabase.
-- Infra ownership: `/Users/hansangho/Desktop/aws-infra/portal-ai-servers/portal-ai/` (EC2 docker-compose; webhook URL registration via `setWebhook` is performed at app startup, not via infra repo).
-- Instagram extraction reuse: `portal/app/src/app/api/instagram/fetch-post/route.ts` (POST, request `{input}`, response `{slides: [{r2Url, originalUrl, ...}]}`), backed by `apify~instagram-post-scraper` actor with Supabase cache (REQ-MSG-011).
+- Project context: `/Users/hansangho/Desktop/kikoai/ai/CLAUDE.md` — AI server is stateless and reuses LiteLLM + Modal + Supabase.
+- Infra ownership: `/Users/hansangho/Desktop/aws-infra/kiko-ai-servers/portal-ai/` (EC2 docker-compose; webhook URL registration via `setWebhook` is performed at app startup, not via infra repo).
+- Instagram extraction reuse: `kikoai/app/src/app/api/instagram/fetch-post/route.ts` (POST, request `{input}`, response `{slides: [{r2Url, originalUrl, ...}]}`), backed by `apify~instagram-post-scraper` actor with Supabase cache (REQ-MSG-011).
 
 ---
 

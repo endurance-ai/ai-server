@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # App
-    PROJECT_NAME: str = "portal-ai-server"
+    PROJECT_NAME: str = "kiko-ai-server"
     VERSION: str = "0.1.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
@@ -86,13 +86,13 @@ class Settings(BaseSettings):
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
 
-    # SPEC-VISION-UNIFY-001 — Rich Vision schema (parity with portal/app analyze.ts)
+    # SPEC-VISION-UNIFY-001 — Rich Vision schema (parity with kikoai/app analyze.ts)
     # Master flag for the new rich-schema behavior. When false, falls back to
     # the pre-migration minimal schema (REQ-VISION-COMPAT-005).
     VISION_SCHEMA_V2: bool = True
     # Raised from 600 to fit the rich schema (REQ-VISION-UNIFY-003).
     VISION_MAX_TOKENS: int = 2500
-    # Raised from 0.2 to match portal/app run-vision.ts (REQ-VISION-UNIFY-003).
+    # Raised from 0.2 to match kikoai/app run-vision.ts (REQ-VISION-UNIFY-003).
     VISION_TEMPERATURE: float = 0.3
     # Per-call timeout, raised from 15.0 to fit the larger response.
     VISION_TIMEOUT_S: float = 30.0

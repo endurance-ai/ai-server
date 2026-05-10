@@ -11,7 +11,7 @@ class StyleNode(BaseModel):
 
 
 class AnalyzedItem(BaseModel):
-    """portal/app(Next.js)이 GPT-4o-mini Vision으로 검출한 단일 아이템."""
+    """kikoai/app(Next.js)이 GPT-4o-mini Vision으로 검출한 단일 아이템."""
 
     id: str
     category: str
@@ -34,7 +34,7 @@ class PriceFilter(BaseModel):
 
 
 class RecommendRequest(BaseModel):
-    """AI 서버 메인 진입점 입력. portal/app의 /api/find/search가 이 모양으로 호출."""
+    """AI 서버 메인 진입점 입력. kikoai/app의 /api/find/search가 이 모양으로 호출."""
 
     item: AnalyzedItem
     image_url: str = Field(alias="imageUrl", description="검색 기준 슬라이드 R2 URL")

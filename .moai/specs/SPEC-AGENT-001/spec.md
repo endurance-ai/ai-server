@@ -1218,7 +1218,7 @@ These do not block SPEC approval but should be answered before code is written:
 - **Existing observability pattern**: `app/observability/langfuse.py`
   (`@observe` reused at the graph entrypoint; `CallbackHandler` injected via
   `RunnableConfig` for nested LLM tracing).
-- **Project context**: `/Users/hansangho/Desktop/portal/ai/CLAUDE.md`.
+- **Project context**: `/Users/hansangho/Desktop/kikoai/ai/CLAUDE.md`.
 - **Research backing**: `docs/research/conversational-shopping-agents.md`.
 - **PR baseline**: PR #10 (commit `09010cb`) introduced the modules and
   behaviors that REQ-COMPAT-* preserves.

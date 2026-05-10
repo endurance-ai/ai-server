@@ -177,7 +177,7 @@ embed_step 과 enhance_query_step 둘 다 동일 PipelineState 인스턴스를 �
 본 plan 은 SPEC §10 의 Exclusions 를 그대로 승계한다. 특히:
 - rerank 단계 추가 금지 (별도 SPEC)
 - 캐싱 추가 금지
-- portal/app 책임 영역 변경 금지
+- kikoai/app 책임 영역 변경 금지
 
 ## 6. Open Questions (annotation 단계에서 확정)
 

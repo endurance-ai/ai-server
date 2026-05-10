@@ -9,20 +9,20 @@ priority: P0
 issue_number: null
 ---
 
-# SPEC-VISION-UNIFY-001: Unify Telegram Vision Schema with portal/app Web Vision
+# SPEC-VISION-UNIFY-001: Unify Telegram Vision Schema with kikoai/app Web Vision
 
 ## HISTORY
 
 - 2026-05-07 (v0.1.0): Initial draft. Captures the decision (Option A) to keep
-  TWO Vision call sites — portal/app's `src/lib/prompts/analyze.ts` (web) and
-  portal/ai's `app/channels/vision.py` (Telegram bot) — but force them to emit
+  TWO Vision call sites — kikoai/app's `src/lib/prompts/analyze.ts` (web) and
+  kikoai/ai's `app/channels/vision.py` (Telegram bot) — but force them to emit
   the SAME rich JSON schema so that downstream search quality is identical
   regardless of entry channel. Builds on SPEC-MSG-001 (Telegram channel
   transport — kept), SPEC-AGENT-001 (LangGraph topology — extended through
   Working/Session state plumbing), and SPEC-PIPELINE-001 (search pipeline —
   the consumer of the new rich query fields). Two alternatives were
   considered and explicitly rejected: Option B (have the Telegram bot call
-  portal/app's `/api/analyze` over HTTP) and Option C (extract Vision into a
+  kikoai/app's `/api/analyze` over HTTP) and Option C (extract Vision into a
   shared microservice). Both deferred — see "Non-Goals" and "Future Scope".
 
 ---
@@ -32,13 +32,13 @@ issue_number: null
 The kiko.ai stack currently runs TWO independent GPT-4o-mini Vision
 implementations that have drifted apart:
 
-1. **portal/app (Next.js web)** at
+1. **kikoai/app (Next.js web)** at
    `src/lib/prompts/analyze.ts` (149-line `ANALYZE_SYSTEM_PROMPT`) +
    `src/lib/analyze/run-vision.ts` — produces a RICH outfit-and-items schema
    used by the web `/recommend` flow (`isApparel` gate, `styleNode`,
    `sensitivityTags`, `mood`, `palette`, `style`, fully-enum-constrained
    `items[]` with `searchQuery` / `searchQueryKo`).
-2. **portal/ai Telegram bot (this repo)** at `app/channels/vision.py` —
+2. **kikoai/ai Telegram bot (this repo)** at `app/channels/vision.py` —
    produces a MINIMAL `items[] {label, description, color, keywords[]}` shape.
    The Telegram search node (`app/graphs/nodes/search.py::_build_request`)
    only forwards `keywords + intent` into `ChannelRecommendationRequest`,
@@ -50,16 +50,16 @@ the Telegram channel than on the web, because the Telegram path bypasses the
 sparse-query enrichment and enum-driven matching that `search_products_v5`
 relies on.
 
-This SPEC unifies the schema along **Option A**: portal/ai keeps owning its
+This SPEC unifies the schema along **Option A**: kikoai/ai keeps owning its
 own Vision call (no microservice extraction, no cross-process call to
-portal/app), but adopts the SAME rich JSON schema, threads the new fields
+kikoai/app), but adopts the SAME rich JSON schema, threads the new fields
 through `WorkingState` / `SessionState` / `ChannelRecommendationRequest`, and
 reaches the underlying `RecommendRequest` with `searchQueryKo`, `subcategory`,
 `fit`, `colorFamily`, `styleNode`, `moodTags`, and `gender` populated.
 
 The migration is **schema + plumbing only**: no new product capabilities, no
 new Vision model, no new agentic features. The acceptance bar is parity with
-portal/app's web search quality on the same content (REQ-VISION-PARITY-*).
+kikoai/app's web search quality on the same content (REQ-VISION-PARITY-*).
 
 This SPEC describes WHAT the new schema and plumbing must look like. Exact
 prompt text reuse strategy, file structure, and rollback toggle wiring belong
@@ -76,15 +76,15 @@ in `plan.md`.
   diversify` pipeline runs unchanged. This SPEC only enriches the inputs
   reaching `RecommendRequest`.
 - **Migrating Vision to a shared microservice (Option C).** Vision continues
-  to run in-process inside `portal/ai`. A future SPEC may extract it once
+  to run in-process inside `kikoai/ai`. A future SPEC may extract it once
   the prompt has stabilized through at least two release cycles in both
   channels.
-- **Calling portal/app's `/api/analyze` from the Telegram bot (Option B).**
+- **Calling kikoai/app's `/api/analyze` from the Telegram bot (Option B).**
   Avoids cross-deployment latency, an extra failure domain, and an auth
   surface between the bot and Next.js. The bot keeps its own Vision call.
-- **Modifying portal/app's prompt or schema.** This SPEC is one-way:
-  portal/ai converges to portal/app's schema. Any future schema change MUST
-  start in portal/app and only land in portal/ai once REQ-VISION-PARITY-001
+- **Modifying kikoai/app's prompt or schema.** This SPEC is one-way:
+  kikoai/ai converges to kikoai/app's schema. Any future schema change MUST
+  start in kikoai/app and only land in kikoai/ai once REQ-VISION-PARITY-001
   can be re-verified.
 - **Introducing new agentic features.** Self-critique loops, multi-image /
   outfit composition (H3), episodic memory, and tool-calling agents are out
@@ -104,7 +104,7 @@ in `plan.md`.
 |------|----------------|
 | Product / Founder (hchsa77@gmail.com) | Approves the parity acceptance bar (web Telegram quality should be indistinguishable on the same image). Sign-off on REQ-VISION-PARITY-* and on the rollback flag (REQ-VISION-COMPAT-005). |
 | AI Server Owner (this SPEC) | All work in `app/channels/vision.py`, `app/graphs/state.py`, `app/channels/session.py`, `app/graphs/nodes/{vision,pick_item,search}.py`, `app/channels/recommendation.py`, `app/models/request.py`, plus the new `app/channels/vision_prompt.py` canonical prompt module. Owns parity tests and per-node tests. |
-| portal/app Owner | Read-only contract source. Signs off that the schema captured in `vision_prompt.py` is verbatim against `analyze.ts` at the SPEC freeze date. After freeze, any divergence triggers a sync PR (RISK R3). |
+| kikoai/app Owner | Read-only contract source. Signs off that the schema captured in `vision_prompt.py` is verbatim against `analyze.ts` at the SPEC freeze date. After freeze, any divergence triggers a sync PR (RISK R3). |
 | Langfuse Operator | Verifies the new metadata fields (`subcategory`, `fit`, `colorFamily`, `searchQueryKo`, `styleNode`, `moodTags`, `gender`) appear on the `vision_extract` span and that no PII leaks. |
 | Modal Team | Out of scope — embeddings unchanged. |
 
@@ -135,7 +135,7 @@ WAS: minimal {label,desc,color,kw[]}        ALREADY: rich {styleNode, mood,
                        SAME quality bar
 ```
 
-**Affected modules in portal/ai (this SPEC)**:
+**Affected modules in kikoai/ai (this SPEC)**:
 
 - `app/channels/vision.py` — rewritten to emit rich schema, return Pydantic
   model, raise `max_tokens=2500` / `temperature=0.3` parity (REQ-VISION-002,
@@ -183,14 +183,14 @@ WAS: minimal {label,desc,color,kw[]}        ALREADY: rich {styleNode, mood,
 
 ## Schema Reference (informative — formalized in REQ-VISION-UNIFY-001)
 
-The unified schema mirrors `portal/app/src/lib/prompts/analyze.ts`
+The unified schema mirrors `kikoai/app/src/lib/prompts/analyze.ts`
 verbatim. Outfit-level fields:
 
 | Field | Type | Notes |
 |-------|------|-------|
 | `isApparel` | `bool` | Gate. When `false`, items SHALL be empty list and downstream nodes SHALL route to `respond` with an off-topic reply. |
-| `styleNode` | object | `{primary: str, primaryConfidence: float, secondary: str, secondaryConfidence: float, reasoning: str}`. Primary is a node ID from `STYLE_NODE_IDS`. portal/ai consumes this as opaque strings; only portal/app owns the taxonomy definition. |
-| `sensitivityTags` | `list[str]` | 1-3 from `SENSITIVITY_TAGS` allowed list. Stored in Korean (matches portal/app). |
+| `styleNode` | object | `{primary: str, primaryConfidence: float, secondary: str, secondaryConfidence: float, reasoning: str}`. Primary is a node ID from `STYLE_NODE_IDS`. kikoai/ai consumes this as opaque strings; only kikoai/app owns the taxonomy definition. |
+| `sensitivityTags` | `list[str]` | 1-3 from `SENSITIVITY_TAGS` allowed list. Stored in Korean (matches kikoai/app). |
 | `mood` | object | `{tags: [{label, score}], summary, vibe, season, occasion}`. |
 | `palette` | `list[{hex, label}]` | 3-5 dominant colors. |
 | `style` | object | `{fit, aesthetic, detectedGender}`. `detectedGender ∈ {male, female, unisex}`. |
@@ -212,10 +212,10 @@ Per-item fields:
 | `fit` | `str` | Enum: `oversized`, `relaxed`, `regular`, `slim`, `skinny`, `boxy`, `cropped`, `longline`. |
 | `searchQuery` | `str` | English sparse query (`"[fit] [color] [fabric] [subcategory] [men/women]"`). |
 | `searchQueryKo` | `str` | Korean sparse query, fashion industry vocabulary. |
-| `position` | object | `{top: float, left: float}`, percent coordinates for UI dot placement. portal/ai bot does NOT render this dot, but the field SHALL still be persisted for parity tests and future UI parity. |
+| `position` | object | `{top: float, left: float}`, percent coordinates for UI dot placement. kikoai/ai bot does NOT render this dot, but the field SHALL still be persisted for parity tests and future UI parity. |
 
 The Pydantic model in `app/channels/vision.py` SHALL forbid extra fields
-(`ConfigDict(extra="forbid")`) so that drift between portal/app and portal/ai
+(`ConfigDict(extra="forbid")`) so that drift between kikoai/app and kikoai/ai
 fails fast.
 
 ---
@@ -224,12 +224,12 @@ fails fast.
 
 ### Schema Unification (REQ-VISION-UNIFY-*)
 
-#### REQ-VISION-UNIFY-001 — Telegram Vision SHALL emit the same JSON schema as portal/app's ANALYZE_SYSTEM_PROMPT [P0]
+#### REQ-VISION-UNIFY-001 — Telegram Vision SHALL emit the same JSON schema as kikoai/app's ANALYZE_SYSTEM_PROMPT [P0]
 
 **WHEN** the Telegram bot extracts vision from an image,
 **THE SYSTEM SHALL** issue a Vision (LiteLLM `gpt-4o-mini`) call whose
 system prompt is byte-for-byte identical to
-`portal/app/src/lib/prompts/analyze.ts::ANALYZE_SYSTEM_PROMPT` at the SPEC
+`kikoai/app/src/lib/prompts/analyze.ts::ANALYZE_SYSTEM_PROMPT` at the SPEC
 freeze date, and whose response satisfies the schema documented in the
 "Schema Reference" section above.
 
@@ -238,15 +238,15 @@ freeze date, and whose response satisfies the schema documented in the
 - A new module `app/channels/vision_prompt.py` exposes
   `ANALYZE_SYSTEM_PROMPT: str` and `ANALYZE_USER_PROMPT: str` as Python
   string constants, populated from a verbatim copy of
-  `portal/app/src/lib/prompts/analyze.ts`. Auxiliary content that
+  `kikoai/app/src/lib/prompts/analyze.ts`. Auxiliary content that
   `analyze.ts` builds at runtime (the output of `buildNodeReference()`,
   `buildTagList()`, `STYLE_NODE_IDS`, `SENSITIVITY_TAGS`, and
   `buildEnumReference()`) SHALL be captured as static strings in the same
-  module so the bot can run without depending on portal/app.
+  module so the bot can run without depending on kikoai/app.
 - The module's docstring documents the source path
-  (`portal/app/src/lib/prompts/analyze.ts`) and the freeze date.
+  (`kikoai/app/src/lib/prompts/analyze.ts`) and the freeze date.
 - A CI check (or a `noqa`-tagged TODO with a tracking issue) flags the
-  module if the source-of-truth copy in `portal/app` diverges. The exact
+  module if the source-of-truth copy in `kikoai/app` diverges. The exact
   mechanism (manual diff in PR review, weekly bash diff, or a sync script)
   is left to `plan.md`; this SPEC requires only that drift cannot ship
   silently.
@@ -299,7 +299,7 @@ and SHALL NOT raise.
 **Acceptance criteria**:
 
 - The constants in `app/channels/vision.py` (`_MAX_TOKENS=2500`,
-  `_TEMPERATURE=0.3`) match the parameters portal/app sends.
+  `_TEMPERATURE=0.3`) match the parameters kikoai/app sends.
 - The values are exposed via `app/core/config.py` as
   `VISION_MAX_TOKENS` (default `2500`) and `VISION_TEMPERATURE`
   (default `0.3`) so future tuning does not require code change.
@@ -728,8 +728,8 @@ The deprecation removal lands in a follow-up SPEC.
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|------|-----------|--------|------------|
-| R1 | **Schema drift between portal/app and portal/ai** post-merge: portal/app updates `analyze.ts` but `vision_prompt.py` is not synced. | High | High | A CI / weekly diff check (mechanism chosen in `plan.md`) flags drift. The `vision_prompt.py` docstring carries the source-path reference and freeze date so divergence is visible in code review (REQ-VISION-UNIFY-001). |
-| R2 | **Token cost regression**: `max_tokens=2500` × Telegram volume increases LLM spend. | High (by design) | Medium | The spend is bounded by the dev-only environment and the same per-call cap that portal/app already accepts. Langfuse + LiteLLM dashboards track per-turn cost (SPEC-AGENT-001 REQ-OBSV-004). The `VISION_SCHEMA_V2=false` flag provides a one-flip rollback path. |
+| R1 | **Schema drift between kikoai/app and kikoai/ai** post-merge: kikoai/app updates `analyze.ts` but `vision_prompt.py` is not synced. | High | High | A CI / weekly diff check (mechanism chosen in `plan.md`) flags drift. The `vision_prompt.py` docstring carries the source-path reference and freeze date so divergence is visible in code review (REQ-VISION-UNIFY-001). |
+| R2 | **Token cost regression**: `max_tokens=2500` × Telegram volume increases LLM spend. | High (by design) | Medium | The spend is bounded by the dev-only environment and the same per-call cap that kikoai/app already accepts. Langfuse + LiteLLM dashboards track per-turn cost (SPEC-AGENT-001 REQ-OBSV-004). The `VISION_SCHEMA_V2=false` flag provides a one-flip rollback path. |
 | R3 | **Latency regression**: bigger response → slower Vision turn. | High (by design) | Medium | `VISION_TIMEOUT_S=30` cap. P95 monitored via Langfuse. If P95 exceeds the SPEC-MSG-001 12-second end-to-end budget, the flag flips (REQ-VISION-COMPAT-005). `plan.md` documents the SLO and the canary procedure. |
 | R4 | **`extra="forbid"` Pydantic validation rejects responses** when GPT adds an undocumented field. | Medium | Medium | The fallback returned on validation failure satisfies the schema (REQ-VISION-UNIFY-002) so the user always gets a reply. A logged validation error surfaces the unknown field for prompt tuning. `plan.md` may opt for `extra="ignore"` if the operational signal turns into noise — decision recorded there. |
 | R5 | **Non-apparel images route to `ask_clarify` instead of `respond`** if `_is_weak_vision` is wrong about which rule fires. | Medium | Medium | REQ-VISION-WEAKVISION-001 explicitly tests the `isApparel=False` path and asserts it routes to `respond`. The "no silent dead end" invariant (SPEC-AGENT-001 REQ-COMPAT-004) is structurally enforced regardless. |
@@ -740,7 +740,7 @@ The deprecation removal lands in a follow-up SPEC.
 | R10 | **Verbatim prompt copy includes JS-style template-literal syntax** (`${buildNodeReference()}`) that does not evaluate in Python. | Low | High if missed | REQ-VISION-UNIFY-001 explicitly requires that the `${...}` slots be replaced with their static evaluated content at copy time, and that `vision_prompt.py` carries a unit-test-checked smoke sentence to catch unfilled slots. |
 | R11 | **Tests assume `extract()` returns `dict`** and break when the return type becomes `VisionResult`. | Medium | Low | REQ-VISION-COMPAT-001 explicitly permits rewriting test assertions; the fix is mechanical. The `model_dump()` escape hatch lets one-line-fix tests stay in dict form during the transition. |
 | R12 | **`_is_weak_vision` rule churn** causes more `ask_clarify` fires (or fewer) than today, surprising users. | Medium | Medium | The new predicate is parameterized via env vars (REQ-VISION-WEAKVISION-001) so production tuning does not require a code change. Langfuse trace metadata (REQ-VISION-OBSV-001) records the predicate inputs so post-migration analysis can recalibrate. |
-| R13 | **Recommendation-port DTO bump cascades** to `portal/app`'s direct `/recommend` callers if `RecommendRequest` schema changes. | Low | High if missed | REQ-VISION-SEARCH-002 keeps new fields strictly OPTIONAL on `RecommendRequest`; `portal/app`'s caller continues to send the existing payload unchanged. A contract test against the existing portal/app fixture guards this. |
+| R13 | **Recommendation-port DTO bump cascades** to `kikoai/app`'s direct `/recommend` callers if `RecommendRequest` schema changes. | Low | High if missed | REQ-VISION-SEARCH-002 keeps new fields strictly OPTIONAL on `RecommendRequest`; `kikoai/app`'s caller continues to send the existing payload unchanged. A contract test against the existing kikoai/app fixture guards this. |
 | R14 | **Langfuse metadata size grows** with new fields, hitting trace size limits. | Low | Low | The new keys add ≤ 1 KB per trace. `mood_tags` is capped at 5 entries. Trace size is monitored on the Langfuse host. |
 
 ---
@@ -753,11 +753,11 @@ MUST NOT be implemented as part of this SPEC:
 1. **Migrating Vision into a shared microservice (Option C).** Two
    in-process Vision call sites remain. Microservice extraction is a
    future SPEC contingent on the prompt stabilizing in both channels.
-2. **Calling portal/app's `/api/analyze` from the bot (Option B).** No
+2. **Calling kikoai/app's `/api/analyze` from the bot (Option B).** No
    cross-deployment HTTP dependency between the bot and Next.js.
-3. **Modifying portal/app's `analyze.ts` prompt or schema.** Strict
-   one-way convergence: portal/ai matches portal/app. Future schema
-   changes start in portal/app.
+3. **Modifying kikoai/app's `analyze.ts` prompt or schema.** Strict
+   one-way convergence: kikoai/ai matches kikoai/app. Future schema
+   changes start in kikoai/app.
 4. **Changing the Vision model.** GPT-4o-mini via LiteLLM remains the
    backend. Only `max_tokens`, `temperature`, timeout, and the prompt
    body change.
@@ -782,7 +782,7 @@ MUST NOT be implemented as part of this SPEC:
 12. **Re-tuning `enhance_query` against the new sparse query input.**
     Done in a follow-up if measurement shows degradation.
 13. **Adding new picker UI affordances** (color swatch, fit badge) based
-    on the new fields. UI parity with portal/app is out of scope; this
+    on the new fields. UI parity with kikoai/app is out of scope; this
     SPEC is data-plumbing only.
 14. **A side-by-side schema-diff dashboard.** The CI / weekly diff check
     in REQ-VISION-UNIFY-001 is the only drift-detection mechanism.
@@ -807,7 +807,7 @@ written:
    reference text as Python lists / dicts (useful for validation), or
    whether the prompt is a single opaque blob.
 2. **CI drift check mechanism.** Manual diff at PR review, weekly bash
-   diff (`diff portal/app/.../analyze.ts portal/ai/.../vision_prompt.py
+   diff (`diff kikoai/app/.../analyze.ts kikoai/ai/.../vision_prompt.py
    --ignore-all-space`), or a pre-commit hook. `plan.md` chooses based
    on team conventions.
 3. **Pydantic `extra` policy.** `extra="forbid"` (fail fast on prompt
@@ -843,7 +843,7 @@ written:
 ## Future Scope (post-MVP, separate SPEC)
 
 - **Microservice extraction (Option C).** A shared Vision service called
-  by both portal/app and portal/ai. Removes the schema-drift risk
+  by both kikoai/app and kikoai/ai. Removes the schema-drift risk
   structurally.
 - **Removing the `VISION_SCHEMA_V2` flag.** Lands once the flag has
   defaulted to `True` for at least one release with no rollbacks.
@@ -853,7 +853,7 @@ written:
 - **`respond`-side use of outfit context.** Lets the bot reference
   styleNode / mood / detected gender naturally in replies (e.g.,
   "Got it — leaning street-minimal for fall.").
-- **Picker UI parity with portal/app.** Show color swatch, fit badge,
+- **Picker UI parity with kikoai/app.** Show color swatch, fit badge,
   styleNode chip on the carousel cards.
 - **Multi-image / outfit composition (H3).** Multiple inbound images
   per turn produce a fused `VisionResult` with cross-item coherence.
@@ -874,11 +874,11 @@ written:
   - SPEC-PIPELINE-001 (search pipeline — receives the rich query
     fields; behavior governed there).
 - **Source of truth (read-only)**:
-  - `portal/app/src/lib/prompts/analyze.ts` —
+  - `kikoai/app/src/lib/prompts/analyze.ts` —
     `ANALYZE_SYSTEM_PROMPT`.
-  - `portal/app/src/lib/analyze/run-vision.ts` — LiteLLM call
+  - `kikoai/app/src/lib/analyze/run-vision.ts` — LiteLLM call
     parameters (`max_tokens=2500`, `temperature=0.3`).
-- **Affected modules in portal/ai**:
+- **Affected modules in kikoai/ai**:
   - `app/channels/vision.py`,
     `app/channels/vision_prompt.py` (NEW),
     `app/channels/session.py`,
@@ -900,7 +900,7 @@ written:
     `tests/test_recommendation_port.py`,
     plus a new `tests/test_vision_schema_parity.py` for
     REQ-VISION-PARITY-*.
-- **Project context**: `/Users/hansangho/Desktop/portal/ai/CLAUDE.md`.
+- **Project context**: `/Users/hansangho/Desktop/kikoai/ai/CLAUDE.md`.
 - **PR baseline**: SPEC-AGENT-001 (PR #11, commit `f0a7f03`) introduced
   the LangGraph topology and `app/graphs/nodes/vision.py` whose output
   shape this SPEC enriches.
@@ -935,13 +935,13 @@ written:
 - [ ] An end-to-end manual test against the dev Telegram bot exercises:
       (a) photo with multi-item outfit → picker → tap → re-search; the
       logged `searchQueryKo` for the selected item matches the value
-      portal/app produces for the same image.
+      kikoai/app produces for the same image.
       (b) non-apparel photo → polite reply (no `ask_clarify`).
       (c) ambiguous-but-apparel photo → `ask_clarify` fires.
       (d) `VISION_SCHEMA_V2=false` restart → minimal schema, legacy
       behavior, no regression.
-- [ ] Snapshot parity test compares portal/app's `analyze.ts` output and
-      portal/ai's new `vision.extract` output on a shared fixture
+- [ ] Snapshot parity test compares kikoai/app's `analyze.ts` output and
+      kikoai/ai's new `vision.extract` output on a shared fixture
       image: JSON keys match (values may differ within tolerance).
 - [ ] Existing Telegram E2E test (image upload → results card) passes
       with no behavior regression.
@@ -958,7 +958,7 @@ written:
 
 ### 추가된 파일
 
-- `app/channels/vision_prompt.py` — ANALYZE_SYSTEM_PROMPT / ANALYZE_USER_PROMPT 상수 모듈 (portal/app analyze.ts 동결 사본)
+- `app/channels/vision_prompt.py` — ANALYZE_SYSTEM_PROMPT / ANALYZE_USER_PROMPT 상수 모듈 (kikoai/app analyze.ts 동결 사본)
 - `app/channels/clarify.py` — ClarifyAxis, ClarifyDelta, parse_callback (SPEC-CLARIFY-CARDS-001 선행 인프라)
 - `tests/test_graph_nodes/test_vision.py` — rich schema 단위 테스트 (새 VisionResult 모델 포함)
 - `tests/test_vision_schema_parity.py` — 프롬프트 상수 smoke test (isApparel, styleNode, searchQueryKo 등 마커 검증)
@@ -978,11 +978,11 @@ written:
 
 ### 이연(Deferred) 항목
 
-- **스냅샷 parity 테스트** — portal/app analyze.ts와 portal/ai vision.extract 결과를 실제 JPEG 픽스처로 비교하는 테스트. LITELLM API 키 및 공유 픽스처 이미지가 필요하여 CI에서 실행 불가. 후속 SPEC 또는 manual QA 시나리오로 처리 예정.
+- **스냅샷 parity 테스트** — kikoai/app analyze.ts와 kikoai/ai vision.extract 결과를 실제 JPEG 픽스처로 비교하는 테스트. LITELLM API 키 및 공유 픽스처 이미지가 필요하여 CI에서 실행 불가. 후속 SPEC 또는 manual QA 시나리오로 처리 예정.
 - **REQ-VISION-OBSV-001 Langfuse 메타데이터 보강** — vision_extract 스팬에 subcategory / fit / colorFamily / searchQueryKo 등 11개 메타데이터 키 추가. @observe 래퍼 확장이 필요하며 현재 no-op 폴백 상태에서 구조 검증이 어려워 이연. 별도 observability 강화 SPEC 또는 Langfuse 연결 안정화 후 진행.
 
 ### 해소된 Open Questions
 
 - Q3 Pydantic extra 정책: extra="forbid"로 확정 (프롬프트 드리프트 조기 감지 우선)
-- Q5 _VISION_TIMEOUT: 30초로 확정 (portal/app run-vision.ts 관찰 P95 기준)
+- Q5 _VISION_TIMEOUT: 30초로 확정 (kikoai/app run-vision.ts 관찰 P95 기준)
 - Q7 vision_outfit_mood_tags: score 기준 상위 5개 레이블로 확정 (REQ-VISION-OBSV-001 cap과 일치)

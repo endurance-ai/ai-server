@@ -203,7 +203,7 @@ updated: 2026-05-04
 ### Backward Compatibility [HARD]
 
 - `ENHANCE_QUERY_ENABLED=false` (기본값) 상태에서 기존 추천 응답 형태(JSON 스키마, product_ids 순서 모두) 100% 동일
-- 기존 호출자(portal/app) 의 코드 변경 0
+- 기존 호출자(kikoai/app) 의 코드 변경 0
 - `RecommendResponse` 스키마 변경 없음
 
 ## 4. Definition of Done

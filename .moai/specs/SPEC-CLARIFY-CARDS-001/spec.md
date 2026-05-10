@@ -20,7 +20,7 @@ issue_number: null
   `boost_keywords` sticky 처리) 위에 올라간다. 채널 전송 계약은 SPEC-MSG-001을,
   그래프 토폴로지 계약은 SPEC-AGENT-001을 그대로 따른다. 본 SPEC은 weak-vision
   분기에서만 동작하며, multi-item picker(`pick_item`), 자기-비평 루프
-  (`evaluator` / `apply_self_critique`), portal/app 웹 UI는 변경하지 않는다.
+  (`evaluator` / `apply_self_critique`), kikoai/app 웹 UI는 변경하지 않는다.
 
 ---
 
@@ -62,7 +62,7 @@ issue_number: null
 
 ## Non-Goals
 
-- **portal/app 웹 UI 변경.** 본 SPEC은 텔레그램 채널 한정이다. 웹은 별도의
+- **kikoai/app 웹 UI 변경.** 본 SPEC은 텔레그램 채널 한정이다. 웹은 별도의
   Vision 신뢰도 흐름과 그 자체의 clarify UX(폼 기반)를 가지며 본 SPEC이
   건드리지 않는다.
 - **다회차 clarify 체인.** 한 카드 + 한 탭 + 검색 진입이 종료 조건이다. 두
@@ -86,10 +86,10 @@ issue_number: null
 | 역할 | 이름 / 그룹 | 관심사 |
 |------|------------|-------|
 | Product owner | hchsa77@ | weak-vision 응답률, 검색 품질 회귀 부재 |
-| Engineering owner | portal/ai 메인테이너 | 그래프 토폴로지 단순성 유지, 테스트 커버리지 |
+| Engineering owner | kikoai/ai 메인테이너 | 그래프 토폴로지 단순성 유지, 테스트 커버리지 |
 | Downstream consumer | `app/pipeline/runner.py` | `boost_keywords` / `subcategory` / `searchQueryKo` 입력 |
 | End user | 텔레그램 봇 사용자 | 더 적은 타이핑, 더 빠른 결과 |
-| Adjacent | portal/app 웹 메인테이너 | 본 SPEC이 웹을 건드리지 않는다는 보장 |
+| Adjacent | kikoai/app 웹 메인테이너 | 본 SPEC이 웹을 건드리지 않는다는 보장 |
 
 ## Architecture Snapshot
 
@@ -353,7 +353,7 @@ axis=formality value=semi_formal subcategory_override=null boost_keywords=...`).
 
 **THE** 본 SPEC **SHALL NOT** 다음을 변경한다.
 
-- `app/api/recommend.py` 또는 `portal/app`의 어떤 라우트 / 컴포넌트
+- `app/api/recommend.py` 또는 `kikoai/app`의 어떤 라우트 / 컴포넌트
 - `pick_item` 노드(SPEC-AGENT-001 REQ-AGENT-010)
 - `evaluator` / `apply_self_critique` 노드(SPEC-AGENTIC-CRITIQUE-001)
 - `app/channels/vision.py`의 Vision 호출 또는 프롬프트
@@ -415,7 +415,7 @@ axis=formality value=semi_formal subcategory_override=null boost_keywords=...`).
 본 SPEC이 의도적으로 만들지 **않는** 것들. 이 목록은 개발자가 "마침 이 자리에
 와 있는 김에" 추가하는 드라이브-바이 변경을 차단한다.
 
-1. **portal/app 웹 UI 변경 일체.** `src/components/`, `app/(routes)/`,
+1. **kikoai/app 웹 UI 변경 일체.** `src/components/`, `app/(routes)/`,
    `src/lib/analyze/` 어떤 파일도 본 SPEC 범위가 아니다.
 2. **다중 턴 clarify(2개 이상 카드 연속 표시).** 한 turn에 한 카드. 두 개 축이
    동시에 weak이라도 우선순위 1개만 묻는다.

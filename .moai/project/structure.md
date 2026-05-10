@@ -215,7 +215,7 @@ ingest → resolve_image → vision → pick_item → ask_clarify? → apply_cla
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO |
 | `app/channels/vision.py` | GPT-4o-mini Vision 호출 → `VisionResult` 반환 (rich schema) |
-| `app/channels/vision_prompt.py` | `ANALYZE_SYSTEM_PROMPT` / `ANALYZE_USER_PROMPT` 상수 (portal/app 동결 사본) |
+| `app/channels/vision_prompt.py` | `ANALYZE_SYSTEM_PROMPT` / `ANALYZE_USER_PROMPT` 상수 (kikoai/app 동결 사본) |
 | `app/channels/clarify.py` | `ClarifyAxis`, `ClarifyDelta`, `parse_callback`, `pick_clarify_axis` |
 | `app/channels/clarify_values.py` | 축별 enum 값 + keywords/subcategory_override/searchQueryKo_augment 매핑 표 |
 | `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체 |

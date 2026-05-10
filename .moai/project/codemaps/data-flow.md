@@ -1,11 +1,11 @@
-# portal-ai 데이터 흐름
+# kiko.ai 데이터 흐름
 
 ## 요청 처리 시퀀스
 
 ```mermaid
 sequenceDiagram
-    participant APP as portal/app (Next.js)
-    participant AI as portal-ai (FastAPI)
+    participant APP as kikoai/app (Next.js)
+    participant AI as kiko.ai (FastAPI)
     participant AUTH as verify_internal_token
     participant RUNNER as run_pipeline
     participant EMBED as embed_step
@@ -139,4 +139,4 @@ RPC 내부에서 dense(HNSW pgvector)와 sparse(pgroonga BM25) 결과를 RRF(Rec
 
 ## 폴백 경로
 
-portal-ai가 HTTP 5xx 또는 timeout을 반환하면, portal/app(Next.js)이 v4 레거시 검색(Supabase 직접 호출)으로 전환한다. 이 폴백 로직은 portal/app 레포에 위치하며 portal-ai는 관여하지 않는다.
+kiko.ai가 HTTP 5xx 또는 timeout을 반환하면, kikoai/app(Next.js)이 v4 레거시 검색(Supabase 직접 호출)으로 전환한다. 이 폴백 로직은 kikoai/app 레포에 위치하며 kiko.ai는 관여하지 않는다.

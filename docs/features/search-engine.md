@@ -15,7 +15,7 @@
 
 ## RPC 인터페이스
 
-`portal/app/supabase/migrations/030_search_products_v5.sql`:
+`kikoai/app/supabase/migrations/030_search_products_v5.sql`:
 
 ```sql
 search_products_v5(
@@ -150,7 +150,7 @@ v4는 점진적으로 폐기 예정 (v5 검증 후).
 
 ## 평가 / 디버깅
 
-- **검색 디버거**: portal/app `/admin/search-debugger` (v4 기반, v5 토글은 미작성 — 백로그)
+- **검색 디버거**: kikoai/app `/admin/search-debugger` (v4 기반, v5 토글은 미작성 — 백로그)
 - **로그**: `search_quality_logs` 테이블 (v4 만 기록 중. v5 로깅은 백로그)
 - **trace**: Langfuse `recommend_pipeline` → `pipeline.search` span 의 input/output 전체 노출
 
@@ -158,5 +158,5 @@ v4는 점진적으로 폐기 예정 (v5 검증 후).
 
 | 파일 | 내용 |
 |------|------|
-| `portal/app/supabase/migrations/027_product_embeddings_and_pgroonga.sql` | embedding 컬럼 + HNSW + pgroonga 인덱스 + bulk_update RPC + coverage 뷰 |
-| `portal/app/supabase/migrations/030_search_products_v5.sql` | 본 RPC (`search_products_v5`) + `product_search_text` 헬퍼 |
+| `kikoai/app/supabase/migrations/027_product_embeddings_and_pgroonga.sql` | embedding 컬럼 + HNSW + pgroonga 인덱스 + bulk_update RPC + coverage 뷰 |
+| `kikoai/app/supabase/migrations/030_search_products_v5.sql` | 본 RPC (`search_products_v5`) + `product_search_text` 헬퍼 |

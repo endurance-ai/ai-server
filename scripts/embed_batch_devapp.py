@@ -1,6 +1,6 @@
 """FashionSigLIP 로컬 배치 임베딩 — dev-app Postgres 직접 접속 버전.
 
-기존 `portal/ai/scripts/embed_batch_local.py` 의 dev-app 대응판.
+기존 `kikoai/ai/scripts/embed_batch_local.py` 의 dev-app 대응판.
 Supabase REST 의존을 제거하고 psycopg 로 직접 SELECT + RPC 호출.
 
 DB 의 products 중 embedding 이 NULL 인 항목을 모아 로컬 머신에서 FashionSigLIP 으로
@@ -12,7 +12,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
   - x86 CPU only:  10~20 시간
 
 사용:
-    cd /Users/hansangho/Desktop/portal/ai
+    cd /Users/hansangho/Desktop/kikoai/ai
 
     # 1) embed 그룹 동기화 (psycopg 추가됨 — pyproject.toml 패치 후)
     uv sync --group embed

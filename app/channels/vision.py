@@ -1,7 +1,7 @@
 """Vision extraction via LiteLLM proxy (GPT-4o-mini default).
 
 SPEC-VISION-UNIFY-001 — emits the rich `VisionResult` schema mirroring
-portal/app's `analyze.ts`. The legacy minimal schema is kept behind the
+kikoai/app's `analyze.ts`. The legacy minimal schema is kept behind the
 `VISION_SCHEMA_V2` flag for one-flip rollback (REQ-VISION-COMPAT-005).
 
 `extract()` always returns a `VisionResult` and never raises.
@@ -45,7 +45,7 @@ _LEGACY_SYSTEM_PROMPT = (
 )
 
 
-# ── Pydantic v2 models — mirror portal/app's VisionAnalysisResult ──────────
+# ── Pydantic v2 models — mirror kikoai/app's VisionAnalysisResult ──────────
 
 
 class VisionMoodTag(BaseModel):
@@ -92,7 +92,7 @@ class VisionPosition(BaseModel):
 
 
 class VisionItem(BaseModel):
-    """Per-item structured fields. Mirrors portal/app's VisionAnalysisItem."""
+    """Per-item structured fields. Mirrors kikoai/app's VisionAnalysisItem."""
 
     # Note: spec mandates extra="forbid" but operationally we use extra="ignore"
     # on inner models so a single unknown key from GPT doesn't fail the whole
@@ -116,7 +116,7 @@ class VisionItem(BaseModel):
 
 
 class VisionResult(BaseModel):
-    """Outfit-level Vision schema. Mirrors portal/app's VisionAnalysisResult."""
+    """Outfit-level Vision schema. Mirrors kikoai/app's VisionAnalysisResult."""
 
     # @MX:NOTE: [AUTO] Outer model uses extra="ignore" not "forbid" for safety —
     # GPT occasionally returns minor extra keys; failing fast loses too much
@@ -233,12 +233,12 @@ def _validate_v2(parsed: dict) -> VisionResult:
     """Validate a parsed JSON payload as a rich-schema VisionResult.
 
     Defensive: if `isApparel` is missing, infer from items list (matches
-    portal/app's run-vision.ts inference logic).
+    kikoai/app's run-vision.ts inference logic).
     """
     if not isinstance(parsed, dict):
         return _fallback_result()
 
-    # Mirror portal/app inference: missing isApparel + non-empty items → True.
+    # Mirror kikoai/app inference: missing isApparel + non-empty items → True.
     if "isApparel" not in parsed:
         items_count = len(parsed.get("items") or []) if isinstance(parsed.get("items"), list) else 0
         parsed = {**parsed, "isApparel": items_count > 0}

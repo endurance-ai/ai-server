@@ -1,6 +1,6 @@
 # 코드 패턴
 
-> portal-ai-server 코드 컨벤션. 변경 시 같이 업데이트: 본 문서, `CLAUDE.md`, `docs/ARCHITECTURE.md`.
+> kiko-ai-server 코드 컨벤션. 변경 시 같이 업데이트: 본 문서, `CLAUDE.md`, `docs/ARCHITECTURE.md`.
 
 ## 1. 두 가지 실행 경로
 

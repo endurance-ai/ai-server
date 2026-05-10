@@ -73,7 +73,7 @@ def test_settings_defaults():
     assert s.QDRANT_HOST == "localhost"
     assert s.QDRANT_PORT == 6333
     assert s.LITELLM_BASE_URL == "http://localhost:4000"
-    assert s.PROJECT_NAME == "portal-ai-server"
+    assert s.PROJECT_NAME == "kiko-ai-server"
     assert s.ENVIRONMENT == "development"
 
 
@@ -105,7 +105,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # App
-    PROJECT_NAME: str = "portal-ai-server"
+    PROJECT_NAME: str = "kiko-ai-server"
     VERSION: str = "0.1.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = False

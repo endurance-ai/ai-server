@@ -1,6 +1,6 @@
 """Internal shared-secret 인증.
 
-portal/app(Next.js) → AI 서버 호출용. INTERNAL_API_TOKEN 미설정 시(dev) 검증 스킵.
+kikoai/app(Next.js) → AI 서버 호출용. INTERNAL_API_TOKEN 미설정 시(dev) 검증 스킵.
 운영에선 반드시 설정 — 미설정 + production 환경 조합은 startup에서 차단(아래 verify).
 """
 

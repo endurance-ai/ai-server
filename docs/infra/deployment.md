@@ -1,6 +1,6 @@
 # 배포
 
-> EC2 t4g.medium (ARM) + Docker Compose 5컨테이너 + Modal serverless. 인프라 측 SoT 는 `aws-infra/portal-ai-servers/portal-ai/`.
+> EC2 t4g.medium (ARM) + Docker Compose 5컨테이너 + Modal serverless. 인프라 측 SoT 는 `aws-infra/kiko-ai-servers/portal-ai/`.
 
 ## 토폴로지
 
@@ -17,7 +17,7 @@ merge → deploy-dev.yml             EC2 t4g.medium (ap-northeast-2)         (T4
 
 ## EC2 스택
 
-`aws-infra/portal-ai-servers/portal-ai/docker/docker-compose.yml` 의 5컨테이너:
+`aws-infra/kiko-ai-servers/portal-ai/docker/docker-compose.yml` 의 5컨테이너:
 
 | 컨테이너 | 역할 | 포트 | 메모리 |
 |---------|------|------|-------|
@@ -34,7 +34,7 @@ merge → deploy-dev.yml             EC2 t4g.medium (ap-northeast-2)         (T4
 
 | 항목 | 값 |
 |------|---|
-| AWS 프로필 | `portal-ai` |
+| AWS 프로필 | `kiko.ai` |
 | Instance ID | `i-095a9f3b60b2bb73f` |
 | 타입 | t4g.medium (또는 t4g.large) |
 | 리전 | `ap-northeast-2` |
@@ -45,7 +45,7 @@ merge → deploy-dev.yml             EC2 t4g.medium (ap-northeast-2)         (T4
 
 ```bash
 # 로컬에서 EC2 SSM 접속
-aws ssm start-session --target i-095a9f3b60b2bb73f --profile portal-ai --region ap-northeast-2
+aws ssm start-session --target i-095a9f3b60b2bb73f --profile kiko.ai --region ap-northeast-2
 
 # EC2 안에서
 sudo dnf install -y docker
@@ -58,7 +58,7 @@ sudo curl -L "https://github.com/docker/compose/releases/download/v2.29.1/docker
 sudo chmod +x /usr/local/bin/docker-compose
 ```
 
-자동화: `aws-infra/portal-ai-servers/portal-ai/scripts/setup.sh`.
+자동화: `aws-infra/kiko-ai-servers/portal-ai/scripts/setup.sh`.
 
 ## 파일 배치 (EC2)
 
@@ -82,10 +82,10 @@ docker compose logs -f
 
 ## 첫 배포 절차
 
-1. **Supabase migration 적용** — `portal/app/supabase/migrations/030_search_products_v5.sql`
-2. **Modal `/embed` 배포** — `aws-infra/portal-ai-servers/portal-ai/modal/embed_app.py` (`modal deploy`)
+1. **Supabase migration 적용** — `kikoai/app/supabase/migrations/030_search_products_v5.sql`
+2. **Modal `/embed` 배포** — `aws-infra/kiko-ai-servers/portal-ai/modal/embed_app.py` (`modal deploy`)
 3. **EC2 docker compose up** — Langfuse + LiteLLM + 빈 ai-server (이미지 미존재 → ai-server 만 fail)
-4. **Langfuse 첫 회원가입** → 프로젝트 `portal-ai` 생성 → API Keys 발급 → `.env` 채움
+4. **Langfuse 첫 회원가입** → 프로젝트 `kiko.ai` 생성 → API Keys 발급 → `.env` 채움
 5. **GHA secrets 등록** — `AWS_*`, `SSH_*` (상세: [`cicd.md`](cicd.md))
 6. **dev 브랜치 첫 커밋 push** → CI 통과 → merge → deploy-dev.yml 실행 → EC2 ai-server 띄워짐
 7. **Vercel env 등록** — `AI_SERVER_URL=http://<EIP>:8000`, `INTERNAL_API_TOKEN=<token>`
@@ -93,7 +93,7 @@ docker compose logs -f
 ## Modal 배포 (별도)
 
 ```bash
-cd aws-infra/portal-ai-servers/portal-ai/modal
+cd aws-infra/kiko-ai-servers/portal-ai/modal
 modal token new                        # 1회
 modal secret create portal-ai-modal \
   EMBED_AUTH_TOKEN=$(openssl rand -hex 32)
@@ -102,7 +102,7 @@ modal deploy embed_app.py
 
 배포 후 출력 URL 을 EC2 `.env` 의 `MODAL_EMBED_URL` 에 등록. `EMBED_AUTH_TOKEN` 값은 `MODAL_EMBED_TOKEN` 과 **동일하게** 채움.
 
-상세: `aws-infra/portal-ai-servers/portal-ai/modal/README.md`.
+상세: `aws-infra/kiko-ai-servers/portal-ai/modal/README.md`.
 
 ### Modal 정책
 
@@ -138,12 +138,12 @@ scale-to-zero 시 cold start ~10~17초. 트래픽 패턴 보면서 조절.
 | EC2 t4g.large 24/7 | ~$60 |
 | EBS gp3 30GB | ~$3 |
 | Modal T4 (scale-to-zero, 호출당 1초) | ~$1~5 |
-| Supabase Pro | (별도, portal/app 과 공유) |
+| Supabase Pro | (별도, kikoai/app 과 공유) |
 | **합계 (medium)** | **~$35~40** |
 
 ## 관련 문서
 
 - [`cicd.md`](cicd.md) — GitHub Actions + ECR + SSH 배포 상세
 - [`env.md`](env.md) — 환경변수 매트릭스
-- `aws-infra/portal-ai-servers/portal-ai/CICD.md` — 인프라 측 셋업 가이드 (SSM/IAM/ECR)
-- `aws-infra/portal-ai-servers/portal-ai/modal/README.md` — Modal 배포
+- `aws-infra/kiko-ai-servers/portal-ai/CICD.md` — 인프라 측 셋업 가이드 (SSM/IAM/ECR)
+- `aws-infra/kiko-ai-servers/portal-ai/modal/README.md` — Modal 배포

@@ -43,7 +43,7 @@ _MAX_LEN = 200
 
 
 def _build_messages(req_item: Any) -> list[dict[str, Any]]:
-    """프롬프트 메시지 구성. portal/app 이 전달한 메타를 그대로 직렬화."""
+    """프롬프트 메시지 구성. kikoai/app 이 전달한 메타를 그대로 직렬화."""
     user_payload = {
         "raw_ko": req_item.search_query_ko or "",
         "raw_en": req_item.search_query or "",

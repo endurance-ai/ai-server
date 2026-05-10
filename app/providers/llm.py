@@ -8,7 +8,7 @@ from app.core.config import settings
 class LLMProvider:
     """LiteLLM 프록시 클라이언트 (httpx async).
 
-    Vision은 portal/app(Next.js)이 담당. 여기는 enhance_query/rerank 등 텍스트 LLM 용도.
+    Vision은 kikoai/app(Next.js)이 담당. 여기는 enhance_query/rerank 등 텍스트 LLM 용도.
     """
 
     _client: ClassVar[httpx.AsyncClient | None] = None

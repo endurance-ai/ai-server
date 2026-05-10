@@ -108,7 +108,7 @@ rows = await SupabaseProvider.rpc("search_products_v5", {
 
 | 항목 | 값 |
 |------|---|
-| RPC | `search_products_v5` (`portal/app/supabase/migrations/030_search_products_v5.sql`) |
+| RPC | `search_products_v5` (`kikoai/app/supabase/migrations/030_search_products_v5.sql`) |
 | 알고리즘 | dense (HNSW pgvector) + sparse (pgroonga BM25) + RRF |
 | top-K | 50 |
 | 응답 | `dense_rank`, `sparse_rank`, `dense_score`, `sparse_score`, `score` (RRF) |
