@@ -22,7 +22,7 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 | Modal | FashionSigLIP 임베딩 (단건 + 배치) |
 | dev-app Postgres + nginx PostgREST shim | pgvector + pgroonga, `search_products_v5` RPC. SPEC-INFRA-MIGRATE-001 P6 이후 자체호스팅 (이전: Supabase) |
 
-> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영 (`SUPABASE_URL` env 는 논리명 유지하면서 nginx PostgREST shim 으로 라우팅).
+> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. env 변수는 `DB_URL`/`DB_TOKEN` 으로 리네임 완료 (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), nginx PostgREST shim (`http://172.31.59.31:3001`) 으로 라우팅.
 
 ## 디렉토리
 

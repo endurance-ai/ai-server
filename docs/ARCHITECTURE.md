@@ -25,9 +25,9 @@ Postgres 16 + pgvector + pgroonga
 
 **외부 채널 서비스**: Telegram Bot API (`https://api.telegram.org`) — Telegram 소유·운영, HTTPS webhook 방식. Pinterest(`pinterest.com` / `pin.it`) 서버사이드 fetch로 og:image 추출 (P0). Instagram P2 스텁.
 
-**v5 인프라**: dev-app Postgres 16 + pgvector + pgroonga (마이그레이션 027 + 030 적용). PostgREST + nginx shim 으로 `SUPABASE_URL` 호환 라우팅. SPEC-INFRA-MIGRATE-001 P6 이후 Supabase.com 미사용. Qdrant **사용 안 함**.
+**v5 인프라**: dev-app Postgres 16 + pgvector + pgroonga (마이그레이션 027 + 030 적용). PostgREST + nginx shim 으로 `DB_URL` 호환 라우팅. SPEC-INFRA-MIGRATE-001 P6 이후 Supabase.com 미사용. Qdrant **사용 안 함**.
 
-> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 기존 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` env 는 논리명만 유지하면서 nginx PostgREST shim (`http://172.31.59.31:3001/rest/v1/...`) 으로 라우팅.
+> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. env 변수는 `DB_URL`/`DB_TOKEN` 으로 리네임 완료 (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), nginx PostgREST shim (`http://172.31.59.31:3001/rest/v1/...`) 으로 라우팅.
 
 `enhance_query` LLM 리파인 step 은 백로그 — 현재 파이프라인은 직선 (embed → search → diversify).
 

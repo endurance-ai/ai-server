@@ -85,7 +85,7 @@ class SomeProvider:
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+    if settings.DB_URL and settings.DB_TOKEN:
         await SupabaseProvider.get_client()
     yield
     await SupabaseProvider.close()
