@@ -30,7 +30,7 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, vision (+ vision_prompt, clarify, clarify_values)
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, lang, vision (+ vision_prompt, clarify, clarify_values)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
 │   └── nodes/           # 12 노드: ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond
@@ -69,6 +69,9 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## 코딩 컨벤션
 
 - **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 12-노드 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **Sticky language (KO/EN)**: `app/channels/lang.py` (`detect_lang` / `remember_lang` / `session_lang`) 가 Hangul 유무로 언어를 판별. `ingest` 노드가 매 텍스트 턴마다 `Session.lang` 을 갱신 — 이후 버튼 탭(텍스트 없음)에도 이전 언어로 응답. `respond` / `send_results` / `pick_item` / `ask_clarify` / `critique_apply` 노드가 `session_lang(sess)` 를 참조해 KO/EN 메시지를 분기.
+- **Bot persona**: `respond` 노드 system prompt 는 "kiko" 페르소나 — Puss-in-Boots 느낌, 친근한 해요체(KO) / lively English(EN). 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 (prompt injection 방어).
+- **구조화 로그 이모지 범례**: 📥 webhook, 🧭 router, 👁 vision, 🔍 search, 🤔 critique/evaluator, 🎨 pipeline, 🐱 bot 발화 (respond/adapter).
 - **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 그래프 노드는 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
@@ -90,12 +93,13 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001) |
 | `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델 |
 | `app/graphs/routing.py` | 6개 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search) |
-| `app/graphs/nodes/respond.py` | 자연어 reply 생성 — `ChatOpenAI` (`RESPONSE_MODEL`, `RESPONSE_MAX_TOKENS`, `RESPONSE_TIMEOUT_MS`). `critique_exhausted` 시 톤 완화 |
+| `app/graphs/nodes/respond.py` | 자연어 reply 생성 — `ChatOpenAI` (`RESPONSE_MODEL`, `RESPONSE_MAX_TOKENS`, `RESPONSE_TIMEOUT_MS`). "kiko" 페르소나 system prompt + KO/EN 분기 fallback. 12 flows (`_Flow` enum, `STALE_CRITIQUE` 포함). `critique_exhausted` 시 톤 완화 |
 | `app/graphs/nodes/ask_clarify.py` | weak-vision 시 인라인 키보드 카드 생성 (SPEC-CLARIFY-CARDS-001, 6 axes, LLM 호출 없음) |
 | `app/graphs/nodes/apply_clarify.py` | `clarify:*` callback 소비 → `session.boost_keywords` 누적 (SPEC-CLARIFY-CARDS-001) |
 | `app/graphs/nodes/evaluator.py` | search 결과 평가 → 빈 결과 fast-path (필터 drop) / LLM 평가 → `CritiqueDelta` 재시도 (SPEC-AGENTIC-CRITIQUE-001, 최대 2회 + 4 안전 가드) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
-| `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함 |
+| `app/channels/lang.py` | 언어 감지 헬퍼 — `detect_lang` / `remember_lang` / `session_lang`. Hangul 유무 기준 KO/EN 판별, `Session.lang` sticky 갱신 |
+| `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함. `Session.lang: str = "en"` (sticky 언어 필드) |
 | `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 — v2 schema (SPEC-VISION-UNIFY-001): `styleNode`/`sensitivityTags`/`mood`/`palette`/`style`/`items[]` (subcategory/fit/colorFamily/searchQuery/searchQueryKo). flag: `VISION_SCHEMA_V2` |
 | `app/channels/vision_prompt.py` | Vision v2 schema 프롬프트 + JSON 스키마 정의 (portal/app `analyze.ts` 동치) |
 | `app/channels/clarify.py` | clarify 카드 빌더 (6 axes: category_pick / formality / fit / occasion / subcategory_disambiguation / generic_fallback) |

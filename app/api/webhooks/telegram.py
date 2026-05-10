@@ -46,13 +46,13 @@ async def telegram_webhook(
     expected = settings.TELEGRAM_WEBHOOK_SECRET
     if not verify_secret_token(x_telegram_bot_api_secret_token, expected):
         client_host = request.client.host if request.client else "unknown"
-        logger.warning("telegram webhook rejected: bad secret token from %s", client_host)
+        logger.warning("📥 [webhook] 🚫 rejected: bad secret token from %s", client_host)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
     try:
         payload = await request.json()
     except Exception:
-        logger.warning("telegram webhook: invalid JSON")
+        logger.warning("📥 [webhook] ⚠️  invalid JSON")
         return ORJSONResponse({"ok": True})
 
     adapter = get_adapter()
@@ -60,16 +60,21 @@ async def telegram_webhook(
     try:
         message = await adapter.parse_inbound(payload)
     except ChannelParseError as e:
-        logger.error("telegram parse_inbound error update_id=%s err=%s", update_id, e)
+        logger.error("📥 [webhook] ❌ parse_inbound error update_id=%s err=%s", update_id, e)
         return ORJSONResponse({"ok": True})
     except Exception:
-        logger.exception("telegram parse_inbound unexpected error update_id=%s", update_id)
+        logger.exception("📥 [webhook] ❌ parse_inbound unexpected error update_id=%s", update_id)
         return ORJSONResponse({"ok": True})
 
+    # Privacy: hash user identity (review P1) and cap text at 80 chars to
+    # match the codebase's existing privacy posture (see ingest.py — "Avoid
+    # logging raw user text"). from_username is intentionally NOT logged.
     logger.info(
-        "inbound parsed text=%r photo_file_id=%s urls=%s",
+        "📥 [webhook] inbound update_id=%s user=%s text=%r photo=%s urls=%s",
+        update_id,
+        _hash_id(message.from_user_id),
         (message.text or "")[:80],
-        message.photo_file_id,
+        bool(message.photo_file_id),
         [str(u) for u in message.urls],
     )
 
@@ -108,4 +113,4 @@ async def _run_graph_safe(adapter: MessengerAdapter, message: ChannelMessage) ->
     try:
         await _invoke_graph(adapter, message)
     except Exception:
-        logger.exception("fashion_bot graph background task failed")
+        logger.exception("📥 [webhook] ❌ fashion_bot graph background task failed")

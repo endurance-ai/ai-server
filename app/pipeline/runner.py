@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
     # 요청 요약 — 어떤 item / 필터로 들어왔는지
     logger.info(
-        "[STEP 4.2][pipeline] === START === item_id=%s search_query=%r search_query_ko=%r "
+        "[STEP 4.2]🎨 [pipeline] === START === item_id=%s search_query=%r search_query_ko=%r "
         "subcategory=%s gender=%s brand_filter=%s tolerance=%.2f final_limit=%s",
         req.item.id,
         req.item.search_query,
@@ -48,7 +48,7 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
             raise embed_result
         # enhance 측 예외는 폴백 — state 만 갱신하고 통과.
         if isinstance(enhance_result, BaseException):
-            logger.warning("[pipeline] enhance_query_step 예외 격리 — %r", enhance_result)
+            logger.warning("🎨 [pipeline] enhance_query_step 예외 격리 — %r", enhance_result)
             state.enhance_query_status = "fallback"
             state.enhanced_query = None
             state.enhanced_query_ko = None
@@ -61,7 +61,7 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
 
     # 최종 요약 — 단계별 latency / count
     logger.info(
-        "[STEP 4.9][pipeline] === END === counts=%s latency_ms=%s",
+        "[STEP 4.9]🎨 [pipeline] === END === counts=%s latency_ms=%s",
         state.counts,
         state.latency_ms,
     )

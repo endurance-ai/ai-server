@@ -170,14 +170,20 @@ async def search_node(state: WorkingState) -> dict:
     try:
         result = await get_port().recommend(req)
     except Exception as exc:  # REQ-AGENT-007
-        logger.exception("[search_node] port.recommend raised")
+        logger.exception("🔍 [search] ❌ port.recommend raised")
         breadcrumbs.append(f"search_node_error: {type(exc).__name__}: {exc}"[:200])
         return {"candidates": [], "log_events": breadcrumbs}
 
     candidates: list[Any] = list(result.candidates) if result and result.candidates else []
-    breadcrumbs.append(
-        f"search_node: candidates={len(candidates)} counts={dict(result.counts or {}) if result else {}}"
+    counts = dict(result.counts or {}) if result else {}
+    logger.info(
+        "🔍 [search] candidates=%d counts=%s exclude_shown=%s delta=%s",
+        len(candidates),
+        counts,
+        exclude_shown,
+        delta.op if delta else None,
     )
+    breadcrumbs.append(f"search_node: candidates={len(candidates)} counts={counts}")
 
     from langchain_core.messages import SystemMessage
 

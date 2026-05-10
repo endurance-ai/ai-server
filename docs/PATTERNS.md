@@ -238,3 +238,19 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 GHA에서 `linux/arm64` 네이티브 러너로 빌드 → ECR push.
+
+## 12. KO/EN 다국어 패턴
+
+그래프 노드가 응답 텍스트를 언어별로 분기할 때는 `app/channels/lang` 헬퍼를 사용한다.
+
+```python
+from app.channels.lang import session_lang
+lang = session_lang(get_store().get_or_create(state.chat_id))
+text = "한국어 메시지" if lang == "ko" else "English message"
+```
+
+- **`detect_lang(text)`** — Hangul 유무로 `'ko'` / `'en'` 반환.
+- **`remember_lang(sess, text)`** — 텍스트가 있으면 `sess.lang` 업데이트 후 언어 반환; 텍스트 없으면 기존 `sess.lang` 유지.
+- **`session_lang(sess)`** — sess 가 None 이거나 lang 미설정 시 `'en'` 기본값.
+- `ingest` 노드가 매 텍스트 턴마다 `remember_lang` 호출 → 버튼 탭(텍스트 없음)도 직전 언어 유지.
+- 하드코딩 문자열은 `_EN` / `_KO` 접미사로 쌍으로 정의하고, 기존 import 호환을 위해 `_FALLBACK = _FALLBACK_EN` 방식으로 back-compat alias 유지.

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 
+from app.channels.lang import session_lang
 from app.channels.session import SessionState, get_store
 from app.channels.vision import derive_legacy_keywords, derive_legacy_label
 from app.graphs.nodes._adapter_ctx import get_adapter
@@ -24,24 +25,54 @@ from app.graphs.state import WorkingState
 
 logger = logging.getLogger(__name__)
 
-PICKER_HEADER = "I see {n} item{s} in this photo 👀\n\n{lines}\n\nWhich one are you after? Tap below 👇"
-PICKER_LINE = "{num}  {label} — {desc}"
+# EN scaffold (default).
+PICKER_HEADER_EN = "I see {n} item{s} in this photo 👀\n\n{lines}\n\nWhich one are you after? Tap below 👇"
+PICKER_LINE_EN = "{num}  {label} — {desc}"
+PICK_INVALID_EN = "Tap one of the buttons above to choose an item 👆"
+
+# KO scaffold — kiko persona, friendly 해요체.
+# (KO label format is inlined in `_send_picker` since description is dropped
+# in KO mode to avoid mixing languages on one line.)
+PICKER_HEADER_KO = "사진에서 {n}개 아이템을 발견했어요 👀\n\n{lines}\n\n어떤 게 마음에 들어요? 아래에서 골라봐요 👇"
+PICK_INVALID_KO = "위 버튼 중 하나를 골라주세요 👆"
+
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
-PICK_INVALID = "Tap one of the buttons above to choose an item 👆"
 
 
-async def _send_picker(adapter, chat_id: int, items: list[dict]) -> None:
+def _ko_label(it: dict) -> str:
+    """Korean-friendly label for a detected item.
+
+    Vision LLM emits English `label` (== item.name) and `description` (== item.detail).
+    For KO output we prefer `searchQueryKo` (already Korean keyword phrase) when present,
+    falling back to the English label so the user still sees something meaningful.
+    """
+    sq_ko = (it.get("searchQueryKo") or "").strip()
+    if sq_ko:
+        return sq_ko
+    return it.get("label") or "아이템"
+
+
+async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en") -> None:
     n = len(items)
     lines: list[str] = []
     for i, it in enumerate(items[:4]):
         num_em = NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}."
-        label = it.get("label") or "item"
-        desc = it.get("description") or ""
-        if desc:
-            lines.append(PICKER_LINE.format(num=num_em, label=label, desc=desc))
-        else:
+        if lang == "ko":
+            label = _ko_label(it)
+            # description is English from the LLM. Skip it in KO mode rather
+            # than mixing languages in one card line.
             lines.append(f"{num_em}  {label}")
-    body = PICKER_HEADER.format(n=n, s="" if n == 1 else "s", lines="\n".join(lines))
+        else:
+            label = it.get("label") or "item"
+            desc = it.get("description") or ""
+            if desc:
+                lines.append(PICKER_LINE_EN.format(num=num_em, label=label, desc=desc))
+            else:
+                lines.append(f"{num_em}  {label}")
+    if lang == "ko":
+        body = PICKER_HEADER_KO.format(n=n, lines="\n".join(lines))
+    else:
+        body = PICKER_HEADER_EN.format(n=n, s="" if n == 1 else "s", lines="\n".join(lines))
     buttons = [(NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}", f"item:{i}") for i in range(min(n, 4))]
     if hasattr(adapter, "send_text_with_buttons"):
         await adapter.send_text_with_buttons(chat_id, body, buttons)
@@ -66,7 +97,8 @@ async def pick_item(state: WorkingState) -> dict:
             try:
                 adapter = get_adapter()
                 if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
-                    await adapter.answer_callback_query(msg.callback_query_id, "Invalid choice")
+                    invalid_msg = "잘못된 선택이에요" if session_lang(sess) == "ko" else "Invalid choice"
+                    await adapter.answer_callback_query(msg.callback_query_id, invalid_msg)
             except Exception as exc:  # REQ-AGENT-007
                 logger.exception("[pick_item] answer_callback_query failed")
                 breadcrumbs.append(f"pick_item_error: {type(exc).__name__}"[:120])
@@ -122,7 +154,7 @@ async def pick_item(state: WorkingState) -> dict:
 
     try:
         adapter = get_adapter()
-        await _send_picker(adapter, state.chat_id, items)
+        await _send_picker(adapter, state.chat_id, items, lang=session_lang(sess))
     except Exception as exc:  # REQ-AGENT-007
         logger.exception("[pick_item] picker send failed")
         breadcrumbs.append(f"pick_item_error: {type(exc).__name__}: {exc}"[:200])

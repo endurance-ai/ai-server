@@ -107,13 +107,13 @@ async def _call_llm(prompt_user: str) -> CritiqueScore:
             timeout=timeout_s,
         )
     except TimeoutError:
-        logger.warning("[evaluator] LLM timeout — fail-open")
+        logger.warning("🤔 [evaluator] ⚠️ LLM timeout — fail-open")
         return _fail_open_score("timeout")
     except httpx.HTTPError as exc:
-        logger.warning("[evaluator] LLM HTTP error %s — fail-open", type(exc).__name__)
+        logger.warning("🤔 [evaluator] ⚠️ LLM HTTP error %s — fail-open", type(exc).__name__)
         return _fail_open_score(f"http:{type(exc).__name__}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[evaluator] LLM unknown error %s — fail-open", type(exc).__name__)
+        logger.warning("🤔 [evaluator] ⚠️ LLM unknown error %s — fail-open", type(exc).__name__)
         return _fail_open_score(f"unknown:{type(exc).__name__}")
 
     try:
@@ -140,7 +140,7 @@ async def _call_llm(prompt_user: str) -> CritiqueScore:
         return CritiqueScore.model_validate(parsed)
     except ValidationError as exc:
         # @MX:NOTE: [AUTO] Validation failure logs the unknown field for prompt tuning.
-        logger.warning("[evaluator] schema validation failed: %s — fail-open", exc.errors()[:2])
+        logger.warning("🤔 [evaluator] ⚠️ schema validation failed: %s — fail-open", exc.errors()[:2])
         return _fail_open_score("validation_error")
 
 
@@ -175,7 +175,7 @@ async def evaluator(state: WorkingState) -> dict:
         )
         source = "fast_path"
         logger.info(
-            "[CRITIQUE][fast-path] dropping=%s iteration=%d",
+            "🤔 [critique][fast-path] dropping=%s iteration=%d",
             ",".join(settings.self_critique_fastpath_drop_filters),
             iteration,
         )
@@ -198,7 +198,7 @@ async def evaluator(state: WorkingState) -> dict:
     # REQ-CRITIQUE-OBSV-002 — structured CRITIQUE log line.
     if source == "llm":
         logger.info(
-            "[CRITIQUE][%d/%d] score=%.2f retry=%s source=%s reason=%r "
+            "🤔 [critique][%d/%d] score=%.2f retry=%s source=%s reason=%r "
             "candidates_in=%d candidates_out=%d elapsed_ms=%d",
             n_label,
             n_total,
