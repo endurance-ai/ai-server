@@ -42,6 +42,8 @@ embed = [
     "open-clip-torch>=2.26",
     "Pillow>=10.0",
     "tqdm>=4.60",
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
 ]
 
 # 브랜드 텍스트 임베딩 (`scripts/embed_brands_text.py`) 전용.
