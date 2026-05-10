@@ -82,6 +82,10 @@ async def critique_apply(state: WorkingState) -> dict:
             breadcrumbs.append(f"critique_apply_error: {type(exc).__name__}"[:200])
             return {"log_events": breadcrumbs}
 
+        from app.channels.lang import session_lang as _sess_lang
+
+        _lang = _sess_lang(sess)
+
         if delta is None:
             # Stale/invalid callback — let routing send to respond.
             try:
@@ -89,20 +93,25 @@ async def critique_apply(state: WorkingState) -> dict:
 
                 adapter = get_adapter()
                 if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
-                    await adapter.answer_callback_query(msg.callback_query_id, "Out of date — try a fresh search")
+                    stale_msg = (
+                        "오래된 카드예요 — 새로 검색해주세요" if _lang == "ko" else "Out of date — try a fresh search"
+                    )
+                    await adapter.answer_callback_query(msg.callback_query_id, stale_msg)
             except Exception:
                 logger.debug("[critique_apply] answer_callback_query best-effort")
             breadcrumbs.append("critique_apply: stale callback")
             return {"log_events": breadcrumbs}
 
-        # Toast acknowledgement
+        # Toast acknowledgement (lang-aware)
         try:
             from app.graphs.nodes._adapter_ctx import get_adapter
 
             adapter = get_adapter()
-            toast = {"more": "Finding more like this ✨", "less": "Steering away ✕", "cheap": "Going cheaper 💰"}.get(
-                delta.op, "Got it"
-            )
+            if _lang == "ko":
+                toasts = {"more": "비슷한 거 더 찾는 중 ✨", "less": "다른 느낌으로 ✕", "cheap": "더 저렴한 걸로 💰"}
+            else:
+                toasts = {"more": "Finding more like this ✨", "less": "Steering away ✕", "cheap": "Going cheaper 💰"}
+            toast = toasts.get(delta.op, "넵" if _lang == "ko" else "Got it")
             if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
                 await adapter.answer_callback_query(msg.callback_query_id, toast)
         except Exception:

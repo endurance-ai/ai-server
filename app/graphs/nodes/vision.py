@@ -43,7 +43,7 @@ async def vision_node(state: WorkingState) -> dict:
     try:
         result = await vision_module.extract(state.image_url)
     except Exception as exc:  # REQ-AGENT-007
-        logger.exception("[vision_node] vision.extract raised")
+        logger.exception("👁 [vision] ❌ vision.extract raised")
         return {
             "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
         }
@@ -65,6 +65,13 @@ async def vision_node(state: WorkingState) -> dict:
     # routing/picker logic keeps working. Each dict carries both legacy keys
     # (label/description/color/keywords) AND rich keys (subcategory/fit/...).
     detected: list[dict] = [derive_legacy_dict(it) for it in result.items]
+
+    logger.info(
+        "👁 [vision] items=%d apparel=%s labels=%s",
+        len(result.items),
+        result.isApparel,
+        [d.get("label", "") for d in detected[:5]],
+    )
 
     outfit_mood = _outfit_mood_tags(result)
     style_primary = result.styleNode.primary or None
@@ -93,7 +100,7 @@ async def vision_node(state: WorkingState) -> dict:
                 sess.vision_keywords = derive_legacy_keywords(only)
             get_store().update(sess)
         except Exception:
-            logger.exception("[vision_node] session persist failed")
+            logger.exception("👁 [vision] ❌ session persist failed")
 
     return {
         "detected_items": detected,

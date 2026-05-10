@@ -1,7 +1,7 @@
 # portal-ai-server — 아키텍처
 
 > portal.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-07 (v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001).
+> 마지막 업데이트: 2026-05-10 (v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE flow + 구조화 로그).
 
 ## 한 줄 요약
 
@@ -109,7 +109,8 @@ app/
 │   ├── factory.py          # MESSENGER_BACKEND 기반 어댑터 팩토리
 │   ├── link_resolver.py    # Pinterest / og:image URL 해석
 │   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
-│   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점)
+│   ├── lang.py             # detect_lang / remember_lang / session_lang — KO/EN sticky 언어 감지
+│   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점). Session.lang 필드 포함
 │   ├── vision.py           # LiteLLM 경유 Vision 추출 (v2 schema, SPEC-VISION-UNIFY-001)
 │   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (portal/app analyze.ts 동치)
 │   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
@@ -187,6 +188,8 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph
 핵심 분기:
 - `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) — 빈 결과 시 필터 drop fast-path / LLM 평가 점수 < threshold 시 `CritiqueDelta` 생성 후 search 재진입 (max 2회 + 4 안전 가드: iteration cap / stagnation / score regression / 30s wall-clock)
 - `ask_clarify → apply_clarify` 결정형 카드 (SPEC-CLARIFY-CARDS-001) — weak-vision 시 6 axes 인라인 키보드, callback 수신 시 `session.boost_keywords` 누적 (self-critique fast-path 통과)
+- **KO/EN sticky 언어**: `ingest` 노드가 `app/channels/lang.remember_lang()` 으로 `Session.lang` 갱신 → 이후 버튼 탭도 동일 언어 유지. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` 노드가 `session_lang(sess)` 참조해 KO/EN 텍스트 분기.
+- **`STALE_CRITIQUE` flow**: `respond` 노드에 추가. `crit:*` 콜백이 만료된 카드에 대해 들어올 때 `critique_apply` 가 delta 없이 반환 → `respond` 가 STALE_CRITIQUE flow 로 분류해 "오래된 카드" 안내 메시지 발송.
 
 파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
 
@@ -225,4 +228,5 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
 | 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |
+| 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
 | 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `portal/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |

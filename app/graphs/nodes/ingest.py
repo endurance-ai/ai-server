@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 
+from app.channels.lang import remember_lang
 from app.channels.router import RoutedDecision, RoutedIntent, route_text
 from app.channels.session import SessionState, get_store
 from app.graphs.state import WorkingState
@@ -21,8 +22,18 @@ logger = logging.getLogger(__name__)
 async def ingest(state: WorkingState) -> dict:
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)
-    if msg.from_user_id and not sess.from_user_id:
+    # Sticky language detection — once user types Korean, subsequent button
+    # callbacks (no text) keep replying in Korean.
+    prev_lang = getattr(sess, "lang", "en")
+    new_lang = remember_lang(sess, msg.text)
+    lang_changed = new_lang != prev_lang
+    fuid_set = msg.from_user_id and not sess.from_user_id
+    if fuid_set:
         sess.from_user_id = msg.from_user_id
+    # Single unconditional update covers BOTH from_user_id assignment AND
+    # lang change. Previously the elif swallowed lang_changed when both
+    # conditions were true on a brand-new user's first turn (review P1).
+    if fuid_set or lang_changed:
         get_store().update(sess)
 
     # Avoid logging raw user text — breadcrumbs flow into Langfuse trace

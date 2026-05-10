@@ -95,7 +95,17 @@ class TelegramAdapter(MessengerAdapter):
         t0 = time.perf_counter()
         await self._post("sendMessage", {"chat_id": chat_id, "text": text})
         elapsed = int((time.perf_counter() - t0) * 1000)
-        logger.info("telegram send_text chat=%s elapsed_ms=%d", _hash_chat_id(chat_id), elapsed)
+        # 🐱 = kiko가 사용자에게 실제로 내보낸 텍스트
+        preview = text.replace("\n", " ⏎ ")
+        if len(preview) > 200:
+            preview = preview[:200] + "…"
+        logger.info(
+            "🐱 [telegram] 📤 send_text chat=%s elapsed_ms=%d len=%d msg=%r",
+            _hash_chat_id(chat_id),
+            elapsed,
+            len(text),
+            preview,
+        )
 
     async def send_card(self, chat_id: int, card: BotCard) -> bool:
         """카드 전송. 성공=True, 실패=False.
@@ -119,11 +129,16 @@ class TelegramAdapter(MessengerAdapter):
         result = await self._post("sendPhoto", payload, timeout=4.0)
         elapsed = int((time.perf_counter() - t0) * 1000)
         ok = bool(result and result.get("ok"))
+        cap_preview = (card.caption or "").replace("\n", " ⏎ ")
+        if len(cap_preview) > 120:
+            cap_preview = cap_preview[:120] + "…"
         logger.info(
-            "telegram send_card chat=%s elapsed_ms=%d ok=%s",
+            "🐱 [telegram] 🖼️  send_card chat=%s elapsed_ms=%d ok=%s caption=%r url=%s",
             _hash_chat_id(chat_id),
             elapsed,
             ok,
+            cap_preview,
+            str(card.button_url),
         )
         return ok
 
@@ -148,7 +163,17 @@ class TelegramAdapter(MessengerAdapter):
         }
         await self._post("sendMessage", payload)
         elapsed = int((time.perf_counter() - t0) * 1000)
-        logger.info("telegram send_buttons chat=%s elapsed_ms=%d", _hash_chat_id(chat_id), elapsed)
+        btn_labels = [b[0] for b in buttons[:4]]
+        text_preview = text.replace("\n", " ⏎ ")
+        if len(text_preview) > 120:
+            text_preview = text_preview[:120] + "…"
+        logger.info(
+            "🐱 [telegram] 🔘 send_buttons chat=%s elapsed_ms=%d msg=%r buttons=%s",
+            _hash_chat_id(chat_id),
+            elapsed,
+            text_preview,
+            btn_labels,
+        )
 
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
         body: dict = {"callback_query_id": callback_query_id}

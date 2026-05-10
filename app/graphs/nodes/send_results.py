@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.channels.lang import session_lang
 from app.channels.schemas import BotCard
 from app.channels.session import SessionState, get_store
 from app.graphs.nodes._adapter_ctx import get_adapter
@@ -23,17 +24,33 @@ from app.graphs.state import WorkingState
 logger = logging.getLogger(__name__)
 
 _MAX_CARDS = 5
-CARD_RENDER_FAIL = "Found some matches but couldn't render the cards — here are the links:"
-CRIT_MORE = "♥ More like this"
-CRIT_LESS = "✕ Less like this"
-CRIT_CHEAP = "💰 Cheaper"
+CARD_RENDER_FAIL_EN = "Found some matches but couldn't render the cards — here are the links:"
+CARD_RENDER_FAIL_KO = "괜찮은 후보들을 찾았는데 카드로 못 보여줘서 링크로 드릴게요:"
+# Back-compat alias
+CARD_RENDER_FAIL = CARD_RENDER_FAIL_EN
+CRIT_MORE_EN = "♥ More like this"
+CRIT_LESS_EN = "✕ Less like this"
+CRIT_CHEAP_EN = "💰 Cheaper"
+CRIT_MORE_KO = "♥ 비슷한 거 더"
+CRIT_LESS_KO = "✕ 다른 느낌"
+CRIT_CHEAP_KO = "💰 더 저렴"
+# Back-compat aliases
+CRIT_MORE = CRIT_MORE_EN
+CRIT_LESS = CRIT_LESS_EN
+CRIT_CHEAP = CRIT_CHEAP_EN
 
 
-def _critique_buttons_for(idx: int) -> list[tuple[str, str]]:
+def _critique_buttons_for(idx: int, lang: str = "en") -> list[tuple[str, str]]:
+    if lang == "ko":
+        return [
+            (CRIT_MORE_KO, f"crit:more:{idx}"),
+            (CRIT_LESS_KO, f"crit:less:{idx}"),
+            (CRIT_CHEAP_KO, f"crit:cheap:{idx}"),
+        ]
     return [
-        (CRIT_MORE, f"crit:more:{idx}"),
-        (CRIT_LESS, f"crit:less:{idx}"),
-        (CRIT_CHEAP, f"crit:cheap:{idx}"),
+        (CRIT_MORE_EN, f"crit:more:{idx}"),
+        (CRIT_LESS_EN, f"crit:less:{idx}"),
+        (CRIT_CHEAP_EN, f"crit:cheap:{idx}"),
     ]
 
 
@@ -53,7 +70,7 @@ def _html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _candidate_to_card(c: Any, idx: int) -> BotCard | None:
+def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
     image_url = getattr(c, "image_url", None)
     product_url = getattr(c, "product_url", None)
     brand = (getattr(c, "brand", "") or "").strip()
@@ -80,13 +97,19 @@ def _candidate_to_card(c: Any, idx: int) -> BotCard | None:
     if platform and platform.lower() != brand.lower():
         lines.append(f"🏬 {_html_escape(platform)}")
 
-    caption = "\n".join(lines) if lines else "Recommended"
+    if lines:
+        caption = "\n".join(lines)
+    else:
+        caption = "추천 아이템" if lang == "ko" else "Recommended"
     if len(caption) > 1024:
         caption = caption[:1020] + "…"
 
-    button_label = f"🛒  Shop on {brand}" if brand else "🛒  Shop now  →"
+    if lang == "ko":
+        button_label = f"🛒  {brand}에서 보기" if brand else "🛒  지금 보러가기  →"
+    else:
+        button_label = f"🛒  Shop on {brand}" if brand else "🛒  Shop now  →"
     if len(button_label) > 64:
-        button_label = "🛒  Shop now  →"
+        button_label = "🛒  지금 보러가기  →" if lang == "ko" else "🛒  Shop now  →"
 
     try:
         return BotCard(
@@ -95,16 +118,16 @@ def _candidate_to_card(c: Any, idx: int) -> BotCard | None:
             button_text=button_label,
             button_url=product_url,
             parse_mode="HTML",
-            critique_buttons=_critique_buttons_for(idx),
+            critique_buttons=_critique_buttons_for(idx, lang=lang),
         )
     except ValidationError:
         return None
 
 
-async def _send_text_fallback(adapter, chat_id: int, candidates: list, limit: int = 3) -> int:
+async def _send_text_fallback(adapter, chat_id: int, candidates: list, limit: int = 3, lang: str = "en") -> int:
     """Plain-text fallback when sendPhoto fails for every candidate."""
     sent = 0
-    lines = [CARD_RENDER_FAIL]
+    lines = [CARD_RENDER_FAIL_KO if lang == "ko" else CARD_RENDER_FAIL_EN]
     for c in candidates:
         if sent >= limit:
             break
@@ -141,6 +164,7 @@ async def send_results(state: WorkingState) -> dict:
 
     sess = get_store().get_or_create(state.chat_id)
     chat_id = state.chat_id
+    lang = session_lang(sess)
 
     try:
         adapter = get_adapter()
@@ -158,7 +182,7 @@ async def send_results(state: WorkingState) -> dict:
         if len(sent_candidates) >= _MAX_CARDS:
             break
         idx = len(sent_candidates)
-        card = _candidate_to_card(c, idx=idx)
+        card = _candidate_to_card(c, idx=idx, lang=lang)
         if card is None:
             continue
         try:
@@ -176,7 +200,7 @@ async def send_results(state: WorkingState) -> dict:
 
     # 0-card fallback to text list (preserves PR #10's behavior).
     if sent == 0:
-        text_sent = await _send_text_fallback(adapter, chat_id, candidates)
+        text_sent = await _send_text_fallback(adapter, chat_id, candidates, lang=lang)
         if text_sent > 0:
             sent_candidates = candidates[:text_sent]
             sent = text_sent

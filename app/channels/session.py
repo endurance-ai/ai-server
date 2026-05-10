@@ -81,6 +81,9 @@ class Session:
     clarify_axis: str | None = None
     clarify_value: str | None = None
     last_active: float = field(default_factory=lambda: time.time())
+    # Sticky reply language. Set on every text turn by `app.channels.lang`.
+    # Defaults to 'en' for back-compat with existing snapshots / tests.
+    lang: str = "en"
 
 
 class SessionStore(Protocol):

@@ -216,15 +216,22 @@ async def route_text(text: str, state: SessionState, last_results: list[Any]) ->
             ),
             timeout=timeout_s,
         )
-    except (TimeoutError, httpx.HTTPError):
-        logger.warning("[router] LLM 호출 실패 → fallback")
+    except (TimeoutError, httpx.HTTPError) as exc:
+        logger.warning(
+            "🧭 [router] ⚠️  LLM 호출 실패 (%s: %s) → fallback (state=%s, text=%r, timeout=%.1fs)",
+            type(exc).__name__,
+            str(exc)[:120] or "(no detail)",
+            state.value,
+            raw[:80],
+            timeout_s,
+        )
         return (
             _fallback_critique(raw)
             if state == SessionState.RESULTS_SENT
             else RoutedDecision(intent=RoutedIntent.OFF_TOPIC)
         )
     except Exception:
-        logger.exception("[router] 알 수 없는 LLM 오류 → fallback")
+        logger.exception("🧭 [router] ❌ 알 수 없는 LLM 오류 → fallback (state=%s, text=%r)", state.value, raw[:80])
         return (
             _fallback_critique(raw)
             if state == SessionState.RESULTS_SENT
@@ -248,10 +255,11 @@ async def route_text(text: str, state: SessionState, last_results: list[Any]) ->
 
     decision = _parse_router_output(content, raw)
     logger.info(
-        "[router] state=%s intent=%s delta=%s taste=%s",
+        "🧭 [router] state=%s → intent=%s delta=%s taste=%s text=%r",
         state.value,
         decision.intent.value,
         bool(decision.critique_delta),
         bool(decision.taste_update),
+        raw[:80],
     )
     return decision
