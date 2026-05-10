@@ -5,25 +5,29 @@
 
 ## 한 줄 요약
 
-`portal/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase `search_products_v5` RPC (dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
+`portal/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
 **Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 12 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환.
 
 ## 책임 분리
 
 ```
-[Vercel / Next.js — portal/app]              [EC2 t4g.medium — portal/ai]              [Modal]
-─────────────────────────────                 ────────────────────────────              ──────────
-Apify 스크래핑 + R2 + DB                       AI 서버 (FastAPI)                          FashionSigLIP /embed
-GPT-4o-mini Vision (LiteLLM 경유)              ├─ 검색 오케스트레이션                       (T4, scale-to-zero)
-세션 / Auth / UI                               ├─ Telegram webhook + 채널 어댑터             단건 + 배치
+[dev-app EC2 — portal/app + Postgres]         [dev-ai EC2 — portal/ai]                  [Modal]
+─────────────────────────────────────         ────────────────────────────              ──────────
+Next.js standalone (Auth.js v5)               AI 서버 (FastAPI)                          FashionSigLIP /embed
+Apify 스크래핑 + R2 + Postgres                  ├─ 검색 오케스트레이션                       (T4, scale-to-zero)
+GPT-4o-mini Vision (LiteLLM 경유)              ├─ Telegram webhook + 채널 어댑터             단건 + 배치
 검색 결과 렌더                                  LiteLLM proxy + Postgres                   Modal Volume 에 weights 캐시
 v4 검색 (폴백 전용)                             Langfuse web + Postgres
+Postgres 16 + pgvector + pgroonga
++ PostgREST + nginx shim (자체호스팅)
 ```
 
 **외부 채널 서비스**: Telegram Bot API (`https://api.telegram.org`) — Telegram 소유·운영, HTTPS webhook 방식. Pinterest(`pinterest.com` / `pin.it`) 서버사이드 fetch로 og:image 추출 (P0). Instagram P2 스텁.
 
-**v5 인프라**: Supabase pgvector + pgroonga (`portal/app` 측 마이그레이션 027 + 030). Qdrant **사용 안 함**.
+**v5 인프라**: dev-app Postgres 16 + pgvector + pgroonga (마이그레이션 027 + 030 적용). PostgREST + nginx shim 으로 `SUPABASE_URL` 호환 라우팅. SPEC-INFRA-MIGRATE-001 P6 이후 Supabase.com 미사용. Qdrant **사용 안 함**.
+
+> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 기존 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` env 는 논리명만 유지하면서 nginx PostgREST shim (`http://172.31.59.31:3001/rest/v1/...`) 으로 라우팅.
 
 `enhance_query` LLM 리파인 step 은 백로그 — 현재 파이프라인은 직선 (embed → search → diversify).
 
@@ -31,7 +35,7 @@ v4 검색 (폴백 전용)                             Langfuse web + Postgres
 
 ```mermaid
 graph TB
-    subgraph App["Next.js (Vercel)"]
+    subgraph App["Next.js (dev-app EC2)"]
         FIND["/api/find/search"]
         V4["/api/search-products (v4 폴백)"]
     end
@@ -53,7 +57,7 @@ graph TB
 
     subgraph External["External"]
         MODAL["Modal /embed<br/>FashionSigLIP T4"]
-        SB[("Supabase Postgres<br/>pgvector + pgroonga")]
+        SB[("dev-app Postgres 16<br/>pgvector + pgroonga<br/>+ PostgREST nginx shim")]
         PIN["Pinterest / pin.it<br/>(og:image fetch)"]
     end
 
@@ -136,11 +140,11 @@ app/
 ├── pipeline/
 │   ├── state.py            # PipelineState (state → state)
 │   ├── embed.py            # Step 1: Modal /embed
-│   ├── search.py           # Step 2: Supabase RPC (search_products_v5)
+│   ├── search.py           # Step 2: search_products_v5 RPC (PostgREST 경유)
 │   ├── diversify.py        # Step 3: 브랜드/플랫폼 캡 + tolerance
 │   └── runner.py           # 파이프라인 조립 + @observe
 ├── providers/
-│   ├── database.py         # SupabaseProvider (async, lifespan 워밍업)
+│   ├── database.py         # SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업)
 │   ├── embedding.py        # EmbedProvider (Modal HTTP)
 │   └── llm.py              # LLMProvider (LiteLLM HTTP)
 ├── observability/
@@ -173,7 +177,7 @@ app/
 |---------|------|
 | AI 서버 5xx / timeout | Next.js가 v4 (`/api/search-products`) 호출로 폴백 |
 | Modal /embed 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 (sparse-only 모드는 추후 고려) |
-| Supabase RPC 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 |
+| PostgREST RPC 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 |
 
 ## LangGraph (SPEC-AGENT-001 — 도입됨)
 
@@ -210,13 +214,14 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
 | `docs/plans/archive/` | 과거 Qdrant 기반 설계 (참고만) |
 | `aws-infra/portal-ai-servers/portal-ai/` | EC2 docker-compose 본체 |
-| `portal/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 |
+| `portal/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 (디렉토리명 유지 — Supabase CLI 시절 잔재, dev-app Postgres 에 적용됨) |
 
 ## 변경 이력
 
 | 날짜 | 사건 |
 |------|------|
-| 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC, GHA + ECR 배포) |
+| 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC 시절, GHA + ECR 배포) |
+| 2026-05-10 | **SPEC-INFRA-MIGRATE-001 컷오버 완료** — Supabase + Vercel pause. dev-app EC2 단독 운영 (Postgres 16 + pgvector + pgroonga + PostgREST nginx shim). portal/ai 코드 변경 0줄 (env 논리명 유지) |
 | 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
 | 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |

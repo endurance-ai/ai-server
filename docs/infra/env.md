@@ -6,8 +6,8 @@
 
 | 키 | 용도 | 노출 |
 |----|------|------|
-| `SUPABASE_URL` | Supabase 프로젝트 URL | 서버 전용 |
-| `SUPABASE_SERVICE_ROLE_KEY` | RLS 우회 — `search_products_v5` RPC 호출 | 서버 전용 |
+| `SUPABASE_URL` | PostgREST 엔드포인트 base URL (논리명 유지). 현재 dev-app EC2 의 nginx PostgREST shim (`http://172.31.59.31:3001`) 을 가리킴 — Supabase.com 미사용 (SPEC-INFRA-MIGRATE-001 P6 이후) | 서버 전용 |
+| `SUPABASE_SERVICE_ROLE_KEY` | PostgREST service JWT — `search_products_v5` RPC 호출 (논리명 유지) | 서버 전용 |
 | `MODAL_EMBED_URL` | Modal `/embed` 엔드포인트 base URL | 서버 전용 |
 | `MODAL_EMBED_TOKEN` | Modal Bearer token (`EMBED_AUTH_TOKEN` 과 동일) | 서버 전용 |
 | `LITELLM_BASE_URL` | LiteLLM proxy base URL | 서버 전용 |

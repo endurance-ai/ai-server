@@ -2,7 +2,7 @@
 
 kiko.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + Telegram 채널.
 
-`portal/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → Supabase v5 검색 RPC → 다양성 캡 → product_id[] 반환**.
+`portal/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유) → 다양성 캡 → product_id[] 반환**.
 
 Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinterest 링크를 DM하면 → webhook → **LangGraph StateGraph** (`app/graphs/`) → 동일 파이프라인 → 채널 카드 응답.
 
@@ -16,11 +16,13 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 
 | 레이어 | 책임 |
 |--------|------|
-| Vercel / `portal/app` | Apify, R2, Vision(GPT-4o-mini), 세션, UI, v4 폴백 |
+| dev-app EC2 / `portal/app` | Apify, R2, Vision(GPT-4o-mini), 세션(Auth.js), UI, v4 폴백. Next.js standalone 컨테이너 |
 | **portal/ai (이 프로젝트)** | **검색 오케스트레이션, enhance_query, Langfuse trace, Telegram webhook + 채널 어댑터** |
 | Telegram Bot API | 채널 transport (메시지 수신/발신). 이 서버에서 블랙박스로 취급 |
 | Modal | FashionSigLIP 임베딩 (단건 + 배치) |
-| Supabase | pgvector + pgroonga, `search_products_v5` RPC |
+| dev-app Postgres + nginx PostgREST shim | pgvector + pgroonga, `search_products_v5` RPC. SPEC-INFRA-MIGRATE-001 P6 이후 자체호스팅 (이전: Supabase) |
+
+> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영 (`SUPABASE_URL` env 는 논리명 유지하면서 nginx PostgREST shim 으로 라우팅).
 
 ## 디렉토리
 
@@ -33,7 +35,7 @@ app/
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
 │   └── nodes/           # 12 노드: ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond
 ├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
-├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
+├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler
 ├── models/              # Pydantic request/response
 └── core/                # config (env)
@@ -47,7 +49,7 @@ app/
 | 에이전트 오케스트레이션 | **LangGraph** `>=1.1.10` (SPEC-AGENT-001) |
 | LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드) |
 | 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
-| 벡터 DB | **Supabase pgvector + pgroonga** (Qdrant 미사용) |
+| 벡터 DB | **dev-app Postgres 16 + pgvector + pgroonga** (PostgREST nginx shim, Qdrant 미사용) |
 | Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
 | 스키마 | Pydantic v2 |
 | HTTP | httpx (async) |
@@ -71,14 +73,14 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
 - 임베딩 호출은 Modal endpoint (`MODAL_EMBED_URL`)
-- Supabase 쿼리는 RPC 함수 호출 (`supabase-py` async)
+- DB 쿼리는 PostgREST RPC 호출 (`supabase-py` async — 클라이언트 라이브러리는 유지, 엔드포인트는 dev-app nginx shim)
 - ruff 린트+포맷 (line-length=120)
 
 ## 핵심 파일
 
 | 파일 | 설명 |
 |------|------|
-| `app/main.py` | FastAPI 엔트리포인트 + lifespan (Supabase 워밍업 + messenger adapter + setWebhook) |
+| `app/main.py` | FastAPI 엔트리포인트 + lifespan (DB 클라이언트 워밍업 + messenger adapter + setWebhook) |
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
 | `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + messenger 상태) |
 | `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
@@ -104,10 +106,10 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/pipeline/state.py` | PipelineState 정의 |
 | `app/pipeline/embed.py` | Modal /embed 호출 |
 | `app/pipeline/enhance_query.py` | LLM 기반 sparse 쿼리 정제 (SPEC-PIPELINE-001, feature flag 기본 off) |
-| `app/pipeline/search.py` | Supabase `search_products_v5` RPC |
+| `app/pipeline/search.py` | `search_products_v5` RPC (PostgREST 경유) |
 | `app/pipeline/diversify.py` | 다양성 캡 + tolerance |
 | `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
-| `app/providers/database.py` | SupabaseProvider (async, lifespan 워밍업) |
+| `app/providers/database.py` | SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업) |
 | `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증 |
 | `app/providers/llm.py` | LiteLLM HTTP |
 | `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 |
@@ -141,4 +143,4 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## 인증 구조
 
 AI 서버는 stateless. 인증 없음.
-`portal/app`이 세션 + Supabase Auth 담당, AI 서버에 request body로 전달.
+`portal/app`이 세션 + Auth.js v5 (Credentials Provider + bcrypt) 담당, AI 서버에 request body로 전달.
