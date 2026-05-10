@@ -15,11 +15,11 @@ def test_settings_defaults():
 def test_settings_overrides():
     """env 값 override 가능해야 한다."""
     s = Settings(
-        SUPABASE_URL="https://test.supabase.co",
+        DB_URL="http://test.local",
         MODAL_EMBED_URL="https://test.modal.run",
         LANGFUSE_HOST="http://langfuse:3000",
     )
-    assert s.SUPABASE_URL == "https://test.supabase.co"
+    assert s.DB_URL == "http://test.local"
     assert s.MODAL_EMBED_URL == "https://test.modal.run"
     assert s.LANGFUSE_HOST == "http://langfuse:3000"
 

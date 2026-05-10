@@ -31,7 +31,7 @@ logging.getLogger("app").setLevel(logging.DEBUG)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Startup — 비동기 클라이언트 워밍업으로 첫 요청 race condition 회피
-    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+    if settings.DB_URL and settings.DB_TOKEN:
         await SupabaseProvider.get_client()
 
     await init_store()

@@ -14,8 +14,8 @@ class SupabaseProvider:
     async def get_client(cls) -> AsyncClient:
         if cls._client is None:
             cls._client = await create_client(
-                settings.SUPABASE_URL,
-                settings.SUPABASE_SERVICE_ROLE_KEY,
+                settings.DB_URL,
+                settings.DB_TOKEN,
             )
         return cls._client
 

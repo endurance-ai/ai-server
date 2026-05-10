@@ -21,7 +21,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
     uv run python scripts/embed_batch_local.py --download-workers 16
     uv run python scripts/embed_batch_local.py --dry-run            # upsert 직전 멈춤
 
-환경변수: `.env` 의 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` 자동 로드.
+환경변수: `.env` 의 `DB_URL` / `DB_TOKEN` 자동 로드.
 
 재실행 안전 — `embedding IS NULL` 만 가져오므로 중단되어도 다음 실행 시 이어서 진행.
 """
@@ -194,14 +194,14 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="upsert 직전 중단 — 검증용")
     args = ap.parse_args()
 
-    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-        print("ERROR: .env 의 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 미설정")
+    if not settings.DB_URL or not settings.DB_TOKEN:
+        print("ERROR: .env 의 DB_URL / DB_TOKEN 미설정")
         sys.exit(1)
 
     # supabase sync client 사용 — async 불필요 (단일 스레드 배치)
     from supabase import create_client
 
-    sb = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    sb = create_client(settings.DB_URL, settings.DB_TOKEN)
 
     device = detect_device()
     model, preprocess = load_model(device)

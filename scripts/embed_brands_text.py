@@ -8,7 +8,7 @@ Idempotent: rows whose canonical text hash matches embedding_text_hash
 are skipped (override with --force). brand_similar rows are deleted
 and re-inserted per source brand_id, so partial reruns are safe.
 
-환경변수: `.env` 의 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` 자동 로드.
+환경변수: `.env` 의 `DB_URL` / `DB_TOKEN` 자동 로드.
 
 사용:
     # 첫 1회 — sentence-transformers / torch / numpy 설치 (~2GB BGE-m3 가중치 포함)
@@ -120,13 +120,13 @@ def main() -> int:
     parser.add_argument("--skip-similar", action="store_true", help="brand_similar 갱신 생략")
     args = parser.parse_args()
 
-    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
-        print("ERROR: SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY 미설정 (.env 확인)", file=sys.stderr)
+    if not settings.DB_URL or not settings.DB_TOKEN:
+        print("ERROR: DB_URL/DB_TOKEN 미설정 (.env 확인)", file=sys.stderr)
         return 2
 
     from supabase import create_client
 
-    sb = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    sb = create_client(settings.DB_URL, settings.DB_TOKEN)
 
     # ─── 1. brand_nodes 로드 ─────────────────────────────────
     print("[1/5] brand_nodes 로드 중...")

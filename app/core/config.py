@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
 
-    # Supabase (검색 RPC + 상품 메타 조회)
-    SUPABASE_URL: str = ""
-    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    # DB (PostgREST shim — 검색 RPC + 상품 메타 조회)
+    DB_URL: str = ""
+    DB_TOKEN: str = ""
 
     # Modal — FashionSigLIP 임베딩 엔드포인트
     MODAL_EMBED_URL: str = ""
