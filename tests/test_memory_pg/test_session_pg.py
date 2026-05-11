@@ -74,7 +74,7 @@ def test_lazy_expiry_returns_fresh_session():
     async def _expire() -> None:
         async with get_pool().connection() as conn, conn.cursor() as cur:
             await cur.execute(
-                "UPDATE user_session SET ttl_expires_at = now() - interval '1 second' WHERE chat_id = %s",
+                "UPDATE ai.user_session SET ttl_expires_at = now() - interval '1 second' WHERE chat_id = %s",
                 (333,),
             )
             await conn.commit()
@@ -98,7 +98,7 @@ def test_lazy_expiry_collapses_concurrent_reads_to_one_row():
     async def _expire() -> None:
         async with get_pool().connection() as conn, conn.cursor() as cur:
             await cur.execute(
-                "UPDATE user_session SET ttl_expires_at = now() - interval '1 second' WHERE chat_id = %s",
+                "UPDATE ai.user_session SET ttl_expires_at = now() - interval '1 second' WHERE chat_id = %s",
                 (444,),
             )
             await conn.commit()
@@ -114,7 +114,7 @@ def test_lazy_expiry_collapses_concurrent_reads_to_one_row():
 
     async def _count() -> int:
         async with get_pool().connection() as conn, conn.cursor() as cur:
-            await cur.execute("SELECT COUNT(*) FROM user_session WHERE chat_id = %s", (444,))
+            await cur.execute("SELECT COUNT(*) FROM ai.user_session WHERE chat_id = %s", (444,))
             row = await cur.fetchone()
         return int(row[0])
 
