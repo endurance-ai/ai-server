@@ -63,13 +63,23 @@ class CritiqueDelta:
     extra_intent: str | None = None  # additional natural-language hint to layer on intent
 
 
+def _attr(c: Any, key: str, default: Any = None) -> Any:
+    """Read field from either object (attribute) or dict (key). See
+    SPEC-MEMORY-001 — JSONB round-trip restores dicts (now also wrapped as
+    SimpleNamespace in session_pg, but this stays defensive in either case)."""
+    if isinstance(c, dict):
+        return c.get(key, default)
+    return getattr(c, key, default)
+
+
 def _candidate_to_anchor(c: Any, idx: int) -> AnchorRef:
+    pid = _attr(c, "id")
     return AnchorRef(
         idx=idx,
-        product_id=str(getattr(c, "id", None)) if getattr(c, "id", None) is not None else None,
-        brand=(getattr(c, "brand", "") or "").strip() or None,
-        name=(getattr(c, "name", "") or "").strip() or None,
-        price=getattr(c, "price", None),
+        product_id=str(pid) if pid is not None else None,
+        brand=(_attr(c, "brand", "") or "").strip() or None,
+        name=(_attr(c, "name", "") or "").strip() or None,
+        price=_attr(c, "price"),
         keywords=[],  # populated only if we cache vision keywords per card later
     )
 

@@ -285,6 +285,23 @@ async def _acleanup_expired() -> int:
     return int(deleted)
 
 
+def _rehydrate_candidates(raw: Any) -> list[Any]:
+    """JSONB round-trip restores dict shape; downstream callers (critique_apply,
+    implicit_feedback, search exclude_shown) expect attribute access via
+    `getattr(c, 'id')`. Wrap each dict in SimpleNamespace so attribute access
+    stays uniform regardless of whether the row came from memory or DB.
+    """
+    from types import SimpleNamespace
+
+    out: list[Any] = []
+    for item in raw or []:
+        if isinstance(item, dict):
+            out.append(SimpleNamespace(**item))
+        else:
+            out.append(item)
+    return out
+
+
 def _row_to_session(cols: list[str], row: Any) -> Session:
     data = dict(zip(cols, row, strict=False))
     last_active = data.get("last_active")
@@ -304,7 +321,7 @@ def _row_to_session(cols: list[str], row: Any) -> Session:
         vision_outfit_mood_tags=list(data.get("vision_outfit_mood_tags") or []),
         vision_outfit_gender=data.get("vision_outfit_gender"),
         user_intent=data.get("user_intent"),
-        last_results=list(data.get("last_results") or []),
+        last_results=_rehydrate_candidates(data.get("last_results")),
         shown_product_ids=list(data.get("shown_product_ids") or []),
         last_critique_summary=data.get("last_critique_summary"),
         boost_keywords=list(data.get("boost_keywords") or []),

@@ -85,7 +85,11 @@ _EVALUATOR_BRANCHES: dict[str, str] = {
     "respond": "respond",
 }
 
-_CRITIQUE_BRANCHES: dict[str, str] = {"search_node": "search_node", "respond": "respond"}
+_CRITIQUE_BRANCHES: dict[str, str] = {
+    "search_node": "search_node",
+    "respond": "respond",
+    "__end__": END,  # SPEC-IMPLICIT-FB-001 / REQ-FB-CLICK-001 — silent click ack
+}
 
 
 async def _router_text_passthrough(state: WorkingState) -> dict:
