@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     # embed + enhance_query 병렬 실행 (asyncio.gather). false 시 sequential.
     PIPELINE_PARALLEL_ENABLED: bool = True
 
+    # SPEC-MEMORY-001 — Postgres-backed memory persistence
+    # ENV: deployment environment marker. "production" 일 때 fail-loud 정책 (REQ-MEMORY-FALLBACK-002).
+    ENV: str = "development"
+    # DB_DSN: psycopg3-style URL for the dev-app Postgres (distinct from DB_URL which is PostgREST shim).
+    DB_DSN: str = ""
+    MEMORY_POOL_MIN_SIZE: int = 2
+    MEMORY_POOL_MAX_SIZE: int = 10
+    # When true, fall back to InMemory stores if Postgres probe fails. Set to "false" in production.
+    MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
+    SESSION_CLEANUP_INTERVAL_S: int = 300
+
     # 보안
     # Next.js → AI 서버 shared secret. 비어있으면 인증 skip (dev). 운영에선 반드시 설정.
     INTERNAL_API_TOKEN: str = ""

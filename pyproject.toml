@@ -26,6 +26,8 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "openai>=2.34.0",
     "umap-learn>=0.5.12",
+    "psycopg[binary,pool]>=3.2",
+    "alembic>=1.18.4",
 ]
 
 [dependency-groups]
@@ -33,6 +35,7 @@ dev = [
     "ruff>=0.11",
     "pytest>=8.0",
     "pytest-asyncio>=0.25",
+    "testcontainers[postgres]>=4.14.2",
 ]
 
 # 로컬 배치 임베딩 (`scripts/embed_batch_local.py`) 전용 — 운영 이미지에는 포함 X

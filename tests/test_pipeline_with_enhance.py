@@ -85,7 +85,7 @@ def patch_pipeline(monkeypatch):
     return rpc
 
 
-async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatch):
+async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatch, capsys):
     """flag=on + LLM 정상 → search_step 이 refined query 로 호출됨."""
     from app.core.config import settings as app_settings
 
