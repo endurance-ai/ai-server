@@ -76,6 +76,54 @@ async def critique_apply(state: WorkingState) -> dict:
     delta: CritiqueDelta | None = None
 
     # ── Callback path ──────────────────────────────────────────────────────
+    if msg.callback_data and msg.callback_data.startswith("crit:click:"):
+        # SPEC-IMPLICIT-FB-001 / REQ-FB-CLICK-001 — implicit click branch.
+        # Distinct from crit:more/less/cheap: silent ack, no critique state mutation,
+        # no further graph routing.
+        from app.channels.implicit_feedback import (
+            _brand_of,
+            _keywords_for_product,
+            record_click,
+            resolve_click_target,
+        )
+
+        suffix = msg.callback_data[len("crit:click:") :]
+        target = resolve_click_target(suffix, sess.last_results or [])
+        if target is None:
+            logger.debug("[IMPLICIT_FB][stale-click] suffix=%s", suffix[:32])
+            await record_click(state.chat_id, sess.from_user_id, suffix or "", "", [], stale=True)
+            stale_ack_done = False
+            try:
+                from app.graphs.nodes._adapter_ctx import get_adapter
+
+                adapter = get_adapter()
+                if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
+                    await adapter.answer_callback_query(msg.callback_query_id, "")
+                    stale_ack_done = True
+            except Exception:
+                logger.debug("[critique_apply] click stale ack best-effort")
+            breadcrumbs.append(f"critique_apply: stale-click ack={stale_ack_done}")
+            return {"log_events": breadcrumbs, "sent_count": 0}
+
+        brand = _brand_of(target)
+        keywords = _keywords_for_product(target)
+        product_id = str(getattr(target, "id", "") or "")
+        try:
+            await record_click(state.chat_id, sess.from_user_id, product_id, brand, keywords)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[critique_apply] record_click failed: %r", exc)
+        # Silent ack
+        try:
+            from app.graphs.nodes._adapter_ctx import get_adapter
+
+            adapter = get_adapter()
+            if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
+                await adapter.answer_callback_query(msg.callback_query_id, "")
+        except Exception:
+            logger.debug("[critique_apply] click silent ack best-effort")
+        breadcrumbs.append(f"critique_apply: click product_id={product_id[:32]}")
+        return {"log_events": breadcrumbs, "sent_count": 0}
+
     if msg.callback_data and msg.callback_data.startswith("crit:"):
         try:
             delta = parse_callback(msg.callback_data, sess.last_results)

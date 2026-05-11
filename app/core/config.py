@@ -136,6 +136,18 @@ class Settings(BaseSettings):
     # 카드당 버튼 상한(skip 포함). 범위 [3, 8].
     CLARIFY_MAX_BUTTONS: int = 5
 
+    # SPEC-IMPLICIT-FB-001 — implicit feedback capture (impressions/clicks/re-query)
+    # No-click attribution window. Snapshotted per-row at INSERT time. REQ-FB-NOCLICK-001.
+    IMPLICIT_FB_ATTRIBUTION_WINDOW_S: int = 600
+    # Re-query detection window after RESULTS_SENT. REQ-FB-REQUERY-001.
+    IMPLICIT_FB_REQUERY_WINDOW_S: int = 90
+    # Soft-negative weight applied on no-click attribution. REQ-FB-NOCLICK-001.
+    IMPLICIT_FB_NOCLICK_WEIGHT: float = 0.2
+    # Strong-positive weight applied on "👀 자세히" click. REQ-FB-CLICK-001.
+    IMPLICIT_FB_CLICK_WEIGHT: float = 1.0
+    # Soft-negative weight applied on rapid re-query. REQ-FB-REQUERY-001.
+    IMPLICIT_FB_REQUERY_WEIGHT: float = 0.5
+
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
         return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]
