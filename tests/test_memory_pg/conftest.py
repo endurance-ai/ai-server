@@ -39,8 +39,23 @@ def pg_container() -> Generator:
     with PostgresContainer("postgres:16-alpine") as pg:
         dsn = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://", 1)
         os.environ["DB_DSN"] = dsn
+        _bootstrap_ai_schema(dsn)
         _alembic_upgrade(dsn)
         yield pg
+
+
+def _bootstrap_ai_schema(dsn: str) -> None:
+    """Create the `ai` schema before running migrations.
+
+    On dev-app this is done once by a superuser (ai_user lacks DB-level CREATE).
+    In tests, the testcontainers default user IS the DB owner and can do it.
+    Migrations themselves never `CREATE SCHEMA` to preserve dev-app permissions.
+    """
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
+        conn.commit()
 
 
 def _alembic_upgrade(dsn: str) -> None:
@@ -79,7 +94,7 @@ async def _truncate_tables(pool_initialized: None) -> AsyncGenerator[None]:
 
     async def _truncate() -> None:
         async with get_pool().connection() as conn, conn.cursor() as cur:
-            await cur.execute("TRUNCATE user_session, user_taste_profile")
+            await cur.execute("TRUNCATE ai.user_session, ai.user_taste_profile")
             await conn.commit()
 
     run_in_pool_loop(_truncate())

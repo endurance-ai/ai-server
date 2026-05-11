@@ -21,8 +21,10 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # @MX:NOTE: All memory tables live in dedicated `ai` schema, isolated from
-    # product catalog (`public.*`). Schema is created externally as a one-time
-    # bootstrap: `CREATE SCHEMA ai AUTHORIZATION ai_user`.
+    # product catalog (`public.*`). The schema itself is created as a one-time
+    # bootstrap by a superuser — this migration does NOT create the schema
+    # (ai_user lacks DB-level CREATE privilege on dev-app, by design).
+    # Test environments bootstrap the schema in conftest before invoking alembic.
     op.execute("SET search_path TO ai")
     # user_taste_profile
     op.execute(
