@@ -20,6 +20,7 @@ from app.channels.schemas import BotCard
 from app.channels.session import SessionState, get_store
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ async def _send_text_fallback(adapter, chat_id: int, candidates: list, limit: in
     return sent
 
 
+@observe(name="node.send_results", as_type="span")
 async def send_results(state: WorkingState) -> dict:
     breadcrumbs: list[str] = []
     candidates = list(state.candidates)

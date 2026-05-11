@@ -17,6 +17,7 @@ from app.channels.taste_profile import (
     user_key_for,
 )
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def _apply(profile: TasteProfile, update: TasteUpdate) -> None:
         profile.reinforce_disliked_keywords(update.disliked_keywords, weight=2.0)
 
 
+@observe(name="node.taste_update", as_type="span")
 async def taste_update(state: WorkingState) -> dict:
     breadcrumbs: list[str] = []
 

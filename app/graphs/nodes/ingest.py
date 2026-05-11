@@ -15,10 +15,12 @@ from app.channels.lang import remember_lang
 from app.channels.router import RoutedDecision, RoutedIntent, route_text
 from app.channels.session import SessionState, get_store
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
 
+@observe(name="node.ingest", as_type="span")
 async def ingest(state: WorkingState) -> dict:
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)

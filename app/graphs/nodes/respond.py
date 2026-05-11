@@ -30,6 +30,7 @@ from app.channels.session import get_store
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,7 @@ def _user_prompt(state: WorkingState, flow: _Flow, lang: str) -> str:
 # ── Node ───────────────────────────────────────────────────────────────────
 
 
+@observe(name="node.respond", as_type="span")
 async def respond(state: WorkingState) -> dict:
     flow = _classify_flow(state)
     user_text = (state.message.text or "").strip() if state.message else ""

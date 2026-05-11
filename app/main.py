@@ -27,6 +27,7 @@ from app.channels.taste_profile_pg import PostgresTasteProfileStore
 from app.channels.telegram.adapter import TelegramAdapter
 from app.channels.telegram.webhook import setup_webhook
 from app.core.config import settings
+from app.observability.langfuse import flush as langfuse_flush
 from app.providers import db_pool
 from app.providers.database import SupabaseProvider
 from app.providers.embedding import EmbedProvider
@@ -74,6 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await SupabaseProvider.close()
     await EmbedProvider.close()
     await LLMProvider.close()
+    # SPEC-OBSERVABILITY-002 / REQ-OBS-COST-001 — drain Langfuse background queue.
+    langfuse_flush()
 
 
 async def _select_memory_backend() -> None:

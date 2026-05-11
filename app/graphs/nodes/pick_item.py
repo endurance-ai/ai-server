@@ -22,6 +22,7 @@ from app.channels.session import SessionState, get_store
 from app.channels.vision import derive_legacy_keywords, derive_legacy_label
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,7 @@ async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en
         await adapter.send_text(chat_id, body)
 
 
+@observe(name="node.pick_item", as_type="span")
 async def pick_item(state: WorkingState) -> dict:
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)

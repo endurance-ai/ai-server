@@ -35,7 +35,7 @@ from app.core.config import settings
 from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
 from app.graphs.nodes._evaluator_prompt import SYSTEM_PROMPT, build_user_prompt
 from app.graphs.state import WorkingState
-from app.observability.langfuse import observe
+from app.observability.langfuse import observe, update_current_span
 from app.providers.llm import LLMProvider
 
 logger = logging.getLogger(__name__)
@@ -144,7 +144,7 @@ async def _call_llm(prompt_user: str) -> CritiqueScore:
         return _fail_open_score("validation_error")
 
 
-@observe(name="evaluator")
+@observe(name="node.evaluator", as_type="span")
 async def evaluator(state: WorkingState) -> dict:
     """REQ-CRITIQUE-EVAL-001 — emit a CritiqueScore + state delta.
 
@@ -155,6 +155,9 @@ async def evaluator(state: WorkingState) -> dict:
     """
     started_ms = time.monotonic() * 1000.0
     iteration = state.critique_retry_count  # 0 on first eval, increments before re-entry
+    # REQ-OBS-TRACE-LOOP-001 — attach iteration index to the current span via v3
+    # client API so the Reflexion loop is reconstructable from sibling spans.
+    update_current_span(metadata={"iteration": iteration})
     candidates = list(state.candidates or [])
     candidates_in = len(candidates)
 

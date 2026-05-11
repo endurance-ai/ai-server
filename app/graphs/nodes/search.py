@@ -26,6 +26,7 @@ from app.channels.taste_profile import (
 )
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,7 @@ def _build_request(
     )
 
 
+@observe(name="node.search", as_type="span")
 async def search_node(state: WorkingState) -> dict:
     sess = get_store().get_or_create(state.chat_id)
     breadcrumbs: list[str] = []

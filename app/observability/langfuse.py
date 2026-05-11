@@ -1,9 +1,15 @@
-"""Langfuse 트레이싱.
+"""Langfuse v3 tracing.
 
-LANGFUSE_PUBLIC_KEY/SECRET_KEY가 비어있거나 langfuse 라이브러리 import 실패 시 no-op 폴백.
-v2(`langfuse.decorators.observe`) / v3(`langfuse.observe`) 양쪽 호환.
+SPEC-OBSERVABILITY-002. Single-path v3 wiring. When `LANGFUSE_PUBLIC_KEY` /
+`LANGFUSE_SECRET_KEY` are absent OR the v3 SDK fails to import, the module
+degrades to a transparent no-op: `observe(...)` is a passthrough decorator,
+`build_callback_handler(...)` returns `None`. The bot starts cleanly in all
+fallback cases (REQ-OBS-FALLBACK-001 / REQ-OBS-FALLBACK-002).
 """
 
+from __future__ import annotations
+
+import logging
 import os
 from collections.abc import Awaitable, Callable
 from functools import wraps
@@ -11,7 +17,10 @@ from typing import Any, ParamSpec, TypeVar
 
 from app.core.config import settings
 
-# langfuse SDK가 os.environ을 직접 읽기 때문에 settings 값을 환경변수로 미리 주입한다.
+logger = logging.getLogger(__name__)
+
+# Langfuse SDK reads `os.environ` directly — mirror settings into env so that
+# `get_client()` picks up self-host config without explicit init.
 for _k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
     _v = getattr(settings, _k, "")
     if _v and not os.environ.get(_k):
@@ -21,23 +30,56 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 _ENABLED = bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
+_SELECTIVE_MODE = bool(getattr(settings, "LANGFUSE_SELECTIVE_MODE", False))
 
-# v3 → v2 → no-op 순서로 폴백. import 실패해도 앱은 떠야 함.
+# REQ-OBS-COST-002 — when selective mode is on, decoration of these nodes
+# collapses to no-op even when Langfuse is enabled.
+_SELECTIVE_NOOP_SPAN_NAMES = frozenset(
+    {
+        "node.ingest",
+        "node.resolve_image",
+        "node.pick_item",
+        "node.ask_clarify",
+        "node.apply_clarify",
+        "node.search",
+        "node.send_results",
+        "node.taste_update",
+    }
+)
+
+# v3 → no-op (REQ-OBS-MIGRATION-001 — no v2 cascade).
 _lf_observe: Callable[..., Any] | None = None
+_lf_get_client: Callable[..., Any] | None = None
 if _ENABLED:
     try:
-        # langfuse v3+ : `from langfuse import observe`
-        from langfuse import observe as _lf_observe_v3  # type: ignore[import-not-found]
+        from langfuse import get_client as _lf_get_client_v3
+        from langfuse import observe as _lf_observe_v3
 
         _lf_observe = _lf_observe_v3
+        _lf_get_client = _lf_get_client_v3
     except ImportError:
-        try:
-            # langfuse v2 : `from langfuse.decorators import observe`
-            from langfuse.decorators import observe as _lf_observe_v2  # type: ignore[import-not-found]
+        logger.error(
+            "🐱 [langfuse] v3 SDK import failed — tracing disabled (install `langfuse>=3,<4`)",
+            exc_info=True,
+        )
+        _lf_observe = None
+        _lf_get_client = None
 
-            _lf_observe = _lf_observe_v2
-        except ImportError:
-            _lf_observe = None
+
+def _noop_decorator(
+    name: str | None = None,
+    **kwargs: Any,
+) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    """Transparent passthrough decorator (Langfuse disabled / SDK missing)."""
+
+    def decorator(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @wraps(fn)
+        async def wrapper(*args: P.args, **kw: P.kwargs) -> R:
+            return await fn(*args, **kw)
+
+        return wrapper
+
+    return decorator
 
 
 if _lf_observe is not None:
@@ -46,40 +88,54 @@ if _lf_observe is not None:
         name: str | None = None,
         **kwargs: Any,
     ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+        # REQ-OBS-COST-002 — selective-mode rollback skips non-LLM nodes.
+        if _SELECTIVE_MODE and name in _SELECTIVE_NOOP_SPAN_NAMES:
+            return _noop_decorator(name=name, **kwargs)
         return _lf_observe(name=name, **kwargs)  # type: ignore[no-any-return,misc]
 else:
-
-    def observe(
-        name: str | None = None,
-        **kwargs: Any,
-    ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-        """No-op decorator (Langfuse 비활성 또는 import 실패)."""
-
-        def decorator(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-            @wraps(fn)
-            async def wrapper(*args: P.args, **kw: P.kwargs) -> R:
-                return await fn(*args, **kw)
-
-            return wrapper
-
-        return decorator
+    observe = _noop_decorator  # type: ignore[assignment]
 
 
-# ── SPEC-AGENT-001 / REQ-OBSV-002 ──────────────────────────────────────────
-# Optional Langfuse `CallbackHandler` factory for nested LLM tracing inside
-# LangGraph nodes (`respond`, `ask_clarify`).
-#
-# Important compatibility note: Langfuse 2.x's `langfuse.callback.CallbackHandler`
-# imports `from langchain.callbacks.base import BaseCallbackHandler`, which only
-# exists on langchain < 1.0. Once langchain is bumped to 1.x (required by
-# langgraph 1.x via langchain-core 1.3+), the legacy import path goes away and
-# the handler can no longer be constructed against this Langfuse major version.
-#
-# The function below tries to import the handler and returns `None` on any
-# import / construction failure. The graph's RunnableConfig.callbacks list
-# stays empty in that case — REQ-OBSV-002 acceptance #4 explicitly allows the
-# no-op fallback. The trace tree still records the parent `@observe` span and
-# the LiteLLM dashboard remains authoritative for cost (REQ-OBSV-004).
+def update_current_span(metadata: dict[str, Any] | None = None, **kwargs: Any) -> None:
+    """Attach metadata to the currently-active Langfuse span (v3 API).
+
+    Used inside node bodies for values that are computed mid-function — e.g.
+    `iteration` index in the Reflexion loop's `evaluator` node. No-op when
+    Langfuse is disabled.
+    """
+    if _lf_get_client is None:
+        return
+    try:
+        client = _lf_get_client()
+        client.update_current_span(metadata=metadata, **kwargs)
+    except Exception:  # noqa: BLE001 — tracing is best-effort
+        pass
+
+
+def update_current_trace(metadata: dict[str, Any] | None = None, **kwargs: Any) -> None:
+    """Attach metadata to the root trace (v3 API). No-op when disabled."""
+    if _lf_get_client is None:
+        return
+    try:
+        client = _lf_get_client()
+        client.update_current_trace(metadata=metadata, **kwargs)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def flush() -> None:
+    """Drain the SDK background queue. Call on lifespan shutdown."""
+    if _lf_get_client is None:
+        return
+    try:
+        _lf_get_client().flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# REQ-OBS-CALLBACK-001 — v3 LangChain CallbackHandler factory.
+# @MX:ANCHOR: [AUTO] high fan_in — called per webhook from 12 graph nodes via LangGraph callback propagation
+# @MX:REASON: This is the single bridge between LangGraph runnable callbacks and Langfuse v3 nested-generation spans.
 
 
 def build_callback_handler(
@@ -88,22 +144,37 @@ def build_callback_handler(
     user_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Any | None:
-    """Return a Langfuse `CallbackHandler` for the current webhook, or `None`
-    when keys are absent OR when the host langchain version no longer exports
-    the legacy callback base class. Callers pass the result into
-    `RunnableConfig.callbacks` — `None` falls through to no-op nicely.
+    """Return a Langfuse v3 `CallbackHandler` bound to the current webhook trace.
+
+    Callers MUST pass pre-hashed `session_id` / `user_id` (use
+    `app.observability.pii.hash_id`). Raw `chat_id` / `from_user_id` MUST NEVER
+    be passed to this function. Returns `None` when Langfuse is disabled OR the
+    v3 langchain sub-module import fails — callers should filter `None` from
+    the `RunnableConfig.callbacks` list.
     """
     if not _ENABLED:
         return None
     try:
-        from langfuse.callback import CallbackHandler  # type: ignore[import-not-found]
-    except Exception:
-        # langchain 1.x removed `langchain.callbacks.base.BaseCallbackHandler`
-        # which langfuse v2's CallbackHandler depends on. Until the host
-        # bumps to langfuse v3 (server-side incompatible) or langchain
-        # restores the legacy module, the nested-tracing path is no-op.
+        from langfuse.langchain import CallbackHandler  # type: ignore[import-not-found]
+    except Exception:  # noqa: BLE001 — broad on purpose; any import path failure → no-op
+        logger.warning("🐱 [langfuse] CallbackHandler import failed — nested-LLM tracing disabled")
         return None
     try:
-        return CallbackHandler(session_id=session_id, user_id=user_id, metadata=metadata or {})
-    except Exception:
+        # v3 CallbackHandler attaches metadata via update_current_trace lazily;
+        # pass it through __init__ for surface compatibility.
+        kwargs: dict[str, Any] = {}
+        if session_id is not None:
+            kwargs["session_id"] = session_id
+        if user_id is not None:
+            kwargs["user_id"] = user_id
+        if metadata:
+            kwargs["metadata"] = metadata
+        return CallbackHandler(**kwargs)
+    except TypeError:
+        # Some v3 minor versions accept fewer kwargs — fall back to bare construction.
+        try:
+            return CallbackHandler()
+        except Exception:  # noqa: BLE001
+            return None
+    except Exception:  # noqa: BLE001
         return None
