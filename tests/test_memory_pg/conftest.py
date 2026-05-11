@@ -74,14 +74,13 @@ async def pg_dsn(pg_container) -> str:
 
 @pytest_asyncio.fixture
 async def pool_initialized(pg_dsn: str) -> AsyncGenerator[None]:
+    # NOTE: do NOT reassign `app.core.config.settings` or any module's
+    # `settings` reference — that would split the singleton into multiple
+    # instances and break every test in the wider suite that relies on
+    # `monkeypatch.setattr(settings, ...)` reaching the same object held
+    # by other modules' `from ... import settings` references.
+    # `init_pool` accepts an explicit DSN so we don't have to mutate settings.
     from app.providers import db_pool
-
-    os.environ["DB_DSN"] = pg_dsn
-    from app.core import config as cfg_mod
-
-    cfg_mod.get_settings.cache_clear()
-    cfg_mod.settings = cfg_mod.get_settings()
-    db_pool.settings = cfg_mod.settings
 
     await db_pool.init_pool(pg_dsn)
     yield
