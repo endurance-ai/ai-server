@@ -85,7 +85,7 @@ def patch_pipeline(monkeypatch):
     return rpc
 
 
-async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatch):
+async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatch, capsys):
     """flag=on + LLM 정상 → search_step 이 refined query 로 호출됨."""
     from app.core.config import settings as app_settings
 
@@ -93,6 +93,19 @@ async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatc
     monkeypatch.setattr(
         "app.pipeline.enhance_query.LLMProvider.chat",
         AsyncMock(return_value=_ok_chat_response()),
+    )
+
+    # DEBUG: verify settings instance identity + flag
+    import sys as _sys
+    from app.pipeline import enhance_query as _eq
+    print(
+        f"DEBUG_ENHANCE id(app_settings)={id(app_settings)} "
+        f"id(eq.settings)={id(_eq.settings)} "
+        f"flag_app={app_settings.ENHANCE_QUERY_ENABLED} "
+        f"flag_eq={_eq.settings.ENHANCE_QUERY_ENABLED} "
+        f"sys.modules.app.core.config.settings.flag="
+        f"{_sys.modules['app.core.config'].settings.ENHANCE_QUERY_ENABLED}",
+        flush=True,
     )
 
     resp = await run_pipeline(_build_request())
