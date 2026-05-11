@@ -20,6 +20,7 @@ from app.channels import vision as vision_module
 from app.channels.session import get_store
 from app.channels.vision import VisionResult, derive_legacy_dict, derive_legacy_keywords, derive_legacy_label
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ def _outfit_mood_tags(result: VisionResult, top_n: int = 5) -> list[str]:
     return [t.label for t in tags[:top_n] if t.label]
 
 
+@observe(name="node.vision", as_type="span")
 async def vision_node(state: WorkingState) -> dict:
     if not state.image_url:
         return {"log_events": ["vision_node: no image_url; skipping"]}

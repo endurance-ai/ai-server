@@ -31,6 +31,7 @@ from app.channels.taste_profile import (
 )
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ def _reinforce_taste(sess, profile: TasteProfile | None, delta: CritiqueDelta) -
         profile.reinforce_disliked_brand(delta.anchor.brand, weight=1.0)
 
 
+@observe(name="node.critique_apply", as_type="span")
 async def critique_apply(state: WorkingState) -> dict:
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)

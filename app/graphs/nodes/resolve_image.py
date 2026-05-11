@@ -14,10 +14,12 @@ import logging
 from app.channels import link_resolver
 from app.channels.session import get_store
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
 
+@observe(name="node.resolve_image", as_type="span")
 async def resolve_image(state: WorkingState) -> dict:
     msg = state.message
     breadcrumbs: list[str] = []

@@ -32,6 +32,7 @@ from app.channels.session import SessionState, get_store
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,7 @@ async def _legacy_text_path(state: WorkingState) -> dict:
     return {"response_text": text, "log_events": breadcrumbs}
 
 
+@observe(name="node.ask_clarify", as_type="span")
 async def ask_clarify(state: WorkingState) -> dict:
     """REQ-CLARIFY-CARD-001 / REQ-CLARIFY-COMPAT-001/002 — 분기 진입점."""
     if not settings.CLARIFY_CARDS_ENABLED:

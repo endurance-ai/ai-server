@@ -9,7 +9,6 @@ handling are all preserved (REQ-COMPAT-009 / SPEC-MSG-001 REQ-MSG-001/002).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
@@ -23,17 +22,25 @@ from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
-from app.observability.langfuse import build_callback_handler, observe
+from app.observability.langfuse import build_callback_handler, observe, update_current_trace
+from app.observability.pii import hash_id
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks/telegram", tags=["webhooks"])
 
 
-def _hash_id(value: int | str | None) -> str | None:
-    if value is None:
-        return None
-    return hashlib.sha256(str(value).encode()).hexdigest()[:16]
+def _classify_flow(message: ChannelMessage) -> str:
+    """REQ-OBS-METADATA-001 — `flow` classifier.
+
+    Returns one of `"image"`, `"callback"`, `"text"`. Image trumps callback
+    when both happen to be present; the bot's actual handling is image-first.
+    """
+    if message.photo_file_id or message.urls:
+        return "image"
+    if message.callback_data:
+        return "callback"
+    return "text"
 
 
 @router.post("")
@@ -72,7 +79,7 @@ async def telegram_webhook(
     logger.info(
         "📥 [webhook] inbound update_id=%s user=%s text=%r photo=%s urls=%s",
         update_id,
-        _hash_id(message.from_user_id),
+        hash_id(message.from_user_id),
         (message.text or "")[:80],
         bool(message.photo_file_id),
         [str(u) for u in message.urls],
@@ -82,10 +89,13 @@ async def telegram_webhook(
     return ORJSONResponse({"ok": True})
 
 
-@observe(name="fashion_bot_webhook")
+@observe(name="webhook.telegram", as_type="span")
 async def _invoke_graph(adapter: MessengerAdapter, message: ChannelMessage) -> None:
-    """Single graph invocation — wrapped by `@observe` so each webhook is a
-    distinct Langfuse trace (REQ-OBSV-001, REQ-AGENT-008)."""
+    """Single graph invocation — wraps a root Langfuse trace per webhook.
+
+    REQ-OBS-METADATA-001 — every webhook root trace carries `lang`, `flow`,
+    `chat_id_hash`, and (on completion) `critique_retry_count`.
+    """
     token = set_adapter(adapter)
     try:
         input_state = InputState(
@@ -93,14 +103,28 @@ async def _invoke_graph(adapter: MessengerAdapter, message: ChannelMessage) -> N
             chat_id=message.chat_id,
             from_user_id=message.from_user_id,
         )
-        session_id = _hash_id(message.chat_id)
-        user_id = _hash_id(message.from_user_id)
+        session_id = hash_id(message.chat_id)
+        user_id = hash_id(message.from_user_id)
+        flow = _classify_flow(message)
+        # Attach root-trace metadata via v3 client API. `lang` reflects what we
+        # will reply with; it's set by `ingest` and overwritten by `respond`
+        # before completion — at this entry we attach `flow` + `chat_id_hash`
+        # which are knowable from the inbound message alone.
+        update_current_trace(
+            metadata={
+                "flow": flow,
+                "chat_id_hash": session_id,
+                "channel": "telegram",
+                "graph": "fashion_bot",
+            }
+        )
         handler = build_callback_handler(
             session_id=session_id,
             user_id=user_id,
             metadata={
                 "channel": "telegram",
                 "graph": "fashion_bot",
+                "flow": flow,
             },
         )
         callbacks = [handler] if handler is not None else []

@@ -27,6 +27,7 @@ from app.channels.critique import CritiqueDelta
 from app.channels.session import SessionState, get_store
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,7 @@ def _merge_session_boost(sess, new_keywords: list[str]) -> list[str]:
     return existing
 
 
+@observe(name="node.apply_clarify", as_type="span")
 async def apply_clarify(state: WorkingState) -> dict:
     msg = state.message
     breadcrumbs: list[str] = []

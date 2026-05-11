@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "http://localhost:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
     LANGFUSE_SECRET_KEY: str = ""
+    # SPEC-OBSERVABILITY-002 / REQ-OBS-COST-002 — emergency fallback to drop
+    # @observe from 8 non-LLM-calling nodes (ingest/resolve_image/pick_item/
+    # ask_clarify/apply_clarify/search/send_results/taste_update) when full
+    # decoration exceeds the < 5ms p99 latency budget. Default off — restore
+    # full coverage by leaving false.
+    LANGFUSE_SELECTIVE_MODE: bool = False
 
     # 검색 파라미터 기본값
     SEARCH_DEFAULT_K: int = 50  # RPC top-k
