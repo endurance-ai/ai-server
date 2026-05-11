@@ -17,6 +17,7 @@ import dataclasses
 import json
 import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 from psycopg.types.json import Jsonb
@@ -291,8 +292,6 @@ def _rehydrate_candidates(raw: Any) -> list[Any]:
     `getattr(c, 'id')`. Wrap each dict in SimpleNamespace so attribute access
     stays uniform regardless of whether the row came from memory or DB.
     """
-    from types import SimpleNamespace
-
     out: list[Any] = []
     for item in raw or []:
         if isinstance(item, dict):

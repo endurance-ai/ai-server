@@ -101,16 +101,7 @@ def _keywords_for_product(c: Any) -> list[str]:
     return [k for k in parts if not (k in seen or seen.add(k))]
 
 
-def _attr(c: Any, key: str, default: Any = None) -> Any:
-    """Read field from either an object (attribute) or a dict (key).
-
-    last_results is round-tripped through JSONB by SPEC-MEMORY-001, so after
-    re-hydration the candidates come back as plain dicts, not Candidate
-    objects. We must support both shapes transparently.
-    """
-    if isinstance(c, dict):
-        return c.get(key, default)
-    return getattr(c, key, default)
+from app.channels._candidate_attr import attr as _attr  # noqa: E402
 
 
 def _product_id_of(c: Any) -> str | None:
@@ -375,7 +366,6 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
     return len(attributed)
 
 
-@observe(name="implicit_feedback.re_query", as_type="span")
 async def _fetch_clicked_product_ids(chat_id: int) -> set[str]:
     """Return product_ids that were already clicked in this chat.
 
@@ -389,18 +379,20 @@ async def _fetch_clicked_product_ids(chat_id: int) -> set[str]:
         from app.providers.db_pool import get_pool
 
         async with get_pool().connection() as conn, conn.cursor() as cur:
+            # LIMIT to avoid unbounded memory growth on long-lived chats.
             await cur.execute(
                 "SELECT DISTINCT product_id FROM ai.card_impression "
-                "WHERE chat_id = %s AND click_status = 'clicked'",
+                "WHERE chat_id = %s AND click_status = 'clicked' LIMIT 1000",
                 (chat_id,),
             )
             rows = await cur.fetchall()
         return {row[0] for row in rows if row and row[0]}
     except Exception:
-        logger.debug("[IMPLICIT_FB][re-query] clicked_pids fetch failed (best-effort)")
+        logger.debug("[IMPLICIT_FB][re-query] clicked_pids fetch failed (best-effort)", exc_info=True)
         return set()
 
 
+@observe(name="implicit_feedback.re_query", as_type="span")
 async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) -> bool:
     """If session matches re-query predicate, soft-negatively reinforce
     last_results' brands+keywords. Returns whether the re-query triggered."""
@@ -435,7 +427,14 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
 
     products = list(getattr(session, "last_results", []) or [])
     elapsed_since = time.time() - float(getattr(session, "last_active", 0.0))
-    chat_id_int = int(getattr(session, "chat_id"))
+    # Guard: chat_id may be missing on degenerate sessions. Skip safely.
+    _raw_chat_id = getattr(session, "chat_id", None)
+    if _raw_chat_id is None:
+        return False
+    try:
+        chat_id_int = int(_raw_chat_id)
+    except (TypeError, ValueError):
+        return False
     clicked_pids = await _fetch_clicked_product_ids(chat_id_int)
     # Exclude already-clicked products from re-query soft-negative to preserve
     # explicit positive signals (REQ-FB-CLICK-001 must not be cancelled by a

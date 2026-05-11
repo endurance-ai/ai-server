@@ -63,13 +63,7 @@ class CritiqueDelta:
     extra_intent: str | None = None  # additional natural-language hint to layer on intent
 
 
-def _attr(c: Any, key: str, default: Any = None) -> Any:
-    """Read field from either object (attribute) or dict (key). See
-    SPEC-MEMORY-001 — JSONB round-trip restores dicts (now also wrapped as
-    SimpleNamespace in session_pg, but this stays defensive in either case)."""
-    if isinstance(c, dict):
-        return c.get(key, default)
-    return getattr(c, key, default)
+from app.channels._candidate_attr import attr as _attr  # noqa: E402
 
 
 def _candidate_to_anchor(c: Any, idx: int) -> AnchorRef:
