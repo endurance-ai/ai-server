@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import ORJSONResponse
 
 from app.channels.factory import backend_name, get_adapter
+from app.channels.session import get_store
+from app.channels.session_pg import PostgresSessionStore
 from app.core.auth import verify_internal_token
 from app.core.config import settings
 from app.providers.database import SupabaseProvider
@@ -43,6 +45,9 @@ async def health_ready() -> ORJSONResponse:
         except (TimeoutError, Exception):
             reachable = False
 
+    # SPEC-MEMORY-001 REQ-MEMORY-HEALTH-001 — surface active memory backend
+    memory_backend = "postgres" if isinstance(get_store(), PostgresSessionStore) else "in_memory"
+
     return ORJSONResponse(
         status_code=status_code,
         content={
@@ -53,6 +58,7 @@ async def health_ready() -> ORJSONResponse:
             "messenger_backend": backend,
             "bot_username": bot_username,
             "reachable": reachable,
+            "memory_backend": memory_backend,
             "version": settings.VERSION,
         },
     )
