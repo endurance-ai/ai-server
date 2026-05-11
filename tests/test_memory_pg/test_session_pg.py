@@ -54,7 +54,12 @@ def test_full_session_round_trip():
     assert s2.vision_keywords == ["oversized", "tee"]
     assert s2.vision_result == {"styleNode": "minimal", "items": [{"subcategory": "tee"}]}
     assert s2.vision_outfit_mood_tags == ["clean", "soft"]
-    assert s2.last_results == [{"product_id": "p1", "brand": "ami"}]
+    # last_results round-trips via JSONB and is re-hydrated into
+    # SimpleNamespace (see session_pg._rehydrate_candidates) so attribute
+    # access stays uniform across in-memory and Postgres backends.
+    assert len(s2.last_results) == 1
+    assert s2.last_results[0].product_id == "p1"
+    assert s2.last_results[0].brand == "ami"
     assert s2.shown_product_ids == ["p1", "p2"]
     assert s2.boost_keywords == ["oversized"]
     assert s2.lang == "ko"

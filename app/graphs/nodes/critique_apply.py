@@ -90,7 +90,14 @@ async def critique_apply(state: WorkingState) -> dict:
         suffix = msg.callback_data[len("crit:click:") :]
         target = resolve_click_target(suffix, sess.last_results or [])
         if target is None:
-            logger.debug("[IMPLICIT_FB][stale-click] suffix=%s", suffix[:32])
+            # Sanitize Telegram-controlled callback payload before logging
+            # (P1-sec: prevent log injection via newlines / control chars).
+            _safe_suffix = "".join(ch for ch in suffix[:53] if ch.isalnum() or ch in "-_")
+            logger.info(
+                "[IMPLICIT_FB][stale-click] suffix=%s last_results_n=%d",
+                _safe_suffix,
+                len(sess.last_results or []),
+            )
             await record_click(state.chat_id, sess.from_user_id, suffix or "", "", [], stale=True)
             stale_ack_done = False
             try:

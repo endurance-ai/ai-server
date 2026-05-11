@@ -301,7 +301,15 @@ def _route_after_critique(state: WorkingState) -> str:
     REQ-COMPAT-001: a stale `crit:*` callback (parse_callback returns None)
     must NOT trigger a re-search — the toast is the only user-visible side
     effect, and the graph terminates at respond.
+
+    SPEC-IMPLICIT-FB-001 / REQ-FB-CLICK-001: `crit:click:` callbacks are
+    silent — critique_apply already recorded the click and ack'd the
+    callback query. Route directly to END so respond does NOT emit any
+    natural-language message.
     """
+    cb = (state.message.callback_data or "") if state.message else ""
+    if cb.startswith("crit:click:"):
+        return "__end__"
     if state.critique_delta is None:
         return "respond"
     return "search_node"

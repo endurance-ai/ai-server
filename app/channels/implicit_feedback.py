@@ -74,7 +74,7 @@ def _keywords_for_product(c: Any) -> list[str]:
       1. `c.keywords` (list[str]) if present
       2. tokens from `c.subcategory + c.name`
     """
-    raw_kw = getattr(c, "keywords", None)
+    raw_kw = _attr(c, "keywords")
     if isinstance(raw_kw, list) and raw_kw:
         out: list[str] = []
         for k in raw_kw:
@@ -87,8 +87,8 @@ def _keywords_for_product(c: Any) -> list[str]:
             return out
     # fallback: tokenize subcategory + name
     parts: list[str] = []
-    sub = (getattr(c, "subcategory", "") or "").strip()
-    name = (getattr(c, "name", "") or "").strip()
+    sub = (_attr(c, "subcategory", "") or "").strip()
+    name = (_attr(c, "name", "") or "").strip()
     for src in (sub, name):
         if not src:
             continue
@@ -101,8 +101,11 @@ def _keywords_for_product(c: Any) -> list[str]:
     return [k for k in parts if not (k in seen or seen.add(k))]
 
 
+from app.channels._candidate_attr import attr as _attr  # noqa: E402
+
+
 def _product_id_of(c: Any) -> str | None:
-    pid = getattr(c, "id", None)
+    pid = _attr(c, "id")
     if pid is None:
         return None
     s = str(pid).strip()
@@ -110,7 +113,7 @@ def _product_id_of(c: Any) -> str | None:
 
 
 def _brand_of(c: Any) -> str:
-    return (getattr(c, "brand", "") or "").strip().lower()
+    return (_attr(c, "brand", "") or "").strip().lower()
 
 
 # ── Public API ────────────────────────────────────────────────────────────
@@ -363,6 +366,32 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
     return len(attributed)
 
 
+async def _fetch_clicked_product_ids(chat_id: int) -> set[str]:
+    """Return product_ids that were already clicked in this chat.
+
+    Used by re-query path to exclude explicitly liked products from the
+    soft-negative reinforcement (preserves REQ-FB-CLICK-001 signal).
+    Best-effort: returns empty set on any failure or in_memory backend.
+    """
+    if not _BACKEND_IS_POSTGRES:
+        return set()
+    try:
+        from app.providers.db_pool import get_pool
+
+        async with get_pool().connection() as conn, conn.cursor() as cur:
+            # LIMIT to avoid unbounded memory growth on long-lived chats.
+            await cur.execute(
+                "SELECT DISTINCT product_id FROM ai.card_impression "
+                "WHERE chat_id = %s AND click_status = 'clicked' LIMIT 1000",
+                (chat_id,),
+            )
+            rows = await cur.fetchall()
+        return {row[0] for row in rows if row and row[0]}
+    except Exception:
+        logger.debug("[IMPLICIT_FB][re-query] clicked_pids fetch failed (best-effort)", exc_info=True)
+        return set()
+
+
 @observe(name="implicit_feedback.re_query", as_type="span")
 async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) -> bool:
     """If session matches re-query predicate, soft-negatively reinforce
@@ -398,14 +427,27 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
 
     products = list(getattr(session, "last_results", []) or [])
     elapsed_since = time.time() - float(getattr(session, "last_active", 0.0))
+    # Guard: chat_id may be missing on degenerate sessions. Skip safely.
+    _raw_chat_id = getattr(session, "chat_id", None)
+    if _raw_chat_id is None:
+        return False
+    try:
+        chat_id_int = int(_raw_chat_id)
+    except (TypeError, ValueError):
+        return False
+    clicked_pids = await _fetch_clicked_product_ids(chat_id_int)
+    # Exclude already-clicked products from re-query soft-negative to preserve
+    # explicit positive signals (REQ-FB-CLICK-001 must not be cancelled by a
+    # subsequent re-query in the same session).
+    filtered_products = [c for c in products if (_product_id_of(c) or "") not in clicked_pids]
+    excluded_n = len(products) - len(filtered_products)
 
     if settings.TASTE_PROFILE_ENABLED:
         try:
             taste_store = get_taste_store()
-            chat_id = int(getattr(session, "chat_id"))
             from_user_id = getattr(session, "from_user_id", None)
-            profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id))
-            for c in products:
+            profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id_int))
+            for c in filtered_products:
                 brand = _brand_of(c)
                 keywords = _keywords_for_product(c)
                 if brand:
@@ -414,9 +456,10 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
                     profile.reinforce_disliked_keywords(keywords, weight=weight)
             taste_store.update(profile)
             logger.info(
-                "[IMPLICIT_FB][re-query] chat_id_hash=%s products=%d elapsed_since_results_s=%.1f",
-                hash_id(chat_id),
-                len(products),
+                "[IMPLICIT_FB][re-query] chat_id_hash=%s products=%d excluded_clicked=%d elapsed_since_results_s=%.1f",
+                hash_id(chat_id_int),
+                len(filtered_products),
+                excluded_n,
                 elapsed_since,
             )
         except Exception:  # noqa: BLE001
