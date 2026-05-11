@@ -8,13 +8,26 @@ capture 해서 enhanced vs raw 사용을 명시 검증한다.
 from __future__ import annotations
 
 import json
+import sys as _sys
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.models.request import AnalyzedItem, RecommendRequest
+from app.pipeline import enhance_query as _eq_mod
 from app.pipeline.runner import run_pipeline
+
+
+def _debug_dump(app_settings: Any) -> None:
+    print(
+        f"DEBUG_ENHANCE id(app_settings)={id(app_settings)} "
+        f"id(eq.settings)={id(_eq_mod.settings)} "
+        f"flag_app={app_settings.ENHANCE_QUERY_ENABLED} "
+        f"flag_eq={_eq_mod.settings.ENHANCE_QUERY_ENABLED} "
+        f"sys.modules.flag={_sys.modules['app.core.config'].settings.ENHANCE_QUERY_ENABLED}",
+        flush=True,
+    )
 
 
 def _build_request(
@@ -95,18 +108,7 @@ async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatc
         AsyncMock(return_value=_ok_chat_response()),
     )
 
-    # DEBUG: verify settings instance identity + flag
-    import sys as _sys
-    from app.pipeline import enhance_query as _eq
-    print(
-        f"DEBUG_ENHANCE id(app_settings)={id(app_settings)} "
-        f"id(eq.settings)={id(_eq.settings)} "
-        f"flag_app={app_settings.ENHANCE_QUERY_ENABLED} "
-        f"flag_eq={_eq.settings.ENHANCE_QUERY_ENABLED} "
-        f"sys.modules.app.core.config.settings.flag="
-        f"{_sys.modules['app.core.config'].settings.ENHANCE_QUERY_ENABLED}",
-        flush=True,
-    )
+    _debug_dump(app_settings)
 
     resp = await run_pipeline(_build_request())
 
