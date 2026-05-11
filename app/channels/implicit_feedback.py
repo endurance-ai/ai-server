@@ -1,0 +1,508 @@
+"""SPEC-IMPLICIT-FB-001 — implicit feedback capture.
+
+Four public functions log card impressions, credit clicks, lazily attribute
+expired no-click impressions, and detect rapid re-queries. All four are
+@observe-decorated and silently no-op when the active memory backend is
+in-memory (degraded mode). See spec.md for the full rationale.
+
+Helpers:
+- `_keywords_for_product(c)` — single source of truth for keyword extraction.
+  REQ-FB-REQUERY-001 requires log_impressions and detect_and_apply_re_query
+  to agree on keyword shape.
+- `_BACKEND_IS_POSTGRES` module-level flag — set during lifespan startup so
+  every call avoids per-call isinstance() against get_store().
+
+# @MX:ANCHOR: [AUTO] Single hot module — every send_results / ingest / click webhook routes here
+# @MX:REASON: log_impressions / record_click / attribute_expired_impressions are fan_in >= 3 (3 nodes call them)
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any
+
+from psycopg.types.json import Jsonb
+
+from app.channels.taste_profile import (
+    get_taste_store,
+    user_key_for,
+)
+from app.core.config import settings
+from app.observability.langfuse import observe, update_current_span
+from app.observability.pii import hash_id
+
+logger = logging.getLogger(__name__)
+
+# Module-level cache — set by `set_backend_is_postgres(True)` during lifespan
+# startup when Postgres probe succeeds. Defaults False so unit tests without
+# pool init silently skip.
+_BACKEND_IS_POSTGRES: bool = False
+
+# WARN-once flood guard — keyed by (chat_id, op) so each session sees one
+# warning per operation across its lifetime, not per webhook.
+_WARN_ONCE: set[tuple[int, str]] = set()
+
+
+def set_backend_is_postgres(value: bool) -> None:
+    """Set the module-level backend flag. Called from app lifespan after
+    Postgres probe succeeds. Tests may also call this directly."""
+    global _BACKEND_IS_POSTGRES
+    _BACKEND_IS_POSTGRES = bool(value)
+
+
+def reset_warn_once_for_tests() -> None:
+    """Clear the warn-once guard (test hook only)."""
+    _WARN_ONCE.clear()
+
+
+def _warn_once(chat_id: int, op: str, msg: str) -> None:
+    key = (int(chat_id), op)
+    if key in _WARN_ONCE:
+        return
+    _WARN_ONCE.add(key)
+    logger.warning(msg)
+
+
+# @MX:ANCHOR: [AUTO] keyword extractor — byte-identical across impression-log
+# and re-query call sites (REQ-FB-IMPRESSION-001 + REQ-FB-REQUERY-001)
+# @MX:REASON: drift between extractors would split the implicit-signal taste profile
+def _keywords_for_product(c: Any) -> list[str]:
+    """Extract lowercased keyword list from a Candidate-like object.
+
+    Order of precedence:
+      1. `c.keywords` (list[str]) if present
+      2. tokens from `c.subcategory + c.name`
+    """
+    raw_kw = getattr(c, "keywords", None)
+    if isinstance(raw_kw, list) and raw_kw:
+        out: list[str] = []
+        for k in raw_kw:
+            if not k:
+                continue
+            s = str(k).strip().lower()
+            if s:
+                out.append(s)
+        if out:
+            return out
+    # fallback: tokenize subcategory + name
+    parts: list[str] = []
+    sub = (getattr(c, "subcategory", "") or "").strip()
+    name = (getattr(c, "name", "") or "").strip()
+    for src in (sub, name):
+        if not src:
+            continue
+        for tok in src.replace(",", " ").split():
+            s = tok.strip().lower()
+            if s and len(s) > 1:
+                parts.append(s)
+    # de-dupe while preserving order
+    seen: set[str] = set()
+    return [k for k in parts if not (k in seen or seen.add(k))]
+
+
+def _product_id_of(c: Any) -> str | None:
+    pid = getattr(c, "id", None)
+    if pid is None:
+        return None
+    s = str(pid).strip()
+    return s or None
+
+
+def _brand_of(c: Any) -> str:
+    return (getattr(c, "brand", "") or "").strip().lower()
+
+
+# ── Public API ────────────────────────────────────────────────────────────
+
+
+@observe(name="implicit_feedback.impression_logged", as_type="span")
+async def log_impressions(chat_id: int, from_user_id: int | None, products: list[Any]) -> int:
+    """Insert one row per product into ai.card_impression. Returns inserted count.
+
+    Single batched INSERT (executemany). Failure caught + logged WARN; never raises.
+    """
+    t0 = time.perf_counter()
+    if not _BACKEND_IS_POSTGRES:
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "count": 0,
+                "elapsed_ms": 0,
+                "backend": "in_memory_skipped",
+            }
+        )
+        return 0
+
+    rows: list[tuple] = []
+    window_s = max(0, int(settings.IMPLICIT_FB_ATTRIBUTION_WINDOW_S))
+    for c in products:
+        pid = _product_id_of(c)
+        if not pid:
+            logger.debug("[IMPLICIT_FB][skip] missing product_id")
+            continue
+        brand = _brand_of(c)
+        keywords = _keywords_for_product(c)
+        rows.append((chat_id, from_user_id, pid, brand, Jsonb(keywords), window_s))
+
+    if not rows:
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "count": 0,
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+                "backend": "postgres",
+            }
+        )
+        return 0
+
+    try:
+        from app.providers.db_pool import get_pool, run_in_pool_loop
+
+        async def _insert() -> None:
+            async with get_pool().connection() as conn, conn.cursor() as cur:
+                await cur.executemany(
+                    """
+                    INSERT INTO ai.card_impression
+                        (chat_id, from_user_id, product_id, brand, keywords, attribution_window_s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    rows,
+                )
+                await conn.commit()
+
+        run_in_pool_loop(_insert())
+    except Exception as exc:  # noqa: BLE001
+        _warn_once(chat_id, "impression_logged", f"[IMPLICIT_FB][impression] insert failed: {exc!r}")
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "count": 0,
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+                "backend": "postgres_error",
+            }
+        )
+        return 0
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    update_current_span(
+        metadata={
+            "chat_id_hash": hash_id(chat_id),
+            "count": len(rows),
+            "elapsed_ms": elapsed_ms,
+            "backend": "postgres",
+        }
+    )
+    return len(rows)
+
+
+@observe(name="implicit_feedback.click", as_type="span")
+async def record_click(
+    chat_id: int,
+    from_user_id: int | None,
+    product_id: str,
+    brand: str,
+    keywords: list[str],
+    *,
+    stale: bool = False,
+) -> int:
+    """Mark impression as clicked and reinforce liked_brand/liked_keywords.
+
+    Returns rows_affected on the UPDATE (0 if already attributed / clicked).
+    Reinforcement runs regardless of UPDATE result (real UI tap = real signal).
+    """
+    t0 = time.perf_counter()
+    weight = float(settings.IMPLICIT_FB_CLICK_WEIGHT)
+
+    if stale or not product_id:
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "product_id": product_id or "",
+                "brand": brand,
+                "weight": weight,
+                "stale": True,
+                "db_rows_affected": 0,
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            }
+        )
+        return 0
+
+    rows_affected = 0
+    if _BACKEND_IS_POSTGRES:
+        try:
+            from app.providers.db_pool import get_pool, run_in_pool_loop
+
+            async def _update() -> int:
+                async with get_pool().connection() as conn, conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        UPDATE ai.card_impression
+                           SET click_status = 'clicked', click_at = now()
+                         WHERE chat_id = %s AND product_id = %s AND click_status IS NULL
+                        """,
+                        (chat_id, product_id),
+                    )
+                    n = cur.rowcount or 0
+                    await conn.commit()
+                return int(n)
+
+            rows_affected = run_in_pool_loop(_update())
+        except Exception as exc:  # noqa: BLE001
+            _warn_once(chat_id, "click", f"[IMPLICIT_FB][click] update failed: {exc!r}")
+            rows_affected = 0
+
+    # Reinforce taste profile regardless of DB state
+    if settings.TASTE_PROFILE_ENABLED:
+        try:
+            taste_store = get_taste_store()
+            profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id))
+            if brand:
+                profile.reinforce_liked_brand(brand, weight=weight)
+            if keywords:
+                profile.reinforce_liked_keywords(keywords, weight=weight)
+            taste_store.update(profile)
+        except Exception:  # noqa: BLE001
+            logger.exception("[IMPLICIT_FB][click] taste reinforcement failed")
+
+    update_current_span(
+        metadata={
+            "chat_id_hash": hash_id(chat_id),
+            "product_id": product_id,
+            "brand": brand,
+            "weight": weight,
+            "stale": False,
+            "db_rows_affected": rows_affected,
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            "backend": "postgres" if _BACKEND_IS_POSTGRES else "in_memory_skipped",
+        }
+    )
+    return rows_affected
+
+
+@observe(name="implicit_feedback.no_click", as_type="span")
+async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) -> int:
+    """Single-CTE round-trip — select+update expired pending rows, reinforce
+    disliked_* with NOCLICK_WEIGHT. Returns count attributed."""
+    t0 = time.perf_counter()
+    weight = float(settings.IMPLICIT_FB_NOCLICK_WEIGHT)
+
+    if not _BACKEND_IS_POSTGRES:
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "attributed_count": 0,
+                "weight": weight,
+                "elapsed_ms": 0,
+                "backend": "in_memory_skipped",
+            }
+        )
+        return 0
+
+    try:
+        from app.providers.db_pool import get_pool, run_in_pool_loop
+
+        async def _attribute() -> list[tuple[str, list[str]]]:
+            async with get_pool().connection() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    WITH expired AS (
+                        SELECT id, brand, keywords FROM ai.card_impression
+                         WHERE chat_id = %s
+                           AND click_status IS NULL
+                           AND shown_at + (attribution_window_s * interval '1 second') < now()
+                    )
+                    UPDATE ai.card_impression
+                       SET click_status = 'attributed_no_click'
+                     WHERE id IN (SELECT id FROM expired)
+                    RETURNING brand, keywords
+                    """,
+                    (chat_id,),
+                )
+                rows = await cur.fetchall()
+                await conn.commit()
+            return [(r[0], list(r[1] or [])) for r in rows]
+
+        attributed = run_in_pool_loop(_attribute())
+    except Exception as exc:  # noqa: BLE001
+        _warn_once(chat_id, "no_click", f"[IMPLICIT_FB][no_click] attribute failed: {exc!r}")
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(chat_id),
+                "attributed_count": 0,
+                "weight": weight,
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+                "backend": "postgres_error",
+            }
+        )
+        return 0
+
+    if attributed and settings.TASTE_PROFILE_ENABLED:
+        try:
+            taste_store = get_taste_store()
+            profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id))
+            for brand, keywords in attributed:
+                if brand:
+                    profile.reinforce_disliked_brand(brand, weight=weight)
+                if keywords:
+                    profile.reinforce_disliked_keywords(keywords, weight=weight)
+            taste_store.update(profile)
+        except Exception:  # noqa: BLE001
+            logger.exception("[IMPLICIT_FB][no_click] taste reinforcement failed")
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    update_current_span(
+        metadata={
+            "chat_id_hash": hash_id(chat_id),
+            "attributed_count": len(attributed),
+            "weight": weight,
+            "elapsed_ms": elapsed_ms,
+            "backend": "postgres",
+        }
+    )
+    return len(attributed)
+
+
+@observe(name="implicit_feedback.re_query", as_type="span")
+async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) -> bool:
+    """If session matches re-query predicate, soft-negatively reinforce
+    last_results' brands+keywords. Returns whether the re-query triggered."""
+    t0 = time.perf_counter()
+    weight = float(settings.IMPLICIT_FB_REQUERY_WEIGHT)
+    window_s = max(0, int(settings.IMPLICIT_FB_REQUERY_WINDOW_S))
+
+    try:
+        from app.channels.session import SessionState
+
+        triggered = (
+            inbound_is_fresh_query
+            and getattr(session, "state", None) == SessionState.RESULTS_SENT
+            and bool(getattr(session, "last_results", None))
+            and window_s > 0
+            and (time.time() - float(getattr(session, "last_active", 0.0))) < window_s
+        )
+    except Exception:  # noqa: BLE001
+        triggered = False
+
+    if not triggered:
+        update_current_span(
+            metadata={
+                "chat_id_hash": hash_id(getattr(session, "chat_id", None)),
+                "triggered": False,
+                "products_count": 0,
+                "weight": weight,
+                "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+            }
+        )
+        return False
+
+    products = list(getattr(session, "last_results", []) or [])
+    elapsed_since = time.time() - float(getattr(session, "last_active", 0.0))
+
+    if settings.TASTE_PROFILE_ENABLED:
+        try:
+            taste_store = get_taste_store()
+            chat_id = int(getattr(session, "chat_id"))
+            from_user_id = getattr(session, "from_user_id", None)
+            profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id))
+            for c in products:
+                brand = _brand_of(c)
+                keywords = _keywords_for_product(c)
+                if brand:
+                    profile.reinforce_disliked_brand(brand, weight=weight)
+                if keywords:
+                    profile.reinforce_disliked_keywords(keywords, weight=weight)
+            taste_store.update(profile)
+            logger.info(
+                "[IMPLICIT_FB][re-query] chat_id_hash=%s products=%d elapsed_since_results_s=%.1f",
+                hash_id(chat_id),
+                len(products),
+                elapsed_since,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("[IMPLICIT_FB][re-query] reinforcement failed")
+
+    update_current_span(
+        metadata={
+            "chat_id_hash": hash_id(getattr(session, "chat_id", None)),
+            "triggered": True,
+            "products_count": len(products),
+            "elapsed_since_results_s": round(elapsed_since, 2),
+            "weight": weight,
+            "elapsed_ms": int((time.perf_counter() - t0) * 1000),
+        }
+    )
+    return True
+
+
+async def cleanup_card_impressions() -> tuple[int, int]:
+    """Hard-delete attributed/clicked rows > 7d AND pending rows > 60d.
+
+    Returns (attributed_deleted, pending_deleted). REQ-FB-CLEANUP-001.
+    Called by PostgresSessionStore's cleanup loop. Safe to call in non-postgres
+    mode (returns (0, 0)).
+    """
+    if not _BACKEND_IS_POSTGRES:
+        return (0, 0)
+    try:
+        from app.providers.db_pool import get_pool
+
+        async with get_pool().connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                DELETE FROM ai.card_impression
+                 WHERE click_status IS NOT NULL
+                   AND COALESCE(click_at, shown_at + (attribution_window_s * interval '1 second'))
+                       < now() - interval '7 days'
+                """
+            )
+            n_attr = cur.rowcount or 0
+            await cur.execute(
+                """
+                DELETE FROM ai.card_impression
+                 WHERE click_status IS NULL
+                   AND shown_at < now() - interval '60 days'
+                """
+            )
+            n_pending = cur.rowcount or 0
+            await conn.commit()
+        if n_attr or n_pending:
+            logger.info("[IMPLICIT_FB][cleanup] deleted_attr=%d deleted_pending=%d", n_attr, n_pending)
+        return (int(n_attr), int(n_pending))
+    except Exception:  # noqa: BLE001
+        logger.exception("[IMPLICIT_FB][cleanup] error")
+        return (0, 0)
+
+
+# Length budget for crit:click:{suffix} — Telegram 64B limit minus "crit:click:" prefix (11)
+_CLICK_SUFFIX_BUDGET = 53
+
+
+def click_callback_for(product_id: str) -> str:
+    """Build callback_data 'crit:click:{suffix}' truncating long product_ids
+    to the last _CLICK_SUFFIX_BUDGET chars. REQ-FB-UX-001."""
+    pid = str(product_id or "")
+    if len(pid) > _CLICK_SUFFIX_BUDGET:
+        pid = pid[-_CLICK_SUFFIX_BUDGET:]
+    return f"crit:click:{pid}"
+
+
+# @MX:ANCHOR: [AUTO] suffix-match resolver — fan_in from critique_apply on every click webhook
+# @MX:REASON: matches truncated callback_data back to a Candidate in Session.last_results
+def resolve_click_target(suffix: str, last_results: list[Any]) -> Any | None:
+    """Resolve a (possibly truncated) product_id suffix to a Candidate in
+    last_results. Prefers exact match; falls back to endswith match. Returns
+    None if no match found."""
+    if not suffix:
+        return None
+    # exact match first
+    for c in last_results:
+        pid = _product_id_of(c)
+        if pid is not None and pid == suffix:
+            return c
+    # suffix match (handles truncation)
+    for c in last_results:
+        pid = _product_id_of(c)
+        if pid is not None and pid.endswith(suffix):
+            return c
+    return None

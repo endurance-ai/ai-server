@@ -46,6 +46,19 @@ async def ingest(state: WorkingState) -> dict:
         f"photo={bool(msg.photo_file_id)} urls={len(msg.urls)} cb={msg.callback_data or '—'}"
     ]
 
+    # SPEC-IMPLICIT-FB-001 / REQ-FB-NOCLICK-001 + REQ-FB-REQUERY-001 — lazy steps.
+    # Run BEFORE state-mutating logic so re-query can read last_results.
+    try:
+        from app.channels import implicit_feedback as _ifb
+
+        await _ifb.attribute_expired_impressions(state.chat_id, sess.from_user_id)
+        inbound_is_fresh_query = bool((msg.text and not msg.callback_data) or msg.photo_file_id or msg.urls) and not (
+            msg.callback_data or ""
+        ).startswith(("crit:", "clarify:"))
+        await _ifb.detect_and_apply_re_query(sess, inbound_is_fresh_query)
+    except Exception as exc:  # noqa: BLE001 — never block webhook
+        logger.warning("[ingest] implicit feedback steps failed: %r", exc)
+
     # Only invoke router for ambiguous text in RESULTS_SENT / IDLE.
     needs_router = (
         msg.text

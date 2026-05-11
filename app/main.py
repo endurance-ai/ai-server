@@ -101,6 +101,13 @@ async def _select_memory_backend() -> None:
 
     set_store_factory(PostgresSessionStore)
     set_taste_store_factory(PostgresTasteProfileStore)
+    # SPEC-IMPLICIT-FB-001 — module-level Postgres flag for implicit feedback fast-path.
+    try:
+        from app.channels.implicit_feedback import set_backend_is_postgres
+
+        set_backend_is_postgres(True)
+    except Exception:  # noqa: BLE001
+        log.exception("[MEMORY][startup] failed to set implicit_feedback backend flag")
     log.info("[MEMORY][startup] backend=postgres")
 
 

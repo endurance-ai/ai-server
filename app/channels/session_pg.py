@@ -111,6 +111,13 @@ class PostgresSessionStore:
                 deleted = await asyncio.to_thread(run_in_pool_loop, _acleanup_expired())
                 if deleted:
                     logger.info("[MEMORY][cleanup] expired_deleted=%d", deleted)
+                # SPEC-IMPLICIT-FB-001 / REQ-FB-CLEANUP-001 — also clean card_impression rows.
+                try:
+                    from app.channels.implicit_feedback import cleanup_card_impressions
+
+                    await cleanup_card_impressions()
+                except Exception:
+                    logger.exception("[IMPLICIT_FB][cleanup] error")
             except asyncio.CancelledError:
                 raise
             except Exception:

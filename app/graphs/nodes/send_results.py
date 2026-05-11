@@ -35,23 +35,31 @@ CRIT_CHEAP_EN = "💰 Cheaper"
 CRIT_MORE_KO = "♥ 비슷한 거 더"
 CRIT_LESS_KO = "✕ 다른 느낌"
 CRIT_CHEAP_KO = "💰 더 저렴"
+# SPEC-IMPLICIT-FB-001 / REQ-FB-UX-001 — 4th critique button (click capture)
+CRIT_CLICK_KO = "👀 자세히"
+CRIT_CLICK_EN = "👀 View"
 # Back-compat aliases
 CRIT_MORE = CRIT_MORE_EN
 CRIT_LESS = CRIT_LESS_EN
 CRIT_CHEAP = CRIT_CHEAP_EN
 
 
-def _critique_buttons_for(idx: int, lang: str = "en") -> list[tuple[str, str]]:
+def _critique_buttons_for(idx: int, lang: str = "en", product_id: str | None = None) -> list[tuple[str, str]]:
+    from app.channels.implicit_feedback import click_callback_for
+
+    click_cb = click_callback_for(product_id) if product_id else f"crit:click:{idx}"
     if lang == "ko":
         return [
             (CRIT_MORE_KO, f"crit:more:{idx}"),
             (CRIT_LESS_KO, f"crit:less:{idx}"),
             (CRIT_CHEAP_KO, f"crit:cheap:{idx}"),
+            (CRIT_CLICK_KO, click_cb),
         ]
     return [
         (CRIT_MORE_EN, f"crit:more:{idx}"),
         (CRIT_LESS_EN, f"crit:less:{idx}"),
         (CRIT_CHEAP_EN, f"crit:cheap:{idx}"),
+        (CRIT_CLICK_EN, click_cb),
     ]
 
 
@@ -119,7 +127,7 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
             button_text=button_label,
             button_url=product_url,
             parse_mode="HTML",
-            critique_buttons=_critique_buttons_for(idx, lang=lang),
+            critique_buttons=_critique_buttons_for(idx, lang=lang, product_id=str(getattr(c, "id", "") or "") or None),
         )
     except ValidationError:
         return None
@@ -217,6 +225,14 @@ async def send_results(state: WorkingState) -> dict:
     sess.shown_product_ids = list(dict.fromkeys(sess.shown_product_ids + new_ids))
     sess.state = SessionState.RESULTS_SENT
     get_store().update(sess)
+
+    # SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 — log impressions AFTER session persist.
+    try:
+        from app.channels.implicit_feedback import log_impressions
+
+        await log_impressions(chat_id, sess.from_user_id, sent_candidates)
+    except Exception as exc:  # noqa: BLE001 — best-effort, never fail webhook
+        logger.warning("[send_results] log_impressions failed: %r", exc)
 
     breadcrumbs.append(f"send_results: sent={sent}")
     return {
