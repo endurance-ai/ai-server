@@ -59,6 +59,22 @@ class PostgresTasteProfileStore:
     def delete(self, user_key: str) -> None:
         run_in_pool_loop(_adelete(user_key))
 
+    def seed_from_onboarding(self, user_key: str, weights: dict[str, float]) -> None:
+        """Additive merge into `liked_keywords` for onboarding seed.
+
+        Same contract as InMemory: per-keyword cap, additive only, NEVER overwrite.
+        Uses `jsonb_set` via load → merge → persist so we do NOT compound the 0.9
+        decay across unrelated keywords (one `seed_from_onboarding` call should
+        affect ONLY the keys being seeded). Implementation choice: load the
+        profile, add `min(weight, cap)` per key in-process, then re-persist.
+        `GREATEST(current, seed)` was considered but rejected — additive lets a
+        keyword that appears in BOTH cards AND Pinterest accumulate naturally
+        (still capped per-call).
+
+        @MX:SPEC: SPEC-ONBOARD-CARDS-001
+        """
+        run_in_pool_loop(_aseed_from_onboarding(user_key, weights))
+
     async def start(self) -> None:
         # No background tasks — stale-but-non-evicted policy (REQ-MEMORY-PERSIST-003).
         return None
@@ -123,6 +139,39 @@ async def _aupdate(profile: TasteProfile) -> None:
             ),
         )
         await conn.commit()
+
+
+@observe(name="memory.taste.seed_from_onboarding", as_type="span")
+async def _aseed_from_onboarding(user_key: str, weights: dict[str, float]) -> None:
+    """Load → merge → persist, atomic under the per-key asyncio.Lock that
+    callers hold via `lock_for(user_key)` (REQ-MEMORY-PROTOCOL-001)."""
+    if not weights:
+        return
+    from app.core.config import settings as _settings
+
+    cap = float(getattr(_settings, "ONBOARDING_SEED_MAX_WEIGHT", 0.7))
+    profile = await _aget_or_create(user_key)
+    mutated = False
+    for raw_kw, raw_w in weights.items():
+        if not raw_kw:
+            continue
+        try:
+            w = float(raw_w)
+        except (TypeError, ValueError):
+            continue
+        if w <= 0.0:
+            continue
+        kw = raw_kw.strip().lower()
+        if not kw:
+            continue
+        applied = min(w, cap)
+        profile.liked_keywords[kw] = profile.liked_keywords.get(kw, 0.0) + applied
+        profile.disliked_keywords.pop(kw, None)
+        mutated = True
+    if not mutated:
+        return
+    profile._cap()
+    await _aupdate(profile)
 
 
 async def _adelete(user_key: str) -> None:

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -157,6 +158,67 @@ class Settings(BaseSettings):
     IMPLICIT_FB_CLICK_WEIGHT: float = 1.0
     # Soft-negative weight applied on rapid re-query. REQ-FB-REQUERY-001.
     IMPLICIT_FB_REQUERY_WEIGHT: float = 0.5
+
+    # SPEC-ONBOARD-CARDS-001 — Onboarding cards + Pinterest bootstrap ────
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    APIFY_TOKEN: str = ""
+    APIFY_PINTEREST_ACTOR: str = "epctex/pinterest-scraper"
+    APIFY_PINTEREST_MAX_ITEMS: int = 80
+    APIFY_PINTEREST_CONCURRENCY: int = 5
+    PINTEREST_BOOTSTRAP_ENABLED: bool = True
+    # 24h TTL — REQ-ONBOARD-PINTEREST-007 cache.
+    PINTEREST_INGEST_CACHE_TTL_S: int = 86400
+    # REQ-ONBOARD-PINTEREST-002 — cap on extracted pin URLs per turn.
+    PINTEREST_MAX_PINS_PER_TURN: int = 20
+    # REQ-ONBOARD-PINTEREST-003 — continuous bootstrap rate-limit window.
+    PINTEREST_CONTINUOUS_RATELIMIT_S: int = 300
+    ONBOARDING_CARDS_ENABLED: bool = True
+    # REQ-ONBOARD-SEED-002 — per-keyword seed weight cap. Applied by
+    # `TasteProfileStore.seed_from_onboarding` for both InMemory + Postgres
+    # backends. Recommended range (0, 1].
+    ONBOARDING_SEED_MAX_WEIGHT: float = 0.7
+
+    @field_validator("APIFY_PINTEREST_MAX_ITEMS")
+    @classmethod
+    def _validate_apify_max_items(cls, v: int) -> int:
+        if not (1 <= int(v) <= 100):
+            raise ValueError("APIFY_PINTEREST_MAX_ITEMS must be in [1, 100]")
+        return int(v)
+
+    @field_validator("APIFY_PINTEREST_CONCURRENCY")
+    @classmethod
+    def _validate_apify_concurrency(cls, v: int) -> int:
+        if not (1 <= int(v) <= 20):
+            raise ValueError("APIFY_PINTEREST_CONCURRENCY must be in [1, 20]")
+        return int(v)
+
+    @field_validator("ONBOARDING_SEED_MAX_WEIGHT")
+    @classmethod
+    def _validate_seed_max_weight(cls, v: float) -> float:
+        if not (0.0 < float(v) <= 1.0):
+            raise ValueError("ONBOARDING_SEED_MAX_WEIGHT must be in (0, 1]")
+        return float(v)
+
+    @field_validator("PINTEREST_MAX_PINS_PER_TURN")
+    @classmethod
+    def _validate_max_pins_per_turn(cls, v: int) -> int:
+        if not (1 <= int(v) <= 50):
+            raise ValueError("PINTEREST_MAX_PINS_PER_TURN must be in [1, 50]")
+        return int(v)
+
+    @field_validator("PINTEREST_INGEST_CACHE_TTL_S")
+    @classmethod
+    def _validate_cache_ttl(cls, v: int) -> int:
+        if int(v) < 0:
+            raise ValueError("PINTEREST_INGEST_CACHE_TTL_S must be non-negative")
+        return int(v)
+
+    @field_validator("PINTEREST_CONTINUOUS_RATELIMIT_S")
+    @classmethod
+    def _validate_rate_limit(cls, v: int) -> int:
+        if int(v) < 0:
+            raise ValueError("PINTEREST_CONTINUOUS_RATELIMIT_S must be non-negative")
+        return int(v)
 
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
