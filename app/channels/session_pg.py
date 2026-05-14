@@ -13,8 +13,6 @@ which collapses concurrent expired reads to one row deterministically.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -22,39 +20,13 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from app.channels._jsonable import to_jsonable as _to_jsonable
 from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.observability.langfuse import observe
 from app.providers.db_pool import get_pool, run_in_pool_loop
 
 logger = logging.getLogger(__name__)
-
-
-def _to_jsonable(value: Any) -> Any:
-    """5-step cascade per REQ-MEMORY-SESSION-001 acceptance."""
-    if value is None:
-        return None
-    # Pydantic v2 model
-    dump = getattr(value, "model_dump", None)
-    if callable(dump):
-        try:
-            return dump(mode="json")
-        except TypeError:
-            return dump()
-    # dataclass instance
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
-    # list / tuple
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    # dict
-    if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
-    # primitives pass through
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    # fallback string coercion
-    return json.loads(json.dumps(value, default=str))
 
 
 def _ts_to_dt(ts: float) -> datetime:

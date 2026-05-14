@@ -123,6 +123,45 @@ def update_current_trace(metadata: dict[str, Any] | None = None, **kwargs: Any) 
         pass
 
 
+# @MX:ANCHOR: [AUTO] SPEC-CONVERSATION-LOG-001 — caller-context trace_id capture
+# @MX:REASON: every emit() in app/observability/conversation_log.py reads this before scheduling
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+def current_langfuse_trace_id() -> str | None:
+    """Return current Langfuse v3 trace_id, or None. **Never raises.**
+
+    REQ-LOG-LANGFUSE-XREF-001 — fallback cascade:
+      1. v3 client `get_current_observation().trace_id`
+      2. `langfuse.langfuse_context.get_current_trace_id()`
+      3. None
+
+    Called from `emit(...)` in *caller* context (BEFORE asyncio.create_task)
+    so the contextvar resolution happens on the active task's stack
+    (plan §8.2, mitigates R8 — contextvar loss across task boundary).
+    """
+    if _lf_get_client is None:
+        return None
+    # Cascade 1 — v3 client current observation.
+    try:
+        client = _lf_get_client()
+        obs = client.get_current_observation()
+        if obs is not None:
+            tid = getattr(obs, "trace_id", None)
+            if tid:
+                return str(tid)
+    except Exception:  # noqa: BLE001 — best-effort, never raise
+        pass
+    # Cascade 2 — `langfuse_context` accessor (older / contextvar-only path).
+    try:
+        from langfuse import langfuse_context  # type: ignore[attr-defined]
+
+        tid = langfuse_context.get_current_trace_id()
+        if tid:
+            return str(tid)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def flush() -> None:
     """Drain the SDK background queue. Call on lifespan shutdown."""
     if _lf_get_client is None:

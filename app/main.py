@@ -51,6 +51,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # SPEC-MEMORY-001 — choose memory backend before factory injection
     await _select_memory_backend()
 
+    # SPEC-CONVERSATION-LOG-001 / LOG-T07 — reachability probe for
+    # ai.log_conversation_event. Sets `app.state.conv_log_backend` to
+    # "postgres" on success, "stderr" on failure (e.g., migration not applied).
+    # log_event() reads this flag to decide between INSERT and stderr fallback.
+    await _probe_conversation_log(app)
+
     await init_store()
     if settings.TASTE_PROFILE_ENABLED:
         await init_taste_store()
@@ -77,6 +83,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await LLMProvider.close()
     # SPEC-OBSERVABILITY-002 / REQ-OBS-COST-001 — drain Langfuse background queue.
     langfuse_flush()
+
+
+async def _probe_conversation_log(app: FastAPI) -> None:
+    """SPEC-CONVERSATION-LOG-001 / LOG-T07 — best-effort reachability probe.
+
+    Runs ONLY after `_select_memory_backend()` succeeded with a Postgres pool.
+    Sets `app.state.conv_log_backend`:
+    - "postgres" → log_event() writes rows.
+    - "stderr"   → log_event() emits single-line JSON to stderr (REQ-LOG-FAILSOFT-001).
+    The probe never blocks lifespan startup — failure only flips the backend
+    flag so individual emits degrade gracefully (R3: best-effort).
+    """
+    log = logging.getLogger(__name__)
+    # Only probe when Postgres pool is live (i.e., we did NOT fall back to in-memory).
+    pool = db_pool._pool  # noqa: SLF001 — internal, but only check for None
+    if pool is None:
+        app.state.conv_log_backend = "stderr"
+        log.info("[CONV_LOG][startup] backend=stderr (no postgres pool)")
+        return
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT 1 FROM ai.log_conversation_event LIMIT 0")
+        app.state.conv_log_backend = "postgres"
+        log.info("[CONV_LOG][startup] log_conversation_event reachable backend=postgres")
+    except Exception as exc:  # noqa: BLE001
+        app.state.conv_log_backend = "stderr"
+        log.warning(
+            "[CONV_LOG][startup] table unreachable (%s) — emits will fallback to stderr",
+            type(exc).__name__,
+        )
 
 
 async def _select_memory_backend() -> None:
