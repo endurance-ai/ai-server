@@ -26,9 +26,9 @@ class _StubAdapter(MessengerAdapter):
     async def send_text(self, chat_id: int, text: str) -> None:
         self._raise()
 
-    async def send_card(self, chat_id, card) -> bool:
+    async def send_card(self, chat_id, card) -> int | None:
         self._raise()
-        return False
+        return None
 
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         self._raise()

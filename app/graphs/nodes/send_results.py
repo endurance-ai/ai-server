@@ -6,11 +6,18 @@ accumulates `shown_product_ids` in the SessionStore (REQ-COMPAT-006/007).
 Lifts the card-render logic from `scenario._send_results` /
 `_candidate_to_card`. No semantic change — same captions, same critique
 button rows.
+
+SPEC-CONVERSATION-LOG-001 / LOG-T17 — emits `diversify_done` (turn_no=8) before
+card dispatch and `card_sent` (turn_no=9) per successfully-sent card.
+`card_sent.payload.source_message_id` carries the Telegram `message_id` returned
+by `adapter.send_card(...)` so that LOG-T09's callback `_resolve_thread_id`
+can correlate inline-button taps back to this thread.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -18,8 +25,10 @@ from pydantic import ValidationError
 from app.channels.lang import session_lang
 from app.channels.schemas import BotCard
 from app.channels.session import SessionState, get_store
+from app.channels.taste_profile import user_key_for
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -197,6 +206,30 @@ async def send_results(state: WorkingState) -> dict:
             continue
         pairs.append((c, card))
 
+    # LOG-T17 — emit `diversify_done` BEFORE dispatch so the row lands even
+    # when sendPhoto fails for every card. turn_no = 8 (plan §4.10).
+    user_key = user_key_for(state.from_user_id, state.chat_id)
+    try:
+        emit(
+            event_type="diversify_done",
+            user_key=user_key,
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=8,
+            payload={
+                "input_count": len(candidates),
+                "output_count": len(pairs),
+                "brand_cap": 0,  # diversify caps live inside pipeline.diversify
+                "platform_cap": 0,  # — surface 0 here pending pipeline instrumentation
+            },
+        )
+    except Exception:  # noqa: BLE001 — emit must never break the node
+        logger.debug("[send_results] diversify_done emit best-effort")
+
+    # Each successful send_card produces a `card_sent` row with the Telegram
+    # message_id. (c, card, position, message_id, send_elapsed_ms) tuples are
+    # collected here for unified post-loop emission.
+    sent_records: list[tuple[Any, int, int | None, int]] = []
     sent_candidates: list = []
     # DEMO_MODE — fire cards in parallel to cut wall-clock from ~13s to ~4s.
     # Telegram may display them slightly out of arrival order; acceptable for demo.
@@ -205,35 +238,63 @@ async def send_results(state: WorkingState) -> dict:
     if _settings.DEMO_MODE and pairs:
         import asyncio
 
-        async def _send_one(c, card):
+        async def _send_one(c, card, idx):
+            _t0 = time.perf_counter()
             try:
-                ok = await adapter.send_card(chat_id, card)
+                mid = await adapter.send_card(chat_id, card)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("[send_results] send_card raised")
-                return c, False, f"{type(exc).__name__}: {exc}"[:200]
-            return c, ok, None
+                _elapsed = int((time.perf_counter() - _t0) * 1000)
+                return c, idx, None, _elapsed, f"{type(exc).__name__}: {exc}"[:200]
+            _elapsed = int((time.perf_counter() - _t0) * 1000)
+            return c, idx, mid, _elapsed, None
 
-        results = await asyncio.gather(*(_send_one(c, card) for c, card in pairs))
-        for c, ok, err in results:
+        results = await asyncio.gather(*(_send_one(c, card, i) for i, (c, card) in enumerate(pairs)))
+        for c, idx, mid, elapsed_ms, err in results:
             if err:
                 breadcrumbs.append(f"send_results_error: {err}")
                 continue
-            if not ok:
-                breadcrumbs.append("send_results: send_card returned False (skip)")
+            if mid is None:
+                breadcrumbs.append("send_results: send_card returned None (skip)")
                 continue
             sent_candidates.append(c)
+            sent_records.append((c, idx, mid, elapsed_ms))
     else:
-        for c, card in pairs:
+        for idx, (c, card) in enumerate(pairs):
+            _t0 = time.perf_counter()
             try:
-                ok = await adapter.send_card(chat_id, card)
+                mid = await adapter.send_card(chat_id, card)
             except Exception as exc:  # REQ-AGENT-007 — log + continue
                 logger.exception("[send_results] send_card raised")
                 breadcrumbs.append(f"send_results_error: {type(exc).__name__}: {exc}"[:200])
                 continue
-            if not ok:
-                breadcrumbs.append("send_results: send_card returned False (skip)")
+            elapsed_ms = int((time.perf_counter() - _t0) * 1000)
+            if mid is None:
+                breadcrumbs.append("send_results: send_card returned None (skip)")
                 continue
             sent_candidates.append(c)
+            sent_records.append((c, idx, mid, elapsed_ms))
+
+    # LOG-T17 — emit `card_sent` per successfully-sent card. turn_no = 9.
+    # `source_message_id` is THE key for callback thread_id correlation.
+    for c, position, message_id, elapsed_ms in sent_records:
+        try:
+            emit(
+                event_type="card_sent",
+                user_key=user_key,
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=9,
+                payload={
+                    "product_id": str(getattr(c, "id", "") or ""),
+                    "position": position,
+                    "send_ok": True,
+                    "send_elapsed_ms": elapsed_ms,
+                    "source_message_id": message_id,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[send_results] card_sent emit best-effort")
 
     sent = len(sent_candidates)
 

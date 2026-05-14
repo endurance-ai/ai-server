@@ -28,9 +28,11 @@ from app.channels.lang import detect_lang as _detect_lang_text
 from app.channels.lang import session_lang
 from app.channels.router import RoutedIntent
 from app.channels.session import get_store
+from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -391,6 +393,8 @@ async def respond(state: WorkingState) -> dict:
 
     try:
         adapter = get_adapter()
+        total = len(chunks)
+        user_key = user_key_for(state.from_user_id, state.chat_id)
         for idx, chunk in enumerate(chunks):
             # 첫 청크 전, 그리고 청크 사이마다 typing 표시 + 자연스러운 딜레이.
             try:
@@ -401,15 +405,30 @@ async def respond(state: WorkingState) -> dict:
             if delay_s > 0 and len(chunks) > 1:
                 await asyncio.sleep(delay_s)
             await adapter.send_text(state.chat_id, chunk)
-            breadcrumbs.append(
-                f"respond_chunk: idx={idx}/{len(chunks) - 1} len={len(chunk)}"
-            )
+            # LOG-T19 — emit `bot_text` per chunk. Same thread_id, same
+            # turn_no=10. chunk_index distinguishes per-chunk rows.
+            # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+            try:
+                emit(
+                    event_type="bot_text",
+                    user_key=user_key,
+                    chat_id=state.chat_id,
+                    thread_id=state.thread_id,
+                    turn_no=10,
+                    payload={
+                        "chunk_text": chunk,
+                        "chunk_index": idx,
+                        "total_chunks": total,
+                        "flow": flow.value,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("[respond] bot_text emit best-effort")
+            breadcrumbs.append(f"respond_chunk: idx={idx}/{len(chunks) - 1} len={len(chunk)}")
     except Exception as exc:
         logger.exception("🐱 [respond] ❌ send_text failed (flow=%s, lang=%s)", flow.value, lang)
         breadcrumbs.append(f"respond_send_error: {type(exc).__name__}: {exc}"[:200])
-        return {"response_text": text, "log_events": breadcrumbs}
+        return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}
 
-    breadcrumbs.append(
-        f"respond: flow={flow.value} lang={lang} text_len={len(text)} chunks={len(chunks)}"
-    )
-    return {"response_text": text, "log_events": breadcrumbs}
+    breadcrumbs.append(f"respond: flow={flow.value} lang={lang} text_len={len(text)} chunks={len(chunks)}")
+    return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}

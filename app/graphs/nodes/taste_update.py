@@ -17,6 +17,7 @@ from app.channels.taste_profile import (
     user_key_for,
 )
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,29 @@ async def taste_update(state: WorkingState) -> dict:
 
     summary = _summarize(update)
     breadcrumbs.append(f"taste_update: applied summary={summary[:80]}")
+    # LOG-T20 — emit `taste_update` with source="free_text".
+    # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+    try:
+        emit(
+            event_type="taste_update",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=state.turn_no,
+            payload={
+                "source": "free_text",
+                "keywords_delta": {
+                    "liked_added": list(update.liked_keywords or []),
+                    "disliked_added": list(update.disliked_keywords or []),
+                },
+                "brands_delta": {
+                    "liked_added": list(update.liked_brands or []),
+                    "disliked_added": list(update.disliked_brands or []),
+                },
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[taste_update] emit best-effort")
     return {
         "presearch_summary": summary,
         "log_events": breadcrumbs,

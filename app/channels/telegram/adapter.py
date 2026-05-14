@@ -107,8 +107,13 @@ class TelegramAdapter(MessengerAdapter):
             preview,
         )
 
-    async def send_card(self, chat_id: int, card: BotCard) -> bool:
-        """카드 전송. 성공=True, 실패=False.
+    async def send_card(self, chat_id: int, card: BotCard) -> int | None:
+        """카드 전송. 성공 시 Telegram message_id, 실패 시 None.
+
+        SPEC-CONVERSATION-LOG-001 / LOG-T17 — message_id 를 반환해서 send_results
+        가 `card_sent.payload.source_message_id` 로 캡처할 수 있게 한다. 이는
+        다음 callback Update 의 thread_id resolution 입력이다 (LOG-T09 lookup).
+
         sendPhoto timeout 4s — Telegram이 이미지 URL을 가져오는 데 실패하면 빠르게 다음 후보로.
         critique_buttons 가 있으면 Shop 버튼 아래에 한 줄로 추가 송출 (callback_data 기반).
         """
@@ -129,18 +134,28 @@ class TelegramAdapter(MessengerAdapter):
         result = await self._post("sendPhoto", payload, timeout=4.0)
         elapsed = int((time.perf_counter() - t0) * 1000)
         ok = bool(result and result.get("ok"))
+        # LOG-T17 — extract Telegram message_id for callback correlation.
+        message_id: int | None = None
+        if ok:
+            try:
+                mid = (result or {}).get("result", {}).get("message_id")
+                if isinstance(mid, int):
+                    message_id = mid
+            except Exception:  # noqa: BLE001
+                message_id = None
         cap_preview = (card.caption or "").replace("\n", " ⏎ ")
         if len(cap_preview) > 120:
             cap_preview = cap_preview[:120] + "…"
         logger.info(
-            "🐱 [telegram] 🖼️  send_card chat=%s elapsed_ms=%d ok=%s caption=%r url=%s",
+            "🐱 [telegram] 🖼️  send_card chat=%s elapsed_ms=%d ok=%s msg_id=%s caption=%r url=%s",
             _hash_chat_id(chat_id),
             elapsed,
             ok,
+            message_id,
             cap_preview,
             str(card.button_url),
         )
-        return ok
+        return message_id
 
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         await self._post("sendChatAction", {"chat_id": chat_id, "action": action})

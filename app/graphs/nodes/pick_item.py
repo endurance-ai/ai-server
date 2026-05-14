@@ -19,9 +19,11 @@ import logging
 
 from app.channels.lang import session_lang
 from app.channels.session import SessionState, get_store
+from app.channels.taste_profile import user_key_for
 from app.channels.vision import derive_legacy_keywords, derive_legacy_label
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -79,6 +81,34 @@ async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en
         await adapter.send_text_with_buttons(chat_id, body, buttons)
     else:
         await adapter.send_text(chat_id, body)
+
+
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+def _emit_pick_item_done(
+    state: WorkingState,
+    *,
+    items: list[dict],
+    picked_index: int,
+    auto_picked: bool,
+) -> None:
+    """LOG-T14 — emit `pick_item_done` (single carousel / callback / auto-pick)."""
+    try:
+        emit(
+            event_type="pick_item_done",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=4,
+            payload={
+                "candidate_items": [
+                    {"label": it.get("label", ""), "subcategory": it.get("subcategory", "")} for it in items[:10]
+                ],
+                "picked_index": picked_index,
+                "auto_picked": auto_picked,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[pick_item] pick_item_done emit best-effort")
 
 
 @observe(name="node.pick_item", as_type="span")
@@ -141,11 +171,13 @@ async def pick_item(state: WorkingState) -> dict:
         sess.state = SessionState.AWAITING_INTENT
         get_store().update(sess)
         breadcrumbs.append(f"pick_item: selected idx={idx} label={sess.vision_item}")
+        _emit_pick_item_done(state, items=items, picked_index=idx, auto_picked=False)
         return {
             "selected_item_index": idx,
             "detected_items": items,
             "vision_selected_item": rich_item,
             "log_events": breadcrumbs,
+            "turn_no": 4,
         }
 
     # ── Carousel-send path ─────────────────────────────────────────────────
@@ -166,4 +198,6 @@ async def pick_item(state: WorkingState) -> dict:
     sess.state = SessionState.AWAITING_ITEM_PICK
     get_store().update(sess)
     breadcrumbs.append(f"pick_item: picker sent n={len(items)} → END")
-    return {"detected_items": items, "log_events": breadcrumbs}
+    # Carousel sent — no specific pick yet, picked_index=-1.
+    _emit_pick_item_done(state, items=items, picked_index=-1, auto_picked=False)
+    return {"detected_items": items, "log_events": breadcrumbs, "turn_no": 4}

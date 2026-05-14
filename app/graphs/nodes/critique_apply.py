@@ -31,6 +31,7 @@ from app.channels.taste_profile import (
 )
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,45 @@ async def critique_apply(state: WorkingState) -> dict:
             await record_click(state.chat_id, sess.from_user_id, product_id, brand, keywords)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[critique_apply] record_click failed: %r", exc)
+        # LOG-T21 — dual emit: `card_clicked` + `taste_update(source="click")`.
+        # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+        _user_key = user_key_for(state.from_user_id, state.chat_id)
+        try:
+            # Resolve card position from sess.last_results for the impression row.
+            position: int | None = None
+            for i, c in enumerate(sess.last_results or []):
+                if str(getattr(c, "id", "") or "") == product_id:
+                    position = i
+                    break
+            emit(
+                event_type="card_clicked",
+                user_key=_user_key,
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=1,
+                payload={
+                    "product_id": product_id,
+                    "position": position,
+                    "dwell_ms": None,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[critique_apply] card_clicked emit best-effort")
+        try:
+            emit(
+                event_type="taste_update",
+                user_key=_user_key,
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=1,
+                payload={
+                    "source": "click",
+                    "keywords_delta": {"liked_added": list(keywords or [])},
+                    "brands_delta": {"liked_added": [brand] if brand else []},
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[critique_apply] taste_update(click) emit best-effort")
         # Silent ack
         try:
             from app.graphs.nodes._adapter_ctx import get_adapter
@@ -210,6 +250,37 @@ async def critique_apply(state: WorkingState) -> dict:
 
     summary = format_delta_summary(delta)
     breadcrumbs.append(f"critique_apply: op={delta.op} summary={summary[:80]}")
+
+    # LOG-T21 — emit `taste_update(source="critique")` for more/less/cheap ops.
+    # free_text path is handled by `taste_update` node (LOG-T20) so we skip it here.
+    # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+    if delta.op in {"more", "less", "cheap"}:
+        try:
+            anchor_brand = (delta.anchor.brand or "").strip().lower() if delta.anchor and delta.anchor.brand else ""
+            if delta.op == "more":
+                brands_delta = {"liked_added": [anchor_brand] if anchor_brand else []}
+                kw_delta = {"liked_added": list(delta.boost_keywords or [])}
+            elif delta.op == "less":
+                brands_delta = {"disliked_added": [anchor_brand] if anchor_brand else []}
+                kw_delta = {"disliked_added": list(delta.exclude_keywords or [])}
+            else:  # cheap
+                brands_delta = {}
+                kw_delta = {}
+            emit(
+                event_type="taste_update",
+                user_key=user_key_for(state.from_user_id, state.chat_id),
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=1,
+                payload={
+                    "source": "critique",
+                    "keywords_delta": kw_delta,
+                    "brands_delta": brands_delta,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[critique_apply] taste_update(critique) emit best-effort")
+
     return {
         "critique_delta": delta,
         "presearch_summary": summary,

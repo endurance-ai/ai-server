@@ -26,6 +26,7 @@ from app.channels.taste_profile import (
 )
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,92 @@ def _build_request(
     )
 
 
+# @MX:ANCHOR: [AUTO] SPEC-CONVERSATION-LOG-001 / REQ-LOG-PAYLOAD-RICH-001 — search_done emit
+# @MX:REASON: ML-critical payload — top_k_product_ids[] parallel rrf_scores[] invariant
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+def _emit_search_done(
+    state: WorkingState,
+    *,
+    req: ChannelRecommendationRequest | None,
+    candidates: list,
+    counts: dict,
+) -> None:
+    """LOG-T16 — emit `search_done` (REQ-LOG-PAYLOAD-RICH-001).
+
+    Parallel-array invariant: ``len(top_k_product_ids) == len(rrf_scores)``.
+    If any candidate is missing a score we coerce to 0.0 so the invariant
+    is mechanically preserved (downstream ML pipelines can still spot the
+    zero scores as "score absent").
+    """
+    try:
+        top_k_product_ids: list[str] = []
+        rrf_scores: list[float] = []
+        for c in candidates:
+            pid = str(getattr(c, "id", "") or "")
+            top_k_product_ids.append(pid)
+            raw_score = getattr(c, "rrf_score", None)
+            if raw_score is None:
+                raw_score = getattr(c, "score", None)
+            try:
+                rrf_scores.append(float(raw_score) if raw_score is not None else 0.0)
+            except (TypeError, ValueError):
+                rrf_scores.append(0.0)
+        # Defensive invariant guard — REQ-LOG-PAYLOAD-RICH-001 acceptance.
+        assert len(top_k_product_ids) == len(rrf_scores), (
+            f"search_done parallel arrays mismatched: ids={len(top_k_product_ids)} scores={len(rrf_scores)}"
+        )
+
+        if req is not None:
+            query_payload = {
+                "text_query": (req.intent or req.item_search_query_en or req.item_label or "") or None,
+                "sparse_terms": list(req.keywords or []),
+                "embedding_present": bool(req.image_url),
+                "filters": {
+                    "exclude_brands": list(req.exclude_brands or []),
+                    "exclude_keywords": list(req.exclude_keywords or []),
+                    "exclude_product_ids_count": len(req.exclude_product_ids or []),
+                    "boost_brands": list(req.boost_brands or []),
+                    "boost_keywords": list(req.boost_keywords or []),
+                    "max_price": req.max_price,
+                    "min_price": req.min_price,
+                    "color": req.color,
+                },
+            }
+        else:
+            query_payload = {
+                "text_query": None,
+                "sparse_terms": [],
+                "embedding_present": False,
+                "filters": {},
+            }
+
+        emit(
+            event_type="search_done",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=6,
+            payload={
+                "query": query_payload,
+                # Embedding bytes are produced inside the pipeline runner and
+                # never reach this node. sha256-prefix-16 hashing therefore
+                # happens here only as a stable "no-embedding" marker (None).
+                # @MX:NOTE: future enhancement — surface embedding from pipeline.
+                "embedding_ref": None,
+                "top_k_product_ids": top_k_product_ids,
+                "rrf_scores": rrf_scores,
+                "dense_count": int(counts.get("dense_count", 0) or counts.get("dense", 0) or 0),
+                "sparse_count": int(counts.get("sparse_count", 0) or counts.get("sparse", 0) or 0),
+                # @MX:NOTE: filter_drop_log requires pipeline instrumentation
+                # (recommendation.py._apply_post_filters). Surface empty list
+                # here pending Phase 4 enhancement (out of scope per R12).
+                "filter_drop_log": [],
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[search] search_done emit best-effort")
+
+
 @observe(name="node.search", as_type="span")
 async def search_node(state: WorkingState) -> dict:
     sess = get_store().get_or_create(state.chat_id)
@@ -191,15 +278,18 @@ async def search_node(state: WorkingState) -> dict:
         candidates = get_demo_candidates()
         logger.info("🎬 [search] DEMO_MODE active — returning %d fixture candidates", len(candidates))
         breadcrumbs.append(f"search_node: DEMO_MODE fixture n={len(candidates)}")
+        _emit_search_done(state, req=None, candidates=list(candidates), counts={})
         return {
             "candidates": candidates,
             "messages": [SystemMessage(content=f"search: {len(candidates)} candidate(s) (DEMO_MODE)")],
             "log_events": breadcrumbs,
+            "turn_no": 6,
         }
 
     if not sess.image_url:
         breadcrumbs.append("search_node: no image_url; cannot search")
-        return {"candidates": [], "log_events": breadcrumbs}
+        _emit_search_done(state, req=None, candidates=[], counts={})
+        return {"candidates": [], "log_events": breadcrumbs, "turn_no": 6}
 
     delta = state.critique_delta
     taste: TasteProfile | None = None
@@ -222,7 +312,25 @@ async def search_node(state: WorkingState) -> dict:
     except Exception as exc:  # REQ-AGENT-007
         logger.exception("🔍 [search] ❌ port.recommend raised")
         breadcrumbs.append(f"search_node_error: {type(exc).__name__}: {exc}"[:200])
-        return {"candidates": [], "log_events": breadcrumbs}
+        _emit_search_done(state, req=req, candidates=[], counts={})
+        # LOG-T22 — node_error on recovered path (REQ-LOG-EMIT-EVERY-NODE-001 floor).
+        try:
+            emit(
+                event_type="node_error",
+                user_key=user_key_for(sess.from_user_id, state.chat_id),
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=6,
+                payload={
+                    "node_name": "search",
+                    "exception_type": type(exc).__name__,
+                    "message": str(exc)[:500],
+                    "recovered": True,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[search] node_error emit best-effort")
+        return {"candidates": [], "log_events": breadcrumbs, "turn_no": 6}
 
     candidates: list[Any] = list(result.candidates) if result and result.candidates else []
     counts = dict(result.counts or {}) if result else {}
@@ -237,8 +345,12 @@ async def search_node(state: WorkingState) -> dict:
 
     from langchain_core.messages import SystemMessage
 
+    # LOG-T16 — emit at success terminus (REQ-LOG-PAYLOAD-RICH-001).
+    _emit_search_done(state, req=req, candidates=candidates, counts=counts)
+
     return {
         "candidates": candidates,
         "messages": [SystemMessage(content=f"search: {len(candidates)} candidate(s) after diversify+post-filter")],
         "log_events": breadcrumbs,
+        "turn_no": 6,
     }

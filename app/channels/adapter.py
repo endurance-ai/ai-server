@@ -15,7 +15,14 @@ class MessengerAdapter(ABC):
     async def send_text(self, chat_id: int, text: str) -> None: ...
 
     @abstractmethod
-    async def send_card(self, chat_id: int, card: BotCard) -> bool: ...
+    async def send_card(self, chat_id: int, card: BotCard) -> int | None:
+        """Send a card.
+
+        Returns the platform message_id on success, ``None`` on failure.
+        SPEC-CONVERSATION-LOG-001 / LOG-T17 requires message_id propagation
+        for callback thread_id correlation (REQ-LOG-THREAD-CALLBACK-001).
+        """
+        ...
 
     @abstractmethod
     async def send_chat_action(self, chat_id: int, action: str) -> None: ...
