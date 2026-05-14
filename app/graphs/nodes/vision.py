@@ -42,13 +42,28 @@ async def vision_node(state: WorkingState) -> dict:
     if not state.image_url:
         return {"log_events": ["vision_node: no image_url; skipping"]}
 
-    try:
-        result = await vision_module.extract(state.image_url)
-    except Exception as exc:  # REQ-AGENT-007
-        logger.exception("👁 [vision] ❌ vision.extract raised")
-        return {
-            "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
-        }
+    # DEMO_MODE — skip Vision LLM, return fixture after a short wait so the
+    # UX still feels like "analyzing the image".
+    from app.core.config import settings as _settings
+
+    if _settings.DEMO_MODE:
+        import asyncio
+
+        from app.pipeline.demo_fixtures import get_demo_vision_result
+
+        # Pinterest link_resolver already adds ~2s for og:image fetch; keep
+        # vision delay short so total time-to-first-card stays near 2s.
+        await asyncio.sleep(0.5)
+        result = get_demo_vision_result()
+        logger.info("🎬 [vision] DEMO_MODE — fixture VisionResult (items=%d)", len(result.items))
+    else:
+        try:
+            result = await vision_module.extract(state.image_url)
+        except Exception as exc:  # REQ-AGENT-007
+            logger.exception("👁 [vision] ❌ vision.extract raised")
+            return {
+                "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
+            }
 
     # Defensive: extract() should always return a VisionResult. Tests
     # monkeypatching `vision_module.extract` may still return the legacy dict

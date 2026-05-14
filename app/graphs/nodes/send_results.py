@@ -187,24 +187,53 @@ async def send_results(state: WorkingState) -> dict:
         breadcrumbs.append(f"send_results_error: {type(exc).__name__}: adapter unbound")
         return {"log_events": breadcrumbs}
 
-    sent_candidates: list = []
+    # Build card list (preserves order, drops invalid).
+    pairs: list[tuple[Any, Any]] = []  # (candidate, card)
     for c in candidates:
-        if len(sent_candidates) >= _MAX_CARDS:
+        if len(pairs) >= _MAX_CARDS:
             break
-        idx = len(sent_candidates)
-        card = _candidate_to_card(c, idx=idx, lang=lang)
+        card = _candidate_to_card(c, idx=len(pairs), lang=lang)
         if card is None:
             continue
-        try:
-            ok = await adapter.send_card(chat_id, card)
-        except Exception as exc:  # REQ-AGENT-007 — log + continue
-            logger.exception("[send_results] send_card raised")
-            breadcrumbs.append(f"send_results_error: {type(exc).__name__}: {exc}"[:200])
-            continue
-        if not ok:
-            breadcrumbs.append("send_results: send_card returned False (skip)")
-            continue
-        sent_candidates.append(c)
+        pairs.append((c, card))
+
+    sent_candidates: list = []
+    # DEMO_MODE — fire cards in parallel to cut wall-clock from ~13s to ~4s.
+    # Telegram may display them slightly out of arrival order; acceptable for demo.
+    from app.core.config import settings as _settings
+
+    if _settings.DEMO_MODE and pairs:
+        import asyncio
+
+        async def _send_one(c, card):
+            try:
+                ok = await adapter.send_card(chat_id, card)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[send_results] send_card raised")
+                return c, False, f"{type(exc).__name__}: {exc}"[:200]
+            return c, ok, None
+
+        results = await asyncio.gather(*(_send_one(c, card) for c, card in pairs))
+        for c, ok, err in results:
+            if err:
+                breadcrumbs.append(f"send_results_error: {err}")
+                continue
+            if not ok:
+                breadcrumbs.append("send_results: send_card returned False (skip)")
+                continue
+            sent_candidates.append(c)
+    else:
+        for c, card in pairs:
+            try:
+                ok = await adapter.send_card(chat_id, card)
+            except Exception as exc:  # REQ-AGENT-007 — log + continue
+                logger.exception("[send_results] send_card raised")
+                breadcrumbs.append(f"send_results_error: {type(exc).__name__}: {exc}"[:200])
+                continue
+            if not ok:
+                breadcrumbs.append("send_results: send_card returned False (skip)")
+                continue
+            sent_candidates.append(c)
 
     sent = len(sent_candidates)
 

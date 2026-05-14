@@ -21,7 +21,14 @@ LANG_EN = "en"
 
 
 def detect_lang(text: str | None) -> str:
-    """Return 'ko' if any Hangul syllable is present, else 'en'."""
+    """Return 'ko' if any Hangul syllable is present, else 'en'.
+
+    DEMO_MODE override — always force KO for the video shoot.
+    """
+    from app.core.config import settings
+
+    if settings.DEMO_MODE:
+        return LANG_KO
     if not text:
         return LANG_EN
     return LANG_KO if _HANGUL_RE.search(text) else LANG_EN
@@ -46,7 +53,14 @@ def remember_lang(sess: Any, text: str | None) -> str:
 
 
 def session_lang(sess: Any | None) -> str:
-    """Read sticky language from session, defaulting to 'en'."""
+    """Read sticky language from session, defaulting to 'en'.
+
+    DEMO_MODE override — always force KO for the video shoot.
+    """
+    from app.core.config import settings
+
+    if settings.DEMO_MODE:
+        return LANG_KO
     if sess is None:
         return LANG_EN
     return getattr(sess, "lang", None) or LANG_EN

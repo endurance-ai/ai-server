@@ -165,9 +165,9 @@ async def critique_apply(state: WorkingState) -> dict:
 
             adapter = get_adapter()
             if _lang == "ko":
-                toasts = {"more": "비슷한 거 더 찾는 중 ✨", "less": "다른 느낌으로 ✕", "cheap": "더 저렴한 걸로 💰"}
+                toasts = {"more": "비슷한 거 더 찾는 중 🐱", "less": "다른 느낌으로 ✕", "cheap": "더 저렴한 걸로 💰"}
             else:
-                toasts = {"more": "Finding more like this ✨", "less": "Steering away ✕", "cheap": "Going cheaper 💰"}
+                toasts = {"more": "Finding more like this 🐱", "less": "Steering away ✕", "cheap": "Going cheaper 💰"}
             toast = toasts.get(delta.op, "넵" if _lang == "ko" else "Got it")
             if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
                 await adapter.answer_callback_query(msg.callback_query_id, toast)

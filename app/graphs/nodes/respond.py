@@ -54,42 +54,42 @@ class _Flow(StrEnum):
 
 
 _FALLBACKS_EN: dict[_Flow, str] = {
-    _Flow.SEARCH_HIT: "Tap any one — I'll fetch more in that vibe ✨",
+    _Flow.SEARCH_HIT: "Tap any one — I'll fetch more in that vibe 🐱",
     _Flow.SEARCH_EMPTY: "Hmm, nothing quite matched. Try another angle or a different shot?",
     _Flow.LINK_FAIL: "Couldn't open that link 🙈 Maybe drop the photo straight in?",
     _Flow.VISION_FAIL: "I couldn't read that look. Try a clearer shot for me?",
     _Flow.PHOTO_DIRECT: ("Direct photo uploads aren't ready yet 🙏\nToss me a Pinterest / image link instead 📌"),
     _Flow.OFF_TOPIC: "Drop a photo or a Pinterest link and I'll get to work 📸",
-    _Flow.NEW_SEARCH_NEED_IMAGE: "Got it — slide me a photo or a Pinterest link to start ✨",
+    _Flow.NEW_SEARCH_NEED_IMAGE: "Got it — slide me a photo or a Pinterest link to start 🐱",
     _Flow.TASTE_ACK: "Noted, filed away 📝",
     _Flow.REFINE_NUDGE: "Drop a photo or a Pinterest link first and I'll work my magic 📸",
     _Flow.PICK_OPENER: "Nice pick 👌 Same vibe, cheaper, or a specific color?",
     _Flow.STALE_CRITIQUE: "That card's a bit old 🙈 Send a fresh photo or link and I'll dive back in!",
-    _Flow.DEFAULT: "Got it ✨",
+    _Flow.DEFAULT: "Got it 🐱",
 }
 
 _FALLBACKS_KO: dict[_Flow, str] = {
-    _Flow.SEARCH_HIT: "마음에 드는 거 골라봐요, 비슷한 느낌으로 더 찾아드릴게요 ✨",
+    _Flow.SEARCH_HIT: "마음에 드는 거 골라봐요, 비슷한 느낌으로 더 찾아드릴게요 🐱",
     _Flow.SEARCH_EMPTY: "음, 딱 맞는 게 없네요. 다른 각도나 다른 사진으로 다시 보여주실래요?",
     _Flow.LINK_FAIL: "링크가 안 열려요 🙈 사진을 바로 보내주시면 돼요!",
     _Flow.VISION_FAIL: "사진을 잘 못 읽었어요. 좀 더 또렷한 컷으로 보여주실래요?",
     _Flow.PHOTO_DIRECT: ("사진 직접 업로드는 아직 준비 중이에요 🙏\n핀터레스트 링크나 이미지 URL로 보내주세요 📌"),
     _Flow.OFF_TOPIC: "사진이나 핀터레스트 링크 하나만 던져주세요, 바로 시작할게요 📸",
-    _Flow.NEW_SEARCH_NEED_IMAGE: "좋아요! 사진이나 핀터레스트 링크 하나 보내주세요 ✨",
+    _Flow.NEW_SEARCH_NEED_IMAGE: "좋아요! 사진이나 핀터레스트 링크 하나 보내주세요 🐱",
     _Flow.TASTE_ACK: "기억해둘게요 📝",
     _Flow.REFINE_NUDGE: "사진이나 핀터레스트 링크부터 하나 보여주세요 📸",
     _Flow.PICK_OPENER: "오 좋네요 👌 비슷한 느낌으로 갈까요, 좀 더 저렴한 걸로? 색깔 바꿀까요?",
     _Flow.STALE_CRITIQUE: "이전 카드는 좀 오래됐어요 🙈 사진이나 링크 새로 보내주시면 바로 다시 찾아드릴게요!",
-    _Flow.DEFAULT: "넵 ✨",
+    _Flow.DEFAULT: "넵 🐱",
 }
 
 # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — softer reply prefix
 # applied when the self-critique loop exhausted its budget without crossing
 # the score threshold. The user gets a coherent acknowledgment of the
 # difficulty rather than just a delayed empty result.
-_EXHAUSTED_HIT_EN = "Tricky one — here's the closest I could pull ✨"
+_EXHAUSTED_HIT_EN = "Tricky one — here's the closest I could pull 🐱"
 _EXHAUSTED_EMPTY_EN = "That look was a tough match — nothing great popped up. Another angle?"
-_EXHAUSTED_HIT_KO = "오, 좀 까다로운 룩이었어요. 그래도 가장 가까운 걸로 골라봤어요 ✨"
+_EXHAUSTED_HIT_KO = "오, 좀 까다로운 룩이었어요. 그래도 가장 가까운 걸로 골라봤어요 🐱"
 _EXHAUSTED_EMPTY_KO = "이 룩은 진짜 까다로웠어요... 딱 맞는 게 안 나왔네요. 다른 각도로 보여주실래요?"
 
 # Fallback for unset _Flow keys (defensive)
@@ -193,7 +193,7 @@ _SYSTEM_PROMPT = (
     "English or other → reply in natural, lively English. Never mix languages in one reply. "
     "\n\nFormat: ONE short conversational message — max ~2 sentences, under 200 tokens. "
     "No markdown headings, no code fences, no JSON, no bullet lists. Up to 1–2 emojis "
-    "(✨ 📸 📌 👌 🙈 etc.) when they fit the vibe — never spam them. Acknowledge what "
+    "(🐱 📸 📌 👌 🙈 etc.) when they fit the vibe — never spam them. Acknowledge what "
     "just happened and, when natural, nudge the next step."
 )
 

@@ -136,6 +136,11 @@ class Settings(BaseSettings):
     # 카드당 버튼 상한(skip 포함). 범위 [3, 8].
     CLARIFY_MAX_BUTTONS: int = 5
 
+    # DEMO MODE — local-only POC short-circuit for video shoot.
+    # When true, search_node bypasses DB/Modal and returns fixture candidates
+    # from app.pipeline.demo_fixtures. Restore production by leaving false.
+    DEMO_MODE: bool = False
+
     # SPEC-IMPLICIT-FB-001 — implicit feedback capture (impressions/clicks/re-query)
     # No-click attribution window. Snapshotted per-row at INSERT time. REQ-FB-NOCLICK-001.
     IMPLICIT_FB_ATTRIBUTION_WINDOW_S: int = 600

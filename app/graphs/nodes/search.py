@@ -149,6 +149,54 @@ async def search_node(state: WorkingState) -> dict:
     sess = get_store().get_or_create(state.chat_id)
     breadcrumbs: list[str] = []
 
+    # Pre-search loading UX — friendly "지금 찾는 중" line + upload_photo
+    # indicator. Common across DEMO and production. Best-effort: adapter
+    # unbinding (test contexts) or transient telegram errors must not block
+    # the actual search.
+    from app.channels.lang import session_lang
+    from app.graphs.nodes._adapter_ctx import get_adapter
+
+    _loading_lang = session_lang(sess)
+    _loading_text = (
+        "잠시만요, 어울리는 아이템 찾고 있어요… 🔍"
+        if _loading_lang == "ko"
+        else "Hold on — pulling some matches for you… 🔍"
+    )
+    try:
+        _adapter = get_adapter()
+        await _adapter.send_text(state.chat_id, _loading_text)
+        try:
+            await _adapter.send_chat_action(state.chat_id, "upload_photo")
+        except Exception:  # noqa: BLE001 — chat action is best-effort
+            pass
+    except RuntimeError:
+        # Adapter ContextVar not bound (test contexts). Skip pre-message.
+        pass
+    except Exception:  # noqa: BLE001 — never let UX hint block the search
+        logger.exception("🔍 [search] pre-search loading hint failed")
+
+    # DEMO_MODE — local POC short-circuit. Bypass Modal/DB, return fixture
+    # candidates as if search_products_v5 returned them. Same downstream
+    # send_results / critique buttons / session caching.
+    if settings.DEMO_MODE:
+        import asyncio
+
+        from langchain_core.messages import SystemMessage
+
+        from app.pipeline.demo_fixtures import get_demo_candidates
+
+        # Demo-only artificial pause so cards don't feel instant.
+        await asyncio.sleep(2.0)
+
+        candidates = get_demo_candidates()
+        logger.info("🎬 [search] DEMO_MODE active — returning %d fixture candidates", len(candidates))
+        breadcrumbs.append(f"search_node: DEMO_MODE fixture n={len(candidates)}")
+        return {
+            "candidates": candidates,
+            "messages": [SystemMessage(content=f"search: {len(candidates)} candidate(s) (DEMO_MODE)")],
+            "log_events": breadcrumbs,
+        }
+
     if not sess.image_url:
         breadcrumbs.append("search_node: no image_url; cannot search")
         return {"candidates": [], "log_events": breadcrumbs}
