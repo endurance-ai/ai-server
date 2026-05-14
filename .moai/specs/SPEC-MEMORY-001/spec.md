@@ -1,9 +1,9 @@
 ---
 id: SPEC-MEMORY-001
-version: 0.2.0
+version: 1.1.0
 status: draft
 created: 2026-05-11
-updated: 2026-05-11
+updated: 2026-05-14
 author: hchsa77@gmail.com
 priority: P0
 issue_number: null
@@ -13,6 +13,7 @@ issue_number: null
 
 ## HISTORY
 
+- 2026-05-14 (v1.1.0): TasteProfileStore Protocol extended with `seed_from_onboarding(user_key, weights: dict)` method per SPEC-ONBOARD-CARDS-001 REQ-ONBOARD-SEED-001 / REQ-ONBOARD-MEMORY-AMEND-001. REQ-MEMORY-PROTOCOL-001's "Protocol surface SHALL be unchanged" promise is hereby amended: surface is **additive-only** — new methods MAY be added with default no-op fallback on Protocol implementations. The previously frozen Protocol method set (`get_or_create`, `update`, `delete`, `lock_for`) remains unchanged in signature and semantics. New methods MUST be added with default implementations on the Protocol (or a documented contract requiring concrete classes to implement them, with a fallback path on the in-memory tier). This amendment was prerequisited by SPEC-ONBOARD-CARDS-001 v0.3.0 (Cross-SPEC Amendments section) and lands BEFORE any code commit adding `seed_from_onboarding`.
 - 2026-05-11 (v0.2.0): plan-auditor 1차 감사(0.62) 반영. 7가지 결함 수정. **Blockers**: (D1) `delete()` Protocol 의미 명시를 위해 REQ-MEMORY-PROTOCOL-002 신설; (D2) lazy TTL 경합 제거를 위해 REQ-MEMORY-SESSION-002 의 OR 조항을 단일 atomic `INSERT ... ON CONFLICT DO UPDATE WHERE` 로 확정. **Majors**: (D3) `MEMORY_FALLBACK_ON_PROBE_FAIL` 운영 안전을 위해 REQ-MEMORY-FALLBACK-002 신설 (prod=`false` 강제); (D4) REQ-MEMORY-PERSIST-002 round-trip 에 `last_active` 명시적 포함 (`timestamptz(6)` 마이크로초 정밀도 + epoch ↔ timestamp 변환 계약); (D5) Background "multi-worker 자연 안전" 주장을 "last-write-wins, not serializable" 로 정정하고 Non-Goal #9 와 일치시킴; (D6) testcontainers-python 채택 확정 + dev-deps 명시; (D7) `/health/ready` backend 필드를 위해 REQ-MEMORY-HEALTH-001 신설 + `app/api/health.py` Affected Modules 등재. **Minors**: (D8) `last_results` JSON 인코더 cascade 를 REQ-MEMORY-SESSION-001 에 정식화; (D9) probe 타임아웃 측정 방법 (`psycopg.connect_timeout` + hanging-server mock) 명시; (D10) probe SQL 을 `SELECT 1 FROM user_taste_profile LIMIT 0` 로 확정하고 fresh-DB tradeoff 를 R10 에 문서화; (D11) 포팅 대상 테스트 (`tests/test_taste_profile.py`, `tests/test_graph_state.py`) 열거; (D12) 신규 모듈 85%+ 커버리지 목표 추가 (TRUST 5 Tested); (D13) DoD (d) 를 binary-testable 하게 강화; (D15) `testcontainers[postgres]` 를 dev deps 에 추가.
 - 2026-05-11 (v0.1.0): 초안 작성. `docs/research/conversational-shopping-agents.md` takeaway #4 ("agentic 베이스라인은 영속 메모리를 전제로 한다")를 충족하기 위해 `InMemorySessionStore` / `InMemoryTasteProfileStore` 를 Postgres 백엔드로 교체. 기존 `SessionStore` / `TasteProfileStore` Protocol은 변경하지 않고 새 구현체만 추가하는 zero-touch 방식. dev-app Postgres (자체호스팅, `DB_URL` 직결, PostgREST shim 우회) 를 마이그레이션 도구는 Alembic으로 결정. 후속 SPEC인 SPEC-IMPLICIT-FB-001 (카드 노출/암묵 피드백) 과 SPEC-OBSERVABILITY-002 (Langfuse 활성화) 의 토대가 된다.
 
