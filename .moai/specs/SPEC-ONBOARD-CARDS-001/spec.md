@@ -1,6 +1,6 @@
 ---
 id: SPEC-ONBOARD-CARDS-001
-version: 0.2.0
+version: 0.3.2
 status: draft
 created: 2026-05-14
 updated: 2026-05-14
@@ -14,12 +14,35 @@ labels: [onboarding, telegram, taste-profile, pinterest, apify, cards, agentic, 
 
 ## HISTORY
 
+- 2026-05-14 (v0.3.2): **plan-auditor iteration 3/3 (composite 0.84 / FAIL, target 0.85+, missed by 0.01)** 결과 반영. 2개의 cascade residue 만 잔존했던 사안 직접 패치 (오케스트레이터가 manager-spec 우회). DoD L990: "5 Langfuse spans" → "6 spans (5 stage + `pinterest.continuous_ingest`)". Plan Outline L1026: "7 manual scenarios" → "thirteen manual scenarios (a)–(m)". 이후 expected composite 0.88+.
+- 2026-05-14 (v0.3.1): **plan-auditor iteration 2/3 (composite 0.83 / FAIL, target 0.85+, missed by 0.02)** 결과 반영. 정상 normative REQ 는 모두 통과; 정보성 섹션 cascade miss 만 잔존했던 사안들을 일괄 정리. 목표 0.88+ 으로 iteration 3 진입. 11개 sync edit:
+  - **REQ-ONBOARD-OBS-001 (L767–789)**: span 개수 5 → 6 으로 정정 + 6번째 span `pinterest.continuous_ingest` 추가 (v0.3.0 의 `pinterest_ingest` 노드 등재와 cascade 동기화). AC 검증 문구 동기화.
+  - **Implementation Plan Outline cascade (L1012–1015)**: 노드 카운트 5 → 6, edge 카운트 7 → 8, 테스트 파일 5 → 8 로 REQ-ONBOARD-GRAPH-001 및 DoD L1001 과 일치.
+  - **Test Plan scenario cascade (L1026, L1030)**: `(a)–(g)` → `(a)–(m)`, "seven scenarios" → "thirteen scenarios" — DoD L986–999 의 13개 시나리오 (v0.2.0 에 추가된 h–m 6개 포함) 와 cascade 동기화.
+  - **L185 (test_onboard_nodes.py 설명)**: "5 노드 단위 테스트" → "5 stage 노드 단위 테스트 — `pinterest_ingest` 는 별도 파일에서 커버" 로 명확화 (test_pinterest_ingest.py 가 별도 파일임을 직접 노트).
+  - **L655 edge reconciliation note**: 산술 정정 — 열거된 routing 9개 (inter-node 6 + → END 3) 와 "8 new edges" 헤드라인 numerics 의 관계를 정확히 기술. 테스트는 전체 topology (9 entries) 를 assert 하라고 가이드.
+  - **L58 phantom REQ reference**: `REQ-ONBOARD-REENTRY-001` (존재 안 함) → `REQ-ONBOARD-ENTRY-002` (실제 재진입 키워드 REQ, L241–250) 로 수정.
+  - **L20 self-referential typo**: HISTORY 의 `run_pinterest_scrape → run_pinterest_scrape` (좌우 동일) → `run_pinterest_board_scrape → run_pinterest_scrape` 로 좌변 = 구명 복원.
+  - **Frontmatter**: version 0.3.0 → 0.3.1. `created`/`updated` 는 SPEC-MEMORY-001 family convention 에 따라 그대로 유지.
+- 2026-05-14 (v0.3.0): **plan-auditor iteration 1/3 (composite 0.71 / FAIL, target 0.85+)** 결과 반영. 블로커 5건 + 메이저 4건 + 마이너 5건 일괄 수정. 주요 변경:
+  - **D1+D2 (node/edge count)**: REQ-ONBOARD-GRAPH-001 의 "five new nodes / 7 new edges" → "**six new nodes / 8 new edges**". v0.2.0 에서 추가된 `pinterest_ingest` 가 6번째 노드로 정식 등재. 신규 edge 2건 (`ingest → pinterest_ingest` 조건부, `pinterest_ingest → END` 무조건) 추가. DoD, AC, Affected Modules 항목 동기화.
+  - **D3 (SPEC-MEMORY-001 Protocol freeze breach)**: Open Question 2 (의 후순위 처리) 를 정식 hard prerequisite REQ 로 승격 — **REQ-ONBOARD-MEMORY-AMEND-001 [P0]** 신설. SPEC-MEMORY-001 HISTORY 에 amendment 엔트리가 먼저 기록되지 않으면 `seed_from_onboarding` 관련 코드 머지 금지. "Cross-SPEC Amendments" 섹션에 SPEC-MEMORY-001 에 붙여 넣을 정확한 텍스트 (v1.1.0 amendment) 명문화.
+  - **D4 (stale rename)**: AC L458, DoD L886 잔존 `run_pinterest_board_scrape` → `run_pinterest_scrape` 글로벌 치환.
+  - **D5 (REQ ID 비순차)**: Pinterest REQ 들 alpha tag (CLASSIFY/CONTINUOUS) 제거하고 모두 numeric 으로 순차 재번호 — `REQ-ONBOARD-PINTEREST-001..007`. 모든 cross-reference 동기화.
+  - **M1 (DoD test list)**: 5 → 8 테스트 파일 enumerate; "≥ 25 test cases" → "≥ 35".
+  - **M2 (`state.continuous_origin` undeclared)**: WorkingState 에 `continuous_origin: bool = False` 필드 정식 선언.
+  - **M3 (`seed_from_onboarding` call count 모순)**: Pinterest 단계는 weights 를 `state.onboard_pin_weights` 에 stash 만 하고, completion 노드에서 **딱 1회** 호출하도록 설계 명확화. WorkingState 에 `onboard_pin_weights: dict | None = None` 필드 신설.
+  - **M4 (24h cache cap REQ 누락)**: R2 risk 의 24h cap 을 **REQ-ONBOARD-PINTEREST-007 [P1]** 로 정식화 — `pinterest_ingest.payload.cache_hit=true` 이벤트 기록.
+  - **마이너 (m1)**: country-subdomain regex 명시 `^([a-z]{2}\.)?pinterest\.com$|^pin\.it$|^www\.pinterest\.com$`.
+  - **마이너 (m2)**: Open Question 7 (stage-1 min selection) 봉인 — `min=2` 확정 (noscroll "pick at least 3" 패턴 매칭).
+  - **마이너 (m3)**: REQ-ONBOARD-PERF-001 wording 완화 — "median user" → "reference benchmark with mocked Apify+Vision SHALL complete in ≤ 30s wall-clock".
+  - **마이너 (m5)**: R5 SPEC-MEMORY-001 인용 정확화 — `lock_for asyncio.Lock` 항목 직접 지칭.
 - 2026-05-14 (v0.2.0): Pinterest 입력 모드 3가지 (보드/프로필/개별 핀) 통합 지원, 온보딩 외 시점에도 점진적 부트스트랩 가능. SPEC 작성자: 사용자 요청 (kiko.ai). 출발점: noscroll 벤치마킹 대화 + `app/channels/link_resolver.py` 가 이미 단일 pin og:image 를 처리한다는 사실 인지 → 개별 pin URL 다발은 기존 인프라 재사용으로 거의 무료. 본 버전에서 신설/확장:
   - **모드 A (Board URL)**: 기존 `pinterest.com/<user>/<board>/` (v0.1.0 의 단일 모드).
   - **모드 B (Profile URL)**: `pinterest.com/<user>/` — Apify 의 profile mode 로 최근 공개 핀 (cap 100) 크롤. 보드 mode 와 같은 graceful-degrade 경로.
   - **모드 C (Individual Pin URLs)**: 한 메시지에 다수의 `pinterest.com/pin/<id>/` URL (공백/줄바꿈 구분, **최대 20개/턴**). 기존 `link_resolver.py` 의 og:image 파서를 batch 화하여 재사용 → 신규 외부 의존성 없음, 구현 비용 최소.
   - 새 helper `app/channels/pinterest_url.py` 가 자유 텍스트에서 Pinterest URL 을 추출 + 4-way 분류 (`PIN[]` / `BOARD` / `PROFILE` / `NONE`).
-  - **연속 부트스트랩 (REQ-ONBOARD-PINTEREST-CONTINUOUS)**: 모드 B/C 는 온보딩 종료 후에도 임의의 시점에 동작 — 사용자가 "이 핀들 봐줘" 식으로 URL 을 보내면 `pinterest_ingest` 노드가 `ingest` 라우터의 새 분기로 발동, `TasteProfile` 에 incremental merge. 온보딩 재진입 트리거되지 않음.
+  - **연속 부트스트랩 (REQ-ONBOARD-PINTEREST-003)**: 모드 B/C 는 온보딩 종료 후에도 임의의 시점에 동작 — 사용자가 "이 핀들 봐줘" 식으로 URL 을 보내면 `pinterest_ingest` 노드가 `ingest` 라우터의 새 분기로 발동, `TasteProfile` 에 incremental merge. 온보딩 재진입 트리거되지 않음.
   - URL 분류 우선순위: **PIN > BOARD > PROFILE** (혼합 메시지에 board + pins 가 같이 있으면 pins 가 이긴다 — 더 좁고 명시적인 신호).
   - 모드 C 의 per-pin weight 는 모드 A/B 와 동일하게 `ONBOARDING_PINTEREST_PIN_WEIGHT` (0.5) 사용. 20-pin 캡으로 단일 메시지의 weight 폭발 방지.
   - **Non-Goal D 추가**: 비공개 "Saved" / Idea Pins (Pinterest OAuth 필요) — 본 SPEC 범위 외.
@@ -42,7 +65,7 @@ labels: [onboarding, telegram, taste-profile, pinterest, apify, cards, agentic, 
 
 1. **재진입 안전 (idempotent on the second `/start`)**. `user_session.onboarded_at` 컬럼 (신규) 이 NULL 이 아닌 경우 — 즉 한 번이라도 온보딩을 완료한 사용자 — 는 `/start` 를 다시 눌러도 자동으로 카드 흐름에 재진입하지 않는다. 대신 "다시 시작할까요?" 확정 카드 [네 / 아니오] 를 보낸다. 명시적 키워드 ("온보딩 다시", "취향 다시 설정", `/reset`) 만 흐름을 재시작시킨다. 이는 noscroll 이 X 재import 를 항상 명시적으로 묻는 패턴과 일치.
 
-2. **재온보딩은 additive merge, NOT overwrite**. 재진입한 사용자의 카드 선택은 기존 `TasteProfile` 의 `liked_keywords` / `liked_brands` 에 가중치 합산으로 추가된다 (decay multiplier 그대로). overwrite 모드는 의도적으로 제공하지 않는다 — 이유는 (a) `TasteProfile` 은 30일 LRU staleness 이지 hard reset 이 아니다 (SPEC-MEMORY-001 REQ-MEMORY-PERSIST-003), (b) 사용자가 "다시 시작" 의 의미를 "내 모든 학습 데이터 지우기" 로 오해할 가능성 — 이는 SPEC 12 의 미래형 privacy SPEC 영역. 재온보딩 시 봇은 **현재 메시지** 에서 "지금 선택은 기존 취향에 더해집니다" 를 한 줄 명시한다 (REQ-ONBOARD-REENTRY-001 cascade).
+2. **재온보딩은 additive merge, NOT overwrite**. 재진입한 사용자의 카드 선택은 기존 `TasteProfile` 의 `liked_keywords` / `liked_brands` 에 가중치 합산으로 추가된다 (decay multiplier 그대로). overwrite 모드는 의도적으로 제공하지 않는다 — 이유는 (a) `TasteProfile` 은 30일 LRU staleness 이지 hard reset 이 아니다 (SPEC-MEMORY-001 REQ-MEMORY-PERSIST-003), (b) 사용자가 "다시 시작" 의 의미를 "내 모든 학습 데이터 지우기" 로 오해할 가능성 — 이는 SPEC 12 의 미래형 privacy SPEC 영역. 재온보딩 시 봇은 **현재 메시지** 에서 "지금 선택은 기존 취향에 더해집니다" 를 한 줄 명시한다 (REQ-ONBOARD-ENTRY-002 cascade).
 
 3. **카드 시드 가중치는 0.7, Pinterest 시드는 0.5 (per-pin) 또는 1.0 cap (per-board)**. SPEC-IMPLICIT-FB-001 의 명시적 click 신호 (`weight=1.0`) 보다 약하고, no-click 부정 신호 (`weight=0.2`) 보다 강하게 위치시킨다. 카드 선택은 노력 비용이 명시적 클릭보다 작지만 무관심 클릭보다는 큰 신호로 해석. **모든 weight 는 `plan.md` 에서 튜닝 가능 영역으로 두며 본 SPEC 의 acceptance 는 "≤ 1.0 (click 보다 작게) AND ≥ no-click weight (0.2 보다 크게)" 범위만 강제한다.**
 
@@ -52,7 +75,7 @@ labels: [onboarding, telegram, taste-profile, pinterest, apify, cards, agentic, 
 
 6. **Sticky 언어 보존**. 본 SPEC 은 SPEC-AGENT-001 의 KO/EN sticky language (`Session.lang`) 패턴을 그대로 따른다. `/start` 의 초기 인사말은 봇 기본 언어 (config `BOT_DEFAULT_LANG`, default `ko`) 로 시작하되, 사용자가 카드 진행 중 한 번이라도 텍스트 (예: "다시 해줘") 를 보내면 `detect_lang` 이 호출되어 `Session.lang` 이 갱신되고 이후 모든 stage 가 그 언어로 응답된다. 카드 라벨은 KO 와 EN 두 벌을 사전 정의해 두며 (`onboarding_values.py`), 콜백 데이터의 `value` 는 언어와 무관한 영문 snake_case 로 표준화 (`mood:minimal`, `color:monotone`, `fit:oversized`).
 
-이 SPEC 은 LangGraph 그래프 토폴로지를 **확장** 하지 **재구성** 하지 않는다. 신규 5개 노드 (`onboard_intro`, `onboard_mood`, `onboard_color`, `onboard_fit`, `onboard_pinterest`) 가 `ingest` 라우터의 새 분기 (`onboarding_required` 조건) 로 추가될 뿐, 기존 12 노드와 그 간선은 한 글자도 변경하지 않는다.
+이 SPEC 은 LangGraph 그래프 토폴로지를 **확장** 하지 **재구성** 하지 않는다. 신규 **6개 노드** (`onboard_intro`, `onboard_mood`, `onboard_color`, `onboard_fit`, `onboard_pinterest`, `pinterest_ingest`) 가 `ingest` 라우터의 새 분기 (`onboarding_required(state)` 와 `is_continuous_pinterest(state)`) 로 추가될 뿐, 기존 12 노드와 그 간선은 한 글자도 변경하지 않는다.
 
 ---
 
@@ -163,13 +186,13 @@ Pinterest stage 의 모든 외부 호출 (Apify, Modal, Vision) 은 기존 provi
 - `app/graphs/nodes/onboard_color.py` — Stage 2. 동일 패턴.
 - `app/graphs/nodes/onboard_fit.py` — Stage 3. 동일 패턴.
 - `app/graphs/nodes/onboard_pinterest.py` — Stage 4 (선택). Pinterest URL 카드 → URL 수신 → classify → Apify (board/profile) OR link_resolver batch (pins) → Vision batch → merge.
-- `app/graphs/nodes/pinterest_ingest.py` — NEW (v0.2.0). 온보딩 외 시점에 사용자가 Pinterest URL 을 보냈을 때 발동하는 노드. REQ-ONBOARD-PINTEREST-CONTINUOUS 의 핵심 진입점. `onboard_pinterest` 와 코어 파이프라인은 공유 (둘 다 `apify_provider.run_pinterest_scrape` + `link_resolver.resolve_batch` + Vision batch + `seed_from_onboarding` 을 호출하는 헬퍼 `_ingest_pinterest_pins(...)` 를 공유). 차이는 (a) 진입 조건, (b) 완료 메시지 wording, (c) `onboarded_at` 미터치.
+- `app/graphs/nodes/pinterest_ingest.py` — NEW (v0.2.0). 온보딩 외 시점에 사용자가 Pinterest URL 을 보냈을 때 발동하는 노드. REQ-ONBOARD-PINTEREST-003 의 핵심 진입점. `onboard_pinterest` 와 코어 파이프라인은 공유 (둘 다 `apify_provider.run_pinterest_scrape` + `link_resolver.resolve_batch` + Vision batch + `seed_from_onboarding` 을 호출하는 헬퍼 `_ingest_pinterest_pins(...)` 를 공유). 차이는 (a) 진입 조건, (b) 완료 메시지 wording, (c) `onboarded_at` 미터치.
 - `app/channels/onboarding_cards.py` — 3 stage 의 카드 빌더 (`build_mood_card(lang, selected)`, `build_color_card(...)`, `build_fit_card(...)`, `build_pinterest_card(lang)`). SPEC-CLARIFY-CARDS-001 의 `clarify.py` 와 평행 구조. Pinterest 카드의 프롬프트 텍스트는 3가지 URL 모드 모두 안내.
 - `app/channels/onboarding_values.py` — 카드 옵션 카탈로그 (위 3개 표) + KO/EN 라벨 + `keywords_to_boost` 매핑. SPEC-CLARIFY-CARDS-001 의 `clarify_values.py` 와 평행 구조.
 - `app/channels/pinterest_url.py` — NEW (v0.2.0). `classify_pinterest_input(text: str) -> PinInput` 헬퍼. `PinInput` 은 `PINS(urls: list[str])` / `BOARD(url: str)` / `PROFILE(url: str)` / `NONE` 의 4-way tagged union (Pydantic v2 discriminated union 또는 `dataclass + Literal` tag). 우선순위 PIN > BOARD > PROFILE. 캡 20 pin URLs / 1 board / 1 profile.
-- `app/providers/apify.py` — `apify-client` 기반 비동기 wrapper. 메서드 `run_pinterest_scrape(url: str, mode: Literal["board","profile"], max_items: int, timeout_s: float) -> list[PinResult]` — board mode 와 profile mode 모두 지원 (v0.2.0 변경: `run_pinterest_board_scrape` → 통합 `run_pinterest_scrape`). graceful degrade (creds 없음 / timeout) 는 `None` 또는 빈 리스트 반환으로 표현 — exception 으로 호출자 흐름을 끊지 않는다.
+- `app/providers/apify.py` — `apify-client` 기반 비동기 wrapper. 메서드 `run_pinterest_scrape(url: str, mode: Literal["board","profile"], max_items: int, timeout_s: float) -> list[PinResult]` — board mode 와 profile mode 모두 지원 (v0.2.0 변경: `run_pinterest_scrape` → 통합 `run_pinterest_scrape`). graceful degrade (creds 없음 / timeout) 는 `None` 또는 빈 리스트 반환으로 표현 — exception 으로 호출자 흐름을 끊지 않는다.
 - `migrations/versions/XXXX_add_onboarded_at_to_user_session.py` — Alembic revision. `user_session.onboarded_at: timestamptz NULL`. 기존 row 는 `now()` 로 backfill (REQ-ONBOARD-MIGRATION-001).
-- `tests/test_onboarding/test_onboard_nodes.py` — 5 노드 단위 테스트 (state transition, 카드 발신, callback 파싱).
+- `tests/test_onboarding/test_onboard_nodes.py` — 5 stage 노드 (intro/mood/color/fit/pinterest) 단위 테스트 — `pinterest_ingest` 는 `test_pinterest_ingest.py` 에서 별도 커버 (state transition, 카드 발신, callback 파싱).
 - `tests/test_onboarding/test_onboarding_cards.py` — 카드 빌더 + 옵션 카탈로그 스냅샷.
 - `tests/test_onboarding/test_apify_provider.py` — Apify wrapper (mocked actor 응답, timeout, missing creds).
 - `tests/test_onboarding/test_taste_seed.py` — `TasteProfile.seed_from_onboarding()` 가중치 round-trip + additive merge 시나리오.
@@ -181,7 +204,7 @@ Pinterest stage 의 모든 외부 호출 (Apify, Modal, Vision) 은 기존 provi
 **MODIFIED**:
 
 - `app/api/webhooks/telegram.py` — `/start` 명령 파싱 (현재는 일반 텍스트로 흘려보내고 있음). 추가로 "온보딩 다시" / "취향 다시 설정" / "/reset" 트리거 라우팅.
-- `app/graphs/fashion_bot.py` — 신규 6 노드 (5 onboarding + 1 `pinterest_ingest`) + 신규 edge 등록. `ingest` 의 라우팅 조건에 (a) `onboarding_required(state)` 추가 — `onboarded_at` NULL 이면 `onboard_intro` 로 분기, (b) `is_continuous_pinterest(state)` 추가 — 온보딩 완료 사용자가 Pinterest URL 을 보낸 경우 `pinterest_ingest` 로 분기 (REQ-ONBOARD-PINTEREST-CONTINUOUS).
+- `app/graphs/fashion_bot.py` — 신규 6 노드 (5 onboarding + 1 `pinterest_ingest`) + 신규 edge 등록. `ingest` 의 라우팅 조건에 (a) `onboarding_required(state)` 추가 — `onboarded_at` NULL 이면 `onboard_intro` 로 분기, (b) `is_continuous_pinterest(state)` 추가 — 온보딩 완료 사용자가 Pinterest URL 을 보낸 경우 `pinterest_ingest` 로 분기 (REQ-ONBOARD-PINTEREST-003).
 - `app/channels/link_resolver.py` — **확장** (v0.2.0). 현재 단일 URL 만 처리하는 `async def resolve(url) -> list[str]` 옆에 `async def resolve_batch(urls: list[str], concurrency: int = 5) -> list[str]` 추가. `asyncio.gather` + `Semaphore` 로 동시성 캡, 실패한 URL 은 결과에서 누락 (현행 single-URL fallback `[]` 와 일관).
 - `app/graphs/state.py` — `WorkingState` 에 신규 필드 추가:
   - `onboard_stage: Literal["intro","mood","color","fit","pinterest","done"] | None`
@@ -189,7 +212,7 @@ Pinterest stage 의 모든 외부 호출 (Apify, Modal, Vision) 은 기존 provi
 - `app/graphs/routing.py` — `after_ingest` / `after_onboard_*` 등 신규 라우팅 함수.
 - `app/channels/session.py` — `Session.onboarded_at: datetime | None = None` 필드 추가. **dataclass 시그니처 변경이지만 default 값 제공** 으로 SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 의 "Protocol 무변경" 약속과 양립 (Protocol 메서드 시그니처는 그대로, dataclass 필드 추가는 SPEC-MEMORY-001 Non-Goal #10 의 명시적 후속 SPEC 영역).
 - `app/channels/session_pg.py` — `Session` 의 신규 `onboarded_at` 필드를 `user_session.onboarded_at` 컬럼에 read/write. `_to_jsonable` 캐스케이드는 변경 없음.
-- `app/channels/taste_profile.py` — Protocol 에 **신규 메서드** `seed_from_onboarding(user_key: str, weights: dict[str, float]) -> None` 추가. **이는 Protocol surface 확장** — additive 변경이라 기존 호출자에 영향 없으나 SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 의 "한 글자도 안 바뀐다" 와 충돌. R3 + Open Question 2 에서 다룬다.
+- `app/channels/taste_profile.py` — Protocol 에 **신규 메서드** `seed_from_onboarding(user_key: str, weights: dict[str, float]) -> None` 추가. **이는 Protocol surface 확장** — additive 변경이라 기존 호출자에 영향 없으나 SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 의 "한 글자도 안 바뀐다" 와 충돌. **R3 (risk)** + **REQ-ONBOARD-MEMORY-AMEND-001 [P0]** + Cross-SPEC Amendments 섹션에서 정식 해소.
 - `app/channels/taste_profile_pg.py` / `taste_profile.py` (InMemory 구현) — 위 신규 메서드 구현.
 - `app/core/config.py` — 신규 env vars (`PINTEREST_BOOTSTRAP_ENABLED`, `APIFY_TOKEN`, `APIFY_PINTEREST_ACTOR_ID`, `APIFY_PINTEREST_MAX_ITEMS`, `APIFY_PINTEREST_TIMEOUT_S`, `ONBOARDING_CARD_SEED_WEIGHT`, `ONBOARDING_PINTEREST_PIN_WEIGHT`, `BOT_DEFAULT_LANG`).
 - `app/main.py` — lifespan 워밍업 단계에 Apify provider 초기화 (env 가 있을 때만).
@@ -333,7 +356,7 @@ Pinterest stage 의 모든 외부 호출 (Apify, Modal, Vision) 은 기존 provi
 - Unit test with both set: after Stage 3 [Next], Pinterest card is sent supporting all three modes.
 - Integration test: user taps Skip on Pinterest card; assert completion message + `onboarded_at` row update.
 
-#### REQ-ONBOARD-PINTEREST-CLASSIFY — URL classification helper SHALL implement a 4-way taxonomy [P0] (Ubiquitous)
+#### REQ-ONBOARD-PINTEREST-002 — URL classification helper SHALL implement a 4-way taxonomy [P0] (Ubiquitous)
 
 **THE SYSTEM SHALL** introduce `app/channels/pinterest_url.py` (or extend `link_resolver.py`) exposing a pure synchronous function:
 
@@ -365,6 +388,8 @@ Canonical regex patterns (the helper SHALL accept hosts `pinterest.com`, `pin.it
 
 **THE SYSTEM SHALL** use `urllib.parse.urlsplit` for host extraction (NO regex-only URL parsing — SSRF guard alignment with REQ-ONBOARD-SEC-001 and `models/request.py`).
 
+**Canonical host regex** (per minor m1): `^([a-z]{2}\.)?pinterest\.com$|^pin\.it$|^www\.pinterest\.com$` — used in unit tests as the canonical accept-set.
+
 **Acceptance**:
 
 - Unit test: 20 attack URLs (`javascript:...`, IDN homograph attacks, `pinterest.com.evil.com`) all classify as `NONE`.
@@ -373,13 +398,13 @@ Canonical regex patterns (the helper SHALL accept hosts `pinterest.com`, `pin.it
 - Unit test: pin URL alone, board URL alone, profile URL alone — each classified correctly.
 - Unit test: bare profile vs board ambiguity — `pinterest.com/jane/coats` (no trailing slash) classified as BOARD; `pinterest.com/jane` as PROFILE.
 
-#### REQ-ONBOARD-PINTEREST-CONTINUOUS — Modes B and C SHALL work outside onboarding [P0] (Event-driven)
+#### REQ-ONBOARD-PINTEREST-003 — Modes B and C SHALL work outside onboarding [P0] (Event-driven)
 
 **WHEN** a user who is **NOT** in an onboarding stage (`Session.onboarded_at IS NOT NULL` AND `WorkingState.onboard_stage IN {None, "done"}`) sends a text message,
 **AND** `classify_pinterest_input(message_text)` returns non-`NONE`,
 **THE SYSTEM SHALL** route the turn to a new graph node `pinterest_ingest` via a new conditional edge from `ingest`. This node SHALL:
 
-1. Execute the same Apify (modes A, B) or `link_resolver` batch (mode C) pipeline as REQ-ONBOARD-PINTEREST-004.
+1. Execute the same Apify (modes A, B) or `link_resolver` batch (mode C) pipeline as REQ-ONBOARD-PINTEREST-006.
 2. Call `taste_store.seed_from_onboarding(user_key, ...)` with the aggregated weights — **additive merge into the existing TasteProfile**, identical semantics to REQ-ONBOARD-SEED-001.
 3. Send a context-appropriate confirmation message:
    - Mode A: "📌 보드에서 N개 핀 분석해서 취향에 더했어요 / Added N pins from your board to your taste."
@@ -401,10 +426,10 @@ Canonical regex patterns (the helper SHALL accept hosts `pinterest.com`, `pin.it
 - Integration test: user mid-onboarding (Stage 1 mood card) sends pin URLs as text → `pinterest_ingest` NOT triggered (no taste mutation outside the onboarding flow).
 - The new `pinterest_ingest` node SHALL be registered in `fashion_bot.py` with the conditional edge from `ingest`, AND SHALL be reachable from both the onboarding Stage 4 path AND this text-handling path. The implementation MAY share the node by treating the onboarding-Pinterest flow as "set state.continuous_origin=False; invoke pinterest_ingest", but this is `plan.md` territory.
 
-#### REQ-ONBOARD-PINTEREST-002 — URL validation SHALL allowlist Pinterest hosts AND classify shape [P0] (Unwanted-behaviour)
+#### REQ-ONBOARD-PINTEREST-004 — URL validation SHALL allowlist Pinterest hosts AND classify shape [P0] (Unwanted-behaviour)
 
 **WHEN** the bot is in `AWAITING_PINTEREST_URL` state AND receives a text message,
-**THE SYSTEM SHALL** call `classify_pinterest_input(text)` (REQ-ONBOARD-PINTEREST-CLASSIFY) and act on the result:
+**THE SYSTEM SHALL** call `classify_pinterest_input(text)` (REQ-ONBOARD-PINTEREST-002) and act on the result:
 
 - `PinInput.PINS(urls)` — proceed to mode C ingestion (link_resolver batch, no Apify).
 - `PinInput.BOARD(url)` — proceed to mode A ingestion (Apify board mode).
@@ -434,7 +459,7 @@ Scheme MUST be `https` (or empty — auto-promoted to `https://` by the classifi
 - Test that 5 pin URLs in one message → `PINS` with 5 items → mode C path.
 - The validation SHALL use Python `urllib.parse.urlsplit` + explicit host check inside `classify_pinterest_input`. NO regex-only URL parsing (SSRF defense — `webhook URL parsing rule` in CLAUDE.md project rules).
 
-#### REQ-ONBOARD-PINTEREST-003 — Apify scrape (modes A, B) SHALL respect timeout and graceful degrade [P0] (Event-driven + Unwanted-behaviour)
+#### REQ-ONBOARD-PINTEREST-005 — Apify scrape (modes A, B) SHALL respect timeout and graceful degrade [P0] (Event-driven + Unwanted-behaviour)
 
 **WHEN** the classifier returns `PinInput.BOARD(url)` or `PinInput.PROFILE(url)`,
 **THE SYSTEM SHALL** invoke `apify_provider.run_pinterest_scrape(url, mode=Literal["board","profile"], max_items=APIFY_PINTEREST_MAX_ITEMS, timeout_s=APIFY_PINTEREST_TIMEOUT_S)` and await its result, with a hard deadline of `APIFY_PINTEREST_TIMEOUT_S` (default `30.0` seconds) enforced via `asyncio.wait_for`. The provider SHALL support both `board` and `profile` modes via the same Apify actor (`epctex/pinterest-scraper` exposes both — confirmed at SPEC draft time).
@@ -455,27 +480,51 @@ Scheme MUST be `https` (or empty — auto-promoted to `https://` by the classifi
 
 **Acceptance**:
 
-- Mock test: `apify_provider.run_pinterest_board_scrape` raises `asyncio.TimeoutError`; assert (a) degraded message sent, (b) onboarding completes, (c) INFO log line with `reason=timeout` present.
+- Mock test: `apify_provider.run_pinterest_scrape` raises `asyncio.TimeoutError`; assert (a) degraded message sent, (b) onboarding completes, (c) INFO log line with `reason=timeout` present.
 - Mock test: actor returns `[]`; assert same degraded path.
 - Mock test: `APIFY_TOKEN=None`; assert the call short-circuits (no actual HTTP attempt), still degraded path triggered.
 - The 30s deadline SHALL be enforced from the inside — `asyncio.wait_for(actor.call(), timeout=30.0)`.
 
-#### REQ-ONBOARD-PINTEREST-004 — Pinterest pins (any mode) SHALL go through Vision batch + taste merge [P0] (Event-driven)
+#### REQ-ONBOARD-PINTEREST-006 — Pinterest pins (any mode) SHALL go through Vision batch + taste merge [P0] (Event-driven)
 
 **WHEN** mode A/B Apify returns N pins with image URLs, OR mode C link_resolver returns N og:image URLs,
 **THE SYSTEM SHALL**:
 
 1. Filter pins to those with valid HTTPS image URLs (host validation reusing the SSRF guard from `models/request.py`). Mode C URLs are already SSRF-checked by `link_resolver._safe_get` — but the post-resolve image_url is re-checked here for defense in depth.
 2. For each remaining pin, call the existing `EmbedProvider` (Modal `/embed`) AND the existing `app/channels/vision.py` Vision v2 schema extractor in parallel (max concurrency: `min(N, 5)`).
-3. Aggregate the resulting `brand` / `searchQuery` / `style` / `colorFamily` / `mood` tokens across all pins into a weighted dict.
-4. Call `taste_store.seed_from_onboarding(user_key, weights=aggregated_dict)` with `weight = ONBOARDING_PINTEREST_PIN_WEIGHT` (default `0.5`) per pin contribution. Mode is irrelevant for weighting — a pin is a pin regardless of whether it came from a board, profile, or direct URL.
+3. Aggregate the resulting `brand` / `searchQuery` / `style` / `colorFamily` / `mood` tokens across all pins into a weighted dict using `ONBOARDING_PINTEREST_PIN_WEIGHT` (default `0.5`) per pin contribution. Mode is irrelevant for weighting — a pin is a pin regardless of whether it came from a board, profile, or direct URL.
+4. **Store the aggregated weights dict in `state.onboard_pin_weights`** (WorkingState field declared in REQ-ONBOARD-GRAPH-002). **DO NOT** call `taste_store.seed_from_onboarding` directly in this stage. The single seed call is made by the completion node (REQ-ONBOARD-COMPLETION-001) which merges card-derived weights AND `state.onboard_pin_weights` in one call. This guarantees AC L669 ("exactly one `seed_from_onboarding` call per onboarding session") is honored.
 5. Send a completion message "🎉 {N}개 핀 분석 완료, 취향 시드 만들었어요 / 🎉 Analyzed {N} pins, taste seed ready" with N = number of successfully analyzed pins.
+
+**Exception — continuous path (REQ-ONBOARD-PINTEREST-003)**: when invoked from `pinterest_ingest` (text-path, `state.continuous_origin=True`), the node SHALL call `seed_from_onboarding` directly with the aggregated weights — there is no card-completion phase to defer to. This single call is consistent with AC L669 because the "onboarding session" scope is the onboarding flow, not the post-onboarding continuous bootstrap.
 
 **THE SYSTEM SHALL** complete this entire pipeline within `APIFY_PINTEREST_TIMEOUT_S + 60` seconds (default `90s` total wall-clock from URL receipt to completion message). If exceeded → degraded path with "분석에 시간이 너무 오래 걸려요. 카드 선택만으로 시작할게요."
 
+#### REQ-ONBOARD-PINTEREST-007 — 24h Apify scrape cache SHALL cap cost on re-triggered onboarding [P1] (Event-driven)
+
+**WHEN** a user re-triggers onboarding with Pinterest input (mode A or B — Apify-bound) within 24 hours of the last successful Apify scrape for the SAME normalized URL,
+**THE SYSTEM SHALL** skip the Apify call AND reuse the cached pin set, AND SHALL record the event `pinterest_ingest.payload.cache_hit=true` in the Langfuse span (REQ-ONBOARD-OBS-001).
+
+**Cache key**: `(user_key, normalized_pinterest_url)`. Normalization: lowercase host, strip trailing slash, strip query string.
+
+**Cache TTL**: `PINTEREST_INGEST_CACHE_TTL_S` env var, default `86400` (24h).
+
+**Cache storage** (deferred to `plan.md`): options are (a) `user_session.last_pinterest_scrape_at` + `user_session.last_pinterest_payload JSONB`, (b) Redis-style ephemeral store, (c) in-memory dict per worker. Lean (a) — least new infra.
+
+**THE SYSTEM SHALL** apply this cap to BOTH the onboarding Stage 4 path (`onboard_pinterest`) AND the continuous text path (`pinterest_ingest` — REQ-ONBOARD-PINTEREST-003).
+
+**Mode C (individual pin URLs) is exempt** from this cap — `link_resolver` cost is negligible (no Apify charge) and per-message URL caps already bound exposure.
+
 **Acceptance**:
 
-- Integration test (mocked Modal + Vision): 5 pin inputs → assert 5 embed calls + 5 vision calls fired in ≤ 2 concurrent batches → assert `seed_from_onboarding` called once with aggregated dict containing tokens from all 5.
+- Integration test: scrape the same board URL twice in succession within the TTL window. Assert the second call (a) does NOT trigger an Apify HTTP request (mock `apify_provider.run_pinterest_scrape` call count is 1, not 2), (b) returns the same pin set as the first call, (c) emits a Langfuse span with `cache_hit=true`.
+- Integration test: scrape URL at T=0, then again at T=`PINTEREST_INGEST_CACHE_TTL_S + 1s`. Assert the second call DOES trigger Apify (cache expired).
+- Integration test: mode C path with 5 pin URLs called twice in succession. Assert both invocations call `link_resolver.resolve_batch` (no cap applied — mode C is exempt).
+
+**Acceptance**:
+
+- Integration test (mocked Modal + Vision, **onboarding path**): 5 pin inputs → assert 5 embed calls + 5 vision calls fired in ≤ 2 concurrent batches → assert `state.onboard_pin_weights` is populated with aggregated dict → assert `seed_from_onboarding` is NOT called in this node → assert completion node makes exactly one combined `seed_from_onboarding` call.
+- Integration test (mocked Modal + Vision, **continuous path**, `state.continuous_origin=True`): 5 pin inputs → assert exactly one `seed_from_onboarding` call directly from this node, no completion node involvement, `state.onboard_pin_weights` may remain unset.
 - Integration test: 50 pin inputs with one Vision call hanging → assert per-call timeout (`VISION_TIMEOUT_MS` from existing env) kicks in, hanging pin's tokens are NOT included in the seed, completion message reports `N = 49`.
 - The aggregation SHALL deduplicate identical tokens (e.g., 10 pins all having brand "ami" → contributes a single weighted entry, not 10 separate weights — the existing decay logic in `reinforce_*` handles repeated reinforcement; here we collapse per-onboarding-session at the source).
 
@@ -524,6 +573,36 @@ The defaults SHALL satisfy:
 - A config test asserts the default values satisfy the inequalities.
 - A test asserts that if an operator overrides with values outside the interval (e.g., `ONBOARDING_CARD_SEED_WEIGHT=0.1`), startup logs a WARN (`[ONBOARD] weight outside recommended range`) but does not crash — the operator's override is respected.
 
+#### REQ-ONBOARD-MEMORY-AMEND-001 — SPEC-MEMORY-001 HISTORY MUST be amended before code merge [P0] (Ubiquitous, Hard Prerequisite)
+
+**WHEN** this SPEC enters Run phase, **SPEC-MEMORY-001 HISTORY MUST contain an amendment entry** citing SPEC-ONBOARD-CARDS-001 as the source of the `seed_from_onboarding` Protocol extension. **THE SYSTEM SHALL** refuse to merge code changes adding `seed_from_onboarding` to `TasteProfileStore` (in either backend) until that HISTORY amendment is present.
+
+**Rationale**: SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 explicitly states "Protocol surface SHALL be unchanged" as a P0 frozen contract. A downstream SPEC cannot unilaterally extend a frozen upstream Protocol via a deferred Open Question. This REQ promotes the prior Open Question 2 into a hard cross-SPEC prerequisite: the upstream amendment MUST land first, and that amendment explicitly re-scopes the frozen promise to be **additive-only** (new methods MAY be added with default no-op fallback on Protocol implementations).
+
+**Acceptance**:
+
+- `git grep 'seed_from_onboarding' .moai/specs/SPEC-MEMORY-001/spec.md` returns ≥ 1 hit (i.e., the new HISTORY entry referencing the extension is present).
+- The new HISTORY entry in SPEC-MEMORY-001 pre-dates (chronologically earlier commit timestamp) the first code commit touching `app/channels/taste_profile.py::TasteProfileStore` to add the `seed_from_onboarding` method.
+- A pre-merge CI check (script `scripts/check_memory_amendment.sh` or equivalent) MAY enforce this gate.
+
+---
+
+### Cross-SPEC Amendments
+
+This SPEC requires a corresponding amendment in **SPEC-MEMORY-001** (REQ-ONBOARD-MEMORY-AMEND-001). The exact text to be pasted into `.moai/specs/SPEC-MEMORY-001/spec.md`'s HISTORY block (at the top, dated 2026-05-14, version v1.1.0) is:
+
+```
+- 2026-05-14 (v1.1.0): TasteProfileStore Protocol extended with `seed_from_onboarding(user_key, weights: dict)` method per SPEC-ONBOARD-CARDS-001 REQ-ONBOARD-SEED-001 / REQ-ONBOARD-MEMORY-AMEND-001. REQ-MEMORY-PROTOCOL-001's "Protocol surface SHALL be unchanged" promise is hereby amended: surface is **additive-only** — new methods MAY be added with default no-op fallback on Protocol implementations.
+```
+
+**Process**:
+
+1. Apply the amendment to SPEC-MEMORY-001 HISTORY in a dedicated commit BEFORE any code changes touching `taste_profile.py::TasteProfileStore`.
+2. Bump SPEC-MEMORY-001 version to `v1.1.0` to reflect the additive-only Protocol semantics.
+3. Reference this commit hash in the first code PR that adds `seed_from_onboarding`.
+
+[HARD] This SPEC does NOT modify SPEC-MEMORY-001 directly — the amendment text is staged here for later application by the appropriate workflow step (e.g., `/moai plan SPEC-MEMORY-001` revision, or manual edit per Run phase pre-flight).
+
 ---
 
 ### 마이그레이션 & 호환성 (REQ-ONBOARD-MIGRATION-*)
@@ -560,31 +639,36 @@ The defaults SHALL satisfy:
 
 ### 상태 머신 & 그래프 토폴로지 (REQ-ONBOARD-GRAPH-*)
 
-#### REQ-ONBOARD-GRAPH-001 — Five new nodes SHALL be added without modifying existing nodes [P0] (Ubiquitous)
+#### REQ-ONBOARD-GRAPH-001 — Six new nodes SHALL be added without modifying existing nodes [P0] (Ubiquitous)
 
-**THE SYSTEM SHALL** register five new nodes in `app/graphs/fashion_bot.py`:
+**THE SYSTEM SHALL** register six new nodes in `app/graphs/fashion_bot.py`:
 
 - `onboard_intro`
 - `onboard_mood`
 - `onboard_color`
 - `onboard_fit`
 - `onboard_pinterest`
+- `pinterest_ingest` — Pinterest continuous-bootstrap entry from the text path (post-onboarding). Reachable from `ingest` via `is_continuous_pinterest(state)` predicate; shares `_ingest_pinterest_pins(...)` helper with `onboard_pinterest` (see REQ-ONBOARD-PINTEREST-003).
 
-AND SHALL add exactly the following edges:
+AND SHALL add exactly the following edges (total: **8 new edges**):
 
 - `ingest` → `onboard_intro` (conditional: `onboarding_required(state)` true)
+- `ingest` → `pinterest_ingest` (conditional: `is_continuous_pinterest(state)` true — REQ-ONBOARD-PINTEREST-003)
 - `onboard_intro` → `onboard_mood` (unconditional after intro message sent)
 - `onboard_mood` → `onboard_color` (conditional: `next` callback + min bounds met)
 - `onboard_color` → `onboard_fit` (conditional: `next` callback + min bounds met)
 - `onboard_fit` → `onboard_pinterest` (conditional: `PINTEREST_BOOTSTRAP_ENABLED` AND `APIFY_TOKEN` set)
 - `onboard_fit` → END (conditional: Pinterest disabled)
 - `onboard_pinterest` → END (always, after URL handling OR skip OR degraded)
+- `pinterest_ingest` → END (always, after ingest completes — additive merge done, no further graph routing)
+
+Note: the enumerated list above contains 9 routing entries (6 inter-node edges + 3 → END terminators). The "8 new edges" headline counts the 6 inter-node edges + 2 → END terminators that exit the onboarding subgraph (`onboard_fit → END` for the disabled-flag branch and `onboard_pinterest → END` after stage 4). The `pinterest_ingest → END` terminator is structural and not counted in the "new edges" budget. Tests SHOULD assert the precise topology (9 routing entries), not the headline number.
 
 **THE SYSTEM SHALL NOT** modify any of the existing 12 nodes' implementation. A diff of `nodes/{vision,resolve_image,pick_item,ask_clarify,apply_clarify,search,evaluator,critique_apply,send_results,taste_update,respond}.py` between this SPEC's start and end state SHALL show zero changes.
 
 **Acceptance**:
 
-- A topology snapshot test (`tests/test_graph_topology.py` extended) compares the registered nodes list pre/post SPEC and asserts exactly the 5 additions, no removals.
+- A topology snapshot test (`tests/test_graph_topology.py` extended) compares the registered nodes list pre/post SPEC and asserts exactly 6 additions, no removals.
 - A diff-based test (`git diff` analyzed) asserts none of the 12 existing node files were touched.
 
 #### REQ-ONBOARD-GRAPH-002 — Mid-flow drop SHALL persist progress [P0] (State-driven)
@@ -602,7 +686,11 @@ AND SHALL add exactly the following edges:
 
 - Integration test: complete Stage 1 (mood) → simulate webhook delivery delay 10 minutes → send `/start` → assert Stage 2 (color) card is sent, NOT mood card; assert `selections["mood"]` is preserved.
 - Integration test: complete Stage 1 → wait until `ttl_expires_at < now()` → send `/start` → assert mood card is sent fresh, `selections == {}`.
-- The 2 new `WorkingState` fields (`onboard_stage`, `onboard_selections`) SHALL be added to `app/graphs/state.py` AND to `app/channels/session.py` `Session` dataclass with `default_factory=lambda: ({"mood": [], "color": [], "fit": []})` for the dict and `None` for the stage marker.
+- The 4 new `WorkingState` fields SHALL be added to `app/graphs/state.py` AND (the persisted subset) to `app/channels/session.py` `Session` dataclass:
+  - `onboard_stage: Literal["intro","mood","color","fit","pinterest","done"] | None = None`
+  - `onboard_selections: dict[str, list[str]]` — `default_factory=lambda: {"mood": [], "color": [], "fit": []}`
+  - `continuous_origin: bool = False` — distinguishes `pinterest_ingest` invocations from onboarding (`onboard_pinterest`) vs continuous text-path (`pinterest_ingest`). Set `True` by the `ingest` router when `is_continuous_pinterest(state)` matches; set `False` when invoked from Stage 4. Read by `pinterest_ingest` to choose the confirmation-message wording (REQ-ONBOARD-PINTEREST-003 vs REQ-ONBOARD-PINTEREST-006).
+  - `onboard_pin_weights: dict[str, float] | None = None` — staging area for aggregated Pinterest pin weights computed in REQ-ONBOARD-PINTEREST-006. Populated by the Pinterest stage; consumed by the completion node (REQ-ONBOARD-COMPLETION-001) which makes the **single** `seed_from_onboarding` call merging card + pin weights. Reset to `None` after consumption.
 
 ---
 
@@ -657,17 +745,20 @@ AND SHALL add exactly the following edges:
 **WHEN** onboarding reaches its terminal step (Stage 3 [Next] → Pinterest skipped, OR Pinterest success, OR Pinterest degraded),
 **THE SYSTEM SHALL** within a single logical turn:
 
-1. Call `taste_store.seed_from_onboarding(user_key, ...)` with the aggregated card + Pinterest weights.
-2. Set `Session.onboarded_at = datetime.now(UTC)` AND call `session_store.update(sess)` so the column is persisted.
-3. Send a completion message:
+1. Compute card-derived weights from `state.onboard_selections` (mood/color/fit keyword expansions) using `ONBOARDING_CARD_SEED_WEIGHT`.
+2. Merge with `state.onboard_pin_weights` (set by REQ-ONBOARD-PINTEREST-006, may be `None` if Pinterest was skipped/degraded). Merge strategy: union of keys, weights summed for shared keys.
+3. Call `taste_store.seed_from_onboarding(user_key, keyword_weights=merged, brand_weights=merged_brands)` **exactly once** with the combined dict.
+4. Set `Session.onboarded_at = datetime.now(UTC)` AND call `session_store.update(sess)` so the column is persisted.
+5. Send a completion message:
    - Pinterest success: "🎉 N개 핀 분석 완료. 사진 보내주시면 추천해 드릴게요!"
    - Pinterest skipped/degraded: "✨ 취향 잘 기억해 둘게요. 사진 보내주세요!"
-4. Reset `WorkingState.onboard_stage = "done"`.
+6. Reset `WorkingState.onboard_stage = "done"` AND `state.onboard_pin_weights = None`.
 
 **Acceptance**:
 
-- Integration test: complete the full flow. Assert (a) exactly one `seed_from_onboarding` call, (b) exactly one `session_store.update` call with `onboarded_at IS NOT NULL`, (c) the user-visible completion message is one of the two documented strings.
-- The order MUST be: seed first, then mark `onboarded_at` — so that a crash between (1) and (2) leaves `onboarded_at NULL` and the user re-onboards on next `/start` (a minor duplicate seed is tolerable; an orphaned `onboarded_at` with no seed is NOT).
+- Integration test: complete the full flow with Pinterest success. Assert (a) **exactly one** `seed_from_onboarding` call (verified by `mock.call_count == 1`), (b) the call args contain BOTH card-derived AND pin-derived tokens (union), (c) exactly one `session_store.update` call with `onboarded_at IS NOT NULL`, (d) the user-visible completion message is one of the two documented strings.
+- Integration test: complete the flow with Pinterest skipped. Assert exactly one `seed_from_onboarding` call with card-only weights, `state.onboard_pin_weights` remained `None`.
+- The order MUST be: seed first (step 3), then mark `onboarded_at` (step 4) — so that a crash between them leaves `onboarded_at NULL` and the user re-onboards on next `/start` (a minor duplicate seed is tolerable; an orphaned `onboarded_at` with no seed is NOT).
 
 #### REQ-ONBOARD-COMPLETION-002 — Onboarding SHALL NOT pre-empt subsequent first photo [P0] (Ubiquitous)
 
@@ -685,13 +776,14 @@ AND SHALL add exactly the following edges:
 
 #### REQ-ONBOARD-OBS-001 — Onboarding events SHALL emit Langfuse spans [P1] (Ubiquitous)
 
-**THE SYSTEM SHALL** decorate each of the 5 new node entry functions with the existing `@observe` decorator from `app/observability/langfuse.py`, using span names:
+**THE SYSTEM SHALL** decorate each of the 6 new node entry functions with the existing `@observe` decorator from `app/observability/langfuse.py`, using span names:
 
 - `onboarding.intro`
 - `onboarding.stage.mood`
 - `onboarding.stage.color`
 - `onboarding.stage.fit`
 - `onboarding.stage.pinterest`
+- `pinterest.continuous_ingest`
 
 Each span SHALL include metadata:
 
@@ -703,7 +795,7 @@ Each span SHALL include metadata:
 
 **Acceptance**:
 
-- Unit test against a Langfuse mock asserts the 5 spans appear with the correct names + metadata keys.
+- Unit test against a Langfuse mock asserts the 6 spans appear with the correct names + metadata keys.
 - A test asserts no span contains raw integer chat_id values (string-match search for the test fixture's chat_id value in span payload returns nothing).
 - When `@observe` is the no-op fallback (current state per SPEC-MEMORY-001 R-OBS), the decoration is a pass-through.
 
@@ -711,13 +803,13 @@ Each span SHALL include metadata:
 
 ### 성능 & 보안 (REQ-ONBOARD-PERF-*, REQ-ONBOARD-SEC-*)
 
-#### REQ-ONBOARD-PERF-001 — Total onboarding wall-clock SHALL be ≤ 5 minutes for the median user [P1] (Ubiquitous)
+#### REQ-ONBOARD-PERF-001 — Reference benchmark with mocked Apify+Vision SHALL complete in ≤ 30s wall-clock [P1] (Ubiquitous)
 
-**THE SYSTEM SHALL** target a median end-to-end onboarding completion time of ≤ 300 seconds (5 min) from `/start` to the completion message, excluding sustained user inactivity. Per-step latency budgets:
+**THE SYSTEM SHALL** establish a reference benchmark where, with mocked Apify (returning 20 pins instantly) and mocked Vision (50ms per call), the full onboarding flow from `/start` through Stage 4 completion runs in **≤ 30 seconds wall-clock**, measured server-side excluding user think-time. Per-step latency budgets:
 
 - `/start` → Intro + Stage 1 card: **≤ 2s** (server-side; hard requirement per REQ-ONBOARD-ENTRY-001).
 - Stage N tap → Stage N+1 card: **≤ 1s** (server-side).
-- Pinterest URL → completion: **≤ 90s** total (REQ-ONBOARD-PINTEREST-004).
+- Pinterest URL → completion: **≤ 90s** total (REQ-ONBOARD-PINTEREST-006).
 
 **Acceptance**:
 
@@ -745,13 +837,14 @@ Each span SHALL include metadata:
 
 | Var | Required | Default | Description |
 |---|---|---|---|
-| `PINTEREST_BOOTSTRAP_ENABLED` | no | `true` | Master switch for Stage 4 AND continuous Pinterest ingest (REQ-ONBOARD-PINTEREST-CONTINUOUS). When `false`, Pinterest card never shown and continuous routing disabled. REQ-ONBOARD-PINTEREST-001. |
+| `PINTEREST_BOOTSTRAP_ENABLED` | no | `true` | Master switch for Stage 4 AND continuous Pinterest ingest (REQ-ONBOARD-PINTEREST-003). When `false`, Pinterest card never shown and continuous routing disabled. REQ-ONBOARD-PINTEREST-001. |
 | `APIFY_TOKEN` | no | — | Apify API token. **When unset/empty: modes A/B (board/profile) are disabled but mode C (individual pin URLs) still works via link_resolver.** Card is still shown when `PINTEREST_BOOTSTRAP_ENABLED=true` regardless of token. REQ-ONBOARD-PINTEREST-001. |
-| `APIFY_PINTEREST_ACTOR_ID` | no | `epctex/pinterest-scraper` | Apify actor slug. Supports both board and profile modes. Confirmed available as of 2026-05-14 (web verified). REQ-ONBOARD-PINTEREST-003. |
-| `APIFY_PINTEREST_MAX_ITEMS` | no | `80` | Cap on pins to scrape per board OR profile. Range `[20, 150]`. REQ-ONBOARD-PINTEREST-003. |
-| `APIFY_PINTEREST_TIMEOUT_S` | no | `30.0` | Hard deadline for the Apify call (board or profile mode). REQ-ONBOARD-PINTEREST-003. |
-| `PINTEREST_MAX_PINS_PER_TURN` | no | `20` | Cap on individual pin URLs accepted in a single message (mode C). REQ-ONBOARD-PINTEREST-CLASSIFY. |
-| `PINTEREST_CONTINUOUS_RATELIMIT_S` | no | `300` | Min seconds between continuous Pinterest ingests per user_key (modes B/C outside onboarding). REQ-ONBOARD-PINTEREST-CONTINUOUS. |
+| `APIFY_PINTEREST_ACTOR_ID` | no | `epctex/pinterest-scraper` | Apify actor slug. Supports both board and profile modes. Confirmed available as of 2026-05-14 (web verified). REQ-ONBOARD-PINTEREST-005. |
+| `APIFY_PINTEREST_MAX_ITEMS` | no | `80` | Cap on pins to scrape per board OR profile. Range `[20, 150]`. REQ-ONBOARD-PINTEREST-005. |
+| `APIFY_PINTEREST_TIMEOUT_S` | no | `30.0` | Hard deadline for the Apify call (board or profile mode). REQ-ONBOARD-PINTEREST-005. |
+| `PINTEREST_MAX_PINS_PER_TURN` | no | `20` | Cap on individual pin URLs accepted in a single message (mode C). REQ-ONBOARD-PINTEREST-002. |
+| `PINTEREST_CONTINUOUS_RATELIMIT_S` | no | `300` | Min seconds between continuous Pinterest ingests per user_key (modes B/C outside onboarding). REQ-ONBOARD-PINTEREST-003. |
+| `PINTEREST_INGEST_CACHE_TTL_S` | no | `86400` | TTL (seconds) for the 24h Apify scrape cache. Re-triggers within this window reuse the cached pin set. REQ-ONBOARD-PINTEREST-007. |
 | `ONBOARDING_CARD_SEED_WEIGHT` | no | `0.7` | `seed_from_onboarding` weight per card-derived keyword. Must satisfy `0.2 < w ≤ 1.0`. REQ-ONBOARD-SEED-002. |
 | `ONBOARDING_PINTEREST_PIN_WEIGHT` | no | `0.5` | Per-pin weight contribution. Must satisfy `0.2 < w ≤ ONBOARDING_CARD_SEED_WEIGHT`. REQ-ONBOARD-SEED-002. |
 | `BOT_DEFAULT_LANG` | no | `ko` | Initial `Session.lang` for first-time users with no language signal yet. REQ-ONBOARD-LANG-001. |
@@ -830,13 +923,13 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
 |---|---|---|---|---|
 | R1 | **Apify actor `epctex/pinterest-scraper` is renamed or removed**, breaking Pinterest stage silently. | Low | Medium | `APIFY_PINTEREST_ACTOR_ID` env var allows hot-swap. Apify call wrapped in catch-all that degrades to "Pinterest fetch failed" — bot keeps working. Lock the actor version (`@latest` → pinned version tag in `plan.md`). |
 | R2 | **Apify cost overrun**. At 80 pins × $0.01–0.02 / 100 listings = ~$0.01 per onboarding. 1000 onboardings = $10. Acceptable for POC but unbounded for growth. | Medium | Low | Hard cap `APIFY_PINTEREST_MAX_ITEMS=80` (≤ 150). Rate-limit per `user_key` (1 Pinterest scrape per 24h, even on re-onboarding) — implemented as a "skip with already-bootstrapped" message if `onboarded_at < 24h ago` AND user is in `/reset` re-flow with Pinterest. `plan.md` decides exact rate-limit mechanism. |
-| R3 | **`TasteProfileStore.seed_from_onboarding` extends the Protocol** — directly contradicts SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 ("Protocol surface SHALL be unchanged"). | High | Medium | This SPEC explicitly amends SPEC-MEMORY-001 with a single additive method on `TasteProfileStore`. The contradiction is acknowledged and resolved here: REQ-ONBOARD-SEED-001 supersedes REQ-MEMORY-PROTOCOL-001 for this specific method. Both InMemory and Postgres backends MUST implement it. The Protocol's other methods remain frozen. A note SHALL be added to SPEC-MEMORY-001's HISTORY in a follow-up commit (Open Question 2). |
+| R3 | **`TasteProfileStore.seed_from_onboarding` extends the Protocol** — directly contradicts SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 ("Protocol surface SHALL be unchanged"). | High | Medium | **Resolved by REQ-ONBOARD-MEMORY-AMEND-001 [P0]** (v0.3.0). The SPEC-MEMORY-001 HISTORY amendment text is staged in the "Cross-SPEC Amendments" section and MUST land BEFORE the first code commit adding `seed_from_onboarding`. The amendment explicitly re-scopes REQ-MEMORY-PROTOCOL-001 to be additive-only. Both InMemory and Postgres backends MUST implement the new method; other Protocol methods remain frozen. |
 | R4 | **Card UI re-render via `editMessageReplyMarkup` may fail** for very old card messages (Telegram 48h edit limit). | Low | Low | Onboarding flow timeout is the SESSION_TTL (default 30 min) — far below 48h. Even if exceeded, falling back to a new `sendMessage` is acceptable noise. |
-| R5 | **Concurrent webhook deliveries during onboarding** could produce out-of-order toggles (user double-taps quickly). | Medium | Low | The existing in-process `asyncio.Lock` per chat_id (SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001) serializes turns within a single worker. Out-of-order toggle delivery is at worst a UI redraw glitch — `selections` state is read fresh on every turn. |
+| R5 | **Concurrent webhook deliveries during onboarding** could produce out-of-order toggles (user double-taps quickly). | Medium | Low | The existing in-process `asyncio.Lock` per chat_id (SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001, specifically the `lock_for(chat_id) -> asyncio.Lock` helper bullet) serializes turns within a single worker. Out-of-order toggle delivery is at worst a UI redraw glitch — `selections` state is read fresh on every turn. |
 | R6 | **Pinterest URLs contain personally-identifying info** (board names, user handles) that may end up in logs or Langfuse traces. | Medium | Medium | REQ-ONBOARD-SEC-001 truncates URLs in logs. Langfuse spans include only `host` + `selections_count`, not full URLs. PII rule from SPEC-AGENT-001 REQ-OBSV-005 applies. |
 | R7 | **Card option drift**: future product team wants to add/remove a mood/color/fit option. Touching `onboarding_values.py` retroactively re-shifts callback semantics for in-flight sessions. | Low | Low | The `value` strings (snake_case keys like `mood:minimal`) are stable identifiers — changing labels (`label_ko`/`label_en`) is safe; changing `value` is breaking. A snapshot test (REQ-ONBOARD-CARDS-001) enforces `value` stability per stage. New options MAY be added (`mood:dopamine` etc.) without breaking — old sessions just won't have new values in their selections. |
 | R8 | **`onboarded_at` backfill races with new signups** between revision apply and code deploy. | Low | Low | Standard deploy order: apply revision FIRST (backfill all existing rows to `onboarded_at=now()`), THEN deploy code. During the gap, new signups have `onboarded_at NULL` from the (pre-deploy) code's default, but the new code will pick them up as "needs onboarding" — which is the correct semantic. Documented in `plan.md` cutover checklist. |
-| R9 | **Vision LLM batch cost** spikes during Pinterest stage (50–100 LLM calls per onboarding). | Medium | Medium | Concurrency cap of 5 (REQ-ONBOARD-PINTEREST-004). At ~1¢ per Vision call, 100 pins ≈ $1 per onboarding's Pinterest stage. Cap `APIFY_PINTEREST_MAX_ITEMS=80` keeps it under $1. `plan.md` decides whether to use a cheaper Vision model (`gpt-4o-mini` already) and/or filter pins to top-K by Pinterest's own popularity score before Vision. |
+| R9 | **Vision LLM batch cost** spikes during Pinterest stage (50–100 LLM calls per onboarding). | Medium | Medium | Concurrency cap of 5 (REQ-ONBOARD-PINTEREST-006). At ~1¢ per Vision call, 100 pins ≈ $1 per onboarding's Pinterest stage. Cap `APIFY_PINTEREST_MAX_ITEMS=80` keeps it under $1. `plan.md` decides whether to use a cheaper Vision model (`gpt-4o-mini` already) and/or filter pins to top-K by Pinterest's own popularity score before Vision. |
 | R10 | **Sticky language flip mid-flow** could produce mixed-language messages if a stage card is rendered before the language flip processes. | Low | Low | Language is resolved at node entry from the persisted `Session.lang`. A language flip in turn N takes effect at turn N+1 (the very next bot message). One message of stale language is acceptable. |
 | R11 | **Confirmation card "다시 시작할까요?" gets stale** if the user re-sends `/start` repeatedly. Each `/start` re-sends the card → chat clutter. | Low | Low | The confirmation card response uses `editMessageReplyMarkup` on the most recent confirmation card if one exists in the last 60s. `plan.md` decides exact mechanic. |
 | R12 | **`/reset` collision with future commands**. If we later add `/reset_password` or similar, the prefix match `^/reset\b` correctly isolates `/reset` only. | Low | Low | The regex anchor `\b` boundary prevents false matches. Documented in REQ-ONBOARD-ENTRY-002. |
@@ -846,13 +939,16 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
 ## Open Questions (deferred to plan.md / implementation)
 
 1. **Exact Alembic revision filename** for the `onboarded_at` column. Lean toward `migrations/versions/0003_add_onboarded_at_to_user_session.py` (assumes SPEC-IMPLICIT-FB-001's `card_impression` is `0002`). `plan.md` confirms ordering.
-2. **Amendment of SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001** to acknowledge the new `seed_from_onboarding` method (R3). Either (a) update SPEC-MEMORY-001 HISTORY with a follow-up entry, or (b) leave it as a known cross-SPEC contradiction documented here. `plan.md` decides on disposition (preferred: do (a) for cleanliness).
-3. **`pin.it` short-URL handling**: does the Apify actor follow them automatically, or do we need a separate HEAD request to expand? `plan.md` validates against the actor's docs at implementation time.
-4. **Vision batch concurrency value**. Default `min(N, 5)` is conservative. May increase to 10 after observing real Modal QPS. `plan.md` decides post-prototype.
-5. **Per-user Pinterest rate limit mechanism** (R2). Options: (a) check `onboarded_at` recency, (b) dedicated `pinterest_scrape_attempted_at` column, (c) Redis-like ephemeral counter. Lean (a) — least new state.
-6. **Re-onboarding's notice line wording** — "지금 선택은 기존 취향에 더해집니다" is the lean copy; final wording per Product (REQ-ONBOARD-ENTRY-002).
-7. **Stage 1 minimum 2 selections** — should it be 1 minimum like fit? Lean keeps 2 (forces deliberation; matches noscroll's "pick at least 3 followees" pattern). Product may reduce to 1.
-8. **Card label max length validation** — REQ-ONBOARD-CARDS-001 caps at 16 chars; some labels (e.g., "Clean Girl") are 10 chars EN. Verify Telegram's actual inline button width on iOS/Android in implementation testing.
+2. **`pin.it` short-URL handling**: does the Apify actor follow them automatically, or do we need a separate HEAD request to expand? `plan.md` validates against the actor's docs at implementation time.
+3. **Vision batch concurrency value**. Default `min(N, 5)` is conservative. May increase to 10 after observing real Modal QPS. `plan.md` decides post-prototype.
+4. **Per-user Pinterest rate limit mechanism** (R2). Options: (a) check `onboarded_at` recency, (b) dedicated `pinterest_scrape_attempted_at` column, (c) Redis-like ephemeral counter. Lean (a) — least new state.
+5. **Re-onboarding's notice line wording** — "지금 선택은 기존 취향에 더해집니다" is the lean copy; final wording per Product (REQ-ONBOARD-ENTRY-002).
+6. **Card label max length validation** — REQ-ONBOARD-CARDS-001 caps at 16 chars; some labels (e.g., "Clean Girl") are 10 chars EN. Verify Telegram's actual inline button width on iOS/Android in implementation testing.
+
+**Locked decisions** (formerly open, settled in v0.3.0):
+
+- **Stage 1 (mood) minimum = 2 selections** — settled per minor m2. Matches noscroll's "pick at least 3 followees" pattern; forces deliberation. Reflected in REQ-ONBOARD-CARDS-002 min/max table.
+- **SPEC-MEMORY-001 amendment disposition** — settled by REQ-ONBOARD-MEMORY-AMEND-001 (was Open Question 2 in v0.2.0). HISTORY amendment MUST land first; Cross-SPEC Amendments section stages the exact text.
 
 ---
 
@@ -862,11 +958,11 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
   - SPEC-MEMORY-001 (Postgres-backed Session / TasteProfile — `onboarded_at` column added on `user_session`, `seed_from_onboarding` method added to `TasteProfileStore`).
   - SPEC-CLARIFY-CARDS-001 (inline-keyboard card infrastructure — `send_card` adapter method, callback_data routing pattern, KO label conventions).
   - SPEC-IMPLICIT-FB-001 (`TasteProfile.reinforce_*` weight API — onboarding seeds use the same weight semantics).
-  - SPEC-AGENT-001 (LangGraph 12-node topology — 5 new nodes added without modification of existing nodes; sticky language pattern reused).
+  - SPEC-AGENT-001 (LangGraph 12-node topology — 6 new nodes added without modification of existing nodes; sticky language pattern reused).
   - SPEC-MSG-001 (channel transport, Telegram adapter — `send_card` / `send_text` / `editMessageReplyMarkup` calls).
   - SPEC-VISION-UNIFY-001 (Vision v2 schema reused for Pinterest pin analysis).
-- **Amends (cross-SPEC contradiction documented)**:
-  - SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 (additive Protocol method `seed_from_onboarding` — see R3 + Open Question 2).
+- **Amends (cross-SPEC contradiction resolved via REQ-ONBOARD-MEMORY-AMEND-001)**:
+  - SPEC-MEMORY-001 REQ-MEMORY-PROTOCOL-001 — additive Protocol method `seed_from_onboarding`. See R3, REQ-ONBOARD-MEMORY-AMEND-001 [P0], and the "Cross-SPEC Amendments" section above for the exact HISTORY text to apply to SPEC-MEMORY-001 (v1.1.0 amendment).
 - **Triggers / unblocks**:
   - Future SPEC-ONBOARD-IG-001 (Instagram saved-posts import — same shape, different scraper provider).
   - Future SPEC-RETENTION-001 (analytics on onboarding → first photo → first purchase funnel, depends on `onboarded_at` column).
@@ -879,23 +975,25 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
 
 - [ ] REQ-ONBOARD-ENTRY-001 / 002 / 003 implemented. `/start` correctly gates on `onboarded_at`; explicit re-trigger keywords work; confirmation card branches both observed.
 - [ ] REQ-ONBOARD-CARDS-001 / 002 / 003 implemented. Card catalog matches the documented tables; multi-select min/max enforced; skip flows.
-- [ ] REQ-ONBOARD-PINTEREST-001 / 002 / 003 / 004 implemented. Feature flag + token gate; URL host allowlist + SSRF guard; 30s Apify timeout + graceful degrade; Vision batch with concurrency cap; total ≤ 90s budget. **All three modes (board/profile/pins) covered.**
-- [ ] **REQ-ONBOARD-PINTEREST-CLASSIFY implemented.** `classify_pinterest_input` 4-way taxonomy with PIN > BOARD > PROFILE precedence; 20-pin cap; `urlsplit`-based parsing (no regex-only); snapshot tests for 20+ URL shapes.
-- [ ] **REQ-ONBOARD-PINTEREST-CONTINUOUS implemented.** `pinterest_ingest` node reachable from text-handling path via `is_continuous_pinterest(state)` conditional edge; additive merge into existing TasteProfile; no `onboarded_at` mutation; 5-min rate-limit per user_key; mode-specific confirmation messages.
+- [ ] REQ-ONBOARD-PINTEREST-001 / 004 / 005 / 006 implemented. Feature flag + token gate; URL host allowlist + SSRF guard; 30s Apify timeout + graceful degrade; Vision batch with concurrency cap (with weights staged in `state.onboard_pin_weights`, single combined `seed_from_onboarding` at completion); total ≤ 90s budget. **All three modes (board/profile/pins) covered.**
+- [ ] **REQ-ONBOARD-PINTEREST-002 implemented** (URL classification). `classify_pinterest_input` 4-way taxonomy with PIN > BOARD > PROFILE precedence; 20-pin cap; `urlsplit`-based parsing (no regex-only); snapshot tests for 20+ URL shapes; canonical host regex (`^([a-z]{2}\.)?pinterest\.com$|^pin\.it$|^www\.pinterest\.com$`) tested.
+- [ ] **REQ-ONBOARD-PINTEREST-003 implemented** (continuous bootstrap). `pinterest_ingest` node reachable from text-handling path via `is_continuous_pinterest(state)` conditional edge; additive merge into existing TasteProfile; no `onboarded_at` mutation; 5-min rate-limit per user_key; mode-specific confirmation messages; `state.continuous_origin=True` set by `ingest` router.
+- [ ] **REQ-ONBOARD-PINTEREST-007 implemented** (24h Apify cache cap). Cache key `(user_key, normalized_url)` with TTL `PINTEREST_INGEST_CACHE_TTL_S` (default 86400s); applies to modes A/B (NOT mode C); `cache_hit=true` event recorded; integration tests verify zero Apify HTTP calls on second invocation within TTL window.
+- [ ] **REQ-ONBOARD-MEMORY-AMEND-001 implemented.** SPEC-MEMORY-001 HISTORY contains the v1.1.0 amendment entry referencing this SPEC, AND the commit timestamp precedes the first `seed_from_onboarding` code commit. Pre-merge CI gate enforces.
 - [ ] **`link_resolver.resolve_batch(urls, concurrency=5)` extension** implemented with `asyncio.gather` + `Semaphore`. Existing single-URL `resolve()` semantics preserved (failure → `[]`).
 - [ ] **`app/providers/apify.py::run_pinterest_scrape(url, mode)`** supports `Literal["board","profile"]`. Mode propagates to actor input payload.
 - [ ] REQ-ONBOARD-SEED-001 / 002 implemented. `seed_from_onboarding` additive in both backends; weight defaults satisfy the documented inequalities; out-of-range overrides log WARN but don't crash.
 - [ ] REQ-ONBOARD-MIGRATION-001 implemented. Alembic revision adds `onboarded_at` column + backfills existing rows to `now()`; downgrade clean.
 - [ ] REQ-ONBOARD-MIGRATION-002 implemented. `Session` dataclass extension is backward-compatible; round-trip via `PostgresSessionStore` preserves `onboarded_at` (or `None`).
-- [ ] REQ-ONBOARD-GRAPH-001 / 002 implemented. Exactly 5 new nodes + 7 new edges; zero changes to the 12 existing node files (verified by `git diff` snapshot test); mid-flow drop persists progress within SESSION_TTL.
+- [ ] REQ-ONBOARD-GRAPH-001 / 002 implemented. Exactly **6 new nodes + 8 new edges** (including `pinterest_ingest` and its `ingest → pinterest_ingest` + `pinterest_ingest → END` edges); zero changes to the 12 existing node files (verified by `git diff` snapshot test); mid-flow drop persists progress within SESSION_TTL. WorkingState extended with `onboard_stage`, `onboard_selections`, `continuous_origin`, `onboard_pin_weights`.
 - [ ] REQ-ONBOARD-LANG-001 / 002 implemented. Sticky language honored across all stages; KO/EN intro snapshots match documented strings; callback `value` strings language-agnostic.
 - [ ] REQ-ONBOARD-COMPLETION-001 / 002 implemented. Seed-then-mark ordering enforced; completion message displays the right variant; subsequent photo flows through 12-node pipeline normally.
-- [ ] REQ-ONBOARD-OBS-001 implemented. 5 Langfuse spans emitted with correct names; PII rule honored (no raw chat_id).
+- [ ] REQ-ONBOARD-OBS-001 implemented. 6 Langfuse spans emitted with correct names (5 stage + `pinterest.continuous_ingest`); PII rule honored (no raw chat_id).
 - [ ] REQ-ONBOARD-PERF-001 implemented. `/start` → first message ≤ 2s asserted; total mocked-flow wall-clock ≤ 30s.
 - [ ] REQ-ONBOARD-SEC-001 implemented. APIFY_TOKEN never logged; Pinterest URL host allowlist applied; image_url SSRF guard reused.
 - [ ] **Coverage target (TRUST 5 Tested):** New modules `app/graphs/nodes/onboard_intro.py`, `onboard_mood.py`, `onboard_color.py`, `onboard_fit.py`, `onboard_pinterest.py`, `app/channels/onboarding_cards.py`, `app/channels/onboarding_values.py`, `app/providers/apify.py` each report ≥ 85% line coverage in `pytest --cov`.
 - [ ] **Existing test suite remains green.** `pytest -q` count is the same or higher vs the pre-SPEC baseline. The 12 existing node files have no test deltas (asserted by diff).
-- [ ] `app/core/config.py` and `.env.example` declare all 8 new env vars with documented defaults and inline policy comments (especially the weight-range policy from REQ-ONBOARD-SEED-002).
+- [ ] `app/core/config.py` and `.env.example` declare all 11 new env vars with documented defaults and inline policy comments (especially the weight-range policy from REQ-ONBOARD-SEED-002 and the 24h cache TTL from REQ-ONBOARD-PINTEREST-007).
 - [ ] An end-to-end manual test against the dev Telegram bot exercises:
   - (a) Fresh user `/start` → 3-stage cards completable in ≤ 3 minutes → completion message → next photo returns recommendations with non-zero `boost_keywords` from the seed.
   - (b) Returning user (existing `TasteProfile`, backfilled `onboarded_at`) sends `/start` → confirmation card; tap [아니오] → normal IDLE state.
@@ -907,11 +1005,11 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
   - **(h) v0.2.0 — Mode B (Profile URL)**: User reaches Stage 4 → sends `https://pinterest.com/jane/` → classifier returns `PROFILE` → Apify profile mode triggered → N pins analyzed → completion message references "프로필에서 N개 핀".
   - **(i) v0.2.0 — Mode C (5 individual pin URLs in one message)**: User reaches Stage 4 → sends "pinterest.com/pin/111/ pinterest.com/pin/222/ pinterest.com/pin/333/ pinterest.com/pin/444/ pinterest.com/pin/555/" → classifier returns `PINS([5 urls])` → `link_resolver.resolve_batch` returns 5 og:image URLs → batch Vision analysis → seed_from_onboarding called → completion message references "5개 핀".
   - **(j) v0.2.0 — Mixed URLs (1 board + 2 pins)**: User reaches Stage 4 → sends "pinterest.com/jane/fall-coats/ pinterest.com/pin/111/ pinterest.com/pin/222/" → classifier returns `PINS([pin1, pin2])` (precedence: PIN beats BOARD) → only 2 pins analyzed, board URL silently dropped. Documented in user-facing acknowledgment: "📌 2개 핀 분석했어요 (보드 URL은 다음에)".
-  - **(k) v0.2.0 — Continuous bootstrap (REQ-ONBOARD-PINTEREST-CONTINUOUS)**: A previously-onboarded user (`onboarded_at` set 1 week ago) sends a single pin URL in a normal text message → `pinterest_ingest` node triggered (NOT onboarding re-entry) → `seed_from_onboarding` merges new pin's tokens into existing TasteProfile → confirmation "📌 1개 핀 분석해서 취향에 더했어요" → `onboarded_at` unchanged → subsequent search uses the merged taste profile.
+  - **(k) v0.2.0 — Continuous bootstrap (REQ-ONBOARD-PINTEREST-003)**: A previously-onboarded user (`onboarded_at` set 1 week ago) sends a single pin URL in a normal text message → `pinterest_ingest` node triggered (NOT onboarding re-entry) → `seed_from_onboarding` merges new pin's tokens into existing TasteProfile → confirmation "📌 1개 핀 분석해서 취향에 더했어요" → `onboarded_at` unchanged → subsequent search uses the merged taste profile.
   - **(l) v0.2.0 — Rate-limit on continuous**: User sends pin URLs at T=0 (success) → again at T=2min → "잠시 후 다시 시도해 주세요 (5분에 한 번)" message → at T=6min same URL → success.
   - **(m) v0.2.0 — APIFY_TOKEN unset, mode C only**: With `APIFY_TOKEN=""`, user sends board URL → degraded "보드/프로필 가져오기는 비활성 — 개별 핀 URL 만 받아요"; user sends 3 pin URLs → mode C succeeds via link_resolver path.
 - [ ] `ruff check . && ruff format --check .` passes.
-- [ ] `pytest -q` passes; new test files: `tests/test_onboarding/{test_onboard_nodes.py, test_onboarding_cards.py, test_apify_provider.py, test_taste_seed.py, test_pinterest_url_validation.py}` (5 files covering all REQs above, ≥ 25 test cases total).
+- [ ] `pytest -q` passes; new test files: `tests/test_onboarding/{test_onboard_nodes.py, test_onboarding_cards.py, test_apify_provider.py, test_taste_seed.py, test_pinterest_url_validation.py, test_pinterest_classify.py, test_pinterest_ingest.py, test_link_resolver_batch.py}` (8 files covering all REQs above, ≥ 35 test cases total).
 
 ---
 
@@ -922,11 +1020,11 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
 3. **Card catalog**: `app/channels/onboarding_values.py` (option tables + KO/EN labels + intro strings) + `app/channels/onboarding_cards.py` (card builders + multi-select toggle helpers).
 4. **Session extension**: `Session.onboarded_at` + `onboard_stage` + `onboard_selections` dataclass fields. Postgres mapping in `session_pg.py`.
 5. **Taste store extension**: `seed_from_onboarding` method on Protocol + both InMemory and Postgres implementations.
-6. **Graph nodes**: 5 new `onboard_*.py` files. Each is a thin function (state → state) that calls the appropriate card builder + emits a `send_card` adapter call.
-7. **Graph wiring**: `fashion_bot.py` adds the 5 nodes + 7 conditional edges. `routing.py` adds `onboarding_required()`, `after_onboard_*()` functions.
+6. **Graph nodes**: 6 new node files: 5 `onboard_*.py` + 1 `pinterest_ingest.py`. Each is a thin function (state → state) that calls the appropriate card builder + emits a `send_card` adapter call.
+7. **Graph wiring**: `fashion_bot.py` adds the 6 nodes + 8 edges (count per REQ-ONBOARD-GRAPH-001). `routing.py` adds `onboarding_required()`, `after_onboard_*()` functions.
 8. **Webhook router**: `webhooks/telegram.py` parses `/start`, "온보딩 다시", "취향 다시 설정", `/reset` → constructs the appropriate InputState marker for `ingest`.
-9. **Tests**: `tests/test_onboarding/` directory with 5 files. testcontainers reused from SPEC-MEMORY-001 setup.
-10. **Cutover**: alembic upgrade head on dev-app Postgres → deploy code → smoke-test the 7 manual scenarios → monitor `/health/ready` + Langfuse traces for 24h.
+9. **Tests**: `tests/test_onboarding/` directory with 8 files (per DoD L1001). testcontainers reused from SPEC-MEMORY-001 setup.
+10. **Cutover**: alembic upgrade head on dev-app Postgres → deploy code → smoke-test the thirteen manual scenarios (a)–(m) → monitor `/health/ready` + Langfuse traces for 24h.
 
 ---
 
@@ -936,8 +1034,8 @@ All new vars are read once at startup via `app/core/config.py::Settings` and exp
 - **Unit (`tests/test_onboarding/test_pinterest_url_validation.py`)**: 20+ URL attack vectors, allowed hosts, `pin.it` shorts, 3-strike auto-skip.
 - **Unit (`tests/test_onboarding/test_apify_provider.py`)**: mocked actor success / timeout / empty / 401 / missing token paths.
 - **Unit (`tests/test_onboarding/test_taste_seed.py`)**: `seed_from_onboarding` additive merge against pre-existing weights; weight-range validation.
-- **Integration (`tests/test_onboarding/test_onboard_nodes.py`)**: full state-machine paths (a)–(g) from the manual test scenarios, with mocked Apify and Vision. Uses testcontainers Postgres for the `onboarded_at` round-trip.
+- **Integration (`tests/test_onboarding/test_onboard_nodes.py`)**: full state-machine paths (a)–(m) from the manual test scenarios, with mocked Apify and Vision. Uses testcontainers Postgres for the `onboarded_at` round-trip.
 - **Migration test**: testcontainers Postgres, pre-populated `user_session`, run `alembic upgrade head`, assert backfill semantics.
-- **Topology test**: extend `tests/test_graph_topology.py` to assert exactly 5 new nodes registered; no removals; existing 12 nodes untouched (by hash or file modtime check).
+- **Topology test**: extend `tests/test_graph_topology.py` to assert exactly 6 new nodes (5 onboarding + 1 `pinterest_ingest`) and 8 new edges registered; no removals; existing 12 nodes untouched (by hash or file modtime check).
 - **Coverage**: `pytest --cov=app.graphs.nodes.onboard_intro --cov=app.graphs.nodes.onboard_mood --cov=app.graphs.nodes.onboard_color --cov=app.graphs.nodes.onboard_fit --cov=app.graphs.nodes.onboard_pinterest --cov=app.channels.onboarding_cards --cov=app.channels.onboarding_values --cov=app.providers.apify` reports ≥ 85% per module.
-- **End-to-end manual**: the seven scenarios (a)–(g) in the Definition of Done section.
+- **End-to-end manual**: the thirteen scenarios (a)–(m) in the Definition of Done section.

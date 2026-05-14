@@ -1,6 +1,6 @@
 ---
 id: SPEC-CONVERSATION-LOG-001
-version: 0.1.0
+version: 0.2.2
 status: draft
 created: 2026-05-14
 updated: 2026-05-14
@@ -14,6 +14,9 @@ labels: [event-sourcing, observability, data-moat, postgres, jsonb, telegram, ml
 
 ## HISTORY
 
+- 2026-05-14 (v0.2.2): plan-auditor iteration 3/3 결과(composite 0.88 / **PASS**, target 0.85+) 의 단일 잔여 nit 정리. Non-Goals item #1 (L1004) 의 "17개 sibling table" → "19개 sibling table" — option B 의 가설적 테이블 카운트도 카탈로그 실제 개수 19 와 일치시킴 (v0.2.1 sweep 에서 누락된 6번째 17 occurrence). spec.md 단독 변경, 다른 SPEC 무변경. 본 round 로 audit 종결.
+- 2026-05-14 (v0.2.1): plan-auditor iteration 2/3 결과(composite 0.82 / FAIL, target 0.90+) 를 받아 잔여 blocker + major + minor 일괄 수정. **Blockers**: (D1 residue) v0.2.0 round 에서 카탈로그 개수를 19 로 정정하면서 누락된 5 군데 "17" → "19" 표기 통일 (L99 비교표, L101 사용자 코멘트 인용, L301 test_payload_shapes 설명, L334 schema reference notes, L354 payload version 묵시). (D3 documented choice) Frontmatter `created` 키는 SPEC-MEMORY-001 family convention 으로 유지 — `created_at` 으로 통일하는 housekeeping 작업은 본 SPEC scope 밖, 별도 cross-SPEC SPEC 으로 분리. 본 결정을 명시적으로 기록해 audit firewall 이 deliberate choice 임을 인식하도록 함. **Major**: (D4) `onboard_select.stage` 카탈로그 예시 값(`step_1_style`/`step_2_brand`) 을 REQ-LOG-ONBOARD-OPTIONAL-001 의 실제 stage 5-값 enum (`mood`/`color`/`fit`/`pinterest`/`completion`) 과 동기화. **Minors**: (D5) REQ-LOG-FIRE-AND-FORGET-001 latency acceptance 의 weasel 표현 `≤ ~110ms (close to body-only time, not body + DB)` 를 측정 가능한 baseline `≤ 110ms (compared to no-emit baseline measured by test fixture)` 로 타이트닝. (D6) DoD REQ-LOG-TURN-001 bullet 에서 "deviations require an inline comment at the emit site" 스타일 가이드라인 제거 — normative monotonicity gate (REQ-LOG-TURN-001 L737) 만 유지, 인라인 코멘트 권장 사항은 향후 `app/observability/conversation_log.py` 모듈 docstring 으로 이동 가능. (D7) OQ-9 의 concrete preferred signature candidate 제거 — normative contract(이름 `log_event`, 반환 None, 예외 미발생) 는 REQ-LOG-FIRE-AND-FORGET-001 고정, 파라미터 list / defaults 는 plan.md 로 defer 만 명시. 본 round 는 spec.md 단독 수정 — 다른 SPEC 무변경. 다음 audit target composite 0.90+.
+- 2026-05-14 (v0.2.0): plan-auditor iteration 1/3 결과(composite 0.78 / FAIL, target 0.90+) 를 받아 blocker + major 일괄 수정. **Blockers**: (D1) "17 이벤트 타입" 표기를 카탈로그 실제 개수와 일치시켜 **19** 로 정정 (L89, L146 — `user_callback`/`onboard_select`/`pinterest_ingest` 가 카탈로그에 포함되어 있었으나 요약 문구에서 빠져 있었음); (D2) `card_clicked.thread_id == card_sent.thread_id` 와 "모든 webhook Update 가 fresh thread_id 를 seed" 가 상호 모순 — **REQ-LOG-THREAD-CALLBACK-001 [P0]** 신설하여 callback Update 의 경우 30일 윈도우 내 매칭되는 `card_sent` 의 thread_id 를 propagate (fallback: fresh seed). REQ-LOG-THREAD-001 도 "non-callback Update" 로 한정. R16 신규 risk (callback correlation latency); (D3) frontmatter `created` 키 유지 (SPEC-MEMORY-001 family 와 동일) — 프로젝트 전체에서 `created` vs `created_at` 가 혼재한다는 점은 향후 정리 대상으로 기록만 함, 본 SPEC 단독 변경은 cross-SPEC divergence 만 키움. **Majors**: (M1) **REQ-LOG-ONBOARD-OPTIONAL-001 [P1]** 신설 — EARS Optional 패턴 (`WHERE`) 추가, onboarding 활성 시에만 `onboard_select` emit; (M2) HOW 누수 정정 — log_event full signature 를 informative section 에서 빼고 OQ-9 로 이동 (모듈은 `log_event` 함수명 / 반환 None / 예외 미발생만 normative), REQ-LOG-FAILSOFT-001 acceptance 의 literal stderr prefix(`[CONV_LOG][...]`)를 제거 (포맷은 OQ-5 로 defer), OQ-4 의 prescriptive 기본 시그니처 제거; (M3) **REQ-LOG-PAYLOAD-CAP-001 [P1]** 신설 — free-form 문자열/리스트/딕셔너리 필드 전역 truncation cap (text 2048 chars, list 50 items, dict 100 keys); (M4) REQ-LOG-FIRE-AND-FORGET-001 acceptance 에서 helper 의 import path (`app.observability.conversation_log.emit`) + return type + 예외 미발생만 lock 하고 signature shape 는 OQ-4 로 defer. **Minors**: (m1) REQ-LOG-CATALOG-001 acceptance 에 `taste_update.source` 7-value parametric test 명시; (m2) DoD 의 turn_no convention 을 "soft guideline" 으로 완화; (m3) REQ-LOG-LANGFUSE-XREF-001 에 fallback cascade 순서(`get_current_observation` → `langfuse_context` → `RunnableConfig` metadata) non-binding 기록. 본 round 는 spec.md 단독 수정 — 다른 SPEC 무변경. 다음 audit target composite 0.90+.
 - 2026-05-14 (v0.1.0): 초안 작성. 직접적 동기는 `docs/_tmp/noscroll-benchmark.html` 의 noscroll 벤치마크 리서치 — "사용자 행동 시퀀스(어떤 추천 → 어떤 클릭 → 어떤 재질문)는 본 프로젝트의 가장 강력한 데이터 해자(moat)이며, 이를 기록하지 않는 것은 모델 개선의 가장 큰 손실"이라는 관찰. 현 상태에서 영속 데이터는 (a) `ai.user_taste_profile` (mutable snapshot, SPEC-MEMORY-001), (b) `ai.user_session` (mutable snapshot, TTL, SPEC-MEMORY-001), (c) `ai.card_impression` (append-only, 카드 노출/클릭 attribution 전용, SPEC-IMPLICIT-FB-001) 세 테이블뿐. Langfuse v3 trace 는 30일 보존이라 SQL 분석/ML 데이터셋/장기 replay 에 부적합하고, 봇 stdout 로그는 휘발성. 본 SPEC 은 이 갭을 메우기 위해 **단일 append-only 이벤트 소싱 테이블** `ai.log_conversation_event` 를 도입하고, LangGraph 12 노드(SPEC-AGENT-001) 와 Telegram webhook 인테이크 지점에서 **fire-and-forget** 으로 이벤트를 emit. 사용자가 컨버세이션 라운드에서 직접 확정한 정책 결정: (A) 단일 테이블 이벤트 소싱 (per-event-type 테이블 분리는 기각); (B) PII 원본 저장 (해싱/리덕션 없음); (C) **영구 보존** (cold storage tier / TTL cron 없음, GDPR 삭제는 user_key 기반 ad-hoc DELETE 로 처리); (D) per-node fire-and-forget (`asyncio.create_task`), 이벤트 쓰기 실패 시 그래프 중단 금지; (E) 목적 3종 동시 — 행동 분석 + ML 데이터셋 + 디버그 replay, 그러므로 payload schema 는 세 가지 사용처를 모두 만족할 만큼 풍부해야 함. 본 SPEC 은 SPEC-MEMORY-001 (`ai` 스키마 + psycopg3 풀), SPEC-OBSERVABILITY-002 (Langfuse trace_id 크로스 레퍼런스), SPEC-IMPLICIT-FB-001 (`card_impression` 과의 보완 관계 — replace 가 아닌 add), SPEC-ONBOARD-CARDS-001 (`onboard_select` 이벤트 타입), SPEC-AGENT-001 (12 노드 토폴로지 — 각 노드가 이벤트 emitter 가 됨) 위에 쌓이며, 이 중 어떤 SPEC 도 수정하지 않는다.
 
 ---
@@ -86,7 +89,7 @@ Langfuse v3 (SPEC-OBSERVABILITY-002) 가 LLM/agent call tree 를 trace 하지만
 | Pinterest 일괄 처리 (board/profile/pin) | ✗ | (stdout) | ✓ `pinterest_ingest` |
 | 노드 실행 중 예외 | ✗ | (stdout) | ✓ `node_error` |
 
-본 SPEC 은 위 17 개 이벤트 타입(`user_callback` 포함)으로 캡처 범위를 확정한다. 향후 노드가 추가되면 새 이벤트 타입을 추가할 수 있도록 schema 는 `event_type TEXT` 로 open-ended.
+본 SPEC 은 위 19 개 이벤트 타입(`user_callback`/`onboard_select`/`pinterest_ingest` 포함)으로 캡처 범위를 확정한다. 향후 노드가 추가되면 새 이벤트 타입을 추가할 수 있도록 schema 는 `event_type TEXT` 로 open-ended.
 
 ### 왜 단일 테이블인가 (option A) — 사용자 결정
 
@@ -95,9 +98,9 @@ Langfuse v3 (SPEC-OBSERVABILITY-002) 가 LLM/agent call tree 를 trace 하지만
 | 옵션 | 장점 | 단점 | 결정 |
 |---|---|---|---|
 | **(A) 단일 `log_conversation_event` (JSONB payload)** | 1테이블만 관리, SQL 분석 진입점 단일, schema evolution 유연 | type-specific 제약 강제 불가 (앱 레이어 책임), 인덱싱 일부 GIN 의존 | **채택** |
-| (B) `log_vision_done` / `log_search_done` / `log_card_sent` … 17개 테이블 | 컬럼 단위 타입 안전, JOIN 시 typed | 테이블 폭증, 마이그레이션 17개, JOIN 비용 | **기각** |
+| (B) `log_vision_done` / `log_search_done` / `log_card_sent` … 19개 테이블 | 컬럼 단위 타입 안전, JOIN 시 typed | 테이블 폭증, 마이그레이션 19개, JOIN 비용 | **기각** |
 
-사용자 코멘트(요지): "테이블이 17개로 늘어나는 건 분명히 ML 추출 시 더 깔끔하지만 운영 부담이 너무 크고, JSONB GIN 으로 90% 의 쿼리는 충분히 빠르다. 정 안 되면 그때 view 로 split 하자."
+사용자 코멘트(요지): "테이블이 19개로 늘어나는 건 분명히 ML 추출 시 더 깔끔하지만 운영 부담이 너무 크고, JSONB GIN 으로 90% 의 쿼리는 충분히 빠르다. 정 안 되면 그때 view 로 split 하자."
 
 향후 데이터 양이 늘어 JSONB GIN 으로도 못 버틸 때 split 은 별도 SPEC. 본 SPEC 은 그 가능성을 R3 (storage growth) 에서 문서화하고 진로를 열어둔다.
 
@@ -143,7 +146,7 @@ GDPR/사용자 삭제 요청은 **ad-hoc per-user-key DELETE** 로 처리한다 
 - ML 용: query, top_k, rrf_scores 같은 raw signal 을 같은 thread_id 로 묶을 수 있어야 함.
 - Replay 용: input → output 인과 추적이 가능하도록 vision 결과, search 입력, critique iteration 까지 보존.
 
-→ payload 가 풍부해야만 한다 (REQ-LOG-PAYLOAD-RICH-001). 본 SPEC 의 17 이벤트 타입은 위 세 가지 목적의 합집합을 cover.
+→ payload 가 풍부해야만 한다 (REQ-LOG-PAYLOAD-RICH-001). 본 SPEC 의 19 이벤트 타입은 위 세 가지 목적의 합집합을 cover.
 
 ### 왜 `card_impression` 과 공존하는가 — 의도된 중복
 
@@ -268,14 +271,14 @@ None. No cleanup, no TTL, no archive. Rows live forever (REQ-LOG-RETENTION-001).
 **Affected modules in kikoai/ai (this SPEC — informational; exact filenames refined in `plan.md`)**:
 
 - `migrations/versions/0004_create_log_conversation_event.py` — NEW. Alembic revision (down_revision points at the most recent existing revision; 0003 number reserved if implicit-fb introduces 0003 first — `plan.md` confirms the exact chain). Creates `ai.log_conversation_event` + 4 indexes.
-- `app/observability/conversation_log.py` — NEW. 모듈 본체:
-  - `async def log_event(user_key: str, chat_id: int, thread_id: UUID, turn_no: int, event_type: str, payload: dict, langfuse_trace: str | None = None, latency_ms: int | None = None) -> None`
-  - 시그니처는 fire-and-forget 의 의미를 함축 (반환값 없음, 예외 흡수).
-  - 내부 동작: `MEMORY_BACKEND_IS_POSTGRES` flag 가 False → DEBUG 한 줄 + return (silent skip, REQ-LOG-FAILSOFT-001). True → `get_pool().connection()` 빌려 single INSERT, 모든 예외 catch → WARN 한 줄 후 return.
-  - 보조 함수: `current_langfuse_trace_id() -> str | None` (SPEC-OBSERVABILITY-002 의 v3 client 에서 trace_id 끌어옴; 비활성 시 None).
-  - 보조 함수: `seed_thread() -> UUID` (uuid4 alias — webhook 진입점에서 호출).
-  - **모든 emit 은 호출자가 `asyncio.create_task(log_event(...))` 로 감싼다.** 모듈 본체는 그 자체로는 task 생성하지 않음 (호출자 책임 — 디자인 단순화).
-  - 단, REQ-LOG-FAILSOFT-001 의 stderr fallback 은 모듈 내부에서 처리한다.
+- `app/observability/conversation_log.py` — NEW. 모듈 본체 (normative contract):
+  - 함수명 `log_event`, 반환 타입 `None`, **예외 절대 미발생** (모든 path 에서 swallow).
+  - 정확한 파라미터 리스트는 `plan.md` 에서 결정 (OQ-9 참조 — preferred shape candidate 만 informative 로 기록).
+  - 내부 동작: `MEMORY_BACKEND_IS_POSTGRES` flag 가 False → DEBUG 한 줄 + return (silent skip, REQ-LOG-FAILSOFT-001). True → `get_pool().connection()` 빌려 single INSERT, 모든 예외 catch → WARN + stderr fallback 후 return.
+  - 보조 함수 `current_langfuse_trace_id() -> str | None` (SPEC-OBSERVABILITY-002 의 v3 client 에서 trace_id 끌어옴; 비활성 시 None).
+  - 보조 함수 `seed_thread() -> UUID` (uuid4 alias — webhook 진입점에서 호출).
+  - **모든 emit 은 호출자가 `asyncio.create_task(...)` 로 감싼다** (또는 동치의 `emit(...)` 헬퍼 — REQ-LOG-FIRE-AND-FORGET-001).
+  - REQ-LOG-FAILSOFT-001 의 stderr fallback 은 모듈 내부에서 처리한다 (포맷은 OQ-5).
 - `app/graphs/state.py` — MODIFIED. `InputState` / `WorkingState` 에 두 필드 추가:
   - `thread_id: UUID = Field(default_factory=uuid4)` — webhook entry 가 직접 seed 하거나 ingest 가 default 채움.
   - `turn_no: int = 0` — 각 노드가 emit 직전에 bump (또는 ingest 가 0 으로 reset).
@@ -297,7 +300,7 @@ None. No cleanup, no TTL, no archive. Rows live forever (REQ-LOG-RETENTION-001).
 - `app/main.py` — MODIFIED (minor). lifespan 안에서 `MEMORY_BACKEND_IS_POSTGRES` flag 가 set 된 후 conversation_log 모듈에 같은 flag 를 reuse 하도록 보장 (모듈 import 만 추가; flag 는 SPEC-MEMORY-001 의 module-level state 를 그대로 읽음).
 - `tests/test_conversation_log/test_log_event.py` — NEW. log_event 의 happy path + 예외 흡수 + in-memory fallback skip.
 - `tests/test_conversation_log/test_thread_propagation.py` — NEW. webhook → ingest → … → respond 전 구간에서 thread_id 가 같은 값으로 유지되는지, turn_no 가 단조 증가하는지.
-- `tests/test_conversation_log/test_payload_shapes.py` — NEW. 17 이벤트 타입 각각의 payload 가 documented schema 와 일치 (key 존재 + type).
+- `tests/test_conversation_log/test_payload_shapes.py` — NEW. 19 이벤트 타입 각각의 payload 가 documented schema 와 일치 (key 존재 + type).
 - `tests/test_conversation_log/test_search_payload.py` — NEW. `search_done` payload 가 top_k_product_ids[] 와 rrf_scores[] 를 같은 길이로 보존.
 - `tests/test_conversation_log/test_node_error.py` — NEW. 노드 강제 raise 시 `node_error` row 가 기록되고 그래프는 계속 진행.
 - `tests/test_conversation_log/test_failsoft.py` — NEW. log_event 가 강제 raise 해도 webhook 정상 응답.
@@ -330,7 +333,7 @@ None. No cleanup, no TTL, no archive. Rows live forever (REQ-LOG-RETENTION-001).
 | `chat_id` | `bigint NOT NULL` | Telegram chat id. user_key 가 `c:` 변형일 수도 있어 별도 컬럼으로 보존 (group chat / channel 구분 용도 + JOIN 효율). |
 | `thread_id` | `uuid` | nullable (webhook 진입 시 항상 채우지만, 노드 외부에서 emit 되는 일부 이벤트 — 예: `taste_update` from cron — 시 NULL 가능; 본 SPEC 범위에서는 모두 채워질 예정이지만 향후 호환성 위해 nullable). |
 | `turn_no` | `integer` | nullable. thread 내 노드 순서. webhook = 0, ingest = 1, … |
-| `event_type` | `text NOT NULL` | 카탈로그된 17 종 중 하나. 새 타입 추가는 free-form (schema 변경 불필요). |
+| `event_type` | `text NOT NULL` | 카탈로그된 19 종 중 하나. 새 타입 추가는 free-form (schema 변경 불필요). |
 | `payload` | `jsonb NOT NULL` | 이벤트별 schema (다음 섹션). `'{}'` 도 허용하지만 의미 있는 모든 이벤트는 1 key 이상. |
 | `langfuse_trace` | `text` | nullable. v3 trace_id 문자열. Langfuse 비활성 시 NULL. |
 | `latency_ms` | `integer` | nullable. 노드 실행 시간 (선택). 없으면 NULL. |
@@ -350,7 +353,7 @@ JSONB 폴리시:
 
 - 모든 nested object / list 는 JSONB. psycopg3 자동 변환 (SPEC-MEMORY-001 와 동일 패턴).
 - payload 의 schema 는 docstring + 본 SPEC 의 다음 섹션에서만 정의 — DB-level CHECK constraint 강제 안 함 (스키마 드리프트 시 부담 없이 진화).
-- payload version 필드는 향후 schema 진화 시 추가 가능하도록 `payload.v: int` 자리를 권장 (REQ-LOG-PAYLOAD-RICH-001 의 acceptance — 단, 본 SPEC 의 17 이벤트 타입은 모두 `v=1` 묵시).
+- payload version 필드는 향후 schema 진화 시 추가 가능하도록 `payload.v: int` 자리를 권장 (REQ-LOG-PAYLOAD-RICH-001 의 acceptance — 단, 본 SPEC 의 19 이벤트 타입은 모두 `v=1` 묵시).
 
 ---
 
@@ -563,7 +566,7 @@ Emitted by: `critique_apply` 노드의 `crit:click:*` 분기. turn_no=1 (콜백 
 
 ```
 payload = {
-  stage: str,                 # "step_1_style" | "step_2_brand" 등 — SPEC-ONBOARD-CARDS-001 에서 정의
+  stage: str,                 # "mood" | "color" | "fit" | "pinterest" | "completion" — defined by SPEC-ONBOARD-CARDS-001
   axis: str,                  # "style" | "brand" | "occasion" 등
   selected_values: list[str], # 사용자가 다중 선택한 값들
 }
@@ -645,7 +648,8 @@ Emitted by: 모든 노드의 except 블록. 그래프가 죽지 않을 때만 em
 |---|---|---|
 | REQ-LOG-MIGRATION-001 | Alembic revision creates `ai.log_conversation_event` with 4 indexes | P0 |
 | REQ-LOG-CATALOG-001 | 19 event types enumerated with documented payload schemas | P0 |
-| REQ-LOG-THREAD-001 | `thread_id` seeded at webhook intake and propagated through all 12 nodes | P0 |
+| REQ-LOG-THREAD-CALLBACK-001 | Callback Update propagates the originating `card_sent.thread_id` (30-day window) | P0 |
+| REQ-LOG-THREAD-001 | Non-callback Update seeds a fresh `thread_id` at webhook intake; propagated through all 12 nodes | P0 |
 | REQ-LOG-TURN-001 | `turn_no` monotonically increases (or stays equal) within a thread | P0 |
 | REQ-LOG-EMIT-EVERY-NODE-001 | Every graph node emits exactly one terminal event (success or error) per execution | P0 |
 | REQ-LOG-FAILSOFT-001 | log_event raises NEVER block the graph; fallback to stderr structured log line | P0 |
@@ -653,9 +657,11 @@ Emitted by: 모든 노드의 except 블록. 그래프가 죽지 않을 때만 em
 | REQ-LOG-LANGFUSE-XREF-001 | When Langfuse v3 is active, every row includes the current trace_id | P0 |
 | REQ-LOG-IMPLICIT-FB-COEXIST-001 | `card_sent` / `card_clicked` coexist with `ai.card_impression` (intentional duplication) | P0 |
 | REQ-LOG-PAYLOAD-RICH-001 | `search_done` payload contains parallel `top_k_product_ids[]` and `rrf_scores[]`; arrays equal length | P0 |
+| REQ-LOG-PAYLOAD-CAP-001 | Free-form payload fields capped globally (strings 2048 chars, lists 50 items, dicts 100 keys) | P1 |
 | REQ-LOG-PRIVACY-001 | Per-user-key DELETE supported; one user's deletion does not affect others | P0 |
 | REQ-LOG-RETENTION-001 | NO automatic deletion / cron / TTL; rows live forever | P0 |
 | REQ-LOG-FALLBACK-001 | `memory_backend=in_memory` → all emits silently skip with DEBUG log only | P0 |
+| REQ-LOG-ONBOARD-OPTIONAL-001 | `onboard_select` emit is active only WHERE SPEC-ONBOARD-CARDS-001 onboarding is in flight | P1 |
 
 ---
 
@@ -689,24 +695,44 @@ Emitted by: 모든 노드의 except 블록. 그래프가 죽지 않을 때만 em
   - All required fields are present.
   - `json.dumps(payload, default=str)` succeeds (no non-serializable values).
 - A documentation test inspects the conversation_log module docstring and asserts every event type from the catalog is mentioned at least once (sanity check for catalog drift between code and SPEC).
+- A parametric test enumerates the 7 documented `taste_update.source` values (`click`, `onboard`, `pinterest`, `critique`, `free_text`, `no_click`, `re_query`) and asserts at least one emit site exists in the codebase for each value (AST search across `app/graphs/nodes/` + `app/channels/implicit_feedback.py`). Drift between catalog and call sites fails loudly. (m1)
 - The catalog is considered open-ended: future SPECs MAY add event types by appending to the catalog + TypedDict file. The DB schema requires zero change for additions (only documented entries).
 
 ---
 
-### Thread Propagation (REQ-LOG-THREAD-*, REQ-LOG-TURN-*)
+### Thread Propagation (REQ-LOG-THREAD-CALLBACK-*, REQ-LOG-THREAD-*, REQ-LOG-TURN-*)
 
-#### REQ-LOG-THREAD-001 — `thread_id` SHALL be seeded at webhook intake and propagated through every node [P0]
+#### REQ-LOG-THREAD-CALLBACK-001 — Callback Update SHALL propagate the originating `card_sent.thread_id` (30-day window) [P0]
 
-**WHEN** `POST /webhooks/telegram` accepts an Update,
+**WHEN** a webhook Update is a callback whose `source_message_id` matches a recent `card_sent` row in the past 30 days for the same `user_key`,
+**THE SYSTEM SHALL** look up the originating `thread_id` from `ai.log_conversation_event` (joining on `payload->>'source_message_id'`) AND propagate that `thread_id` to the resulting `card_clicked` event (with `turn_no = prior_card_sent.turn_no + 1`).
+
+**WHERE** no matching `card_sent` row is found within the 30-day window for the current `user_key`,
+**THE SYSTEM SHALL** fall back to seeding a fresh `thread_id` (the current REQ-LOG-THREAD-001 behavior for non-callback Updates).
+
+**Rationale**: This resolves the contradiction between the original REQ-LOG-THREAD-001 (every Update seeds a fresh `thread_id = uuid4()`) and the REQ-LOG-IMPLICIT-FB-COEXIST-001 acceptance (which asserts `card_clicked.thread_id == card_sent.thread_id`). Without callback correlation, the two requirements are mutually exclusive — a `crit:click:*` callback tap is its own webhook Update and would carry a NEW `thread_id`, breaking the join. This REQ makes the implementation possible.
+
+**Acceptance**:
+
+- An integration test: emit one `card_sent` row with `payload.source_message_id = M` and `thread_id = T0` for `user_key='u:99'`. Simulate a callback Update from the same user with `callback_data='crit:click:abc'` and `source_message_id = M`. Assert the resulting `card_clicked` row has `thread_id == T0` AND `turn_no == prior_card_sent.turn_no + 1`.
+- An integration test for the fallback: emit `card_sent` with `source_message_id = M` and `created_at = now() - interval '31 days'`. Simulate the callback Update at `now()`. Assert the resulting `card_clicked` row carries a FRESH `thread_id` (not T0), since the 30-day window has expired.
+- A negative test: callback Update from `user_key='u:99'` referencing `source_message_id` that matches a `card_sent` row belonging to a DIFFERENT user (`user_key='u:42'`) MUST NOT propagate that row's `thread_id` — the lookup SHALL be scoped to `user_key`.
+- The lookup SHALL use `idx_log_conv_user_time` for the user-key + time-window scan AND `idx_log_conv_payload_gin` (or a dedicated functional index — `plan.md` decides) for the `payload->>'source_message_id'` match. EXPLAIN MUST NOT show a sequential scan.
+- The lookup latency budget per callback Update is < 50ms p99 against a 10M-row table. Exceeding this triggers the R16 mitigation path.
+
+#### REQ-LOG-THREAD-001 — Non-callback Update SHALL seed a fresh `thread_id` at webhook intake and propagate it through every node [P0]
+
+**WHEN** `POST /webhooks/telegram` accepts an Update that is NOT a callback matching REQ-LOG-THREAD-CALLBACK-001 conditions (i.e., a text/photo Update, OR a callback whose `source_message_id` has no match within the 30-day window),
 **THE SYSTEM SHALL** generate a fresh `thread_id = uuid4()` BEFORE invoking the LangGraph, attach it to the `InputState` Pydantic v2 model, and ensure every subsequent node observes the SAME `thread_id` value in its emitted events.
 
 **Acceptance**:
 
-- An integration test plays a full webhook (text message → ingest → vision → search → evaluator → diversify → send_results → respond) and asserts every row in `ai.log_conversation_event` written by that webhook shares one and only one `thread_id` value.
+- An integration test plays a full text-Update webhook (text message → ingest → vision → search → evaluator → diversify → send_results → respond) and asserts every row in `ai.log_conversation_event` written by that webhook shares one and only one `thread_id` value.
 - A unit test asserts `InputState.thread_id` defaults via `Field(default_factory=uuid4)` — i.e., a webhook that forgets to seed still produces a valid (locally unique) thread.
 - A unit test asserts `WorkingState` (and `OutputState` if reachable) carry the same field — propagation in the LangGraph state reducer.
 - The webhook entry SHALL emit the FIRST event (`user_text` / `user_photo` / `user_callback`) carrying that `thread_id` and `turn_no=0`. Verified by a test that intercepts the first INSERT.
-- Cross-webhook independence: two simultaneous webhooks from different chat_ids SHALL produce 2 distinct `thread_id` values (no collisions). Verified by a concurrency test.
+- Cross-webhook independence: two simultaneous text-Update webhooks from different chat_ids SHALL produce 2 distinct `thread_id` values (no collisions). Verified by a concurrency test.
+- Callback-Update independence: when REQ-LOG-THREAD-CALLBACK-001 applies, this REQ does NOT fire — the callback's thread_id comes from the prior `card_sent` lookup, not from `uuid4()`. The two REQs are mutually exclusive per-Update.
 
 #### REQ-LOG-TURN-001 — `turn_no` SHALL be monotonically non-decreasing within a thread [P0]
 
@@ -753,18 +779,18 @@ Nodes that emit MULTIPLE rows per execution (e.g., `evaluator` emits 1 per itera
 **WHEN** `log_event(...)` is invoked,
 **THE SYSTEM SHALL** treat the write as best-effort:
 
-1. If `MEMORY_BACKEND_IS_POSTGRES=False` (in-memory fallback per SPEC-MEMORY-001): emit ONE DEBUG-level log line `[CONV_LOG][skip] backend=in_memory event_type=...` and return immediately. No INSERT attempted. No exception.
+1. If `MEMORY_BACKEND_IS_POSTGRES=False` (in-memory fallback per SPEC-MEMORY-001): emit ONE DEBUG-level structured log line indicating a skip with `backend` and `event_type` fields, and return immediately. No INSERT attempted. No exception. (Exact log format / prefix deferred to `plan.md` per OQ-5.)
 2. If `MEMORY_BACKEND_IS_POSTGRES=True` and INSERT succeeds: return silently.
-3. If the pool acquisition fails (timeout, exhausted) OR the INSERT itself raises (psycopg.OperationalError, schema mismatch, NOT NULL violation, etc.): catch ALL exceptions (`except Exception`), emit ONE WARN-level log line `[CONV_LOG][warn] event_type=... exception_type=... message=...`, AND emit ONE structured stderr log line `[CONV_LOG][stderr_fallback] {full payload as single-line JSON, with thread_id, turn_no, event_type, payload, langfuse_trace, latency_ms, created_at=now()}` so no data is silently lost. Then return.
+3. If the pool acquisition fails (timeout, exhausted) OR the INSERT itself raises (psycopg.OperationalError, schema mismatch, NOT NULL violation, etc.): catch ALL exceptions (`except Exception`), THEN emit a structured single-line log on stderr (format deferred to `plan.md` per OQ-5) when the PG write fails. The log SHALL include `event_type` and `user_key` fields at minimum, and SHALL contain enough information (thread_id, turn_no, payload, langfuse_trace, latency_ms, created_at) to recover the row from text logs if needed. Then return.
 
-The function signature is `async def log_event(...) -> None` — no return value, no raised exception. Callers can wrap in `asyncio.create_task` without `.add_done_callback(...)` worry.
+The function contract is: function name `log_event`, return type `None`, **MUST NOT raise** under any input or failure mode. Callers can wrap in `asyncio.create_task` without `.add_done_callback(...)` worry. The parameter list is deferred to `plan.md` (see OQ-9).
 
 **Acceptance**:
 
-- A unit test patches the pool's `connection()` to raise `psycopg.OperationalError` and asserts `await log_event(...)` returns `None` without raising, emits exactly one WARN log line, and emits exactly one stderr fallback line (captured via `capfd` or pytest's `caplog`).
-- A unit test forces the INSERT itself to raise (e.g., violating NOT NULL by passing `event_type=None` — type-system would prevent this, but a raw bytes payload achieves the same) and asserts identical behavior — `None` returned, one WARN line, one stderr fallback.
+- A unit test patches the pool's `connection()` to raise `psycopg.OperationalError` and asserts `await log_event(...)` returns `None` without raising, AND emits exactly one structured stderr fallback line (captured via `capfd` or pytest's `caplog`). The stderr line MUST include `event_type` and `user_key` fields at minimum (other fields per OQ-5).
+- A unit test forces the INSERT itself to raise (e.g., violating NOT NULL by passing `event_type=None` — type-system would prevent this, but a raw bytes payload achieves the same) and asserts identical behavior — `None` returned, one stderr fallback line emitted.
 - A property-style test invokes `log_event` 1000 times concurrently with various malformed payloads and asserts: zero exceptions reach the caller, the count of stderr fallback lines plus successful inserts equals 1000 (no silent data loss).
-- The stderr fallback line SHALL be valid JSON (parseable by `json.loads`). Verified by a test that captures stderr and feeds each `[CONV_LOG][stderr_fallback]` prefixed line into `json.loads`.
+- The stderr fallback line SHALL be a valid single-line JSON payload (parseable by `json.loads`). Verified by a test that captures stderr and feeds each fallback line into `json.loads`. The exact line shape (prefix tag, key order, top-level vs nested) is deferred to OQ-5.
 - The stderr fallback semantics intentionally trade write durability (stderr is the container's log driver, which may rotate / lose lines) against write availability (the bot never blocks). The trade-off is documented and accepted.
 
 #### REQ-LOG-FIRE-AND-FORGET-001 — All caller-side emit sites SHALL wrap `log_event` in `asyncio.create_task` [P0]
@@ -779,10 +805,12 @@ The task SHALL NOT be awaited. The caller SHALL NOT attach a `.add_done_callback
 
 **Acceptance**:
 
-- An AST-level test parses each call site and asserts the `log_event` invocation appears inside an `asyncio.create_task(...)` (or an equivalent helper). Bare `await log_event(...)` is flagged as a violation.
-- A latency test: a node whose body takes 100ms of synthetic work AND emits one `log_event` (whose DB INSERT is patched to take 200ms) SHALL complete its node body in ≤ ~110ms (close to body-only time, not body + DB). The task continues in the background.
+- THE SYSTEM SHALL provide a helper importable as `app.observability.conversation_log.emit` — return type `None`, never raises. The helper's parameter shape is deferred to `plan.md` (see OQ-4).
+- An AST test asserts `from app.observability.conversation_log import emit` is reachable from every graph node module that emits events. The test enumerates the 12 node files under `app/graphs/nodes/` + `app/api/webhooks/telegram.py` + (if applicable) `app/channels/implicit_feedback.py`, and asserts each contains the `emit` import OR a re-export equivalent. Bare `await log_event(...)` at a call site is flagged as a violation.
+- An AST-level test parses each call site and asserts the `log_event` invocation appears inside an `asyncio.create_task(...)` (or inside the `emit(...)` helper, which wraps in `create_task` internally). Bare `await log_event(...)` outside of the helper's own implementation is flagged.
+- A latency test: a node whose body takes 100ms of synthetic work AND emits one event (whose DB INSERT is patched to take 200ms) SHALL complete its node body in ≤ 110ms (compared to no-emit baseline measured by test fixture). The task continues in the background.
 - A test SHALL verify that on graph completion, any in-flight log_event tasks are NOT explicitly awaited by the caller (no `.join()` semantic) — the trade-off is that if the container is SIGKILLed mid-task, the row is lost. This is intentional (R5).
-- The `asyncio.create_task` wrapping pattern SHALL be encoded in a single helper `emit(event_type, payload, ...)` exported by the conversation_log module so call sites don't repeat the boilerplate. `plan.md` decides the exact helper signature.
+- The `asyncio.create_task` wrapping pattern SHALL be encoded inside the single `emit(...)` helper so call sites don't repeat the boilerplate. Full signature details (positional vs kwargs, defaults, sync wrapper vs async, return type) are deferred to OQ-4.
 
 ---
 
@@ -801,6 +829,7 @@ The task SHALL NOT be awaited. The caller SHALL NOT attach a `.add_done_callback
 - An integration test with `LANGFUSE_PUBLIC_KEY` set and a mock Langfuse v3 client that returns a fixed trace_id `"trace-abc-123"` asserts every row written during a full turn carries `langfuse_trace='trace-abc-123'`.
 - An integration test with Langfuse env vars unset (no-op fallback) asserts every row carries `langfuse_trace IS NULL`.
 - The helper `current_langfuse_trace_id()` SHALL NOT raise even if Langfuse internal state is malformed — it returns `None` in any error path. Verified by a unit test that patches the v3 client to raise.
+- Fallback cascade order (non-binding, visible to implementers — formalized in `plan.md`, OQ-2): (1) `get_current_observation().trace_id` from the v3 client → (2) `langfuse_context.get_current_trace_id()` if the contextvar accessor exists → (3) `RunnableConfig` callback metadata threaded through the LangGraph invocation. Any step returning `None` advances to the next. If all three return `None`, the column is NULL. (m3)
 - The `langfuse_trace` value is best-effort: a turn that crosses an `asyncio.create_task` boundary may lose the trace context (Langfuse v3 uses contextvars). The fallback to NULL is acceptable for those tasks. Documented in R8.
 
 ---
@@ -846,6 +875,34 @@ The remaining `search_done` payload keys (`query`, `embedding_ref`, `dense_count
 - A unit test forces the RPC to return mismatched lengths (e.g., 5 ids but 3 scores — defensive impossible-case) and asserts the emit code raises an internal assertion BEFORE writing to the log, surfaces a `node_error` event with `payload.exception_type='AssertionError'`, and lets the graph continue with empty results. This prevents corrupted ML datasets at the source.
 - A retrieval test: after writing one `search_done` row, run `SELECT payload->'top_k_product_ids' AS ids, payload->'rrf_scores' AS scores FROM ai.log_conversation_event WHERE event_type='search_done' LIMIT 1` and assert both JSON arrays have equal length.
 - Acceptance for related rich payloads: `vision_done` (REQ-LOG-CATALOG-001 covers the v2 schema fields), `evaluator_run` (iteration_no + score + delta + retry_decision present), `taste_update` (source + keywords_delta + brands_delta present). These are individually covered by REQ-LOG-CATALOG-001 acceptance criteria.
+
+---
+
+### Payload Truncation Cap (REQ-LOG-PAYLOAD-CAP-*)
+
+#### REQ-LOG-PAYLOAD-CAP-001 — Free-form payload fields SHALL be truncated globally to bounded sizes before INSERT [P1]
+
+**WHEN** any emit site constructs a payload containing free-form string, list, or dict fields,
+**THE SYSTEM SHALL** apply the following truncation policy BEFORE handing the payload to `log_event` (or inside the `emit(...)` helper — `plan.md` decides the exact wiring location):
+
+1. **String fields capped at 2048 chars** (silent truncation, no ellipsis required): `user_text.text`, `user_photo.caption`, `bot_text.chunk_text`, `intent_routed.critique_delta_summary`, `link_resolved.input_url`.
+2. **List fields capped at 50 items** (silent drop of overflow from the tail): `search_done.filter_drop_log`, `clarify_applied.boost_keywords_added`, `vision_done.items`.
+3. **Dict fields capped at 100 keys** (drop lowest weights first when the dict has numeric values, otherwise drop arbitrary keys): `taste_update.keywords_delta.liked_added` / `disliked_added` (each treated as a list per #2 above — the cap-100 rule applies to dict-shaped variants if a future schema introduces them).
+4. Truncation is silent — NO `node_error` SHALL be emitted for truncation itself. The truncated row carries the data that fit; the rest is dropped.
+5. The cap policy SHALL be enforced at the producer (caller side, or the helper). It is NOT enforced at the DB layer (no CHECK constraint).
+
+**Rationale**: Without a global cap, a user pasting a 50KB caption produces a 50KB JSONB row with write amplification (×2 for GIN index updates). The current `node_error.message` cap of 500 chars is point-policy; this REQ extends a similar discipline to every free-form field.
+
+**Acceptance**:
+
+- A unit test feeds a 10KB-length `text` to a `user_text` emit and asserts the resulting row has `length(payload->>'text') = 2048` (via `SELECT octet_length(payload->>'text') FROM ai.log_conversation_event WHERE event_type='user_text' LIMIT 1`).
+- A unit test feeds a 200-item `filter_drop_log` to `search_done` emit and asserts the resulting row has `jsonb_array_length(payload->'filter_drop_log') = 50`.
+- A unit test feeds a 500-element `vision_done.items` list and asserts the row has `jsonb_array_length(payload->'items') = 50`.
+- A unit test feeds a 200-keyword `clarify_applied.boost_keywords_added` and asserts the resulting list length is 50.
+- A property test: random payloads with one or more over-cap fields produce rows whose every capped field is ≤ the documented limit. Zero `node_error` events emitted for truncation.
+- The cap policy is documented in the `conversation_log` module docstring AND in the catalog entries for the affected event types. Drift is flagged by the documentation test in REQ-LOG-CATALOG-001.
+
+Cross-reference: R10 (GIN index size) is partially mitigated by this REQ — `vision_done.items` capped at 50 entries bounds the per-row payload size.
 
 ---
 
@@ -910,6 +967,27 @@ The detection of "memory backend = postgres vs in_memory" SHALL be O(1) — a mo
 
 ---
 
+### Cross-SPEC Integration (REQ-LOG-ONBOARD-OPTIONAL-*)
+
+#### REQ-LOG-ONBOARD-OPTIONAL-001 — `onboard_select` emit SHALL be active only WHERE SPEC-ONBOARD-CARDS-001 onboarding is in flight for the current user [P1]
+
+**WHERE** SPEC-ONBOARD-CARDS-001 onboarding is active for the current user (i.e., `user_session.onboarded_at IS NULL` AND the user is mid-flow through the onboarding axes),
+**THE SYSTEM SHALL** emit `onboard_select` events with `payload.stage` ∈ {`mood`, `color`, `fit`, `pinterest`, `completion`}, `payload.axis` (the specific selection axis within the stage), and `payload.selected_values: list[str]` per the catalog definition (event type #15). Exactly ONE `onboard_select` row SHALL be appended per stage transition.
+
+**WHERE** onboarding is not yet landed (SPEC-ONBOARD-CARDS-001 not merged into the codebase) OR the user has already completed onboarding (`user_session.onboarded_at IS NOT NULL`),
+**THE SYSTEM SHALL NOT** emit `onboard_select` events. The catalog entry (#15) remains as documentation only — no call sites fire, no rows appear in `ai.log_conversation_event` with `event_type='onboard_select'`.
+
+**Rationale**: The catalog reserves `onboard_select` slot ahead of SPEC-ONBOARD-CARDS-001 landing, but until the onboarding nodes exist there is no emitter. This REQ uses the EARS Optional pattern (`WHERE … SHALL`) to make the conditional-emit semantics testable and explicit.
+
+**Acceptance**:
+
+- When SPEC-ONBOARD-CARDS-001's onboarding nodes execute, exactly one `onboard_select` row per stage transition SHALL be recorded in `ai.log_conversation_event`. Integration test parametrized over the 5 stage values asserts: 5 distinct `payload.stage` values produced over a full onboarding flow.
+- A negative test asserts that when `user_session.onboarded_at IS NOT NULL` and no onboarding nodes are reachable in the current graph path, zero `onboard_select` rows are added during a 100-turn synthetic load.
+- A documentation test asserts the catalog's `onboard_select` entry remains in sync with the `payload.stage` enumeration defined in SPEC-ONBOARD-CARDS-001 (cross-SPEC consistency). Drift fails loudly.
+- Until SPEC-ONBOARD-CARDS-001 lands, the catalog entry is FROZEN inert — `payload` TypedDict export is allowed (REQ-LOG-CATALOG-001), but the AST-level "emit-every-node" check (REQ-LOG-EMIT-EVERY-NODE-001) does NOT include onboarding nodes (they don't exist yet).
+
+---
+
 ## Environment Variables (introduced by this SPEC)
 
 **None.**
@@ -924,7 +1002,7 @@ The detection of "memory backend = postgres vs in_memory" SHALL be O(1) — a mo
 
 The following are explicitly NOT delivered by SPEC-CONVERSATION-LOG-001 and MUST NOT be conflated with it:
 
-1. **Per-event-type strongly-typed tables (option B).** 사용자가 option A 를 명시적으로 선택. 17개 sibling table 분리는 향후 데이터 양이 JSONB GIN 으로 못 버틸 때 검토.
+1. **Per-event-type strongly-typed tables (option B).** 사용자가 option A 를 명시적으로 선택. 19개 sibling table 분리는 향후 데이터 양이 JSONB GIN 으로 못 버틸 때 검토.
 2. **Pseudonymization, hashing, or redaction of stored text/URLs.** 사용자가 raw 저장을 명시적으로 선택 (정책 결정 B). 향후 별도 privacy SPEC 이 column-level encryption 도입 가능하지만 본 SPEC 범위 외.
 3. **Cold storage tier (S3 / Iceberg archive).** 30일 / 90일 / 365일 분기 archival 없음. 디스크 부담이 실제로 닥칠 때 별도 SPEC.
 4. **Cron-based deletion or TTL.** 시간 기반 자동 삭제 없음 (REQ-LOG-RETENTION-001). retention policy 의 진화는 별도 SPEC.
@@ -1002,14 +1080,15 @@ The following are explicitly NOT delivered by SPEC-CONVERSATION-LOG-001 and MUST
 | R7 | **`asyncio.create_task` reference leak** — Python's asyncio strongly warns against creating tasks without retaining a reference (the GC can collect a not-yet-started task). | Low | Medium | The `emit(...)` helper (REQ-LOG-FIRE-AND-FORGET-001 acceptance) SHALL retain task references in a module-level `WeakSet` and drop them on completion (standard Python idiom). Verified by a stress test that emits 10K events and asserts none are lost to GC. |
 | R8 | **Langfuse trace_id propagation across `asyncio.create_task` boundaries.** Langfuse v3 uses contextvars; spawning a task may break the binding. | Medium | Low | The `current_langfuse_trace_id()` helper SHALL be called in the *caller's* context BEFORE spawning the task — i.e., the trace_id is captured as a local variable and passed as an argument to `log_event`. The task itself doesn't need contextvar access. Verified by an integration test that confirms `langfuse_trace` is populated for `card_sent` events emitted from `send_results` (which is the busiest emit site). |
 | R9 | **Synthetic test load (REQ-LOG-EMIT-EVERY-NODE-001 acceptance) hits the testcontainers Postgres at ~800 inserts in 5 minutes.** CI runtime budget for the test suite. | Medium | Low | The 100-turn sequential test runs in < 30 seconds locally (synthetic webhooks, mocked LLM / RPC). The 800-row floor is generous — actual count is typically ~1200. CI flakiness budget: 20% headroom. |
-| R10 | **GIN index size on `payload`** could grow to 2-3x the table size if payloads are large (vision_done's v2 schema). | Medium | Medium | (a) `idx_log_conv_payload_gin` is the only GIN — its growth is concentrated, easy to monitor (`pg_indexes` view). (b) `vision_done` payload is bounded by the Vision LLM's `VISION_MAX_TOKENS` (~1KB JSON typical, ~4KB worst case). Not pathological. (c) If size becomes a concern, swap to `jsonb_path_ops` — narrower operator support (`@>` only) but ~2x smaller. Decision deferred. |
+| R10 | **GIN index size on `payload`** could grow to 2-3x the table size if payloads are large (vision_done's v2 schema). | Medium | Medium | (a) `idx_log_conv_payload_gin` is the only GIN — its growth is concentrated, easy to monitor (`pg_indexes` view). (b) `vision_done` payload is bounded by the Vision LLM's `VISION_MAX_TOKENS` (~1KB JSON typical, ~4KB worst case) AND by REQ-LOG-PAYLOAD-CAP-001's 50-item cap on `vision_done.items` + 2048-char cap on free-form strings. Not pathological. (c) If size becomes a concern, swap to `jsonb_path_ops` — narrower operator support (`@>` only) but ~2x smaller. Decision deferred. |
 | R11 | **Time-skew between thread_id seed and first node emit.** If webhook intake is delayed (e.g., Telegram retry), the FIRST event's created_at may not be the earliest in the thread. | Low | Low | The webhook intake's three event types (`user_text` / `user_photo` / `user_callback`) are emitted *before* graph invocation, so they always lead. The `id BIGSERIAL` PK provides a guaranteed tiebreaker order independent of created_at. Replay logic SHALL use `(thread_id, id ASC)` for ordering, not `created_at`. |
 | R12 | **Adding emit calls to 12 node files increases the diff surface.** Risk of accidental regression in nodes' core logic during edit. | Medium | Medium | Each node modification is a single-purpose change: insert one emit call at the success terminus + wrap body in try/except for `node_error` emit. PR review SHALL surface any logic touch beyond that. Per-node unit tests already exist (per SPEC-AGENT-001 acceptance) — they continue to pass after the emit additions. |
 | R13 | **`embedding_ref` in `search_done` payload.** The Modal-returned embedding vector is too large (3072 floats) to store inline. If we store nothing, replay can't reproduce the search; if we store a hash, hash collisions are a non-issue but storage savings are nominal. | Medium | Low | Store `embedding_ref` as `sha256(vector_bytes)[:16]` — 16 hex chars. Sufficient to detect "same embedding submitted twice" without storing the vector. For replay, the embedding must be re-derived from the original image — which is OK because `vision_done` carries the items/keywords (the canonical input shape downstream of Vision). Future SPEC may add a separate `embedding_archive` table if vector replay is critical. |
-| R14 | **TypedDict-vs-dict drift.** Python's TypedDict is structural — passing a wrong-key dict is a runtime no-op (no error). Tests must enforce schema. | High | Medium | REQ-LOG-CATALOG-001's per-event-type unit test enforces required-key presence (`assert "text" in payload`). A linter rule (deferred to `plan.md`) could catch dict literal sites that don't construct from the typed class. The pragmatic mitigation is: the 17-event-type test suite is the gate. |
+| R14 | **TypedDict-vs-dict drift.** Python's TypedDict is structural — passing a wrong-key dict is a runtime no-op (no error). Tests must enforce schema. | High | Medium | REQ-LOG-CATALOG-001's per-event-type unit test enforces required-key presence (`assert "text" in payload`). A linter rule (deferred to `plan.md`) could catch dict literal sites that don't construct from the typed class. The pragmatic mitigation is: the 19-event-type test suite is the gate. |
 | R15 | **Cross-table consistency between `card_sent` and `card_impression`.** A `card_impression` INSERT succeeds while the parallel `card_sent` emit fails (or vice versa), leaving the two views disagreeing. | Medium | Low | The two writes are independent and the divergence is documented as acceptable (REQ-LOG-IMPLICIT-FB-COEXIST-001). Analytics that needs precise click attribution SHALL use `card_impression` (the SPEC-IMPLICIT-FB-001 source-of-truth). Analytics that needs timeline SHALL use `log_conversation_event` (best-effort). The two are not joined as foreign keys for this reason. |
 | R-DUP | **`card_sent` / `card_clicked` row volume duplication.** Per impression, 2 rows persist (one per table). At 5 cards × 30 turns/day × 365 = 54K row-pairs/year. | Low | Low | Acceptable disk overhead (~108KB/year per active user for these two row classes). The duplication unlocks both attribution (mutable single row) and timeline (append-only) use cases without one paying the other's cost. Documented in Background section. |
-| R-PII | **payload contains raw user PII (text, URLs, captions, callback_data, vision results that may include nudity/sensitivity tags).** Internal users (founder, oncall) can read the log. | High | Medium | (a) Policy decision B accepts raw PII storage — founder is the data controller. (b) DB-level access is restricted to the app user + operator user (no shared service accounts). (c) future privacy SPEC may add audit logging of operator-level SELECT queries. (d) GDPR delete (REQ-LOG-PRIVACY-001) is the user-facing escape hatch. |
+| R-PII | **payload contains raw user PII (text, URLs, captions, callback_data, vision results that may include nudity/sensitivity tags).** Internal users (founder, oncall) can read the log. | High | Medium | (a) Policy decision B accepts raw PII storage — founder is the data controller. (b) DB-level access is restricted to the app user + operator user (no shared service accounts). (c) future privacy SPEC may add audit logging of operator-level SELECT queries. (d) GDPR delete (REQ-LOG-PRIVACY-001) is the user-facing escape hatch. (e) REQ-LOG-PAYLOAD-CAP-001 caps free-form text at 2048 chars — bounds PII per row but does NOT redact it. |
+| R16 | **Callback correlation latency.** REQ-LOG-THREAD-CALLBACK-001 adds a DB query on every callback ingest (lookup `card_sent` rows in the 30-day window for `user_key` + `source_message_id`). At 10K turns/day with ~1 callback per turn, that's a steady SELECT/turn. | Medium | Medium | (a) `idx_log_conv_user_time` already exists and provides the user-key + time-window scan in `O(log N + k)`. (b) `idx_log_conv_payload_gin` (or a dedicated functional index on `payload->>'source_message_id'` — `plan.md` decides) provides the `source_message_id` filter. (c) The 30-day cutoff bounds the result set per user. (d) An optional Redis cache for "recent `card_sent` lookups per user_key" can be added in `plan.md` if measured p99 exceeds the 50ms budget. (e) If the lookup itself fails (DB transient error), fall back to seeding fresh `thread_id` (REQ-LOG-THREAD-001) — never block the webhook. |
 
 ---
 
@@ -1020,11 +1099,12 @@ The following are explicitly NOT delivered by SPEC-CONVERSATION-LOG-001 and MUST
 1. **Exact `_to_jsonable` cascade reuse vs new module.** SPEC-MEMORY-001 REQ-MEMORY-SESSION-001 의 5-step cascade 를 `app.observability.conversation_log` 가 import 해서 재사용할지, 또는 새 `_payload_to_jsonable` 헬퍼를 박을지. `plan.md` 가 결정 — 코드 중복 vs 모듈 결합도 트레이드오프.
 2. **`current_langfuse_trace_id()` 의 정확한 v3 API call.** SPEC-OBSERVABILITY-002 가 land 한 v3 client (`langfuse.Langfuse`) 의 어떤 메서드가 context-local trace_id 를 반환하는지 — v3 docs 의 `get_current_observation().trace_id` 또는 `langfuse_context.get_current_trace_id()` — `plan.md` 가 실측해서 확정. 둘 다 안 되면 langchain `RunnableConfig` 의 callback metadata 를 통해 우회.
 3. **Migration 번호.** SPEC-IMPLICIT-FB-001 의 `0002_create_card_impression.py` 가 이미 land 되어 있으므로 본 SPEC 의 revision 은 0003 또는 0004. 현재 `migrations/versions/` 디렉토리 상태(0001, 0002 가 land 됨; 0003 미정)를 plan.md 에서 확인 후 확정.
-4. **`emit(...)` helper signature.** REQ-LOG-FIRE-AND-FORGET-001 acceptance 에서 module-level helper 의 시그니처(positional vs kwargs only, default 값, async vs sync wrapper)를 plan.md 에서 결정. 기본 안: `def emit(event_type: str, payload: dict, *, thread_id: UUID, turn_no: int, user_key: str, chat_id: int) -> asyncio.Task`.
-5. **Stderr fallback format.** REQ-LOG-FAILSOFT-001 의 stderr line 이 정확히 어떤 JSON 키 집합인지 — full row 직렬화인지 일부 핵심 필드만인지. 운영자가 `grep '\[CONV_LOG\]\[stderr_fallback\]' | jq -s '...'` 로 archive 할 수 있는 포맷이어야 함.
+4. **`emit(...)` helper signature.** REQ-LOG-FIRE-AND-FORGET-001 acceptance 에서 module-level helper 의 시그니처(positional vs kwargs only, default 값, async vs sync wrapper, return type — `asyncio.Task` vs `None`) 를 plan.md 에서 결정. 이 SPEC 은 이름(`emit`) + import path(`app.observability.conversation_log.emit`) + 예외 미발생 contract 만 lock 한다 — 파라미터 shape 은 plan.md.
+5. **Stderr fallback format.** REQ-LOG-FAILSOFT-001 의 stderr line 이 정확히 어떤 prefix tag (있다면 무엇), 어떤 JSON 키 집합인지 — full row 직렬화인지 일부 핵심 필드만인지. 운영자가 stream parsing 으로 archive 할 수 있는 포맷이어야 함. 최소 포함 필드: `event_type`, `user_key`. 확장 필드(thread_id, turn_no, payload, langfuse_trace, latency_ms, created_at) 의 inclusion 은 plan.md.
 6. **AST-level test for "every node emits".** REQ-LOG-EMIT-EVERY-NODE-001 acceptance 의 parametric test 가 어떻게 노드 모듈을 import 하고 `log_event` 호출을 찾는지의 정확한 패턴. 후보: (a) `ast.parse(src).walk()` 로 `Call(func=Name("log_event"))` 검색, (b) `inspect.getsource(node_module)` regex 검색. plan.md 가 결정.
 7. **`embedding_ref` hash 알고리즘.** R13 에서 sha256-prefix-16 으로 제안했지만 plan.md 가 sha1 / blake2 / fxhash 등 더 빠른 옵션을 검토해 확정. embedding 벡터 hashing 은 turn 당 1회라 latency 의 0.1% 미만.
 8. **`payload.v` 필드 도입 여부.** R4 mitigation 의 `payload.v: int = 1` 명시는 현재 묵시. plan.md 에서 명시적으로 모든 payload 첫 키로 박을지(`{"v": 1, "text": ...}`), 또는 향후 schema evolution 시 retroactive 도입할지 결정.
+9. **`log_event(...)` signature shape.** decide `log_event(...)` signature shape in plan.md. The normative contract (name, return type `None`, no-raise) is fixed in REQ-LOG-FIRE-AND-FORGET-001; parameter list and defaults are deferred.
 
 ---
 
@@ -1058,17 +1138,20 @@ The following are explicitly NOT delivered by SPEC-CONVERSATION-LOG-001 and MUST
 
 - [ ] REQ-LOG-MIGRATION-001 implemented. Alembic revision creates `ai.log_conversation_event` with 10 columns and 4 indexes (`idx_log_conv_user_time`, `idx_log_conv_thread`, `idx_log_conv_event_type`, `idx_log_conv_payload_gin USING GIN`). `alembic upgrade head` and `alembic downgrade -1` both succeed on dev Postgres. No FOREIGN KEY clauses present.
 - [ ] REQ-LOG-CATALOG-001 implemented. 19 event types (user_text, user_photo, user_callback, intent_routed, link_resolved, vision_done, pick_item_done, ask_clarify_sent, clarify_applied, search_done, evaluator_run, diversify_done, card_sent, card_clicked, onboard_select, pinterest_ingest, bot_text, taste_update, node_error) each have a TypedDict export. Per-type payload smoke test passes.
-- [ ] REQ-LOG-THREAD-001 implemented. `InputState.thread_id: UUID` + `InputState.turn_no: int` added with sensible defaults. webhook intake seeds a fresh `uuid4()` per request. Full-turn integration test asserts one and only one thread_id per turn.
-- [ ] REQ-LOG-TURN-001 implemented. Per-node turn_no follows the catalog's documented values (webhook=0, ingest=1, resolve_image=2, …, respond=10). For nodes that emit multiple rows (evaluator iterations, send_results cards, respond chunks), all rows share the same turn_no. Non-decreasing monotonicity test passes.
+- [ ] REQ-LOG-THREAD-CALLBACK-001 implemented. Callback Update with matching `source_message_id` within 30 days propagates the originating `card_sent.thread_id` (with `turn_no = prior + 1`). Stale (>30d) reference falls back to fresh seed. Cross-user lookup scoped by `user_key` (no cross-user leakage). p99 lookup latency < 50ms.
+- [ ] REQ-LOG-THREAD-001 implemented. Non-callback Update: `InputState.thread_id: UUID` + `InputState.turn_no: int` added with sensible defaults. webhook intake seeds a fresh `uuid4()` per request. Full-turn integration test asserts one and only one thread_id per turn.
+- [ ] REQ-LOG-TURN-001 implemented. Per-node turn_no follows the catalog's documented convention as a **soft guideline** (webhook=0, ingest=1, resolve_image=2, …, respond=10) — deviations are allowed during refactors as long as monotonic non-decreasing within a thread holds. For nodes that emit multiple rows (evaluator iterations, send_results cards, respond chunks), all rows share the same turn_no. Non-decreasing monotonicity test passes. (m2)
 - [ ] REQ-LOG-EMIT-EVERY-NODE-001 implemented. AST-level test verifies each of the 12 node files contains at least one `log_event` invocation. Full happy-path turn produces ≥ 8 rows; 100-turn synthetic load produces ≥ 800 rows. Each of the 12 nodes has a forced-exception test asserting `node_error` row is appended.
-- [ ] REQ-LOG-FAILSOFT-001 implemented. `log_event` never raises; pool failure produces one WARN log + one stderr structured JSON line; the bot continues normally. 1000-call concurrent property test asserts zero exceptions and zero data loss (insert + stderr counts sum to 1000).
+- [ ] REQ-LOG-FAILSOFT-001 implemented. `log_event` never raises; pool failure produces one stderr structured JSON line (format per OQ-5, minimum includes `event_type` + `user_key`); the bot continues normally. 1000-call concurrent property test asserts zero exceptions and zero data loss (insert + stderr counts sum to 1000).
 - [ ] REQ-LOG-FIRE-AND-FORGET-001 implemented. All `log_event` invocations wrapped in `asyncio.create_task` via an `emit(...)` helper. Latency test asserts node body completes in body-only time even when the DB INSERT is artificially slow. WeakSet retention prevents task GC loss.
 - [ ] REQ-LOG-LANGFUSE-XREF-001 implemented. Langfuse v3 active → every row carries `langfuse_trace = trace_id`. Langfuse no-op → every row carries `langfuse_trace IS NULL`. `current_langfuse_trace_id()` helper never raises. trace_id captured in caller context before `asyncio.create_task` spawn.
 - [ ] REQ-LOG-IMPLICIT-FB-COEXIST-001 implemented. 3-card send → 3 rows in `card_impression` AND 3 rows in `log_conversation_event` (event_type='card_sent'). Click on card 2 → row in `card_impression` flips to `clicked` AND new row in `log_conversation_event` (event_type='card_clicked'). Either write failing does not block the other.
 - [ ] REQ-LOG-PAYLOAD-RICH-001 implemented. `search_done.payload.top_k_product_ids` and `rrf_scores` are parallel arrays of equal length. Empty-RPC case → both `[]`. Mismatched-length defensive assertion raises `node_error` before write. JSON `->` extraction returns the arrays correctly.
+- [ ] REQ-LOG-PAYLOAD-CAP-001 implemented. Free-form string fields capped at 2048 chars (`user_text.text`, `user_photo.caption`, `bot_text.chunk_text`, `intent_routed.critique_delta_summary`, `link_resolved.input_url`); list fields capped at 50 items (`search_done.filter_drop_log`, `clarify_applied.boost_keywords_added`, `vision_done.items`); dict fields capped at 100 keys. Truncation is silent (no `node_error`). Per-field unit tests pass.
 - [ ] REQ-LOG-PRIVACY-001 implemented. `DELETE FROM ai.log_conversation_event WHERE user_key=$1` uses `idx_log_conv_user_time`. Two-user test asserts deletion isolation. Operator runbook documented in `plan.md`.
 - [ ] REQ-LOG-RETENTION-001 implemented. AST scan of `app/channels/session_pg.py` confirms no `log_conversation_event` reference. Operator runbook in `plan.md` explicitly states no automatic cleanup.
 - [ ] REQ-LOG-FALLBACK-001 implemented. `MEMORY_BACKEND_IS_POSTGRES=False` → 100 calls produce 0 rows + 100 DEBUG lines + 0 WARN lines. 10-webhook end-to-end with unreachable `DB_DSN` → bot responds normally, 0 rows, DEBUG-only logs.
+- [ ] REQ-LOG-ONBOARD-OPTIONAL-001 implemented (or marked inert until SPEC-ONBOARD-CARDS-001 lands). When onboarding nodes execute, exactly one `onboard_select` row per stage transition is recorded. When onboarding is not in flight, zero `onboard_select` rows over a 100-turn synthetic load. Catalog entry stays in sync with SPEC-ONBOARD-CARDS-001's stage enumeration.
 - [ ] All existing tests (`pytest -q` baseline before this SPEC, including SPEC-MEMORY-001 + SPEC-IMPLICIT-FB-001 + SPEC-OBSERVABILITY-002 + SPEC-AGENT-001 suites) continue to pass under both backends. The 12-node tests in particular MUST be re-run after the emit additions to confirm no regression.
 - [ ] **Coverage target (TRUST 5 Tested):** `app/observability/conversation_log.py` reports ≥ 85% line coverage. The 11 new test files in `tests/test_conversation_log/` collectively cover every public symbol of the module and every event type in the catalog.
 - [ ] `migrations/versions/0004_create_log_conversation_event.py` (or the resolved revision number) exists with `down_revision` correctly chained to the latest prior revision. DDL matches Schema Reference exactly (10 columns, 4 indexes, no FK).
@@ -1090,8 +1173,8 @@ The following are explicitly NOT delivered by SPEC-CONVERSATION-LOG-001 and MUST
 1. **Alembic revision** (`0004_create_log_conversation_event.py` or resolved number): hand-write DDL + 4 indexes with `IF NOT EXISTS`; `alembic upgrade head` on local dev Postgres.
 2. **`conversation_log.py` module**: `log_event` async function with full exception swallow + stderr fallback. `emit(...)` helper that wraps in `asyncio.create_task` and retains in WeakSet. `current_langfuse_trace_id()` proxy. TypedDicts for the 19 event types.
 3. **`state.py` modification**: add `thread_id: UUID = Field(default_factory=uuid4)` + `turn_no: int = 0` to InputState + WorkingState.
-4. **Webhook intake** (`app/api/webhooks/telegram.py`): seed thread_id + emit `user_text` / `user_photo` / `user_callback` per inbound type.
-5. **Node modifications** (12 files): one emit per success terminus + try/except for `node_error` emit. Care taken to NOT change the node's primary logic (per scope discipline).
+4. **Webhook intake** (`app/api/webhooks/telegram.py`): for non-callback Updates → seed fresh thread_id; for callback Updates → run the REQ-LOG-THREAD-CALLBACK-001 lookup (`source_message_id` + `user_key` + 30-day window) and propagate the originating `thread_id` (fallback: fresh seed on miss). Emit `user_text` / `user_photo` / `user_callback` per inbound type.
+5. **Node modifications** (12 files): one emit per success terminus + try/except for `node_error` emit. Care taken to NOT change the node's primary logic (per scope discipline). Each emit site applies REQ-LOG-PAYLOAD-CAP-001 truncation on free-form fields before constructing the payload (or relies on the `emit(...)` helper to apply the caps centrally — `plan.md` decides the wiring).
 6. **Langfuse helper export** (`app/observability/langfuse.py`): `current_langfuse_trace_id()` reads the v3 client's context-local state (or returns None on no-op).
 7. **Lifespan wiring** (`app/main.py`): ensure `MEMORY_BACKEND_IS_POSTGRES` flag is set BEFORE any node spawns (already true per SPEC-MEMORY-001 — verify no regression).
 8. **Tests** (11 files): testcontainers Postgres-based integration for thread propagation, payload shapes, search_done richness, node_error, failsoft, Langfuse xref, card_impression coexistence, privacy delete, GIN index usage, migration up/down. Mock Langfuse and mock Telegram adapter.
