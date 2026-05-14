@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -282,6 +283,46 @@ def _user_prompt(state: WorkingState, flow: _Flow, lang: str) -> str:
 # ── Node ───────────────────────────────────────────────────────────────────
 
 
+# 문장 경계: 영어 ".", "!", "?" / 한국어 "다.", "요.", "죠." 뒤 공백 또는 줄바꿈.
+# 인용부호 / 괄호 안 마침표는 split 하지 않도록 lookahead로 trailing whitespace 요구.
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|(?<=[다요죠]\.)\s+|\n{2,}")
+
+
+def _split_into_chunks(text: str, *, min_chars: int) -> list[str]:
+    """Split a reply into conversational chunks.
+
+    Behavior:
+    - Split on sentence boundaries (regex above).
+    - Merge consecutive short fragments (< min_chars) into the next chunk so we
+      don't ship single-emoji or one-word messages.
+    - Always return at least one chunk (the original text) when the result is
+      empty.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    raw = [p.strip() for p in _SENT_SPLIT_RE.split(text) if p and p.strip()]
+    if not raw:
+        return [text]
+
+    merged: list[str] = []
+    buf = ""
+    for piece in raw:
+        if buf:
+            buf = f"{buf} {piece}".strip()
+        else:
+            buf = piece
+        if len(buf) >= min_chars:
+            merged.append(buf)
+            buf = ""
+    if buf:
+        if merged:
+            merged[-1] = f"{merged[-1]} {buf}".strip()
+        else:
+            merged.append(buf)
+    return merged
+
+
 @observe(name="node.respond", as_type="span")
 async def respond(state: WorkingState) -> dict:
     flow = _classify_flow(state)
@@ -337,14 +378,38 @@ async def respond(state: WorkingState) -> dict:
         preview = preview[:200] + "…"
     logger.info("🐱 [respond] flow=%s lang=%s reply=%r", flow.value, lang, preview)
 
-    # Dispatch
+    # Dispatch — noscroll 벤치마크: 문장 단위로 끊어 발화하면 대화감이 살아남.
+    # 1문장씩 typing action 후 짧은 딜레이를 두고 순차 전송.
+    chunks: list[str]
+    if settings.RESPONSE_SPLIT_ENABLED:
+        chunks = _split_into_chunks(text, min_chars=settings.RESPONSE_SPLIT_MIN_CHARS)
+    else:
+        chunks = [text]
+    if not chunks:
+        chunks = [text]
+    delay_s = max(0.0, settings.RESPONSE_SPLIT_DELAY_MS / 1000.0)
+
     try:
         adapter = get_adapter()
-        await adapter.send_text(state.chat_id, text)
+        for idx, chunk in enumerate(chunks):
+            # 첫 청크 전, 그리고 청크 사이마다 typing 표시 + 자연스러운 딜레이.
+            try:
+                await adapter.send_chat_action(state.chat_id, "typing")
+            except Exception:
+                # typing 표시는 best-effort — 실패해도 본 메시지 전송은 진행.
+                logger.debug("🐱 [respond] typing action failed (non-fatal)", exc_info=True)
+            if delay_s > 0 and len(chunks) > 1:
+                await asyncio.sleep(delay_s)
+            await adapter.send_text(state.chat_id, chunk)
+            breadcrumbs.append(
+                f"respond_chunk: idx={idx}/{len(chunks) - 1} len={len(chunk)}"
+            )
     except Exception as exc:
         logger.exception("🐱 [respond] ❌ send_text failed (flow=%s, lang=%s)", flow.value, lang)
         breadcrumbs.append(f"respond_send_error: {type(exc).__name__}: {exc}"[:200])
         return {"response_text": text, "log_events": breadcrumbs}
 
-    breadcrumbs.append(f"respond: flow={flow.value} lang={lang} text_len={len(text)}")
+    breadcrumbs.append(
+        f"respond: flow={flow.value} lang={lang} text_len={len(text)} chunks={len(chunks)}"
+    )
     return {"response_text": text, "log_events": breadcrumbs}

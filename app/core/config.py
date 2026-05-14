@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     RESPONSE_MODEL: str = "gpt-4o-mini"
     RESPONSE_TIMEOUT_MS: int = 5000
     RESPONSE_MAX_TOKENS: int = 200
+    # noscroll 벤치마크 — 1문장씩 끊어서 발화하면 대화감이 살아남.
+    # respond 노드가 LLM/fallback 출력을 문장 단위로 split → typing action → 짧은 딜레이 → send.
+    RESPONSE_SPLIT_ENABLED: bool = True
+    RESPONSE_SPLIT_DELAY_MS: int = 350
+    RESPONSE_SPLIT_MIN_CHARS: int = 8  # 너무 짧은 조각은 다음 청크와 병합
     # Vision 결과가 약할 때(짧은 description / ambiguous label) ask_clarify 분기 트리거 임계값
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
