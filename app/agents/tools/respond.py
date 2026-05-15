@@ -101,11 +101,23 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
         except Exception as exc:  # noqa: BLE001
             logger.warning("[tool.respond] send_text failed: %r", exc)
 
-    # Source cards INTERNALLY from this turn's last search (sess.last_results),
-    # rendered via the EXACT V1 card path (send_results._candidate_to_card +
-    # adapter.send_card). The LLM never provides cards. Pure chit-chat / clarify
-    # turns have no recent candidates → text only.
-    cards_sent = await _send_last_results_cards(adapter, ctx, chat_id)
+    # Source cards INTERNALLY from this turn's last search, rendered via the
+    # EXACT V1 card path (send_results._candidate_to_card + adapter.send_card).
+    # The LLM never provides cards.
+    #
+    # CRITICAL GATE: send cards ONLY when `search_products` / `refine_search`
+    # actually ran AND returned >0 candidates THIS turn — signalled by the
+    # per-turn `CARDS_READY_KEY` marker in the shared `ctx` (set by
+    # `persist_last_results`). `sess.last_results` PERSISTS across turns, so
+    # gating on its non-emptiness re-blasted the previous search's cards onto
+    # every greeting / chit-chat / clarify turn. Gating on the per-turn marker
+    # fixes that: no search this turn (or 0 results) → marker unset → text
+    # only, zero cards. `sess.last_results` is intentionally NOT cleared (V1
+    # critique callbacks still rely on it); only this SEND GATE changed.
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    if ctx.get(CARDS_READY_KEY):
+        cards_sent = await _send_last_results_cards(adapter, ctx, chat_id)
 
     if not text_sent and cards_sent == 0:
         # Nothing sent THIS entry. If a prior (interrupted) entry already

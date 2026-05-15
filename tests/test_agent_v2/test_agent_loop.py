@@ -526,10 +526,40 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     sess = _make_session()
     store = get_store()
     store_sess = store.get_or_create(42)
-    store_sess.last_results = [_cand(i) for i in range(4)]
     store_sess.lang = "en"
 
-    fake = _FakeLLM([_FakeAIMessage([{"name": "respond", "args": {"text": "here you go"}, "id": "1"}])])
+    # A real search runs THIS turn (mocked pipeline → 4 candidates). This
+    # populates last_results AND sets the per-turn card-ready marker via the
+    # genuine persist_last_results path — the precondition for respond to send
+    # cards at all (cards are gated on a per-turn search, not on stale
+    # last_results non-emptiness).
+    async def _fake_search_step(state):
+        state.raw_candidates = [
+            {
+                "id": f"p{i}",
+                "name": f"Item {i}",
+                "brand": "Acme",
+                "price": 10000 + i,
+                "image_url": f"https://img/{i}.jpg",
+                "product_url": f"https://shop/{i}",
+            }
+            for i in range(4)
+        ]
+        return state
+
+    async def _fake_diversify_step(state):
+        state.final_candidates = list(state.raw_candidates)
+        return state
+
+    monkeypatch.setattr("app.pipeline.search.search_step", _fake_search_step)
+    monkeypatch.setattr("app.pipeline.diversify.diversify_step", _fake_diversify_step)
+
+    fake = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "boots"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "here you go"}, "id": "2"}]),
+        ]
+    )
     monkeypatch.setattr(rl, "get_llm", lambda: fake)
     monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
     # Force the generic per-tool timeout tiny so 4×0.05s cards blow past it,
@@ -616,6 +646,7 @@ async def test_respond_self_idempotent_on_double_call(monkeypatch):
     """respond.dispatch is self-idempotent: a second call with the same ctx
     re-sends neither text nor already-sent cards."""
     from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.agents.tools.search_products import CARDS_READY_KEY
     from app.channels.session import get_store
 
     store = get_store()
@@ -636,7 +667,9 @@ async def test_respond_self_idempotent_on_double_call(monkeypatch):
 
     monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: _A())
 
-    ctx = {"chat_id": 77, "lang": "en"}
+    # A search ran this turn (marker set by persist_last_results); the same
+    # ctx is reused across the defensive 2nd entry (react_loop contract).
+    ctx = {"chat_id": 77, "lang": "en", CARDS_READY_KEY: True}
     r1 = await respond_dispatch({"text": "hello"}, ctx)
     r2 = await respond_dispatch({"text": "hello"}, ctx)  # defensive 2nd entry
 

@@ -98,7 +98,8 @@ async def test_search_persists_last_results(monkeypatch):
         monkeypatch.setattr("app.pipeline.search.search_step", fake_search_step)
         monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
 
-        res = await sp.dispatch({"text_query": "slim black tee"}, {"chat_id": 7, "image_url": ""})
+        ctx = {"chat_id": 7, "image_url": ""}
+        res = await sp.dispatch({"text_query": "slim black tee"}, ctx)
         assert res["ok"] is True
         # Full candidate promoted to a Candidate model (attribute access works
         # for the V1 card renderer) and stashed in the EXISTING last_results.
@@ -107,6 +108,9 @@ async def test_search_persists_last_results(monkeypatch):
         assert getattr(c, "id") == "p1"
         assert getattr(c, "image_url") == "https://img/x.jpg"
         assert "p1" in sess.shown_product_ids
+        # A search that returned >0 candidates THIS turn sets the per-turn
+        # card-ready marker in the shared ctx so `respond` is allowed to send.
+        assert ctx.get(sp.CARDS_READY_KEY) is True
     finally:
         set_store(None)
 
@@ -117,6 +121,7 @@ async def test_search_persists_last_results(monkeypatch):
 @pytest.mark.asyncio
 async def test_respond_auto_sources_cards(monkeypatch):
     from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
 
     sess = _session_with_results(3)
     set_store(_FakeStore(sess))
@@ -126,7 +131,8 @@ async def test_respond_auto_sources_cards(monkeypatch):
         adapter.send_card = AsyncMock(return_value=1001)
         monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
 
-        ctx = {"chat_id": 42}
+        # A search ran THIS turn (marker set by persist_last_results).
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
         res = await respond_tool.dispatch({"text": "Here are some matches!"}, ctx)
 
         assert res["ok"] is True
@@ -164,6 +170,130 @@ async def test_respond_no_prior_search_text_only(monkeypatch):
         set_store(None)
 
 
+@pytest.mark.asyncio
+async def test_greeting_after_search_sends_no_stale_cards(monkeypatch):
+    """THE BUG REPRO: prior turn searched (sess.last_results still populated),
+    THIS turn is a pure greeting with NO search → respond must send ZERO cards.
+
+    `sess.last_results` PERSISTS across turns; the regression was respond
+    re-blasting it whenever it was non-empty. The fix gates on a per-turn
+    marker, not on last_results non-emptiness."""
+    from app.agents.tools import respond as respond_tool
+
+    # Session carries the PREVIOUS turn's 12 derby-shoes results (the real log).
+    sess = _session_with_results(12)
+    set_store(_FakeStore(sess))
+    try:
+        adapter = MagicMock()
+        adapter.send_text = AsyncMock()
+        adapter.send_card = AsyncMock(return_value=1)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        # Fresh per-turn ctx (no search ran this turn → NO card-ready marker).
+        res = await respond_tool.dispatch({"text": "안녕하세요!"}, {"chat_id": 42})
+
+        assert res["ok"] is True
+        assert res["text_sent"] is True
+        assert res["cards_sent"] == 0  # stale 12 cards must NOT be sent
+        adapter.send_text.assert_awaited_once()
+        adapter.send_card.assert_not_awaited()
+        # last_results is intentionally NOT cleared (V1 critique relies on it).
+        assert len(sess.last_results) == 12
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_zero_result_search_sends_no_cards(monkeypatch):
+    """A search that ran THIS turn but returned 0 candidates → text only,
+    no stale cards (persist_last_results never sets the marker for 0 cands)."""
+    import app.agents.tools.search_products as sp
+    from app.agents.tools import respond as respond_tool
+
+    # Stale prior results present; this turn's search will return nothing.
+    sess = _session_with_results(5)
+    set_store(_FakeStore(sess))
+    try:
+
+        async def fake_search_step(state):
+            state.raw_candidates = []
+            return state
+
+        async def fake_diversify_step(state):
+            state.final_candidates = []
+            return state
+
+        monkeypatch.setattr("app.pipeline.search.search_step", fake_search_step)
+        monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
+
+        adapter = MagicMock()
+        adapter.send_text = AsyncMock()
+        adapter.send_card = AsyncMock(return_value=1)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        ctx = {"chat_id": 42, "image_url": ""}
+        sres = await sp.dispatch({"text_query": "nonexistent xyzzy"}, ctx)
+        assert sres["candidates_count"] == 0
+        # 0-result search must NOT set the per-turn card-ready marker.
+        assert ctx.get(sp.CARDS_READY_KEY) is not True
+
+        rres = await respond_tool.dispatch({"text": "no luck this time!"}, ctx)
+        assert rres["ok"] is True
+        assert rres["cards_sent"] == 0
+        adapter.send_card.assert_not_awaited()
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_search_then_respond_cards_sent_this_turn(monkeypatch):
+    """search_products THIS turn sets the marker → respond sends cards once."""
+    import app.agents.tools.search_products as sp
+    from app.agents.tools import respond as respond_tool
+
+    sess = Session(chat_id=42)
+    set_store(_FakeStore(sess))
+    try:
+
+        async def fake_search_step(state):
+            state.raw_candidates = [
+                {
+                    "id": f"q{i}",
+                    "name": f"Loafer {i}",
+                    "brand": "B",
+                    "price": 100,
+                    "image_url": f"https://img/{i}.jpg",
+                    "product_url": f"https://s/{i}",
+                }
+                for i in range(3)
+            ]
+            return state
+
+        async def fake_diversify_step(state):
+            state.final_candidates = list(state.raw_candidates)
+            return state
+
+        monkeypatch.setattr("app.pipeline.search.search_step", fake_search_step)
+        monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
+
+        adapter = MagicMock()
+        adapter.send_text = AsyncMock()
+        adapter.send_card = AsyncMock(return_value=1)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        # Single shared ctx for the turn (react_loop contract).
+        ctx = {"chat_id": 42, "image_url": ""}
+        await sp.dispatch({"text_query": "leather loafers"}, ctx)
+        assert ctx.get(sp.CARDS_READY_KEY) is True
+
+        res = await respond_tool.dispatch({"text": "found these!"}, ctx)
+        assert res["ok"] is True
+        assert res["cards_sent"] == 3
+        assert adapter.send_card.await_count == 3
+    finally:
+        set_store(None)
+
+
 # --- send_text empty/whitespace guard ---
 
 
@@ -195,6 +325,7 @@ async def test_send_text_empty_guard():
 @pytest.mark.asyncio
 async def test_respond_idempotent_on_retry(monkeypatch):
     from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
 
     sess = _session_with_results(2)
     set_store(_FakeStore(sess))
@@ -204,7 +335,9 @@ async def test_respond_idempotent_on_retry(monkeypatch):
         adapter.send_card = AsyncMock(return_value=1)
         monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
 
-        ctx = {"chat_id": 42}  # same dict reused across retries (react_loop contract)
+        # same dict reused across retries (react_loop contract); a search ran
+        # this turn so the per-turn card-ready marker is set.
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
         first = await respond_tool.dispatch({"text": "hello"}, ctx)
         second = await respond_tool.dispatch({"text": "hello"}, ctx)  # simulated retry
 

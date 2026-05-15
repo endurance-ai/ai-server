@@ -87,13 +87,25 @@ def _to_card_candidate(cand: Any) -> Any:
         return cand
 
 
+# Per-turn marker set in the shared ctx dict when a search ran THIS turn AND
+# returned >0 candidates. `respond` sends cards ONLY when this is set — gating
+# on this (not on `sess.last_results` non-emptiness) is what stops the stale
+# previous-turn cards from leaking onto greeting/chit-chat/clarify turns.
+# `ctx` is built once per turn in react_loop and shared by reference across
+# search_products / refine_search / respond dispatch (react_loop.py:301+524).
+CARDS_READY_KEY = "_cards_ready_this_turn"
+
+
 def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
     """Stash the FULL turn candidates into the session so `respond` can render
     real product cards internally (LLM never hand-serializes cards).
 
     Reuses the EXISTING V1 session field `sess.last_results` (the same field
     `send_results` populates and critique callbacks consume) — no new state.
-    Also extends `shown_product_ids` for parity with the V1 send path.
+    Also extends `shown_product_ids` for parity with the V1 send path. On a
+    successful persist (>0 candidates) sets the per-turn `CARDS_READY_KEY`
+    marker in `ctx` so `respond` knows a search ran THIS turn (a 0-result
+    search leaves the marker unset → respond sends text only, no stale cards).
     Returns the number of candidates persisted.
     """
     chat_id = ctx.get("chat_id")
@@ -110,6 +122,10 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
         new_ids = [i for i in new_ids if i]
         sess.shown_product_ids = list(dict.fromkeys(sess.shown_product_ids + new_ids))
         store.update(sess)
+        # Mark THIS turn as card-bearing only when we actually persisted
+        # candidates (>0). react_loop shares this `ctx` with `respond`.
+        if normalized:
+            ctx[CARDS_READY_KEY] = True
         return len(normalized)
     except Exception as exc:  # noqa: BLE001 — never break the search tool
         logger.debug("[tool.search_products] persist_last_results failed: %r", exc)
