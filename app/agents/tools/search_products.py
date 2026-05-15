@@ -52,6 +52,70 @@ def _is_real_image_url(value: Any) -> bool:
     return v.startswith(("http://", "https://"))
 
 
+def _to_card_candidate(cand: Any) -> Any:
+    """Normalize a pipeline result into a `Candidate` model for the card path.
+
+    The text-only path returns raw RPC dicts (`final_candidates`); the photo
+    path returns `Candidate` models (run_pipeline already converts). The V1
+    card renderer (`send_results._candidate_to_card`) does attribute access,
+    so dicts must be promoted to `Candidate` first. Reuses the EXACT field
+    mapping `pipeline.runner` uses (single source of truth for that shape).
+    Returns the original object on failure (best-effort; rendered-or-skipped
+    downstream by `_candidate_to_card`).
+    """
+    if hasattr(cand, "image_url") and not isinstance(cand, dict):
+        return cand  # already a Candidate-like model
+    if not isinstance(cand, dict):
+        return cand
+    try:
+        from app.models.response import Candidate
+
+        return Candidate(
+            id=str(cand["id"]),
+            brand=cand.get("brand", ""),
+            name=cand.get("name", ""),
+            price=cand.get("price"),
+            image_url=cand.get("image_url"),
+            product_url=cand.get("product_url"),
+            platform=cand.get("platform"),
+            subcategory=cand.get("subcategory"),
+            score=float(cand.get("score", 0.0)),
+            dense_rank=cand.get("dense_rank"),
+            sparse_rank=cand.get("sparse_rank"),
+        )
+    except Exception:  # noqa: BLE001
+        return cand
+
+
+def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
+    """Stash the FULL turn candidates into the session so `respond` can render
+    real product cards internally (LLM never hand-serializes cards).
+
+    Reuses the EXISTING V1 session field `sess.last_results` (the same field
+    `send_results` populates and critique callbacks consume) — no new state.
+    Also extends `shown_product_ids` for parity with the V1 send path.
+    Returns the number of candidates persisted.
+    """
+    chat_id = ctx.get("chat_id")
+    if chat_id is None or not cands:
+        return 0
+    try:
+        from app.channels.session import get_store
+
+        store = get_store()
+        sess = store.get_or_create(int(chat_id))
+        normalized = [_to_card_candidate(c) for c in cands]
+        sess.last_results = list(normalized)
+        new_ids = [str(getattr(c, "id", "") or "") for c in normalized]
+        new_ids = [i for i in new_ids if i]
+        sess.shown_product_ids = list(dict.fromkeys(sess.shown_product_ids + new_ids))
+        store.update(sess)
+        return len(normalized)
+    except Exception as exc:  # noqa: BLE001 — never break the search tool
+        logger.debug("[tool.search_products] persist_last_results failed: %r", exc)
+        return 0
+
+
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
     try:
@@ -187,6 +251,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         return SearchProductsResult(
             ok=False, error=f"pipeline_failed:{type(exc).__name__}", candidates_count=0, top_candidates=[]
         )
+
+    # Persist FULL candidates for the turn so `respond` can render real cards
+    # internally (the LLM never hand-serializes cards). LLM context still gets
+    # only the small `top_candidates` summary below.
+    persist_last_results(ctx, cands)
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
     return SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)

@@ -113,8 +113,12 @@ class GetRecentHistoryArgs(TypedDict, total=False):
 
 
 class RespondArgs(TypedDict, total=False):
+    # NOTE (SPEC-AGENT-V2-REACT cards-spam fix): `cards` is intentionally NOT a
+    # field. The LLM (esp. nova-lite) cannot serialize search candidates and
+    # char-exploded a markdown string into a per-character list → 1-char
+    # Telegram sends + empty-string 400s. Cards are now sourced internally by
+    # the respond tool from the turn's last search (`sess.last_results`).
     text: str
-    cards: list[dict[str, Any]] | None
 
 
 # ── Result TypedDicts (7 tools) ────────────────────────────────────────────
@@ -273,8 +277,10 @@ REGISTRY: dict[str, ToolMetadata] = {
     "respond": {
         "name": "respond",
         "description": (
-            "Send a natural-language reply to the user. "
-            "ALWAYS terminates the agent loop. Optionally include result cards."
+            "Send a natural-language reply to the user. Provide ONLY `text` "
+            "(your written reply). Do NOT provide cards — product cards are "
+            "attached automatically by the system from the most recent search "
+            "in this conversation. ALWAYS terminates the agent loop."
         ),
         "args_typeddict": RespondArgs,
         "result_typeddict": RespondResult,

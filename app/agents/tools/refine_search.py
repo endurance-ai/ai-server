@@ -19,6 +19,7 @@ from app.agents.tool_registry import RefineSearchResult
 from app.agents.tools.search_products import (
     _candidate_to_dict,
     _is_real_image_url,
+    persist_last_results,
     run_image_search,
     run_text_only_search,
 )
@@ -76,6 +77,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     if exclude_kw:
         ek = {k.lower() for k in exclude_kw}
         cands = [c for c in cands if not any(k in (getattr(c, "title", "") or "").lower() for k in ek)]
+
+    # Persist FULL refined candidates so `respond` renders real cards
+    # internally (parity with search_products; LLM never serializes cards).
+    persist_last_results(ctx, cands)
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
     _ = action, max_price, min_price  # informational only in α
