@@ -1,9 +1,21 @@
 """SPEC-AGENT-V2-REACT / T-003b — `search_products` tool wrapper.
 
-Thin wrapper around `app.pipeline.runner.run_pipeline`. Translates LLM-friendly
-flat args into the existing `RecommendRequest` shape.
+Routes to one of two EXISTING search entrypoints — never a new algorithm:
 
-@MX:NOTE: [AUTO] Side effect: DB RPC + Modal embedding call.
+- Photo-pick path: a real resolved image URL is present in ``ctx`` (pin /
+  og:image resolved by the upstream resolve_image step). Use the full
+  ``run_pipeline`` (dense image embedding + sparse pgroonga + RRF).
+- Text-only path: no real image at all. Build a ``PipelineState`` with a
+  zero dense vector and drive the SAME ``search_step`` + ``diversify_step``
+  the pipeline uses. The pgroonga sparse branch carries the query; the zero
+  dense vector contributes only noise that RRF + diversify rank below the
+  real sparse hits (verified against the live 78k catalog).
+
+The LLM NEVER supplies an image URL (the arg is removed from the tool
+schema). Imagery is sourced internally from ``ctx`` only — this kills the
+fabricated-placeholder-URL → Modal regression.
+
+@MX:NOTE: [AUTO] Side effect: DB RPC (text path) or DB RPC + Modal embed (photo path).
 @MX:SPEC: SPEC-AGENT-V2-REACT
 """
 
@@ -16,6 +28,29 @@ from app.agents.tool_registry import SearchProductsResult
 
 logger = logging.getLogger(__name__)
 
+# Number of FashionSigLIP dims (Modal /embed). The text-only path injects a
+# zero vector of this width so dense never matches anything meaningful and
+# the sparse (pgroonga) branch fully drives ranking.
+_EMBED_DIM = 768
+
+# RFC 2606 `.invalid` TLD — provably non-resolvable. Used ONLY to satisfy the
+# unmodifiable RecommendRequest.image_url field on the text-only path. It is
+# NEVER sent to Modal (embed_step is bypassed; embedding is injected directly).
+_TEXT_ONLY_SENTINEL = "https://text-only.invalid/none"
+
+
+def _is_real_image_url(value: Any) -> bool:
+    """A usable, externally-resolved image URL (pin / og:image / R2).
+
+    Rejects empties, the text-only sentinel, and anything not http(s).
+    """
+    if not isinstance(value, str):
+        return False
+    v = value.strip()
+    if not v or v == _TEXT_ONLY_SENTINEL:
+        return False
+    return v.startswith(("http://", "https://"))
+
 
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
@@ -25,45 +60,128 @@ def _candidate_to_dict(cand: Any) -> dict[str, Any]:
         elif isinstance(cand, dict):
             d = dict(cand)
         else:
-            d = {k: getattr(cand, k, None) for k in ("product_id", "brand", "title", "price", "image_url")}
+            d = {k: getattr(cand, k, None) for k in ("product_id", "id", "brand", "title", "name", "price")}
     except Exception:  # noqa: BLE001
         d = {}
+    # Pipeline dicts + Candidate models both expose `name`; `title` was only a
+    # guess and is empty for the text-only path — fall back to `name` so the
+    # LLM actually sees product names in its context.
     return {
         "product_id": d.get("product_id") or d.get("id"),
         "brand": d.get("brand"),
-        "title": (d.get("title") or "")[:80],
+        "title": (d.get("title") or d.get("name") or "")[:80],
         "price": d.get("price"),
     }
 
 
+async def run_text_only_search(
+    *,
+    text_query: str,
+    category: str | None = None,
+    fit: str | None = None,
+    color_family: str | None = None,
+    top_k: int = 15,
+) -> list[Any]:
+    """Text/sparse-only search — reuses the EXISTING search_step + diversify_step.
+
+    No image, no Modal call. A zero dense vector is injected so the RPC's
+    pgroonga (sparse) branch fully drives ranking; RRF + diversify push the
+    zero-vector dense noise below the real sparse hits. Shared by
+    `search_products` and `refine_search` text-only paths.
+
+    Returns the diversified candidate dicts (pipeline `final_candidates`).
+    """
+    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.pipeline.diversify import diversify_step
+    from app.pipeline.search import search_step
+    from app.pipeline.state import PipelineState
+
+    item = AnalyzedItem(
+        id="agent-v2-text",
+        category=category or "apparel",
+        subcategory=None,
+        fit=fit,
+        color_family=color_family,
+        # Force the English/free-text query into the sparse slot. We
+        # deliberately do NOT set search_query_ko so search_step uses this
+        # value verbatim against the (English-indexed) pgroonga column.
+        search_query=text_query,
+    )
+    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
+    state = PipelineState(request=req)
+    # Bypass embed_step entirely — sentinel URL never reaches Modal.
+    state.embedding = [0.0] * _EMBED_DIM
+    state = await search_step(state)
+    state = await diversify_step(state)
+    return list(state.final_candidates or [])
+
+
+async def run_image_search(
+    *,
+    image_url: str,
+    text_query: str,
+    category: str | None = None,
+    fit: str | None = None,
+    color_family: str | None = None,
+    top_k: int = 15,
+) -> list[Any]:
+    """Photo-pick path — full existing `run_pipeline` (dense image + sparse + RRF).
+
+    `image_url` MUST be an externally-resolved URL sourced from ctx (never an
+    LLM arg, never a placeholder).
+    """
+    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.pipeline.runner import run_pipeline
+
+    item = AnalyzedItem(
+        id="agent-v2",
+        category=category or "apparel",
+        subcategory=None,
+        fit=fit,
+        color_family=color_family,
+        search_query=text_query,
+    )
+    req = RecommendRequest(item=item, image_url=image_url, final_limit=max(1, int(top_k)))
+    resp = await run_pipeline(req)
+    return list(getattr(resp, "results", None) or getattr(resp, "candidates", None) or [])
+
+
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsResult:
     text_query = (args.get("text_query") or "").strip()
-    if not text_query:
-        return SearchProductsResult(ok=False, error="missing_text_query", candidates_count=0, top_candidates=[])
+    ctx_image = ctx.get("image_url")
+    has_image = _is_real_image_url(ctx_image)
 
-    # Lazy import — avoids loading pipeline stack at registry import time.
+    # A non-empty text_query alone is sufficient. Only a turn with neither a
+    # query nor a usable image is unanswerable.
+    if not text_query and not has_image:
+        return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
+
+    top_k = int(args.get("top_k") or 15)
+    category = args.get("style_node_primary")
+    fit = args.get("fit")
+    color_family = args.get("color_family")
+
     try:
-        from app.models.request import AnalyzedItem, RecommendRequest
-        from app.pipeline.runner import run_pipeline
-    except Exception as exc:  # noqa: BLE001
-        return SearchProductsResult(ok=False, error=f"import_failed:{exc!r}", candidates_count=0, top_candidates=[])
-
-    image_url = args.get("image_url") or ctx.get("image_url") or ""
-    if not image_url:
-        return SearchProductsResult(ok=False, error="missing_image_url", candidates_count=0, top_candidates=[])
-
-    try:
-        item = AnalyzedItem(
-            id="agent-v2",
-            category=args.get("style_node_primary") or "apparel",
-            subcategory=None,
-            fit=args.get("fit"),
-            color_family=args.get("color_family"),
-            search_query=text_query,
-        )
-        req = RecommendRequest(item=item, image_url=image_url, final_limit=int(args.get("top_k") or 15))
-        resp = await run_pipeline(req)
-        cands = list(getattr(resp, "candidates", None) or [])
+        if has_image:
+            # Photo-pick: real resolved image drives dense; text_query (or the
+            # category) seeds sparse. NEVER an LLM-supplied / placeholder URL.
+            query = text_query or category or "fashion item"
+            cands = await run_image_search(
+                image_url=str(ctx_image),
+                text_query=query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=top_k,
+            )
+        else:
+            cands = await run_text_only_search(
+                text_query=text_query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=top_k,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool.search_products] pipeline raised: %r", exc)
         return SearchProductsResult(

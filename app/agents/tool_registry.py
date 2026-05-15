@@ -65,8 +65,11 @@ class AnalyzeImageArgs(TypedDict, total=False):
 
 
 class SearchProductsArgs(TypedDict, total=False):
+    # NOTE (SPEC-AGENT-V2-REACT root-bug fix): `image_url` is intentionally
+    # NOT a field here. The tool sources imagery internally from the resolved
+    # session/ctx state. Exposing it let the LLM fabricate placeholder URLs
+    # that Modal embedded → vector search missed the whole catalog → 0 results.
     text_query: str
-    image_url: str | None
     style_node_primary: str | None
     color_family: str | None
     fit: str | None
@@ -201,8 +204,12 @@ REGISTRY: dict[str, ToolMetadata] = {
     "search_products": {
         "name": "search_products",
         "description": (
-            "Search the product catalog using text query and optional filters. "
-            "Returns top candidates with brand/title/price."
+            "Search the 78k-product catalog. Provide `text_query` (a concise "
+            "ENGLISH description of the item, e.g. 'leather loafers', 'denim jeans') "
+            "plus optional filters (style_node_primary, color_family, fit, price, "
+            "top_k). Do NOT provide an image_url — the tool handles imagery "
+            "internally from session state. Returns top candidates with "
+            "brand/title/price."
         ),
         "args_typeddict": SearchProductsArgs,
         "result_typeddict": SearchProductsResult,

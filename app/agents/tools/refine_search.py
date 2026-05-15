@@ -16,17 +16,24 @@ import logging
 from typing import Any
 
 from app.agents.tool_registry import RefineSearchResult
-from app.agents.tools.search_products import _candidate_to_dict
+from app.agents.tools.search_products import (
+    _candidate_to_dict,
+    _is_real_image_url,
+    run_image_search,
+    run_text_only_search,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
     action = args.get("action") or "broaden"
-    # P1-2: image_url is optional. In V2 the agent LLM can call refine_search
-    # after a text-only search_products turn (no photo). The pipeline handles
-    # empty image_url on the dense path, so proceed text-query-only.
-    image_url = ctx.get("image_url") or ""
+    # image_url is sourced from ctx ONLY (never an LLM arg). When no real
+    # resolved image is present we route to the text/sparse-only search —
+    # the previous code passed image_url="" straight into run_pipeline, which
+    # POSTed an empty URL to Modal and produced 0 results (same root bug).
+    ctx_image = ctx.get("image_url")
+    has_image = _is_real_image_url(ctx_image)
 
     # Reconstruct text_query from ctx + boost_keywords if present.
     base_query = ctx.get("text_query") or ""
@@ -39,20 +46,26 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     min_price = None if args.get("drop_min_price") else args.get("min_price")
 
     try:
-        from app.models.request import AnalyzedItem, RecommendRequest
-        from app.pipeline.runner import run_pipeline
-
-        item = AnalyzedItem(
-            id="agent-v2-refine",
-            category=ctx.get("style_node_primary") or "apparel",
-            subcategory=None,
-            fit=ctx.get("fit"),
-            color_family=args.get("color") or ctx.get("color_family"),
-            search_query=text_query,
-        )
-        req = RecommendRequest(item=item, image_url=image_url, final_limit=15)
-        resp = await run_pipeline(req)
-        cands = list(getattr(resp, "candidates", None) or [])
+        category = ctx.get("style_node_primary")
+        fit = ctx.get("fit")
+        color_family = args.get("color") or ctx.get("color_family")
+        if has_image:
+            cands = await run_image_search(
+                image_url=str(ctx_image),
+                text_query=text_query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=15,
+            )
+        else:
+            cands = await run_text_only_search(
+                text_query=text_query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=15,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool.refine_search] pipeline raised: %r", exc)
         return RefineSearchResult(
