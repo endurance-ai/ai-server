@@ -11,15 +11,13 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import HttpUrl
 
-from app.channels.critique import CritiqueDelta
-from app.channels.router import RoutedDecision, RoutedIntent
 from app.channels.schemas import ChannelMessage
 from app.channels.session import InMemorySessionStore, SessionState, set_store
+from app.core.config import settings
 from app.graphs.routing import (
     _route_after_ingest,
     _route_after_pick,
     _route_after_resolve,
-    _route_after_router_text,
     _route_after_search,
     _route_after_vision,
 )
@@ -113,46 +111,15 @@ def test_ingest_empty_message_routes_to_respond():
 
 
 # ── _route_after_router_text ───────────────────────────────────────────────
-
-
-def test_router_critique_text_with_context_routes_to_critique_apply(_store):
-    sess = _store.get_or_create(42)
-    sess.image_url = "https://i.pinimg.com/x.jpg"
-    sess.vision_item = "tee"
-    _store.update(sess)
-    s = _state(
-        _msg(text="cheaper"),
-        decision=RoutedDecision(intent=RoutedIntent.CRITIQUE_TEXT, critique_delta=CritiqueDelta(op="free_text")),
-    )
-    assert _route_after_router_text(s) == "critique_apply"
-
-
-def test_router_critique_text_without_context_routes_to_respond():
-    s = _state(
-        _msg(text="cheaper"),
-        decision=RoutedDecision(intent=RoutedIntent.CRITIQUE_TEXT, critique_delta=CritiqueDelta(op="free_text")),
-    )
-    assert _route_after_router_text(s) == "respond"
-
-
-def test_router_taste_update_routes_to_taste_update():
-    s = _state(_msg(text="i love ami"), decision=RoutedDecision(intent=RoutedIntent.TASTE_UPDATE))
-    assert _route_after_router_text(s) == "taste_update"
-
-
-def test_router_new_search_routes_to_respond():
-    s = _state(_msg(text="show me beige tees"), decision=RoutedDecision(intent=RoutedIntent.NEW_SEARCH_REQUEST))
-    assert _route_after_router_text(s) == "respond"
-
-
-def test_router_off_topic_routes_to_respond():
-    s = _state(_msg(text="hi"), decision=RoutedDecision(intent=RoutedIntent.OFF_TOPIC))
-    assert _route_after_router_text(s) == "respond"
-
-
-def test_router_no_decision_routes_to_respond():
-    s = _state(_msg(text="???"))
-    assert _route_after_router_text(s) == "respond"
+# SPEC-AGENT-V2-REACT / T-010 (Bucket C) — the 6 `_route_after_router_text`
+# classifier tests (critique_text-with/without-context, taste_update,
+# new_search, off_topic, no_decision) were DELETED. They asserted the V1
+# 4-way intent→node mapping, which is replaced by the agent LLM's autonomous
+# tool selection (plan.md T-010: "router_text classification tests …,
+# agentic LLM 의 자율 결정으로 대체"). They were pure-function classification
+# assertions with zero behavioral / output-class value and no V2 equivalent.
+# `_route_after_router_text` itself is retained for the flag=false V1 path and
+# removed in SPEC-AGENT-V2-CLEANUP-001.
 
 
 # ── _route_after_resolve ───────────────────────────────────────────────────
@@ -248,6 +215,11 @@ def test_search_empty_routes_to_respond(monkeypatch):
 @pytest.mark.skipif(
     os.environ.get("CI", "").lower() == "true",
     reason="pre-existing SPEC-AGENTIC-CRITIQUE-001 routing regression — out of scope for this PR",
+)
+@pytest.mark.skipif(
+    bool(settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip()),
+    reason="V1-only `search_node → evaluator` routing detail; superseded by "
+    "SPEC-AGENT-V2-REACT agent loop (OQ-7: evaluator folded into refine_search)",
 )
 def test_search_routes_to_evaluator_when_self_critique_enabled():
     """SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-EVAL-001 — default ON path."""

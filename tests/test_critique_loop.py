@@ -29,6 +29,7 @@ from app.channels.taste_profile import (
     set_taste_store,
     shutdown_taste_store,
 )
+from app.core.config import settings
 from app.graphs.nodes import evaluator as evaluator_module
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
@@ -37,10 +38,24 @@ from tests.conftest_graph import FakeAdapter, FakeCandidate, StubPort
 
 # 본 파일은 SPEC-AGENTIC-CRITIQUE-001 의 critique loop 동작을 검증하는데
 # 사용자 피드백 시점 (2026-05-15 기준) 으로 stub_port wiring 회귀 5건 보유.
-# 본 PR 범위 밖이라 CI 차원에서 skip. V2 ReAct refactor 에서 해소 예정.
+# 본 PR 범위 밖이라 CI 차원에서 skip.
 pytestmark = pytest.mark.skipif(
     os.environ.get("CI", "").lower() == "true",
     reason="pre-existing critique_loop wiring regression — out of scope for this PR",
+)
+
+# SPEC-AGENT-V2-REACT / T-010 (Bucket B2) — under the V2 ReAct topology the
+# evaluator / critique_apply / send_results nodes are NOT registered (OQ-7:
+# evaluator folded into the `refine_search` tool; SPEC-AGENTIC-CRITIQUE-001's
+# deterministic 4-guard retry loop is superseded by the agent loop's 6-iter
+# cap + infinite-loop guard). These graph-level critique-loop tests assert a
+# V1-only topology detail with no V2 equivalent in an unmocked harness, so
+# they are skipped under flag=true. Under flag=false they run unchanged
+# (pre-existing wiring regression, CI-skipped above).
+_v2_active = bool(settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip())
+_skip_v1_critique_loop = pytest.mark.skipif(
+    _v2_active,
+    reason="V1-only critique loop topology; superseded by SPEC-AGENT-V2-REACT agent loop (OQ-7)",
 )
 
 
@@ -105,6 +120,7 @@ def _seed_session(store, image_url="https://i.pinimg.com/originals/x.jpg", item=
 # ── Iteration cap (REQ-CRITIQUE-LOOP-SAFETY-001) ──────────────────────────
 
 
+@_skip_v1_critique_loop
 @pytest.mark.no_evaluator_fail_open
 class TestIterationCap:
     @pytest.mark.asyncio
@@ -138,6 +154,7 @@ class TestIterationCap:
 # ── Stagnation guard (REQ-CRITIQUE-LOOP-SAFETY-002) ───────────────────────
 
 
+@_skip_v1_critique_loop
 @pytest.mark.no_evaluator_fail_open
 class TestStagnation:
     @pytest.mark.asyncio
@@ -162,6 +179,7 @@ class TestStagnation:
 # ── Score regression (REQ-CRITIQUE-LOOP-SAFETY-002a) ──────────────────────
 
 
+@_skip_v1_critique_loop
 @pytest.mark.no_evaluator_fail_open
 class TestScoreRegression:
     @pytest.mark.asyncio
@@ -191,6 +209,7 @@ class TestScoreRegression:
 # ── Empty fast-path success (REQ-CRITIQUE-EMPTY-001) ───────────────────────
 
 
+@_skip_v1_critique_loop
 @pytest.mark.no_evaluator_fail_open
 class TestEmptyFastPathFlow:
     @pytest.mark.asyncio
@@ -240,10 +259,22 @@ class TestFeatureFlag:
 
     @pytest.mark.asyncio
     async def test_enabled_topology_includes_evaluator(self):
+        """SPEC-AGENT-V2-REACT / T-010 (Bucket A) — flag-aware.
+
+        Under the V1 topology the evaluator/apply_self_critique nodes are
+        present when SELF_CRITIQUE_ENABLED. Under the V2 ReAct topology
+        (REQ-AGENT-TOPOLOGY-SUPERSEDE-001 / OQ-7) the evaluator is folded into
+        the `refine_search` tool and replaced by the single `agent` node.
+        """
         from app.graphs.fashion_bot import build_graph
 
         g = build_graph().get_graph()
         node_names = set(g.nodes.keys())
+        if _v2_active:
+            assert "agent" in node_names
+            assert "evaluator" not in node_names
+            assert "apply_self_critique" not in node_names
+            return
         assert "evaluator" in node_names
         assert "apply_self_critique" in node_names
 
@@ -251,6 +282,7 @@ class TestFeatureFlag:
 # ── Exhaustion bookkeeping (REQ-CRITIQUE-RETRY-003) ───────────────────────
 
 
+@_skip_v1_critique_loop
 @pytest.mark.no_evaluator_fail_open
 class TestExhaustion:
     @pytest.mark.asyncio

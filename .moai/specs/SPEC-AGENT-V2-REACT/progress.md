@@ -44,3 +44,4 @@
 - Tests: tests/test_agent_v2/test_security.py added (27 parametrized cases: SSRF hard-deny + positive control + validate_args type checks)
 - ruff check app/ + ruff format: all green; pytest tests/test_agent_v2/: 53 passed (was 26; +27 new)
 - Scope: only react_loop.py / refine_search.py / agent.py / analyze_image.py / tool_registry.py + new test file touched; skipped items (JSON-malform streak, all P2) left as-is per instruction
+- T-010 complete: V1 regression migrated — 5n flag-aware / 4n property / 17n skipif / 6n deleted; full suite green both flags
