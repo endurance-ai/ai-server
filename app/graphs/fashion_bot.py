@@ -182,10 +182,12 @@ def _build_graph_v2() -> Any:
     router_text passthrough, apply_self_critique_passthrough) are NOT registered.
     """
     from app.graphs.nodes.agent import agent as agent_node
+    from app.graphs.nodes.intro import intro as intro_node
 
     builder = StateGraph(WorkingState)
 
     builder.add_node("ingest", ingest)
+    builder.add_node("intro", intro_node)
     builder.add_node("resolve_image", resolve_image)
     builder.add_node("vision_node", vision_node)
     builder.add_node("pick_item", pick_item)
@@ -205,6 +207,7 @@ def _build_graph_v2() -> Any:
         from app.channels.session import SessionState, get_store
         from app.graphs.routing import (
             _resolve_onboard_stage_target,
+            first_touch_intro_required,
             is_continuous_pinterest,
             onboarding_required,
         )
@@ -214,9 +217,27 @@ def _build_graph_v2() -> Any:
             return _resolve_onboard_stage_target(sess, state)
         if is_continuous_pinterest(state, sess):
             return "pinterest_ingest"
+        # SPEC-AGENT-V2-REACT — onboarding-cards OFF: a brand-new user's FIRST
+        # message gets the one-shot service intro instead of the agent. Gated
+        # strictly on `onboarded_at IS NULL`; intro marks it set so the 2nd
+        # message (re-sent link/text) flows normally. Placed after the
+        # onboarding gate (unchanged when flag ON) and continuous-pinterest,
+        # before item:/clarify:/photo/url/pick and the contentless `__end__`
+        # guard (the predicate itself requires user signal).
+        if first_touch_intro_required(state, sess):
+            return "intro"
 
         msg = state.message
         cb = msg.callback_data or ""
+        logger.info(
+            "🧭 [route_v2] cb=%r text=%r urls=%s photo=%s sel_idx=%s sess_state=%s",
+            cb,
+            (msg.text or "")[:40],
+            bool(msg.urls),
+            bool(msg.photo_file_id),
+            state.selected_item_index,
+            getattr(sess, "state", None),
+        )
         # Picker callback → pick_item (still deterministic).
         if cb.startswith("item:"):
             return "pick_item"
@@ -245,6 +266,7 @@ def _build_graph_v2() -> Any:
         "pick_item": "pick_item",
         "resolve_image": "resolve_image",
         "agent": "agent",
+        "intro": "intro",  # SPEC-AGENT-V2-REACT first-touch service intro (cards OFF)
         "__end__": END,  # SPEC-AGENT-V2-REACT §15 Decision 2 — silent END for contentless Update
         "pinterest_ingest": "pinterest_ingest",
         "onboard_intro": "onboard_intro",
@@ -278,6 +300,10 @@ def _build_graph_v2() -> Any:
     builder.add_edge("apply_clarify", "agent")
     builder.add_edge("ask_clarify", END)
     builder.add_edge("agent", END)
+    # SPEC-AGENT-V2-REACT — first-touch intro is per-turn terminal: the user's
+    # 2nd message is a fresh webhook (new graph run) and onboarded_at is now
+    # set, so the ingest gate routes it normally (agent / resolve_image).
+    builder.add_edge("intro", END)
     # Onboarding edges — preserved.
     builder.add_edge("onboard_intro", END)
     builder.add_edge("onboard_mood", END)

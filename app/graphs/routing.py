@@ -106,6 +106,33 @@ def onboarding_required(state: WorkingState, sess: Session) -> bool:
     return False
 
 
+def first_touch_intro_required(state: WorkingState, sess: Session) -> bool:
+    """SPEC-AGENT-V2-REACT — onboarding-cards OFF first-touch gate.
+
+    True iff ALL of:
+      - ONBOARDING_CARDS_ENABLED is false (card flow disabled),
+      - `sess.onboarded_at IS NULL` (brand-new / not-yet-introduced user),
+      - the inbound Update carries actual user signal (text / photo / url /
+        callback) — a contentless spurious Update must fall through to the
+        empty-input `__end__` guard, not the intro.
+
+    A user who has `onboarded_at` set (introduced OR completed old onboarding)
+    NEVER matches — strictly gated on `onboarded_at IS NULL`.
+    """
+    if bool(getattr(settings, "ONBOARDING_CARDS_ENABLED", True)):
+        return False
+    if getattr(sess, "onboarded_at", None) is not None:
+        return False
+    msg = state.message
+    if msg is None:
+        return False
+    cb = msg.callback_data or ""
+    # Mirror the V2 contentless `__end__` guard exactly: a blank-text Update
+    # with no callback / url / photo carries no user signal and must fall
+    # through to the silent-END guard, NOT trigger the intro.
+    return bool(cb or (msg.text or "").strip() or msg.photo_file_id or msg.urls)
+
+
 def _resolve_onboard_stage_target(sess: Session, state: WorkingState) -> str:
     """Return the onboarding-subgraph node name for the current state.
 
