@@ -102,7 +102,11 @@ def test_stderr_fallback_record_is_single_line_json(capsys):
     last = lines[-1]
     record = json.loads(last)
     assert record["tag"] == "CONV_LOG_FALLBACK"
-    assert record["payload"]["node_name"] == "vision"
+    # security review P1-02: stderr fallback strips payload body to prevent
+    # PII / GDPR cascade. Only metadata + payload_keys count are recorded.
+    assert "payload" not in record, "payload body must NOT be in stderr fallback (security P1-02)"
+    assert record["event_type"] == "node_error"
+    assert record["user_key"] == "u:9"
 
 
 def test_concurrent_emits_no_exception():
@@ -118,8 +122,15 @@ def test_concurrent_emits_no_exception():
         )
 
 
-def test_log_event_module_level_singleton_weakset():
-    """The retention set is a WeakSet at module level — verify identity."""
+def test_log_event_module_level_singleton_strong_set():
+    """The retention set is a strong-ref set at module level.
+
+    code review P0-1 fix: WeakSet allowed GC race where caller-discarded tasks
+    were collected before INSERT started. Strong set + add_done_callback(set.discard)
+    keeps tasks alive until completion, then evicts.
+    """
+    assert isinstance(conv_log_mod._IN_FLIGHT, set)
+    # Not a WeakSet (regression guard).
     from weakref import WeakSet
 
-    assert isinstance(conv_log_mod._IN_FLIGHT, WeakSet)
+    assert not isinstance(conv_log_mod._IN_FLIGHT, WeakSet)

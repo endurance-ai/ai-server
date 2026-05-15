@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncGenerator, Generator
-from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -88,7 +87,22 @@ async def _truncate_log_table(pool_initialized: None) -> AsyncGenerator[None]:
 
 @pytest_asyncio.fixture
 async def conv_log_backend_postgres(monkeypatch, pool_initialized: None):
-    """Set app.state.conv_log_backend = 'postgres' so `emit()` writes rows."""
-    fake_app = SimpleNamespace(state=SimpleNamespace(conv_log_backend="postgres"))
-    monkeypatch.setattr("app.main.app", fake_app, raising=False)
-    yield
+    """Set app.state.conv_log_backend = 'postgres' so `emit()` writes rows.
+
+    실제 FastAPI app 의 state 만 monkeypatch — 전체 app 객체를 SimpleNamespace
+    로 교체하면 ASGI transport 가 작동 안 함 (webhook_client fixture 깨짐).
+    """
+    from app.main import app
+
+    prior = getattr(app.state, "conv_log_backend", None)
+    app.state.conv_log_backend = "postgres"
+    try:
+        yield
+    finally:
+        if prior is None:
+            try:
+                del app.state.conv_log_backend
+            except AttributeError:
+                pass
+        else:
+            app.state.conv_log_backend = prior

@@ -64,9 +64,10 @@ def test_migration_0003_downgrade_and_reupgrade_is_idempotent(pg_dsn: str):
 
     cfg = _alembic_config(pg_dsn)
 
-    # Downgrade by 1 revision (0003 → 0002).
-    command.downgrade(cfg, "-1")
-    assert not _table_exists(pg_dsn, "ai", "log_conversation_event"), "Table should be dropped after downgrade -1"
+    # Downgrade to 0002 explicitly — head is now 0004 (ONBOARD migration added).
+    # `-1` would only undo 0004 (onboarded_at column), not the LOG table.
+    command.downgrade(cfg, "0002")
+    assert not _table_exists(pg_dsn, "ai", "log_conversation_event"), "Table should be dropped after downgrade to 0002"
 
     # Re-upgrade to head — should be idempotent.
     command.upgrade(cfg, "head")
