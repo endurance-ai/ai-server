@@ -197,16 +197,13 @@ async def test_assistant_tooluse_precedes_toolmessage_on_2nd_ainvoke(monkeypatch
     # appended before its tool result. In production this is a langchain
     # AIMessage; the fake mirrors its duck-typed shape (.tool_calls).
     ai_idx = next(
-        i
-        for i, m in enumerate(msgs_2nd)
-        if not isinstance(m, (dict, ToolMessage)) and getattr(m, "tool_calls", None)
+        i for i, m in enumerate(msgs_2nd) if not isinstance(m, (dict, ToolMessage)) and getattr(m, "tool_calls", None)
     )
     nxt = msgs_2nd[ai_idx + 1]
     assert isinstance(nxt, ToolMessage), "ToolMessage must immediately follow assistant tool_use"
     tc_id = first.tool_calls[0]["id"]
     assert nxt.tool_call_id == tc_id, (
-        f"tool_call_id must match the tool call id exactly "
-        f"(got {nxt.tool_call_id!r}, expected {tc_id!r})"
+        f"tool_call_id must match the tool call id exactly (got {nxt.tool_call_id!r}, expected {tc_id!r})"
     )
 
 
