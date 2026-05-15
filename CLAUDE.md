@@ -39,7 +39,7 @@ app/
 ├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, lang, vision (+ vision_prompt, clarify, clarify_values, onboarding_cards, onboarding_values, pinterest_url, _jsonable)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
-│   └── nodes/           # 18 노드 (V1) / 13 노드 (V2 — agent 노드가 deprecated 5개 대체): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent (SPEC-AGENT-V2-REACT)
+│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT)
 ├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
 ├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider, ApifyProvider (SPEC-ONBOARD-CARDS-001)
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler + conversation_log + event_payloads (SPEC-CONVERSATION-LOG-001)
@@ -53,7 +53,7 @@ app/
 |------|------|
 | 프레임워크 | FastAPI + uvicorn |
 | 에이전트 오케스트레이션 | **LangGraph** `>=1.1.10` (SPEC-AGENT-001) |
-| LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드) |
+| LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드). **V2 ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`) via LiteLLM** — `drop_params: true` 로 `tool_choice` 제거 (Bedrock 호환) |
 | 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
 | 벡터 DB | **dev-app Postgres 16 + pgvector + pgroonga** (PostgREST nginx shim, Qdrant 미사용) |
 | Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
@@ -102,7 +102,8 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/nodes/agent.py` | LangGraph `agent` 노드 — `run_react_loop` 래핑, state delta 반환 (SPEC-AGENT-V2-REACT) |
 | `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001). `AGENT_V2_REACT_ENABLED` 플래그로 V1/V2 토폴로지 분기 |
 | `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델. V2: `agent_iterations`, `tool_call_history`, `agent_status` 3 필드 추가 |
-| `app/graphs/routing.py` | 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search + 온보딩 분기 포함) |
+| `app/graphs/routing.py` | 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search + 온보딩 분기 포함). V2 신규: `first_touch_intro_required` (ONBOARDING_CARDS_ENABLED=false + onboarded_at IS NULL 시 intro 진입 판단) |
+| `app/graphs/nodes/intro.py` | 첫 방문 서비스 소개 메시지 — `ONBOARDING_CARDS_ENABLED=false` 시 신규 사용자(`onboarded_at IS NULL`)에게 1회성 상세 안내 발송, `onboarded_at` 기록 후 턴 종료. KO/EN 분기 (SPEC-AGENT-V2-REACT) |
 | `app/graphs/nodes/onboard_intro.py` | 온보딩 인트로 카드 — `/start` + `onboarded_at IS NULL` 시 진입, 기본 언어 KO 설정 (SPEC-ONBOARD-CARDS-001) |
 | `app/graphs/nodes/onboard_mood.py` | 온보딩 Stage 1 — 무드 카드 (4 axes) |
 | `app/graphs/nodes/onboard_color.py` | 온보딩 Stage 2 — 컬러 카드 |
@@ -164,7 +165,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `CLARIFY_CARDS_ENABLED` (기본 `true`) + `CLARIFY_MAX_BUTTONS` (SPEC-CLARIFY-CARDS-001)
 - `RESPONSE_SPLIT_ENABLED` (기본 `true`) + `RESPONSE_SPLIT_DELAY_MS` / `RESPONSE_SPLIT_MIN_CHARS` — 문장 단위 분할 발화 (noscroll benchmark P0)
 - `ONBOARDING_CARDS_ENABLED` (기본 `true`) + `PINTEREST_BOOTSTRAP_ENABLED` (기본 `true`) + `APIFY_TOKEN` / `APIFY_PINTEREST_ACTOR` / `APIFY_PINTEREST_MAX_ITEMS` / `APIFY_PINTEREST_CONCURRENCY` / `ONBOARDING_SEED_MAX_WEIGHT` (SPEC-ONBOARD-CARDS-001)
-- `AGENT_V2_REACT_ENABLED` (기본 `false`, **운영 기본 off**) + `AGENT_LLM_MODEL` (미설정 시 fail-closed — effective gate) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` (SPEC-AGENT-V2-REACT, flag-gated, default off in prod)
+- `AGENT_V2_REACT_ENABLED` (기본 `false`, **운영 기본 off**) + `AGENT_LLM_MODEL` (미설정 시 fail-closed — effective gate, 실제 운영값: `nova-lite` via LiteLLM) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S` (SPEC-AGENT-V2-REACT, flag-gated, default off in prod)
 
 ## 관련 프로젝트
 

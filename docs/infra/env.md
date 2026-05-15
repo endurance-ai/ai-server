@@ -152,6 +152,9 @@ cutover 절차: `docs/infra/deployment.md` Scenario (e) 참조.
 | `AGENT_TURN_TOKEN_BUDGET` | `32000` | 턴당 누적 LLM token 상한. 초과 시 fallback respond (REQ-AGENT-PERF-TURN-BUDGET-001) |
 | `AGENT_TOOL_TIMEOUT_S` | `5.0` | 단일 tool dispatch timeout (초, REQ-AGENT-FAILURE-TOOL-001) |
 | `AGENT_LLM_TIMEOUT_S` | `5.0` | 단일 LLM ainvoke timeout (초) |
+| `AGENT_LLM_MAX_RETRIES` | `2` | LLM transient 오류(5xx/throttle/timeout) 재시도 횟수. 재시도는 별도 iteration 소모 없음 |
+| `AGENT_TOOL_MAX_RETRIES` | `1` | tool dispatch transient 오류 재시도 횟수. terminal `respond` 는 재시도 0 고정 (멱등성 없음) |
+| `AGENT_RESPOND_TIMEOUT_S` | `30.0` | terminal `respond` 툴 전용 wall-clock timeout (초). 카드 최대 12장 순차 전송(~1-1.7s/장) → 구조적으로 `AGENT_TOOL_TIMEOUT_S` 초과 가능, 전용 상한 필요 |
 
 안전 가드 (env 무관 FROZEN): 3-consecutive identical tool call 무한루프 가드, JSON malform 1x retry → exhaustion, args validation (TypedDict).
 

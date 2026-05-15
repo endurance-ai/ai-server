@@ -143,6 +143,7 @@ app/
 │       ├── ask_clarify.py  # weak-vision 시 결정형 카드 (6 axes, no LLM, SPEC-CLARIFY-CARDS-001)
 │       ├── apply_clarify.py # clarify:* 콜백 → session.boost_keywords 누적 [DEPRECATED V2, 롤백 보존]
 │       ├── agent.py        # ReAct agent 노드 — run_react_loop 래핑 (SPEC-AGENT-V2-REACT, V2 전용)
+│       ├── intro.py        # 첫 방문 서비스 소개 — ONBOARDING_CARDS_ENABLED=false 시 신규 사용자 1회성 안내 (SPEC-AGENT-V2-REACT, V2 전용)
 │       ├── critique_apply.py # Routing-LLM + critique refinement [DEPRECATED V2, 롤백 보존]
 │       ├── search.py       # RecommendationPort → 파이프라인 호출
 │       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001) [DEPRECATED V2, 롤백 보존]
@@ -220,8 +221,9 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구�
 
 **V2 토폴로지 (flag-gated, AGENT_V2_REACT_ENABLED=true + AGENT_LLM_MODEL 설정 시, 운영 default off)**:
 - 온보딩 6 노드(`onboard_intro/mood/color/fit/pinterest` + `pinterest_ingest`) 보존 — 동일 분기 로직.
-- Post-onboarding 텍스트/사진/콜백은 모두 `agent` 단일 노드 → `run_react_loop` (SPEC-AGENT-V2-REACT, `app/agents/`).
-- ReAct loop: LLM이 7개 도구(`analyze_image` / `search_products` / `refine_search` / `update_taste` / `ask_user_clarification` / `get_recent_history` / `respond`) 중 순차 선택 → `respond` 호출 시 루프 종료. 안전 가드: iteration cap (`AGENT_MAX_ITERATIONS`) / 3-consecutive 동일 호출 무한루프 가드 / token budget (`AGENT_TURN_TOKEN_BUDGET`) / per-LLM timeout / per-tool timeout (`AGENT_TOOL_TIMEOUT_S`).
+- 신규 `intro` 노드: `ONBOARDING_CARDS_ENABLED=false` + `onboarded_at IS NULL` 시 1회성 서비스 안내 발송 → `onboarded_at` 기록 → 턴 종료. 2번째 메시지부터 `agent` 정상 진입.
+- Post-onboarding 텍스트/사진/콜백은 모두 `agent` 단일 노드 → `run_react_loop` (SPEC-AGENT-V2-REACT, `app/agents/`). **ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`) via LiteLLM** (`drop_params: true` 적용, `tool_choice` 필드 제거로 Bedrock 호환).
+- ReAct loop: LLM이 7개 도구(`analyze_image` / `search_products` / `refine_search` / `update_taste` / `ask_user_clarification` / `get_recent_history` / `respond`) 중 순차 선택 → `respond` 호출 시 루프 종료. 안전 가드: iteration cap (`AGENT_MAX_ITERATIONS`) / 3-consecutive 동일 호출 무한루프 가드 / token budget (`AGENT_TURN_TOKEN_BUDGET`) / per-LLM timeout + transient retry (`AGENT_LLM_MAX_RETRIES`) / per-tool timeout (`AGENT_TOOL_TIMEOUT_S`) + transient retry (`AGENT_TOOL_MAX_RETRIES`) / terminal respond 전용 타임아웃 (`AGENT_RESPOND_TIMEOUT_S`, 재시도 없음).
 - Deprecated (V2에서 미등록, V1 rollback용 보존): `critique_apply`, `evaluator`, `respond`(graph node), `taste_update`, `send_results`, `channels/router.py`.
 - `ingest` 노드: V2 활성 시 `clarify:*` 콜백을 inline 처리 → `session.boost_keywords` 누적 후 `agent` 로 라우팅.
 
