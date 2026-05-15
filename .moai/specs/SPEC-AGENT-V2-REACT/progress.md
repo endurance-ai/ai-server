@@ -34,3 +34,13 @@
 - pytest tests/test_agent_v2/: 26 passed
 - Full suite flag=false: 606 passed / 10 failed (all 10 pre-existing — verified via git stash on unmodified HEAD; 7 = test_critique_loop+routing env-broken, 3 = expected count-bump tests now fixed)
 - Forbidden-path scope check: PASS (no onboard_/pipeline/providers/webhooks/recommend/clarify.py touched)
+
+## Wave 7 — Post-review P0/P1 fixes (code + security review)
+- P0-1 fixed: react_loop.py invalid-args history entry now includes `args_full` so the 3-consecutive-identical-call infinite-loop guard fires for repeated invalid-arg calls; added args_full strip to the infinite_loop_guard early-return path
+- P1-2 fixed: refine_search.py removed `missing_image_url_in_ctx` early return — text-only turns now proceed via empty-image_url dense-path pipeline call (mirrors search_products.py); image_url-present behavior unchanged
+- P1-3 fixed: agent.py turn_no replaced placeholder `10` with `state.turn_no or (state.turn_no or 0) + 1` (matches react_loop.py emit convention)
+- P1-4 fixed: analyze_image.py `_ssrf_ok` adds UNCONDITIONAL hard-deny (non-http(s) schemes / 127.0.0.0-8 / ::1 / localhost / 10. / 172.16-31. / 192.168. / 169.254.) BEFORE allowlist; allowlist retained as narrowing layer (REQ-AGENT-SEC-URL-001)
+- P1-5 fixed: tool_registry.py validate_args adds isinstance enforcement for top_k/n/min_price/max_price (int, bool rejected) + brand_likes/brand_dislikes/keyword_likes/keyword_dislikes/event_types/options (list); type mismatch returns same failure shape → react_loop records as invalid_args
+- Tests: tests/test_agent_v2/test_security.py added (27 parametrized cases: SSRF hard-deny + positive control + validate_args type checks)
+- ruff check app/ + ruff format: all green; pytest tests/test_agent_v2/: 53 passed (was 26; +27 new)
+- Scope: only react_loop.py / refine_search.py / agent.py / analyze_image.py / tool_registry.py + new test file touched; skipped items (JSON-malform streak, all P2) left as-is per instruction

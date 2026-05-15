@@ -238,6 +238,10 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "iter": it,
                 "tool_name": tool_name,
                 "args": _args_summary(raw_args),
+                # P0-1: include args_full so the 3-consecutive-identical-call
+                # infinite-loop guard can deep-compare repeated invalid-arg
+                # calls too (stripped before persist on every return path).
+                "args_full": raw_args,
                 "error": f"invalid_args:{err}",
                 "latency_ms": 0,
             }
@@ -269,6 +273,9 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 _is_identical(h.get("args_full", {}), raw_args) for h in last2
             ):
                 fb = await _fallback_respond(state, sess, "infinite_loop_guard")
+                # Strip args_full before persisting history (keep small).
+                for h in history:
+                    h.pop("args_full", None)
                 return {
                     "agent_iterations": iterations,
                     "agent_status": "exhausted",

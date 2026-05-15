@@ -140,6 +140,23 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 
 cutover 절차: `docs/infra/deployment.md` Scenario (e) 참조.
 
+## ReAct 에이전트 루프 (SPEC-AGENT-V2-REACT, flag-gated, 운영 default off)
+
+`app/agents/react_loop.py` + `app/agents/llm_client.py` — `AGENT_V2_REACT_ENABLED=true` + `AGENT_LLM_MODEL` 설정 시 V2 토폴로지 활성. 두 조건 모두 충족해야 V2 그래프 로딩 (`fashion_bot.build_graph()` 내부 이중 가드).
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `AGENT_V2_REACT_ENABLED` | `false` | V2 ReAct 토폴로지 ON/OFF. **운영 기본 off — dev 환경에서만 true 설정.** |
+| `AGENT_LLM_MODEL` | `""` | ReAct LLM 모델 명칭 (LiteLLM 경유). **미설정 시 fail-closed — `AGENT_V2_REACT_ENABLED=true` 여도 V2 비활성.** |
+| `AGENT_MAX_ITERATIONS` | `6` | 턴당 최대 tool call 반복 횟수 (REQ-AGENT-LOOP-ITERATION-001) |
+| `AGENT_TURN_TOKEN_BUDGET` | `32000` | 턴당 누적 LLM token 상한. 초과 시 fallback respond (REQ-AGENT-PERF-TURN-BUDGET-001) |
+| `AGENT_TOOL_TIMEOUT_S` | `5.0` | 단일 tool dispatch timeout (초, REQ-AGENT-FAILURE-TOOL-001) |
+| `AGENT_LLM_TIMEOUT_S` | `5.0` | 단일 LLM ainvoke timeout (초) |
+
+안전 가드 (env 무관 FROZEN): 3-consecutive identical tool call 무한루프 가드, JSON malform 1x retry → exhaustion, args validation (TypedDict).
+
+> `AGENT_LLM_MODEL` 은 로그에 모델명만 노출 — API key 는 `LITELLM_MASTER_KEY` 경유, 직접 노출 없음.
+
 ## 앱 메타
 
 | 키 | 기본 |

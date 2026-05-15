@@ -313,4 +313,25 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
     if missing:
         return False, f"missing_required: {sorted(missing)}"
 
+    # P1-5: lightweight isinstance enforcement for type-critical fields only.
+    # An LLM passing `top_k: {"nested": 1}` or `n: "abc"` would otherwise pass
+    # validation and crash deep in a caller. Not a full schema validator —
+    # only the fields whose wrong type breaks a downstream call.
+    for key in ("top_k", "n", "min_price", "max_price"):
+        if key in args:
+            v = args[key]
+            # bool is a subclass of int — reject it explicitly.
+            if not isinstance(v, int) or isinstance(v, bool):
+                return False, f"bad_type: {key} must be int"
+    for key in (
+        "brand_likes",
+        "brand_dislikes",
+        "keyword_likes",
+        "keyword_dislikes",
+        "event_types",
+        "options",
+    ):
+        if key in args and not isinstance(args[key], list):
+            return False, f"bad_type: {key} must be list"
+
     return True, None

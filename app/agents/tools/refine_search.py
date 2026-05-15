@@ -23,9 +23,10 @@ logger = logging.getLogger(__name__)
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
     action = args.get("action") or "broaden"
+    # P1-2: image_url is optional. In V2 the agent LLM can call refine_search
+    # after a text-only search_products turn (no photo). The pipeline handles
+    # empty image_url on the dense path, so proceed text-query-only.
     image_url = ctx.get("image_url") or ""
-    if not image_url:
-        return RefineSearchResult(ok=False, error="missing_image_url_in_ctx", candidates_count=0, top_candidates=[])
 
     # Reconstruct text_query from ctx + boost_keywords if present.
     base_query = ctx.get("text_query") or ""

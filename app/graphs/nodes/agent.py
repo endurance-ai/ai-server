@@ -44,5 +44,7 @@ async def agent(state: WorkingState) -> dict[str, Any]:
         "tool_call_history": delta.get("tool_call_history", []),
         "response_text": delta.get("response_text"),
         "log_events": breadcrumbs,
-        "turn_no": 10,
+        # P1-3: real turn_no from state (matches react_loop.py emit convention
+        # `state.turn_no or 1`) instead of the placeholder literal 10.
+        "turn_no": state.turn_no or (state.turn_no or 0) + 1,
     }
