@@ -1,9 +1,9 @@
 ---
 id: SPEC-AGENT-V2-REACT
-version: 0.1.0
+version: 0.1.1
 status: draft
-created: 2026-05-15
-updated: 2026-05-15
+created_at: 2026-05-15
+updated_at: 2026-05-15
 author: hchsa77@gmail.com
 priority: P0
 issue_number: null
@@ -14,6 +14,7 @@ labels: [agentic, react-loop, tool-registry, langgraph, refactor, post-onboardin
 
 ## HISTORY
 
+- 2026-05-15 (v0.1.1): plan-auditor iteration 1/3 (composite 0.95, MP-3 strict-fail) 결과 반영. 변경 2건: (D1 blocker) Frontmatter `created` / `updated` → `created_at` / `updated_at` 으로 정렬 — 본 SPEC 은 greenfield 라 SPEC-MEMORY-001 family 의 `created` 컨벤션 적용보다 MP-3 strict 준수가 깔끔. (D2 minor) Env vars 표의 `AGENT_LLM_MODEL` 기본값 `TBD` → "_(unset; agent disabled until configured — fail-closed)_" 로 변경. 미설정 시 `AGENT_V2_REACT_ENABLED` 가 효과적으로 false 가 되도록 fail-closed 의미 명시. 양 변경은 spec.md 단독 — 다른 SPEC 무변경. iteration 2 expected composite 0.96+.
 - 2026-05-15 (v0.1.0): 초안 작성. 직접적 동기는 사용자 피드백 — "이거 다 하드코딩이지 않아? 에이전틱이 전혀 아니지". 본 SPEC 직전 세 차례의 PR fix (AWAITING_INTENT routing 보강, OFF_TOPIC 분기 프롬프트 강화, sticky lang 처리) 가 모두 **router 의 4-way enum 분류 결과를 if/else 그래프 엣지로 라우팅하는** 현 아키텍처의 근본 한계를 우회하는 band-aid 였다는 인식이 본 SPEC 의 시발점. 현 SPEC-AGENT-001 v0.1.0 의 18-노드 토폴로지는 LLM 을 (1) Vision 추출, (2) router_text 의 4-way 분류 (NEW_SEARCH / CRITIQUE / TASTE_UPDATE / OFF_TOPIC), (3) evaluator critique loop, (4) respond 의 12개 하드코딩 flow 템플릿 픽킹 — 네 군데에서만 사용. **LLM 이 "다음에 무엇을 할지" 를 자율적으로 결정하지 않는다.** 본 라운드에서 사용자가 직접 채택한 정책 결정: (A) post-onboarding 라우팅 트리를 **단일 `agent` 그래프 노드 + ReAct 루프 + tool registry** 로 교체; (B) onboarding 서브그래프 (SPEC-ONBOARD-CARDS-001 v0.3.2 의 6노드) 는 결정형 state machine 으로 **그대로 유지** — 이산적 step 흐름이므로 free-form agentic routing 의 이득이 없음; (C) 최소 **7개 도구** (analyze_image / search_products / refine_search / update_taste / ask_user_clarification / get_recent_history / respond) 로 registry 시작, 향후 추가 가능; (D) ReAct 루프는 **최대 반복 6회** 로 bounded — exhausted 시 fallback respond 로 종료; (E) Multi-agent (planner+worker) 아키텍처는 **기각** (V3 로 deferral) — 본 SPEC 은 single-loop agent 만 다룸; (F) **기존 헬퍼 (vision/embed/search/diversify/critique/taste) 는 재작성 없이 도구 wrapper 로 감싸기만** — 백워드 호환 보장; (G) 모든 도구 호출은 `tool_call` 이벤트로 SPEC-CONVERSATION-LOG-001 의 `ai.log_conversation_event` 에 영구 기록 (per-tool Langfuse span + DB row, future ML 데이터셋의 source). 본 SPEC 은 SPEC-AGENT-001 (graph topology — post-onboarding portion 을 supersede), SPEC-CONVERSATION-LOG-001 (`tool_call` event type 추가 — 별도 amendment PR), SPEC-AGENTIC-CRITIQUE-001 (Reflexion 루프 — 도구로 흡수 or 에이전트 reasoning 으로 fold, OQ 로 deferral), SPEC-ONBOARD-CARDS-001 (온보딩 서브그래프 무변경), SPEC-MEMORY-001 (TasteProfile Protocol 그대로 사용), SPEC-CLARIFY-CARDS-001 (clarify cards → ask_user_clarification 도구 노출) 위에 쌓이며, SPEC-ONBOARD-CARDS-001 외 어느 SPEC 도 본 SPEC 머지 시점에 변경하지 않는다 (SPEC-AGENT-001 amendment v2.0 + SPEC-CONVERSATION-LOG-001 amendment v0.3.0 은 본 SPEC plan phase 통과 후 별도 PR).
 
 ---
@@ -1037,7 +1038,7 @@ Truncation is silent (no `node_error` for truncation itself).
 | `AGENT_MAX_ITERATIONS` | int | `6` | ReAct loop iteration cap (REQ-AGENT-LOOP-ITERATION-001) |
 | `AGENT_TURN_TOKEN_BUDGET` | int | `32000` | Per-turn LLM token budget cap (REQ-AGENT-PERF-TURN-BUDGET-001) |
 | `AGENT_TOOL_TIMEOUT_S` | int | `5` | Per-tool dispatch timeout (REQ-AGENT-PERF-EXHAUST-001) |
-| `AGENT_LLM_MODEL` | str | TBD | LLM model identifier for the agent loop (deferred to OQ-1; e.g., `"gpt-4o"` / `"gpt-4o-mini"` / `"nova-pro"`) |
+| `AGENT_LLM_MODEL` | str | _(unset; agent disabled until configured — fail-closed)_ | LLM model identifier for the agent loop (deferred to OQ-1; e.g., `"gpt-4o"` / `"gpt-4o-mini"` / `"nova-pro"`). When unset, `AGENT_V2_REACT_ENABLED` is forced effectively false. |
 | `AGENT_LLM_TIMEOUT_S` | int | `5` | Per-LLM-call timeout (independent of tool timeout) |
 
 All 6 env vars introduced HERE. `AGENT_LLM_MODEL` does NOT have a default in this SPEC — `plan.md` (informed by OQ-1) decides the production default before the cutover PR.
