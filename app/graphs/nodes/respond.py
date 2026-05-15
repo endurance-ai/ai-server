@@ -62,7 +62,7 @@ _FALLBACKS_EN: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "Couldn't open that link 🙈 Maybe drop the photo straight in?",
     _Flow.VISION_FAIL: "I couldn't read that look. Try a clearer shot for me?",
     _Flow.PHOTO_DIRECT: ("Direct photo uploads aren't ready yet 🙏\nToss me a Pinterest / image link instead 📌"),
-    _Flow.OFF_TOPIC: "Drop a photo or a Pinterest link and I'll get to work 📸",
+    _Flow.OFF_TOPIC: "haha I'm here 🐱 just text me whenever, drop a photo if you want me to search.",
     _Flow.NEW_SEARCH_NEED_IMAGE: "Got it — slide me a photo or a Pinterest link to start 🐱",
     _Flow.TASTE_ACK: "Noted, filed away 📝",
     _Flow.REFINE_NUDGE: "Drop a photo or a Pinterest link first and I'll work my magic 📸",
@@ -77,7 +77,7 @@ _FALLBACKS_KO: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "링크가 안 열려요 🙈 사진을 바로 보내주시면 돼요!",
     _Flow.VISION_FAIL: "사진을 잘 못 읽었어요. 좀 더 또렷한 컷으로 보여주실래요?",
     _Flow.PHOTO_DIRECT: ("사진 직접 업로드는 아직 준비 중이에요 🙏\n핀터레스트 링크나 이미지 URL로 보내주세요 📌"),
-    _Flow.OFF_TOPIC: "사진이나 핀터레스트 링크 하나만 던져주세요, 바로 시작할게요 📸",
+    _Flow.OFF_TOPIC: "ㅎㅎ 나 여기 있어 🐱 그냥 편하게 얘기해. 옷 찾고 싶으면 사진 던지면 돼.",
     _Flow.NEW_SEARCH_NEED_IMAGE: "좋아요! 사진이나 핀터레스트 링크 하나 보내주세요 🐱",
     _Flow.TASTE_ACK: "기억해둘게요 📝",
     _Flow.REFINE_NUDGE: "사진이나 핀터레스트 링크부터 하나 보여주세요 📸",
@@ -218,7 +218,11 @@ _FLOW_INTENT: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "intent: link could not be opened. Ask user to send the photo directly.",
     _Flow.VISION_FAIL: "intent: vision could not read the image. Ask for a clearer shot.",
     _Flow.PHOTO_DIRECT: ("intent: direct photo upload not supported yet. Ask for a Pinterest / image link instead."),
-    _Flow.OFF_TOPIC: "intent: user message is off-topic. Briefly redirect to sending a photo or Pinterest link.",
+    _Flow.OFF_TOPIC: (
+        "intent: user is chatting, not asking for products. Respond naturally as kiko — short, "
+        "friendly, 1~2 sentences. Don't push photos/links unless asked. If conversation drifts "
+        "toward fashion / shopping then briefly mention you can search if they want."
+    ),
     _Flow.NEW_SEARCH_NEED_IMAGE: "intent: user wants a new search but sent no image. Ask for a photo / link.",
     _Flow.TASTE_ACK: "intent: acknowledge taste preference noted. Single short line.",
     _Flow.REFINE_NUDGE: "intent: user wants to refine but no prior search context. Ask for a photo / link first.",
@@ -329,11 +333,26 @@ def _split_into_chunks(text: str, *, min_chars: int) -> list[str]:
 async def respond(state: WorkingState) -> dict:
     flow = _classify_flow(state)
     user_text = (state.message.text or "").strip() if state.message else ""
-    # Prefer immediate text-derived language; fall back to sticky session lang
-    # so button-only turns (e.g. clarify card taps) honor the prior message's
-    # language.
+    # 사용자 피드백 — 한국어로 대화하다가 비전/검색 후 영어로 돌아가는 문제.
+    # ingest 의 remember_lang 이 sticky-aware (commands/short text 보존) 이므로
+    # respond 는 sess.lang 만 신뢰. 명시적 강한 신호 (Hangul 다수 OR 다단어 EN)
+    # 가 있을 때만 즉석 감지로 덮어쓴다.
     sess_for_lang = get_store().get_or_create(state.chat_id)
-    lang = _detect_lang(user_text) if user_text else session_lang(sess_for_lang)
+    sticky_lang = session_lang(sess_for_lang)
+    # 강한 신호 = Hangul 음절 ≥ 2 자 OR 영문 단어 ≥ 2 개. 그 외엔 sticky 유지.
+    if user_text:
+        import re as _re
+
+        hangul_count = len(_re.findall(r"[가-힣]", user_text))
+        en_word_count = len(_re.findall(r"\b[A-Za-z]{2,}\b", user_text))
+        if hangul_count >= 2:
+            lang = "ko"
+        elif en_word_count >= 2 and hangul_count == 0:
+            lang = "en"
+        else:
+            lang = sticky_lang
+    else:
+        lang = sticky_lang
     fallback_table = _FALLBACKS_KO if lang == "ko" else _FALLBACKS_EN
     fallback_text = fallback_table[flow]
     # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — replace fallback for

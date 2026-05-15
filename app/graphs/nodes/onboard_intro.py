@@ -39,24 +39,21 @@ from app.observability.langfuse import update_current_span as update_current_obs
 
 logger = logging.getLogger(__name__)
 
-# ─── intro lines (sticky lang) ────────────────────────────────────────────────
-_INTRO_LINES_KO: list[str] = [
-    "안녕하세요, kiko 예요. 🐱",
-    "당신만의 패션 큐레이터로 함께할게요.",
-    "처음이니까 취향부터 알아볼게요!",
-    "📸 사진을 보내면 비슷한 옷을 찾아드려요.",
-    "🔗 핀터레스트나 인스타 링크도 OK.",
-    "💬 '오버핏 좋아해' 같은 자연어도 받아요.",
-    "먼저 무드부터 골라볼까요? ↓",
+# ─── intro chunks (sticky lang) ────────────────────────────────────────────
+# 한 뭉텅이로 안 보내고 3~4 청크로 끊어서 보낸다 (대화감, 사용자 피드백 #1).
+# 각 청크 사이에 짧은 typing + delay 가 들어가 인간 메신저 느낌으로 흐름.
+_INTRO_CHUNKS_KO: list[str] = [
+    "어 안녕! 🐱",
+    "나는 kiko야. 너 취향에 맞는 옷 같이 찾아주는 친구.",
+    "처음이지? 잠깐 너 취향 좀 알아볼게.\n사진 보내거나 핀터레스트/인스타 링크 던져도 돼. 말로 설명해도 OK.",
+    "일단 무드부터 골라볼까? 👇",
 ]
-_INTRO_LINES_EN: list[str] = [
-    "Hi, I'm kiko. 🐱",
-    "Your personal fashion curator.",
-    "Since you're new, let's figure out your taste first!",
-    "📸 Send me a photo, I'll find similar pieces.",
-    "🔗 Pinterest / Instagram links also work.",
-    "💬 You can also type — e.g. 'I like oversized'.",
-    "Let's start with mood ↓",
+_INTRO_CHUNKS_EN: list[str] = [
+    "hey! 🐱",
+    "I'm kiko — your fashion sidekick.",
+    "first time? lemme get a feel for what you like.\n"
+    "you can send photos, drop pinterest/insta links, or just text me.",
+    "let's start with the vibe 👇",
 ]
 
 
@@ -117,11 +114,23 @@ async def onboard_intro(state: WorkingState) -> dict:
         }
 
     # Fresh user OR explicit re-trigger OR confirmed yes-callback path.
-    intro_lines = _INTRO_LINES_KO if lang == "ko" else _INTRO_LINES_EN
-    try:
-        await adapter.send_text(state.chat_id, "\n".join(intro_lines))
-    except Exception:  # noqa: BLE001
-        logger.exception("🐱 [ONBOARD] intro text send failed")
+    # 인트로를 3~4 청크로 끊어서 보낸다 — 사용자 피드백 #1 (한 뭉텅이는 짜침).
+    # 각 청크 직전에 typing action + 짧은 딜레이를 둬서 메신저 톤 살림.
+    import asyncio as _asyncio
+
+    intro_chunks = _INTRO_CHUNKS_KO if lang == "ko" else _INTRO_CHUNKS_EN
+    intro_delay_s = 0.6
+    for chunk in intro_chunks:
+        try:
+            if hasattr(adapter, "send_chat_action"):
+                await adapter.send_chat_action(state.chat_id, "typing")
+        except Exception:  # noqa: BLE001 — best-effort typing indicator
+            pass
+        try:
+            await _asyncio.sleep(intro_delay_s)
+            await adapter.send_text(state.chat_id, chunk)
+        except Exception:  # noqa: BLE001
+            logger.exception("🐱 [ONBOARD] intro chunk send failed")
 
     # Stage 1 mood card.
     text, kb = build_mood_card(lang, selections=[])

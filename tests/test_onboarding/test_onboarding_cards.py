@@ -41,9 +41,9 @@ class TestMoodCard:
     def test_ko_text_and_button_count(self):
         text, kb = build_mood_card("ko", [])
         assert "무드" in text
-        # 8 options + 1 footer row (Next + Skip)
+        # 12 options + footer row (Next + Skip)
         callbacks = _flatten_callbacks(kb)
-        assert len(callbacks) == 8 + 2
+        assert len(callbacks) == 12 + 2
 
     def test_en_text(self):
         text, _kb = build_mood_card("en", [])
@@ -52,9 +52,9 @@ class TestMoodCard:
     def test_all_callback_shapes_valid(self):
         _text, kb = build_mood_card("ko", [])
         callbacks = _flatten_callbacks(kb)
-        # 8 toggles
+        # 12 toggles (8 → 12 확장)
         toggle_cbs = [c for c in callbacks if c.startswith("onboard:mood:toggle:")]
-        assert len(toggle_cbs) == 8
+        assert len(toggle_cbs) == 12
         # done + skip
         assert "onboard:mood:done" in callbacks
         assert "onboard:mood:skip" in callbacks

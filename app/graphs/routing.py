@@ -110,10 +110,22 @@ def _resolve_onboard_stage_target(sess: Session, state: WorkingState) -> str:
     """Return the onboarding-subgraph node name for the current state.
 
     Priorities (highest first):
-      1. Callback `onboard:<stage>:*` → that stage node.
-      2. `sess.onboard_stage` resume slot.
-      3. Default → `onboard_intro`.
+      1. Restart keyword text (`/reset`, "온보딩 다시" 등) → `onboard_intro` 강제.
+         resume slot 보다 우선 — mid-flow 에서도 빠져나올 수 있어야 한다.
+      2. Callback `onboard:<stage>:*` → that stage node.
+      3. `sess.onboard_stage` resume slot.
+      4. Default → `onboard_intro`.
     """
+    # Priority 1: restart keyword 가 stage resume 를 override 한다 (버그 fix).
+    text = state.message.text if state.message else None
+    if _is_restart_keyword(text):
+        # /reset 등 명시적 재시작 — stage / selections 클리어 후 intro 부터 다시.
+        sess.onboard_stage = None
+        sess.onboard_selections = {}
+        sess.onboard_card_message_id = None
+        get_store().update(sess)
+        return "onboard_intro"
+
     cb = (state.message.callback_data or "") if state.message else ""
     if cb.startswith("onboard:"):
         parts = cb.split(":", 2)
@@ -156,6 +168,12 @@ def is_continuous_pinterest(state: WorkingState, sess: Session) -> bool:
 
     @MX:SPEC: SPEC-ONBOARD-CARDS-001
     """
+    # 사용자 피드백 — continuous bootstrap 은 기본 비활성. 온보딩 끝난 유저가
+    # 핀 URL 던지면 일반 검색 흐름 (resolve_image → vision → search → cards)
+    # 으로 가는 게 직관에 맞음. 명시적으로 "취향에만 추가" 시나리오가 필요할
+    # 때만 PINTEREST_CONTINUOUS_ENABLED=true 로 켜기.
+    if not bool(getattr(settings, "PINTEREST_CONTINUOUS_ENABLED", False)):
+        return False
     if getattr(sess, "onboarded_at", None) is None:
         return False
     stage = getattr(sess, "onboard_stage", None)
@@ -231,14 +249,19 @@ def _route_after_ingest(state: WorkingState) -> str:
     if cb.startswith("crit:"):
         return "critique_apply"
 
-    # Session-state-aware text routing (sess already loaded above for gates).
-    if msg.text and sess.state == SessionState.AWAITING_INTENT and not msg.photo_file_id:
-        return "critique_apply"
-
+    # 사용자 피드백 — 카드 받은 후 일반 대화 가능하게.
+    # 이전: AWAITING_INTENT 면 모든 텍스트가 critique_apply 로 직행 →
+    # "안녕" 같은 잡담도 검색 재실행됨.
+    # 이제: AWAITING_INTENT 도 router_text 거쳐서 LLM 이 OFF_TOPIC / CRITIQUE /
+    # TASTE_UPDATE / NEW_SEARCH 분류하도록 함. OFF_TOPIC → respond (자연 대화).
     if msg.photo_file_id or msg.urls:
         return "resolve_image"
 
-    if msg.text and sess.state in (SessionState.RESULTS_SENT, SessionState.IDLE):
+    if msg.text and sess.state in (
+        SessionState.AWAITING_INTENT,
+        SessionState.RESULTS_SENT,
+        SessionState.IDLE,
+    ):
         return "router_text"
 
     if msg.text and sess.state == SessionState.AWAITING_ITEM_PICK:

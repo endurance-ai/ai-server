@@ -10,7 +10,7 @@ advance target = `fit`. Symmetric with `onboard_mood`.
 
 from __future__ import annotations
 
-from app.channels.onboarding_cards import build_color_card
+from app.channels.onboarding_cards import build_color_card, build_fit_card
 from app.graphs.nodes._onboard_stage import handle_stage_callback
 from app.graphs.state import WorkingState
 from app.observability.langfuse import observe
@@ -31,6 +31,7 @@ async def onboard_color(state: WorkingState) -> dict:
         stage="color",
         next_stage="fit",
         build_card=build_color_card,
+        build_next_card=build_fit_card,
     )
 
 

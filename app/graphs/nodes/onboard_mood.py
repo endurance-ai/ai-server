@@ -11,7 +11,7 @@ selection and advances. Emits `onboard_select` on advance.
 
 from __future__ import annotations
 
-from app.channels.onboarding_cards import build_mood_card
+from app.channels.onboarding_cards import build_color_card, build_mood_card
 from app.graphs.nodes._onboard_stage import handle_stage_callback
 from app.graphs.state import WorkingState
 from app.observability.langfuse import observe
@@ -33,6 +33,7 @@ async def onboard_mood(state: WorkingState) -> dict:
         stage="mood",
         next_stage="color",
         build_card=build_mood_card,
+        build_next_card=build_color_card,
     )
 
 

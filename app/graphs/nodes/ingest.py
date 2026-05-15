@@ -95,7 +95,7 @@ async def ingest(state: WorkingState) -> dict:
         and not msg.photo_file_id
         and not msg.urls
         and not msg.callback_data
-        and sess.state in (SessionState.RESULTS_SENT, SessionState.IDLE)
+        and sess.state in (SessionState.RESULTS_SENT, SessionState.IDLE, SessionState.AWAITING_INTENT)
     )
     if not needs_router:
         # LOG-T11 — emit even when router was skipped (decision stays None).

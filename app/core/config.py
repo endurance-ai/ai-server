@@ -75,14 +75,20 @@ class Settings(BaseSettings):
     TELEGRAM_WEBHOOK_SECRET: str = ""
     TELEGRAM_API_BASE: str = "https://api.telegram.org"
     TELEGRAM_PUBLIC_URL: str = ""
-    VISION_MODEL: str = "gpt-4o-mini"
+    # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
+    # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
+    # 의 429 Too Many Requests 문제 회피 + Bedrock 별도 quota + 비용 절감.
+    VISION_MODEL: str = "nova-lite"
     BOT_LANGUAGE: str = "en"
     SESSION_TTL_SECONDS: int = 1800
 
     # Routing-LLM (paraphrase/intent classification + critique parsing)
     # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
     ROUTER_MODEL: str = "gpt-4o-mini"
-    ROUTER_TIMEOUT_MS: int = 1500
+    # 1500ms 는 LiteLLM proxy + OpenAI roundtrip (300~2000ms) 에 너무 빡빡해서
+    # 거의 매 턴 timeout fallback 으로 빠짐. 3000ms 로 완화. fallback 자체는
+    # 안전망 역할로 유지 (REQ-LLM-004).
+    ROUTER_TIMEOUT_MS: int = 3000
     ROUTER_MAX_TOKENS: int = 300
     # When the deterministic prefilter cannot classify a text message, fall back
     # to LLM routing. Disable to revert to pure SM behavior (router becomes no-op).
@@ -172,6 +178,11 @@ class Settings(BaseSettings):
     PINTEREST_MAX_PINS_PER_TURN: int = 20
     # REQ-ONBOARD-PINTEREST-003 — continuous bootstrap rate-limit window.
     PINTEREST_CONTINUOUS_RATELIMIT_S: int = 300
+    # continuous Pinterest bootstrap (post-onboarding 핀 URL → 취향만 업데이트)
+    # 활성화. 기본 false — 온보딩 끝난 유저가 핀 던지면 일반 검색 흐름
+    # (resolve_image → vision → search → cards) 으로 가는 게 직관에 맞아서.
+    # 명시적으로 "취향에만 추가" 시나리오 필요할 때 true 로 전환. 사용자 피드백.
+    PINTEREST_CONTINUOUS_ENABLED: bool = False
     ONBOARDING_CARDS_ENABLED: bool = True
     # REQ-ONBOARD-SEED-002 — per-keyword seed weight cap. Applied by
     # `TasteProfileStore.seed_from_onboarding` for both InMemory + Postgres

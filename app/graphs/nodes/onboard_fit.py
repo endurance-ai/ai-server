@@ -22,7 +22,7 @@ import logging
 from typing import Any
 
 from app.channels.lang import session_lang
-from app.channels.onboarding_cards import build_fit_card, parse_onboard_callback
+from app.channels.onboarding_cards import build_fit_card, build_pinterest_card, parse_onboard_callback
 from app.channels.onboarding_values import STAGE_BOUNDS
 from app.channels.session import get_store
 from app.channels.taste_profile import get_taste_store, user_key_for
@@ -105,11 +105,16 @@ async def onboard_fit(state: WorkingState) -> dict:
     # advances to "pinterest". Otherwise we must intercept done/skip and run
     # `complete_onboarding` inline.
     if pinterest_on:
+        # Pinterest card 빌더는 selections 인자 없음 — 어댑터로 래핑.
+        def _build_pinterest(lang_: str, _selections: list[str]) -> tuple[str, Any]:
+            return build_pinterest_card(lang_)
+
         return await handle_stage_callback(
             state,
             stage="fit",
             next_stage="pinterest",
             build_card=build_fit_card,
+            build_next_card=_build_pinterest,
         )
 
     # ── Pinterest disabled branch: intercept done/skip for inline completion ──

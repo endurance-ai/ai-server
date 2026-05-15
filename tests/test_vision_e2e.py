@@ -175,6 +175,16 @@ async def test_rich_search_query_ko_reaches_port_via_intent_text(store, taste_st
     monkeypatch.setattr(ri.link_resolver, "resolve", _resolve_ok)
     monkeypatch.setattr(vn.vision_module, "extract", _vision_rich)
 
+    # 사용자 피드백 — AWAITING_INTENT 텍스트가 router_text 거치도록 라우팅 변경됨.
+    # 이 테스트는 critique 의도가 있다고 가정 — route_text 가 CRITIQUE_TEXT 반환하도록 stub.
+    from app.channels.router import RoutedDecision, RoutedIntent
+
+    async def _stub_route(_text, _state, _last_results):
+        return RoutedDecision(intent=RoutedIntent.CRITIQUE_TEXT)
+
+    monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", True)
+    monkeypatch.setattr("app.graphs.nodes.ingest.route_text", _stub_route)
+
     # Turn 1: upload image, vision result populates session.
     await GRAPH.ainvoke(InputState(message=make_msg(urls=["https://www.pinterest.com/pin/123/"]), chat_id=42))
 

@@ -74,12 +74,15 @@ def test_ingest_url_routes_to_resolve_image():
     assert _route_after_ingest(s) == "resolve_image"
 
 
-def test_ingest_text_in_awaiting_intent_routes_to_critique_apply(_store):
+def test_ingest_text_in_awaiting_intent_routes_to_router_text(_store):
+    # 사용자 피드백 — AWAITING_INTENT 텍스트도 router_text 거쳐서 LLM intent
+    # 분류 후 critique vs off-topic vs taste_update 분기. 직접 critique_apply
+    # 로 가지 않음. 자연 대화 가능.
     sess = _store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
     _store.update(sess)
     s = _state(_msg(text="cheaper"))
-    assert _route_after_ingest(s) == "critique_apply"
+    assert _route_after_ingest(s) == "router_text"
 
 
 def test_ingest_text_in_results_sent_routes_to_router_text(_store):

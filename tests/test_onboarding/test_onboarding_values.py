@@ -15,8 +15,9 @@ from app.channels.onboarding_values import (
 )
 
 
-def test_mood_has_exactly_8_options():
-    assert len(MOOD_VALUES) == 8
+def test_mood_has_exactly_12_options():
+    # 8 → 12 확장 (사용자 피드백 #3 — 옵션 부족 + 클린걸/코어웨이브 jargon 제거).
+    assert len(MOOD_VALUES) == 12
 
 
 def test_color_has_exactly_6_options():

@@ -129,12 +129,23 @@ def test_onboarding_required_onboarded_user_normal_text_skips_gate(_store):
 # ── is_continuous_pinterest ──────────────────────────────────────────────────
 
 
-def test_continuous_pinterest_true_for_onboarded_user_with_pin_url(_store):
+def test_continuous_pinterest_true_for_onboarded_user_with_pin_url(_store, monkeypatch):
+    # 사용자 피드백 — continuous bootstrap 기본 OFF. 명시 활성화 시에만 True.
+    monkeypatch.setattr("app.graphs.routing.settings.PINTEREST_CONTINUOUS_ENABLED", True, raising=False)
     sess = _store.get_or_create(7)
     sess.onboarded_at = datetime.now(tz=UTC)
     sess.onboard_stage = "done"
     state = _state(message=_msg(text="https://www.pinterest.com/pin/123456789/"))
     assert is_continuous_pinterest(state, sess) is True
+
+
+def test_continuous_pinterest_false_by_default_flag(_store):
+    # 기본값 False — 온보딩 끝난 유저의 핀 URL 은 일반 검색 흐름으로 가야 함.
+    sess = _store.get_or_create(7)
+    sess.onboarded_at = datetime.now(tz=UTC)
+    sess.onboard_stage = "done"
+    state = _state(message=_msg(text="https://www.pinterest.com/pin/123456789/"))
+    assert is_continuous_pinterest(state, sess) is False
 
 
 def test_continuous_pinterest_false_when_not_onboarded(_store):
@@ -174,6 +185,7 @@ def test_continuous_pinterest_true_when_rate_limit_window_expired(_store, monkey
     from app.core import config as cfg
 
     monkeypatch.setattr(cfg.settings, "PINTEREST_CONTINUOUS_RATELIMIT_S", 300)
+    monkeypatch.setattr(cfg.settings, "PINTEREST_CONTINUOUS_ENABLED", True)
     sess = _store.get_or_create(7)
     sess.onboarded_at = datetime.now(tz=UTC) - timedelta(days=1)
     sess.last_pinterest_scrape_at = datetime.now(tz=UTC) - timedelta(minutes=10)
@@ -224,7 +236,9 @@ def test_route_after_ingest_onboarding_wins_over_text_routing(_store):
     assert _route_after_ingest(state) == "onboard_intro"
 
 
-def test_route_after_ingest_continuous_pinterest_for_onboarded(_store):
+def test_route_after_ingest_continuous_pinterest_for_onboarded(_store, monkeypatch):
+    # PINTEREST_CONTINUOUS_ENABLED=True 일 때만 pinterest_ingest 로 라우팅.
+    monkeypatch.setattr("app.graphs.routing.settings.PINTEREST_CONTINUOUS_ENABLED", True, raising=False)
     sess = _store.get_or_create(7)
     sess.onboarded_at = datetime.now(tz=UTC) - timedelta(days=1)
     sess.onboard_stage = None

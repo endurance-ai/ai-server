@@ -31,17 +31,23 @@ class OnboardingOption:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Stage 1 — mood (8 options, min=2, max=3 per STAGE_BOUNDS)
+# Stage 1 — mood (12 options, min=2, max=3 per STAGE_BOUNDS)
+# Telegram callback_data 는 64 바이트 한계가 있지만 "onboard:mood:toggle:xxx"
+# 는 충분히 여유. 12개까지는 1열 2칸 × 6행으로 깔끔히 표시됨.
 # ──────────────────────────────────────────────────────────────────────────
 MOOD_VALUES: list[OnboardingOption] = [
     OnboardingOption(value="minimal", ko_label="미니멀", en_label="Minimal", emoji="🤍"),
+    OnboardingOption(value="casual", ko_label="캐주얼", en_label="Casual", emoji="👕"),
     OnboardingOption(value="street", ko_label="스트릿", en_label="Street", emoji="🛹"),
-    OnboardingOption(value="cleangirl", ko_label="클린걸", en_label="Clean Girl", emoji="🧼"),
-    OnboardingOption(value="y2k", ko_label="Y2K", en_label="Y2K", emoji="💿"),
+    OnboardingOption(value="formal", ko_label="포멀", en_label="Formal", emoji="🤵"),
+    OnboardingOption(value="sporty", ko_label="스포티", en_label="Sporty", emoji="🏃"),
     OnboardingOption(value="vintage", ko_label="빈티지", en_label="Vintage", emoji="📻"),
-    OnboardingOption(value="corewave", ko_label="코어웨이브", en_label="Corewave", emoji="🌊"),
+    OnboardingOption(value="y2k", ko_label="Y2K", en_label="Y2K", emoji="💿"),
     OnboardingOption(value="workwear", ko_label="워크웨어", en_label="Workwear", emoji="🔧"),
-    OnboardingOption(value="feminine", ko_label="페미닌", en_label="Feminine", emoji="🎀"),
+    OnboardingOption(value="feminine", ko_label="페미닌", en_label="페미닌", emoji="🎀"),
+    OnboardingOption(value="chic", ko_label="시크", en_label="Chic", emoji="🖤"),
+    OnboardingOption(value="lovely", ko_label="러블리", en_label="Lovely", emoji="🌸"),
+    OnboardingOption(value="basic", ko_label="베이직", en_label="Basic", emoji="🟫"),
 ]
 
 # ──────────────────────────────────────────────────────────────────────────

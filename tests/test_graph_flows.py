@@ -87,6 +87,23 @@ def stub_respond_llm(monkeypatch):
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _stub_route_text_default(monkeypatch):
+    """Default router stub — returns CRITIQUE_TEXT to mimic the legacy direct
+    routing (AWAITING_INTENT text → critique_apply). Individual tests can
+    override this with their own `monkeypatch.setattr(...route_text...)` call
+    (later setattr wins). Tests that don't care about router behavior get
+    deterministic critique routing for free.
+    """
+    from app.channels.router import RoutedDecision, RoutedIntent
+
+    async def _default_route(_text, _state, _last_results):
+        return RoutedDecision(intent=RoutedIntent.CRITIQUE_TEXT)
+
+    monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", True)
+    monkeypatch.setattr("app.graphs.nodes.ingest.route_text", _default_route)
+
+
 def _state(message, **kw) -> InputState:
     return InputState(message=message, chat_id=message.chat_id, from_user_id=message.from_user_id, **kw)
 

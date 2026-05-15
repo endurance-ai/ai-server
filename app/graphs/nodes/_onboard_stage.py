@@ -88,6 +88,7 @@ async def handle_stage_callback(
     stage: str,
     next_stage: str,
     build_card: Callable[[str, list[str]], tuple[str, Keyboard]],
+    build_next_card: Callable[[str, list[str]], tuple[str, Keyboard]] | None = None,
 ) -> dict:
     """Run the toggle/done/skip state-machine for one card stage.
 
@@ -102,17 +103,43 @@ async def handle_stage_callback(
     cb_raw = msg.callback_data or ""
     parsed = parse_onboard_callback(cb_raw)
 
-    # ── stale / malformed callback ──────────────────────────────────────────
+    # ── stale callback OR free-form text mid-stage ──────────────────────────
     if parsed is None or parsed.stage != stage:
-        # Stale callback — best-effort toast + stay on stage. Don't mutate state.
+        # 케이스 분기:
+        # (a) 진짜 stale callback (다른 stage 의 옛 카드 탭) → ack + stay
+        # (b) free-form text (사용자가 카드 옆에서 메시지 입력) → 힌트 +
+        #     현재 stage 카드를 현재 lang 으로 재렌더. ingest 가 sess.lang 을
+        #     이미 갱신했으므로 "한글로해줘" 같은 언어 전환 요청도 자동 반영됨.
+        if msg.callback_query_id:
+            # (a) stale callback
+            try:
+                if hasattr(adapter, "answer_callback_query"):
+                    await adapter.answer_callback_query(msg.callback_query_id, "")
+            except Exception:  # noqa: BLE001
+                logger.debug("[onboard:%s] stale callback ack best-effort", stage, exc_info=True)
+            return {
+                "onboard_stage": stage,
+                "log_events": [f"onboard_{stage}: stale_cb cb={cb_raw[:32]}"],
+            }
+        # (b) free-form text — 안내 + 카드 재렌더.
+        selections = _current_selection(sess, stage)
         try:
-            if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
-                await adapter.answer_callback_query(msg.callback_query_id, "")
+            hint = "👆 위 카드에서 골라줘" if lang == "ko" else "👆 pick from the card above"
+            await adapter.send_text(state.chat_id, hint)
         except Exception:  # noqa: BLE001
-            logger.debug("[onboard:%s] stale callback ack best-effort", stage, exc_info=True)
+            logger.debug("[onboard:%s] hint send best-effort", stage, exc_info=True)
+        try:
+            new_text, new_kb = build_card(lang, selections)
+            new_msg_id = await adapter.send_text_with_keyboard(state.chat_id, new_text, new_kb)
+            if new_msg_id:
+                sess.onboard_card_message_id = new_msg_id
+                get_store().update(sess)
+        except Exception:  # noqa: BLE001
+            logger.exception("🐱 [ONBOARD:%s] re-render after free-text failed", stage)
         return {
             "onboard_stage": stage,
-            "log_events": [f"onboard_{stage}: stale_cb cb={cb_raw[:32]}"],
+            "onboard_card_message_id": getattr(sess, "onboard_card_message_id", None),
+            "log_events": [f"onboard_{stage}: free_text_rerender lang={lang}"],
         }
 
     selections = _current_selection(sess, stage)
@@ -204,10 +231,25 @@ async def handle_stage_callback(
         _emit_onboard_select(state, stage=stage, axis=stage, selected_values=selections)
 
         sess.onboard_stage = next_stage
+        # 다음 stage 카드를 즉시 그려서 보낸다 — 이 호출이 없으면 사용자에게
+        # 침묵으로 보임 (그래프는 END 도달, next 카드 미발송). 버그 #4 fix.
+        new_msg_id: int | None = None
+        if build_next_card is not None:
+            try:
+                next_selections = _current_selection(sess, next_stage)
+                next_text, next_kb = build_next_card(lang, next_selections)
+                new_msg_id = await adapter.send_text_with_keyboard(
+                    state.chat_id, next_text, next_kb
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("🐱 [ONBOARD:%s->%s] next card send failed", stage, next_stage)
+        if new_msg_id:
+            sess.onboard_card_message_id = new_msg_id
         get_store().update(sess)
         return {
             "onboard_stage": next_stage,
             "onboard_selections": dict(getattr(sess, "onboard_selections", {}) or {}),
+            "onboard_card_message_id": new_msg_id,
             "log_events": [f"onboard_{stage}: done -> {next_stage} count={len(selections)}"],
         }
 
@@ -217,7 +259,6 @@ async def handle_stage_callback(
         # for forgiving UX. completion node uses additive seed so empty is benign.
         _write_selection(sess, stage, [])
         sess.onboard_stage = next_stage
-        get_store().update(sess)
         try:
             if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
                 await adapter.answer_callback_query(msg.callback_query_id, None)
@@ -226,9 +267,27 @@ async def handle_stage_callback(
 
         _emit_onboard_select(state, stage=stage, axis=stage, selected_values=[])
 
+        # 다음 stage 카드 발송 (버그 #4 fix — done 분기와 동일).
+        new_msg_id: int | None = None
+        if build_next_card is not None:
+            try:
+                next_selections = _current_selection(sess, next_stage)
+                next_text, next_kb = build_next_card(lang, next_selections)
+                new_msg_id = await adapter.send_text_with_keyboard(
+                    state.chat_id, next_text, next_kb
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "🐱 [ONBOARD:%s->%s] next card send failed (skip)", stage, next_stage
+                )
+        if new_msg_id:
+            sess.onboard_card_message_id = new_msg_id
+        get_store().update(sess)
+
         return {
             "onboard_stage": next_stage,
             "onboard_selections": dict(getattr(sess, "onboard_selections", {}) or {}),
+            "onboard_card_message_id": new_msg_id,
             "log_events": [f"onboard_{stage}: skip -> {next_stage}"],
         }
 
