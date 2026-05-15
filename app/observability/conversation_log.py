@@ -141,8 +141,7 @@ _SCRUB_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"sk-[A-Za-z0-9._\-]{16,}", "sk-***"),
     (r"apify_api_[A-Za-z0-9]{16,}", "apify_api_***"),
     # query-string token=... (legacy paths, even though we removed it from Apify)
-    (r"(token|api_key|apikey|password|secret|authorization)\s*[=:]\s*[^\s&\"']+",
-     r"\1=***"),
+    (r"(token|api_key|apikey|password|secret|authorization)\s*[=:]\s*[^\s&\"']+", r"\1=***"),
 )
 _SCRUB_RE_CACHE: list[tuple[re.Pattern[str], str]] = []
 

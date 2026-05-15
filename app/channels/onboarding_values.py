@@ -86,9 +86,7 @@ STAGE_BOUNDS: dict[str, tuple[int, int]] = {
 # @MX:REASON: 두 사이트에 별도 정의했을 때 keyword 누락 (예: "reset taste") 으로
 # 일관성이 깨졌던 결함 (code review P0-2) 의 재발 방지.
 # @MX:SPEC: SPEC-ONBOARD-CARDS-001 REQ-ONBOARD-ENTRY-002
-RESTART_KEYWORDS_LOWER: frozenset[str] = frozenset(
-    {"/reset", "온보딩 다시", "취향 다시 설정", "reset taste"}
-)
+RESTART_KEYWORDS_LOWER: frozenset[str] = frozenset({"/reset", "온보딩 다시", "취향 다시 설정", "reset taste"})
 
 
 def is_restart_keyword(text: str | None) -> bool:

@@ -238,9 +238,7 @@ async def handle_stage_callback(
             try:
                 next_selections = _current_selection(sess, next_stage)
                 next_text, next_kb = build_next_card(lang, next_selections)
-                new_msg_id = await adapter.send_text_with_keyboard(
-                    state.chat_id, next_text, next_kb
-                )
+                new_msg_id = await adapter.send_text_with_keyboard(state.chat_id, next_text, next_kb)
             except Exception:  # noqa: BLE001
                 logger.exception("🐱 [ONBOARD:%s->%s] next card send failed", stage, next_stage)
         if new_msg_id:
@@ -273,13 +271,9 @@ async def handle_stage_callback(
             try:
                 next_selections = _current_selection(sess, next_stage)
                 next_text, next_kb = build_next_card(lang, next_selections)
-                new_msg_id = await adapter.send_text_with_keyboard(
-                    state.chat_id, next_text, next_kb
-                )
+                new_msg_id = await adapter.send_text_with_keyboard(state.chat_id, next_text, next_kb)
             except Exception:  # noqa: BLE001
-                logger.exception(
-                    "🐱 [ONBOARD:%s->%s] next card send failed (skip)", stage, next_stage
-                )
+                logger.exception("🐱 [ONBOARD:%s->%s] next card send failed (skip)", stage, next_stage)
         if new_msg_id:
             sess.onboard_card_message_id = new_msg_id
         get_store().update(sess)
