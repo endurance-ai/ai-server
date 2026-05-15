@@ -44,6 +44,8 @@ def test_ten_nodes_present():
             "pinterest_ingest",
             # SPEC-AGENT-V2-REACT — ReAct agent node.
             "agent",
+            # SPEC-AGENT-V2-REACT — first-touch intro node (onboarding→intro policy).
+            "intro",
         ]
     )
     assert public == expected, f"node inventory drifted: {public}"
