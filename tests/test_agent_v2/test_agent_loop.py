@@ -149,6 +149,68 @@ async def test_json_malform_no_tool_calls(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_assistant_tooluse_precedes_toolmessage_on_2nd_ainvoke(monkeypatch):
+    """Regression guard for the Bedrock Nova multi-turn 400.
+
+    Before the fix, the assistant tool_use AIMessage was never appended to
+    `messages`, so the 2nd ainvoke saw [system, user, tool_result] with a
+    tool_result that had no preceding assistant tool_use turn. Bedrock Nova
+    (via LiteLLM) 400s: "Expected toolResult blocks ... for the following Ids".
+
+    This test asserts that, at the point of the 2nd ainvoke, `messages`
+    contains the assistant AIMessage (carrying tool_calls) IMMEDIATELY
+    followed by a ToolMessage whose tool_call_id equals the tool call's id.
+    """
+    from langchain_core.messages import ToolMessage
+
+    from app.agents import react_loop as rl
+
+    captured: list[list] = []
+
+    class _SpyLLM:
+        def __init__(self, responses):
+            self._responses = list(responses)
+
+        async def ainvoke(self, messages):
+            captured.append(list(messages))
+            return self._responses.pop(0) if self._responses else _FakeAIMessage([])
+
+    first = _FakeAIMessage([{"name": "get_recent_history", "args": {"n": 5}, "id": "tooluse_ABC"}])
+    second = _FakeAIMessage([{"name": "respond", "args": {"text": "hi"}, "id": "tooluse_DEF"}])
+    fake = _SpyLLM([first, second])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    monkeypatch.setattr(
+        "app.agents.tools.get_recent_history.dispatch",
+        AsyncMock(return_value={"ok": True, "events": []}),
+    )
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+
+    # The 2nd ainvoke's message list is what Bedrock would have rejected.
+    assert len(captured) >= 2, "expected a 2nd ainvoke (multi-step turn)"
+    msgs_2nd = captured[1]
+    # Find the assistant tool_use turn (the raw ai_msg, carrying tool_calls)
+    # appended before its tool result. In production this is a langchain
+    # AIMessage; the fake mirrors its duck-typed shape (.tool_calls).
+    ai_idx = next(
+        i
+        for i, m in enumerate(msgs_2nd)
+        if not isinstance(m, (dict, ToolMessage)) and getattr(m, "tool_calls", None)
+    )
+    nxt = msgs_2nd[ai_idx + 1]
+    assert isinstance(nxt, ToolMessage), "ToolMessage must immediately follow assistant tool_use"
+    tc_id = first.tool_calls[0]["id"]
+    assert nxt.tool_call_id == tc_id, (
+        f"tool_call_id must match the tool call id exactly "
+        f"(got {nxt.tool_call_id!r}, expected {tc_id!r})"
+    )
+
+
+@pytest.mark.asyncio
 async def test_invalid_args_recorded_not_dispatched(monkeypatch):
     from app.agents import react_loop as rl
 

@@ -52,3 +52,5 @@
 - react_loop.py review: no Bedrock-incompatible assumptions broken (tool_call id pass-through, finish_reason not inspected, content-vs-tool_calls via langchain-normalized `.tool_calls`, JSON-malform retry provider-agnostic). 1 latent non-live note: `tc.get("id", it)` fallback would mismatch a Bedrock tool-use id IF LiteLLM omits the id — Nova always returns one (verified); not fixed (minimal-diff).
 - plan.md: OQ-1 false Bedrock premise corrected (`gpt-4o-mini`→`nova-lite` default; Bedrock IS configured infra), OQ-2 Bedrock `tool_choice` caveat + fix documented, §1 summary table rows + HISTORY line added.
 - Tests: tests/test_agent_v2/test_llm_client.py added (2 mock-level cases: no forced tool_choice + drop_params + fail-closed). pytest tests/test_agent_v2/: 55 passed. ruff check + format: green.
+
+- agent_v2 hotfix: assistant tool_use turn now appended before tool_result (Bedrock Nova multi-turn 400 fix — Expected toolResult blocks)

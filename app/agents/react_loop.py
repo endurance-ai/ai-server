@@ -26,6 +26,8 @@ import time
 from importlib import import_module
 from typing import Any
 
+from langchain_core.messages import ToolMessage
+
 from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
@@ -213,7 +215,10 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                     "tool_call_history": history,
                     "response_text": fb.get("response_text"),
                 }
-            # Corrective retry — append a user-role msg nudging tool use.
+            # Corrective retry — append the assistant turn first, then a
+            # user-role msg nudging tool use. The assistant turn must precede
+            # any follow-up so the next ainvoke has a valid transcript.
+            messages.append(ai_msg)
             messages.append(
                 {
                     "role": "user",
@@ -230,6 +235,30 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         raw_args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
         if not isinstance(raw_args, dict):
             raw_args = {}
+        tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+        if not tc_id:
+            # Upstream contract violation: a tool_call without an id cannot be
+            # answered with a matching ToolMessage (Bedrock Nova matches
+            # toolUse/toolResult by id). Treat as a malformed-LLM event rather
+            # than inventing an id (which reproduces the Bedrock 400).
+            json_malform_streak += 1
+            if json_malform_streak >= 2:
+                fb = await _fallback_respond(state, sess, "json_malform_repeated")
+                return {
+                    "agent_iterations": iterations,
+                    "agent_status": "exhausted",
+                    "tool_call_history": history,
+                    "response_text": fb.get("response_text"),
+                }
+            messages.append(ai_msg)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Your previous tool call was missing an id. You MUST call a tool "
+                    "with a valid id. If you have nothing else to do, call `respond`.",
+                }
+            )
+            continue
 
         # Args validation.
         ok, err = validate_args(tool_name or "", raw_args)
@@ -246,9 +275,11 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "latency_ms": 0,
             }
             history.append(history_entry)
-            messages.append(
-                {"role": "tool", "content": json.dumps({"error": err}), "tool_call_id": str(tc.get("id", it))}
-            )
+            # Append the assistant tool_use turn BEFORE its matching tool
+            # result — Bedrock Nova (via LiteLLM) requires the toolUse block to
+            # precede its toolResult block, matched by id.
+            messages.append(ai_msg)
+            messages.append(ToolMessage(content=json.dumps({"error": err}), tool_call_id=tc_id))
             # Emit tool_call (with error).
             emit(
                 event_type="tool_call",
@@ -333,14 +364,11 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             status = "done"
             break
 
-        # Append tool result for the next LLM turn.
-        messages.append(
-            {
-                "role": "tool",
-                "content": json.dumps(result, default=str)[:2000],
-                "tool_call_id": str(tc.get("id", it)),
-            }
-        )
+        # Append the assistant tool_use turn BEFORE its matching tool result
+        # for the next LLM turn — Bedrock Nova (via LiteLLM) requires the
+        # toolUse block to precede its toolResult block, matched by id.
+        messages.append(ai_msg)
+        messages.append(ToolMessage(content=json.dumps(result, default=str)[:2000], tool_call_id=tc_id))
 
     else:
         # for-else: loop completed without break (no respond) → exhaustion.
