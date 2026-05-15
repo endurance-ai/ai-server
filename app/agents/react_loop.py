@@ -51,8 +51,71 @@ _SYSTEM_PROMPT = (
     "When the user message includes a `user_selected_item:` line (the user just tapped an "
     "item the photo analysis found), do NOT ask what they are looking for — immediately call "
     "`search_products` using the provided `suggested_query` as `text_query`, then `respond` "
-    "with the product cards."
+    "with the product cards.\n\n"
+    "Avoid redundant tool calls:\n"
+    "- If a previous `search_products` or `refine_search` result in this conversation already "
+    "returned candidates, your NEXT action MUST be `respond` with those cards. Do NOT call "
+    "search again with the same query, and do NOT call `analyze_image`.\n"
+    "- Do NOT call `analyze_image` if vision context is already present — i.e. the user "
+    "message contains any of `detected_items:`, `user_selected_item:`, or `style_node:` "
+    "(the photo was already analyzed before this loop). Only call `analyze_image` when the "
+    "user sent a NEW image this turn AND no such vision context is present.\n"
+    "- Prefer the fewest tool calls. Once you have enough to answer, call `respond`. Never "
+    "repeat a tool with identical args."
 )
+
+
+# Transient-error backoff schedules (seconds). Indexed by attempt number
+# (0-based: the i-th retry sleeps _LLM_BACKOFF[i] before re-issuing). Kept
+# short — the per-turn wall-clock / token budget still bounds total cost.
+_LLM_BACKOFF = (0.6, 1.4)
+_TOOL_BACKOFF = (0.8,)
+
+_TRANSIENT_STATUS = {500, 502, 503, 504}
+_TRANSIENT_MARKERS = (
+    "internal server error",
+    "throttl",
+    "503",
+    "502",
+    "504",
+    "timeout",
+    "timed out",
+    "service unavailable",
+    "bad gateway",
+    "gateway timeout",
+)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Classify whether `exc` is a retryable transient infra error.
+
+    Conservative by design: when unsure, return False so real bugs (4xx,
+    JSON-malformation, contract violations) are NOT masked by retries.
+
+    Transient = HTTP 5xx (500/502/503/504) from httpx/openai/litellm, OR a
+    timeout (asyncio.TimeoutError / builtin TimeoutError), OR an error message
+    that clearly signals throttling / 5xx / timeout.
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return True
+
+    # Structured status code (httpx.HTTPStatusError, openai.APIStatusError,
+    # litellm exceptions all expose .status_code or a nested .response).
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        resp = getattr(exc, "response", None)
+        status = getattr(resp, "status_code", None)
+    if isinstance(status, int):
+        return status in _TRANSIENT_STATUS
+
+    # Fall back to message inspection — but only for clearly-transient markers.
+    # 4xx (400/401/403/404/422) never match these markers, so they fail closed.
+    msg = str(exc).lower()
+    if "400" in msg or "401" in msg or "403" in msg or "404" in msg or "422" in msg:
+        # A 4xx code present in the message → treat as NON-transient even if a
+        # transient marker also appears (avoid masking a real client error).
+        return False
+    return any(m in msg for m in _TRANSIENT_MARKERS)
 
 
 def _resolve_dispatcher(tool_name: str):
@@ -218,6 +281,15 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     token_budget = max(0, int(settings.AGENT_TURN_TOKEN_BUDGET))
     tool_timeout = float(settings.AGENT_TOOL_TIMEOUT_S)
     llm_timeout = float(settings.AGENT_LLM_TIMEOUT_S)
+    llm_max_retries = max(0, int(settings.AGENT_LLM_MAX_RETRIES))
+    tool_max_retries = max(0, int(settings.AGENT_TOOL_MAX_RETRIES))
+
+    # Hard wall-clock ceiling for the whole turn so retries can never push us
+    # past the existing exhaust budget. Derived from the per-call timeouts ×
+    # iteration cap (the same envelope the loop already implicitly had); the
+    # retry layer is bounded WITHIN this, not added on top.
+    turn_t0 = time.monotonic()
+    turn_deadline = turn_t0 + (max_iter * (llm_timeout + tool_timeout)) + sum(_LLM_BACKOFF) + sum(_TOOL_BACKOFF)
 
     ctx = _build_ctx(state, sess)
     user_key = ctx["user_key"]
@@ -247,20 +319,49 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "response_text": fb.get("response_text"),
             }
 
-        # LLM call with timeout.
-        try:
-            ai_msg = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout)
-        except TimeoutError:
-            fb = await _fallback_respond(state, sess, "llm_timeout")
-            return {
-                "agent_iterations": iterations,
-                "agent_status": "exhausted",
-                "tool_call_history": history,
-                "response_text": fb.get("response_text"),
-            }
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[agent_v2] LLM raised: %r", exc)
-            fb = await _fallback_respond(state, sess, f"llm_error:{type(exc).__name__}")
+        # LLM call with timeout + transient-error retry (inner resilience
+        # layer — a retry does NOT consume a ReAct iteration). On a transient
+        # infra error (5xx / throttle / timeout) we re-issue the SAME logical
+        # step up to `llm_max_retries` times with short backoff. Non-transient
+        # errors fall through to the existing exhaustion fallback unchanged.
+        ai_msg = None
+        last_exc: BaseException | None = None
+        last_reason = "llm_timeout"
+        for attempt in range(llm_max_retries + 1):
+            try:
+                ai_msg = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout)
+                break
+            except (TimeoutError, Exception) as exc:  # noqa: BLE001
+                last_exc = exc
+                last_reason = (
+                    "llm_timeout"
+                    if isinstance(exc, (asyncio.TimeoutError, TimeoutError))
+                    else f"llm_error:{type(exc).__name__}"
+                )
+                transient = _is_transient(exc)
+                retries_left = attempt < llm_max_retries
+                if not (transient and retries_left):
+                    break
+                backoff = _LLM_BACKOFF[min(attempt, len(_LLM_BACKOFF) - 1)]
+                # Respect the per-turn wall-clock ceiling — never retry past it.
+                if time.monotonic() + backoff >= turn_deadline:
+                    logger.warning(
+                        "[agent_v2] LLM transient error but turn deadline reached, no more retries: %r",
+                        exc,
+                    )
+                    break
+                logger.warning(
+                    "[agent_v2] LLM transient error (attempt %d/%d), retrying in %.1fs: %r",
+                    attempt + 1,
+                    llm_max_retries,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
+
+        if ai_msg is None:
+            logger.warning("[agent_v2] LLM raised (retries exhausted): %r", last_exc)
+            fb = await _fallback_respond(state, sess, last_reason)
             return {
                 "agent_iterations": iterations,
                 "agent_status": "exhausted",
@@ -387,20 +488,49 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                     "response_text": fb.get("response_text"),
                 }
 
-        # Dispatch.
+        # Dispatch — with transient-error retry (tools internally call the
+        # same throttled proxy: analyze_image / search both hit Bedrock via
+        # LiteLLM). On a transient 5xx/timeout we retry the dispatch up to
+        # `tool_max_retries` time(s) with short backoff before recording the
+        # tool error and continuing the loop. Non-transient → record now.
         t0 = time.monotonic()
         result: dict[str, Any]
         dispatch_err: str | None = None
-        try:
-            dispatcher = _resolve_dispatcher(tool_name)
-            result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=tool_timeout)
-        except TimeoutError:
-            result = {"ok": False, "error": "tool_timeout"}
-            dispatch_err = "tool_timeout"
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
-            result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
-            dispatch_err = result["error"]
+        for attempt in range(tool_max_retries + 1):
+            try:
+                dispatcher = _resolve_dispatcher(tool_name)
+                result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=tool_timeout)
+                dispatch_err = None
+                break
+            except (TimeoutError, Exception) as exc:  # noqa: BLE001
+                if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                    result = {"ok": False, "error": "tool_timeout"}
+                    dispatch_err = "tool_timeout"
+                else:
+                    logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
+                    result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
+                    dispatch_err = result["error"]
+                transient = _is_transient(exc)
+                retries_left = attempt < tool_max_retries
+                if not (transient and retries_left):
+                    break
+                backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]
+                if time.monotonic() + backoff >= turn_deadline:
+                    logger.warning(
+                        "[agent_v2] tool %s transient error but turn deadline reached: %r",
+                        tool_name,
+                        exc,
+                    )
+                    break
+                logger.warning(
+                    "[agent_v2] tool %s transient error (attempt %d/%d), retrying in %.1fs: %r",
+                    tool_name,
+                    attempt + 1,
+                    tool_max_retries,
+                    backoff,
+                    exc,
+                )
+                await asyncio.sleep(backoff)
         latency_ms = int((time.monotonic() - t0) * 1000)
 
         history_entry = {

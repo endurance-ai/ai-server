@@ -203,6 +203,11 @@ class Settings(BaseSettings):
     AGENT_LLM_MODEL: str = ""
     # Per-LLM-call timeout in seconds.
     AGENT_LLM_TIMEOUT_S: float = 5.0
+    # Transient-error retry knobs (SPEC-AGENT-V2-REACT runtime hardening).
+    # Bedrock Nova bursts get throttled → LiteLLM surfaces HTTP 500; a short
+    # retry survives the throttle without consuming a ReAct iteration.
+    AGENT_LLM_MAX_RETRIES: int = 2
+    AGENT_TOOL_MAX_RETRIES: int = 1
 
     @field_validator("APIFY_PINTEREST_MAX_ITEMS")
     @classmethod

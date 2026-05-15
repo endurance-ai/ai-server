@@ -292,3 +292,183 @@ async def test_build_user_message_handles_out_of_range_index():
     # Falls back to detected_items summary, raw callback preserved (no crash).
     assert "detected_items:" in out
     assert "callback: item:5" in out
+
+
+# --- SPEC-AGENT-V2-REACT runtime hardening: Fix A + Fix B ---
+
+
+def test_system_prompt_contains_redundancy_rules():
+    """Fix A — react_loop _SYSTEM_PROMPT must carry the new anti-redundancy rules."""
+    from app.agents import react_loop as rl
+
+    p = rl._SYSTEM_PROMPT
+    assert "Avoid redundant tool calls" in p
+    # search-then-respond rule
+    assert "your NEXT action MUST be `respond`" in p
+    assert "do NOT call `analyze_image`" in p
+    # vision-context guard
+    assert "`detected_items:`" in p and "`user_selected_item:`" in p and "`style_node:`" in p
+    # fewest-calls rule
+    assert "Prefer the fewest tool calls" in p
+    # additive — original persona / fence rules still present
+    assert "You are kiko" in p
+    assert "ReAct agent" in p
+
+
+class _FakeHTTPError(Exception):
+    """Mimics httpx/openai status-bearing exception."""
+
+    def __init__(self, status_code: int, msg: str = ""):
+        super().__init__(msg or f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        (_FakeHTTPError(500), True),
+        (_FakeHTTPError(502), True),
+        (_FakeHTTPError(503), True),
+        (_FakeHTTPError(504), True),
+        (_FakeHTTPError(400), False),
+        (_FakeHTTPError(401), False),
+        (_FakeHTTPError(422), False),
+        (_FakeHTTPError(404), False),
+        (TimeoutError("read timeout"), True),
+        (Exception("litellm.InternalServerError: Internal Server Error"), True),
+        (Exception("Bedrock throttlingException: rate exceeded"), True),
+        (Exception("503 Service Unavailable"), True),
+        (Exception("connect timeout"), True),
+        (Exception("400 Bad Request: invalid model"), False),
+        (Exception("ValidationError: missing field"), False),
+        (ValueError("some random bug"), False),
+    ],
+)
+def test_is_transient_truth_table(exc, expected):
+    from app.agents import react_loop as rl
+
+    assert rl._is_transient(exc) is expected
+
+
+class _FlakyLLM:
+    """Raises a given exc N times, then returns canned messages."""
+
+    def __init__(self, exc, fail_times, then):
+        self._exc = exc
+        self._fail = fail_times
+        self._then = list(then)
+        self.calls = 0
+
+    async def ainvoke(self, messages):
+        self.calls += 1
+        if self._fail > 0:
+            self._fail -= 1
+            raise self._exc
+        if self._then:
+            return self._then.pop(0)
+        return _FakeAIMessage([])
+
+
+@pytest.mark.asyncio
+async def test_llm_retry_then_success(monkeypatch):
+    """Fix B — one transient 500 then success → loop recovers, NOT exhausted."""
+    from app.agents import react_loop as rl
+
+    flaky = _FlakyLLM(
+        _FakeHTTPError(500, "Internal Server Error"),
+        fail_times=1,
+        then=[_FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "1"}])],
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: flaky)
+    monkeypatch.setattr(rl, "_LLM_BACKOFF", (0.0, 0.0))
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+    assert delta["agent_iterations"] == 1  # retry did NOT consume an iteration
+    assert flaky.calls == 2  # 1 fail + 1 success
+    mock_adapter.send_text.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_llm_retry_exhausted_falls_back(monkeypatch):
+    """Fix B — 3 consecutive 500s (> max 2 retries) → graceful single fallback."""
+    from app.agents import react_loop as rl
+
+    flaky = _FlakyLLM(_FakeHTTPError(500), fail_times=10, then=[])
+    monkeypatch.setattr(rl, "get_llm", lambda: flaky)
+    monkeypatch.setattr(rl, "_LLM_BACKOFF", (0.0, 0.0))
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "exhausted"
+    assert delta["response_text"]  # ONE user-facing message
+    # 1 initial + 2 retries = 3 calls, then fallback (no infinite loop)
+    assert flaky.calls == 3
+
+
+@pytest.mark.asyncio
+async def test_llm_non_transient_no_retry(monkeypatch):
+    """Fix B — a 400 must NOT retry (fast fail to fallback), behavior unchanged."""
+    from app.agents import react_loop as rl
+
+    flaky = _FlakyLLM(_FakeHTTPError(400, "Bad Request"), fail_times=10, then=[])
+    monkeypatch.setattr(rl, "get_llm", lambda: flaky)
+    monkeypatch.setattr(rl, "_LLM_BACKOFF", (0.0, 0.0))
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "exhausted"
+    assert flaky.calls == 1  # NO retry on non-transient
+
+
+@pytest.mark.asyncio
+async def test_tool_dispatch_transient_retry(monkeypatch):
+    """Fix B — tool dispatch transient 5xx retried once then succeeds."""
+    from app.agents import react_loop as rl
+
+    # LLM: call search_products, then respond.
+    fake = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "navy jeans"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "here you go"}, "id": "2"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    monkeypatch.setattr(rl, "_LLM_BACKOFF", (0.0, 0.0))
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+
+    calls = {"n": 0}
+
+    async def _flaky_dispatch(args, ctx):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _FakeHTTPError(503, "Service Unavailable")
+        return {"ok": True, "candidates_count": 5}
+
+    _real_resolve = rl._resolve_dispatcher
+
+    def _resolve(name):
+        # Only the search tool is flaky; respond uses the real dispatcher.
+        return _flaky_dispatch if name == "search_products" else _real_resolve(name)
+
+    monkeypatch.setattr(rl, "_resolve_dispatcher", _resolve)
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+    assert calls["n"] == 2  # 1 transient fail + 1 retry success
+    hist = delta["tool_call_history"]
+    assert hist[0]["tool_name"] == "search_products"
+    assert hist[0]["error"] is None  # retry cleared the error
