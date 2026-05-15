@@ -203,10 +203,7 @@ class TelegramAdapter(MessengerAdapter):
         re-render on toggle), or None on failure.
         """
         t0 = time.perf_counter()
-        rows = [
-            [{"text": label, "callback_data": data} for label, data in row]
-            for row in keyboard
-        ]
+        rows = [[{"text": label, "callback_data": data} for label, data in row] for row in keyboard]
         payload = {
             "chat_id": chat_id,
             "text": text,
@@ -250,10 +247,7 @@ class TelegramAdapter(MessengerAdapter):
         Used by onboarding toggle handlers to update the ✓ checkmarks without
         spamming new messages. Returns True on Telegram-reported success.
         """
-        rows = [
-            [{"text": label, "callback_data": data} for label, data in row]
-            for row in keyboard
-        ]
+        rows = [[{"text": label, "callback_data": data} for label, data in row] for row in keyboard]
         payload = {
             "chat_id": chat_id,
             "message_id": message_id,

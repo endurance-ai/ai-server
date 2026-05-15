@@ -41,17 +41,188 @@ adapter or the session store. Side effects belong to nodes.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from app.channels.router import RoutedIntent
-from app.channels.session import SessionState, get_store
+from app.channels.session import Session, SessionState, get_store
 from app.core.config import settings
 from app.graphs.state import WorkingState
+
+# ── SPEC-ONBOARD-CARDS-001 — entry/gating predicates ─────────────────────────
+# @MX:SPEC: SPEC-ONBOARD-CARDS-001
+# @MX:REASON: REQ-ONBOARD-ENTRY-001/002 + REQ-ONBOARD-PINTEREST-003 gate the
+#   entire onboarding subgraph; logic lives here so `_route_after_ingest` can
+#   short-circuit before existing branches and no other code path duplicates
+#   the predicate.
+
+# Exact-match (whitespace-trimmed, case-insensitive) — plan §7.2: Python regex
+# `\b` is unreliable on Korean text, so we use a fixed allow-list.
+_RESTART_KEYWORDS_LOWER: frozenset[str] = frozenset({"/reset", "온보딩 다시", "취향 다시 설정", "reset taste"})
+_ONBOARDING_ACTIVE_STAGES: frozenset[str] = frozenset({"intro", "mood", "color", "fit", "pinterest"})
+
+
+def _is_restart_keyword(text: str | None) -> bool:
+    """REQ-ONBOARD-ENTRY-002 — exact-match re-trigger keyword detector."""
+    if not text:
+        return False
+    return text.strip().lower() in _RESTART_KEYWORDS_LOWER
+
+
+def onboarding_required(state: WorkingState, sess: Session) -> bool:
+    """REQ-ONBOARD-ENTRY-001 / REQ-ONBOARD-ENTRY-002 — onboarding gate.
+
+    True if any of:
+      (a) ONBOARDING_CARDS_ENABLED is true AND `sess.onboarded_at IS NULL`,
+      (b) re-trigger keyword detected in the inbound text,
+      (c) callback starts with `onboard:` (mid-flow card interaction),
+      (d) `sess.onboard_stage` is in an active stage (resume).
+
+    @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    """
+    if not bool(getattr(settings, "ONBOARDING_CARDS_ENABLED", True)):
+        return False
+
+    msg = state.message
+    cb = (msg.callback_data or "") if msg else ""
+    if cb.startswith("onboard:"):
+        return True
+
+    text = msg.text if msg else None
+    if _is_restart_keyword(text):
+        return True
+
+    stage = getattr(sess, "onboard_stage", None)
+    if stage in _ONBOARDING_ACTIVE_STAGES:
+        return True
+
+    if getattr(sess, "onboarded_at", None) is None:
+        # Fresh user — any inbound text/photo/callback triggers onboarding.
+        # We do require *some* user signal; an empty payload should never reach
+        # routing in practice, but guard anyway.
+        if cb or (msg and (msg.text or msg.photo_file_id or msg.urls)):
+            return True
+
+    return False
+
+
+def _resolve_onboard_stage_target(sess: Session, state: WorkingState) -> str:
+    """Return the onboarding-subgraph node name for the current state.
+
+    Priorities (highest first):
+      1. Callback `onboard:<stage>:*` → that stage node.
+      2. `sess.onboard_stage` resume slot.
+      3. Default → `onboard_intro`.
+    """
+    cb = (state.message.callback_data or "") if state.message else ""
+    if cb.startswith("onboard:"):
+        parts = cb.split(":", 2)
+        if len(parts) >= 2:
+            stage_token = parts[1]
+            mapping = {
+                "restart": "onboard_intro",
+                "mood": "onboard_mood",
+                "color": "onboard_color",
+                "fit": "onboard_fit",
+                "pinterest": "onboard_pinterest",
+            }
+            target = mapping.get(stage_token)
+            if target:
+                return target
+
+    stage = getattr(sess, "onboard_stage", None)
+    if stage == "mood":
+        return "onboard_mood"
+    if stage == "color":
+        return "onboard_color"
+    if stage == "fit":
+        return "onboard_fit"
+    if stage == "pinterest":
+        return "onboard_pinterest"
+    return "onboard_intro"
+
+
+def is_continuous_pinterest(state: WorkingState, sess: Session) -> bool:
+    """REQ-ONBOARD-PINTEREST-003 — continuous (post-onboarding) bootstrap.
+
+    True iff all of:
+      - `sess.onboarded_at IS NOT NULL` (user finished onboarding),
+      - `sess.onboard_stage` in {None, "done"} (not currently in onboarding),
+      - inbound `text` is present AND `classify_pinterest_input(text)` returns
+        non-NONE,
+      - rate-limit window not active (or already expired).
+
+    Defense in depth: the node body also enforces the rate-limit gate.
+
+    @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    """
+    if getattr(sess, "onboarded_at", None) is None:
+        return False
+    stage = getattr(sess, "onboard_stage", None)
+    if stage not in (None, "done"):
+        return False
+
+    msg = state.message
+    text = msg.text if msg else None
+    if not text:
+        return False
+
+    # Avoid hard-importing at module top — keeps `routing.py` import-light and
+    # mirrors the laziness used elsewhere for channel helpers.
+    try:
+        from app.channels.pinterest_url import PinInputNone, classify_pinterest_input
+    except Exception:  # noqa: BLE001
+        return False
+
+    max_pins = int(getattr(settings, "PINTEREST_MAX_PINS_PER_TURN", 20))
+    try:
+        classified = classify_pinterest_input(text, max_pins=max_pins)
+    except Exception:  # noqa: BLE001
+        return False
+    if isinstance(classified, PinInputNone):
+        return False
+
+    last = getattr(sess, "last_pinterest_scrape_at", None)
+    window_s = int(getattr(settings, "PINTEREST_CONTINUOUS_RATELIMIT_S", 300))
+    if last is not None and window_s > 0:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        elapsed = (datetime.now(UTC) - last).total_seconds()
+        if 0 <= elapsed < float(window_s):
+            return False
+
+    return True
+
+
+def _route_after_onboard_fit(state: WorkingState) -> str:
+    """REQ-ONBOARD-GRAPH-001 — Stage 3 branch on PINTEREST_BOOTSTRAP_ENABLED.
+
+    Currently both branches lead to END because `onboard_fit` finalizes
+    inline when Pinterest is disabled and renders the Pinterest card when
+    enabled (the user's next callback re-enters the graph fresh). The
+    explicit conditional satisfies plan §6.2 entries #4+#5.
+    """
+    # When Pinterest is enabled and the user just hit `fit:done`, the next
+    # webhook turn carries `onboard:pinterest:*` (or a URL text), at which point
+    # the ingest gate dispatches to `onboard_pinterest` directly. Within the
+    # same turn we terminate.
+    return "__end__"
 
 
 def _route_after_ingest(state: WorkingState) -> str:
     msg = state.message
     cb = msg.callback_data or ""
+
+    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — onboarding gate FIRST.
+    # Must precede every existing branch so /reset, mid-flow callbacks, and
+    # fresh-user paths all win against generic text routing. Continuous
+    # Pinterest bootstrap is checked second (only for onboarded users).
+    sess = get_store().get_or_create(state.chat_id)
+    if onboarding_required(state, sess):
+        return _resolve_onboard_stage_target(sess, state)
+    if is_continuous_pinterest(state, sess):
+        return "pinterest_ingest"
+
     if cb.startswith("item:"):
         return "pick_item"
     # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-CALLBACK-002 — clarify 콜백 분기.
@@ -60,8 +231,7 @@ def _route_after_ingest(state: WorkingState) -> str:
     if cb.startswith("crit:"):
         return "critique_apply"
 
-    # Session-state-aware text routing
-    sess = get_store().get_or_create(state.chat_id)
+    # Session-state-aware text routing (sess already loaded above for gates).
     if msg.text and sess.state == SessionState.AWAITING_INTENT and not msg.photo_file_id:
         return "critique_apply"
 

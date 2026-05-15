@@ -34,8 +34,18 @@ from tests.conftest_graph import FakeAdapter, FakeCandidate, StubLLM, StubPort, 
 
 @pytest.fixture
 async def store():
+    """SPEC-ONBOARD-CARDS-001 cascade: graph_flows tests target legacy
+    non-onboarding branches; pre-mark the canonical chat_id 42 as onboarded so
+    the ingest gate's onboarding predicate stays off and existing flow assertions
+    continue to fire (DDD PRESERVE for non-onboarding paths).
+    """
+    from datetime import UTC, datetime
+
     s = InMemorySessionStore()
     set_store(s)
+    sess = s.get_or_create(42)
+    sess.onboarded_at = datetime.now(tz=UTC)
+    s.update(sess)
     yield s
     await shutdown_store()
 

@@ -201,6 +201,40 @@ async def complete_onboarding(
             # rule: do NOT mark onboarded_at if seed failed.
             raise
 
+    # SPEC-CONVERSATION-LOG-001 LOG-T23 cascade — emit `taste_update` so the
+    # `source="onboard"` and `source="pinterest"` Literal values move from
+    # `_UNIMPLEMENTED_SOURCES` to `_IMPLEMENTED_SOURCES`. The AST scanner in
+    # `tests/test_conversation_log/test_payload_shapes.py` reads payload-dict
+    # literals — keep `event_type` and `source` as Constant strings.
+    try:
+        from app.observability.conversation_log import emit
+
+        # Card-axis emit — always fires (even with empty selections we still
+        # mark the channel as "onboard").
+        emit(
+            event_type="taste_update",
+            user_key=user_key,
+            chat_id=getattr(state, "chat_id", 0),
+            thread_id=getattr(state, "thread_id", None),
+            turn_no=getattr(state, "turn_no", 0),
+            payload={"source": "onboard", "keyword_count": len(merged or {})},
+        )
+        # Pinterest-axis emit — only when a pin stash contributed weights.
+        if pinterest_success:
+            emit(
+                event_type="taste_update",
+                user_key=user_key,
+                chat_id=getattr(state, "chat_id", 0),
+                thread_id=getattr(state, "thread_id", None),
+                turn_no=getattr(state, "turn_no", 0),
+                payload={
+                    "source": "pinterest",
+                    "pin_count": int((pin_stash or {}).get("successfully_analyzed", 0)),
+                },
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("[ONBOARD] taste_update emit best-effort", exc_info=True)
+
     # ── 4. Mark onboarded_at + persist (AFTER seed) ───────────────────────
     stamp = now or datetime.now(UTC)
     try:

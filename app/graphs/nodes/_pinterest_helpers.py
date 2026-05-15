@@ -458,6 +458,11 @@ async def ingest_pinterest_pins(
                 try:
                     taste_store.seed_from_onboarding(user_key, _seed_keyword_brand_dict(cached))
                     seed_called = True
+                    _emit_pinterest_taste_update(
+                        state=state,
+                        user_key=user_key,
+                        pin_count=int(cached.get("successfully_analyzed", 0)),
+                    )
                 except Exception:  # noqa: BLE001 — never propagate into graph
                     logger.exception("🎨 [PINTEREST] continuous seed failed (cache hit path)")
             else:
@@ -524,6 +529,11 @@ async def ingest_pinterest_pins(
         try:
             taste_store.seed_from_onboarding(user_key, _seed_keyword_brand_dict(aggregated))
             seed_called = True
+            _emit_pinterest_taste_update(
+                state=state,
+                user_key=user_key,
+                pin_count=int(aggregated.get("successfully_analyzed", 0)),
+            )
         except Exception:  # noqa: BLE001
             logger.exception("🎨 [PINTEREST] continuous seed failed")
     else:
@@ -538,6 +548,35 @@ async def ingest_pinterest_pins(
         aggregated_weights=aggregated,
         image_urls=list(image_urls),
     )
+
+
+def _emit_pinterest_taste_update(
+    *,
+    state: Any,
+    user_key: str,
+    pin_count: int,
+) -> None:
+    """SPEC-CONVERSATION-LOG-001 LOG-T23 cascade — `taste_update.source="pinterest"`.
+
+    Fired ONLY on the continuous bootstrap path (when this module performs the
+    direct seed call). The onboarding path emits via `_onboard_helpers` after
+    the combined seed; emitting here too would double-count.
+
+    @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    """
+    try:
+        from app.observability.conversation_log import emit
+
+        emit(
+            event_type="taste_update",
+            user_key=user_key,
+            chat_id=getattr(state, "chat_id", 0),
+            thread_id=getattr(state, "thread_id", None),
+            turn_no=getattr(state, "turn_no", 0),
+            payload={"source": "pinterest", "pin_count": int(pin_count)},
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[PINTEREST] taste_update emit best-effort", exc_info=True)
 
 
 def _stash_weights_on_state(state: Any, aggregated: _AggregatedWeights) -> None:

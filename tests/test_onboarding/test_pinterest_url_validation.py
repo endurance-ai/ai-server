@@ -88,18 +88,46 @@ def taste_store():
 # Scheme rejection — classifier-level safety
 # ────────────────────────────────────────────────────────────────────────────
 class TestSchemeRejection:
+    # SPEC-ONBOARD-CARDS-001 ONB-T21 — broaden attack-URL matrix to 20+ cases.
+    # All entries MUST classify to PinInputNone; tightening the classifier
+    # to accept any of these is a security regression and must fail this test.
     @pytest.mark.parametrize(
         "bad",
         [
+            # Dangerous schemes
             "javascript:alert(1)",
             "data:text/html,<script>",
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
             "ftp://pinterest.com/jane/",
+            "gopher://pinterest.com/",
+            # Host-confusion / suffix appending
             "http://pinterest.com.evil.com/jane/",
+            "http://evil.com/pinterest.com/",
+            "http://pinterest.com@evil.com/",
+            "http://pinterest.com#@evil.com/",
+            # Subdomain look-alike NOT in allowlist
+            "http://api.pinterest.com.evil.com/pin/1/",
+            # Internal / SSRF targets
+            "http://127.0.0.1/pin/1/",
+            "http://localhost/pin/1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/pin/1/",
+            "http://0.0.0.0/pin/1/",
+            # IDN homograph mimicking pinterest.com (Cyrillic а / е)
+            "http://pinterеst.com/jane/",
+            "http://piṅterest.com/jane/",
+            # Empty / malformed
+            "",
+            "   ",
+            "://pinterest.com/",
+            "pinterest.com",  # no scheme
         ],
     )
     def test_attack_urls_classified_none(self, bad):
         result = classify_pinterest_input(bad)
-        assert isinstance(result, PinInputNone)
+        assert isinstance(result, PinInputNone), f"Attack URL leaked: {bad!r}"
 
 
 # ────────────────────────────────────────────────────────────────────────────

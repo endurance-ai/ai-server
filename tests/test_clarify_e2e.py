@@ -36,8 +36,12 @@ from tests.conftest_graph import FakeAdapter, StubPort
 
 @pytest.fixture
 async def store():
+    # SPEC-ONBOARD-CARDS-001 cascade — bypass onboarding gate for legacy paths.
     s = InMemorySessionStore()
     set_store(s)
+    sess = s.get_or_create(42)
+    sess.onboarded_at = datetime.now(tz=UTC)
+    s.update(sess)
     yield s
     await shutdown_store()
 

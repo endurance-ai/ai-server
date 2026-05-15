@@ -122,6 +122,22 @@ def _extract_callback_source_message_id(payload: Any) -> int | None:
     return mid if isinstance(mid, int) else None
 
 
+# @MX:NOTE: [AUTO] SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 — logging
+# clarity helper. Returns the canonical command token (e.g. "/start", "/reset")
+# when the inbound text matches a slash command, else None. Dispatch happens
+# downstream in the routing layer; this is intake-side logging only.
+# @MX:SPEC: SPEC-ONBOARD-CARDS-001
+def _is_command_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    stripped = text.strip()
+    if stripped.startswith("/") and len(stripped) <= 64:
+        # Take the head up to first whitespace to keep payloads bounded.
+        head = stripped.split(None, 1)[0]
+        return head.lower() if head.startswith("/") else None
+    return None
+
+
 def _classify_flow(message: ChannelMessage) -> str:
     """REQ-OBS-METADATA-001 — `flow` classifier.
 
@@ -176,6 +192,12 @@ async def telegram_webhook(
         bool(message.photo_file_id),
         [str(u) for u in message.urls],
     )
+
+    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 — log slash commands at intake
+    # for tracing entry-flow decisions; downstream routing handles the dispatch.
+    command = _is_command_text(message.text)
+    if command:
+        logger.info("📥 [webhook] 🎟 command=%s user=%s", command, hash_id(message.from_user_id))
 
     # SPEC-CONVERSATION-LOG-001 / LOG-T08+T09+T10 — intake-time emit.
     # Emit FIRST, then schedule the graph. Even if the graph crashes downstream

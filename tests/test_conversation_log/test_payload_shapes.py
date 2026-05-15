@@ -118,10 +118,20 @@ def _collect_all_taste_sources() -> set[str]:
     return found
 
 
-# Currently-emittable sources (5/7).
-_IMPLEMENTED_SOURCES = {"click", "critique", "free_text", "no_click", "re_query"}
-# Not yet emittable (SPEC-ONBOARD-CARDS-001 not landed).
-_UNIMPLEMENTED_SOURCES = {"onboard", "pinterest"}
+# Currently-emittable sources (7/7) — SPEC-ONBOARD-CARDS-001 landed Phase 4
+# (ONB-T22), wiring `taste_update.source="onboard"` in `_onboard_helpers.py`
+# and `source="pinterest"` in `_pinterest_helpers.py`. The xfail bookmark for
+# unimplemented sources is retired.
+_IMPLEMENTED_SOURCES = {
+    "click",
+    "critique",
+    "free_text",
+    "no_click",
+    "onboard",
+    "pinterest",
+    "re_query",
+}
+_UNIMPLEMENTED_SOURCES: set[str] = set()
 
 
 @pytest.mark.parametrize("source", sorted(_IMPLEMENTED_SOURCES))
@@ -132,17 +142,6 @@ def test_taste_update_implemented_source_has_emit_site(source: str):
     assert source in found, (
         f"taste_update.source={source!r} not emitted from any in-scope file. Currently found: {sorted(found)}"
     )
-
-
-@pytest.mark.parametrize("source", sorted(_UNIMPLEMENTED_SOURCES))
-@pytest.mark.xfail(
-    reason="SPEC-ONBOARD-CARDS-001 not yet implemented; onboard/pinterest sources have no emit sites yet",
-    strict=True,
-)
-def test_taste_update_unimplemented_source_xfail(source: str):
-    """xfail bookmark — flips to xpassed when SPEC-ONBOARD-CARDS-001 lands."""
-    found = _collect_all_taste_sources()
-    assert source in found
 
 
 def test_all_seven_sources_covered_by_test_matrix():

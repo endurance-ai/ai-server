@@ -112,3 +112,38 @@ async def test_non_list_payload_returns_empty(monkeypatch):
     # Json shape is `[]` from _DummyResponse default — verify alternate path.
     out = await run_pinterest_scrape("https://pinterest.com/jane/coats/", "board")
     assert out == []
+
+
+# ── SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-SEC-001 — token never logged ────────
+
+
+async def test_apify_token_never_appears_in_logs(monkeypatch, caplog):
+    """Privacy regression guard — raw APIFY_TOKEN MUST NOT appear in log output.
+
+    Drives a success path + a 401 path + a connection error path so all
+    log statements get exercised, then asserts the literal token string
+    is absent from every captured record.
+    """
+    sentinel = "SECRET-TOKEN-SENTINEL-9f3a7b2c"
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "APIFY_TOKEN", sentinel, raising=False)
+    caplog.set_level("DEBUG", logger="app.providers.apify")
+
+    # Success
+    _patch_httpx(
+        monkeypatch,
+        _DummyClient(_DummyResponse(200, [{"imageUrl": "https://i.pinimg.com/x.jpg"}])),
+    )
+    await run_pinterest_scrape("https://pinterest.com/jane/coats/", "board")
+
+    # Auth failure
+    _patch_httpx(monkeypatch, _DummyClient(_DummyResponse(401, [])))
+    await run_pinterest_scrape("https://pinterest.com/jane/coats/", "board")
+
+    # Network error
+    _patch_httpx(monkeypatch, _DummyClient(exc=httpx.ConnectError("dns")))
+    await run_pinterest_scrape("https://pinterest.com/jane/coats/", "board")
+
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert sentinel not in joined, f"APIFY_TOKEN leaked into logs: {joined}"

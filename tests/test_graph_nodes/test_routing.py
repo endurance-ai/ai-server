@@ -27,8 +27,15 @@ from app.graphs.state import WorkingState
 
 @pytest.fixture(autouse=True)
 def _store():
+    """SPEC-ONBOARD-CARDS-001 cascade: legacy routing tests target non-onboarding
+    branches; mark the session as already-onboarded so the new onboarding gate
+    in `_route_after_ingest` stays off and existing branches keep firing.
+    """
     s = InMemorySessionStore()
     set_store(s)
+    sess = s.get_or_create(42)
+    sess.onboarded_at = datetime.now(tz=UTC)
+    s.update(sess)
     yield s
 
 
