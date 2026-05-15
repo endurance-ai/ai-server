@@ -89,6 +89,51 @@ async def ingest(state: WorkingState) -> dict:
     except Exception as exc:  # noqa: BLE001 — never block webhook
         logger.warning("[ingest] implicit feedback steps failed: %r", exc)
 
+    # SPEC-AGENT-V2-REACT / T-007 Step C — inline clarify:* callback handling
+    # when V2 ReAct topology is active. For onboarded users, accumulate
+    # boost_keywords directly into the session so the agent can use them on
+    # the next iteration. Mid-onboarding clarify is ignored + node_error logged.
+    try:
+        from app.core.config import settings as _settings
+
+        cb_data = msg.callback_data or ""
+        if (
+            _settings.AGENT_V2_REACT_ENABLED
+            and (_settings.AGENT_LLM_MODEL or "").strip()
+            and cb_data.startswith("clarify:")
+        ):
+            if getattr(sess, "onboarded_at", None) is None:
+                breadcrumbs.append("ingest_v2: clarify mid-onboarding ignored")
+                emit(
+                    event_type="node_error",
+                    user_key=user_key_for(state.from_user_id, state.chat_id),
+                    chat_id=state.chat_id,
+                    thread_id=state.thread_id,
+                    turn_no=1,
+                    payload={
+                        "node_name": "ingest",
+                        "exception_type": "ClarifyMidOnboarding",
+                        "message": "clarify callback during onboarding — ignored",
+                        "recovered": True,
+                    },
+                )
+            else:
+                # Parse `clarify:{axis}:{value}` → append value to boost_keywords.
+                parts = cb_data.split(":", 2)
+                if len(parts) >= 3 and parts[2]:
+                    value = parts[2][:64]
+                    cur = list(getattr(sess, "boost_keywords", []) or [])
+                    if value not in cur:
+                        cur.append(value)
+                        try:
+                            setattr(sess, "boost_keywords", cur)
+                            get_store().update(sess)
+                        except Exception:  # noqa: BLE001
+                            pass
+                breadcrumbs.append("ingest_v2: clarify boost_keywords accumulated")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] v2 clarify inline handling failed: %r", exc)
+
     # Only invoke router for ambiguous text in RESULTS_SENT / IDLE.
     needs_router = (
         msg.text

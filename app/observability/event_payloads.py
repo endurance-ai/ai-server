@@ -39,6 +39,8 @@ __all__ = [
     "BotTextPayload",
     "TasteUpdatePayload",
     "NodeErrorPayload",
+    # SPEC-AGENT-V2-REACT — REQ-AGENT-LOG-EVENT-001 (20th event type).
+    "ToolCallPayload",
 ]
 
 # REQ-LOG-CATALOG-001 — taste_update.source 7-value Literal (catalog #18).
@@ -198,3 +200,16 @@ class NodeErrorPayload(TypedDict, total=False):
     exception_type: str
     message: str
     recovered: bool
+
+
+# 20. tool_call — SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001 + REQ-AGENT-OBS-001.
+# Emitted by react_loop after every tool dispatch (success or failure).
+# Note: args / result_summary are SHAPE indicators only — full payloads pass through
+# `_truncate` cap (REQ-AGENT-SEC-PAYLOAD-001 / REQ-LOG-PAYLOAD-CAP-001).
+class ToolCallPayload(TypedDict, total=False):
+    tool_name: str
+    iteration_no: int
+    latency_ms: int
+    error: str | None
+    args_summary: dict
+    result_summary: dict

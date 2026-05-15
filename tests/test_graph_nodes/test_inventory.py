@@ -42,6 +42,8 @@ def test_ten_nodes_present():
             "onboard_fit",
             "onboard_pinterest",
             "pinterest_ingest",
+            # SPEC-AGENT-V2-REACT — ReAct agent node.
+            "agent",
         ]
     )
     assert public == expected, f"node inventory drifted: {public}"

@@ -19,7 +19,7 @@ write the existing in-memory stores via the existing module APIs.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
@@ -120,6 +120,14 @@ class WorkingState(InputState):
     onboard_card_message_id: int | None = None
     continuous_origin: bool = False
     onboard_pin_weights: dict[str, Any] | None = None
+
+    # SPEC-AGENT-V2-REACT / REQ-AGENT-COMPAT-STATE-001 — ReAct loop scratchpad.
+    # Three additive fields, no existing field altered. `tool_call_history` uses
+    # `_LIST_ADD` so LangGraph merges across iterations append-only (matches
+    # `critique_trail` reducer pattern).
+    agent_iterations: int = 0
+    tool_call_history: Annotated[list[dict[str, Any]], _LIST_ADD] = Field(default_factory=list)
+    agent_status: Literal["running", "done", "exhausted"] = "running"
 
 
 class OutputState(BaseModel):

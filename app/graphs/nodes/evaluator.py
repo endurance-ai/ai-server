@@ -1,4 +1,10 @@
-"""SPEC-AGENTIC-CRITIQUE-001 — `evaluator` node (Reflexion-style self-critique).
+"""DEPRECATED — superseded by SPEC-AGENT-V2-REACT (agent loop folds evaluator into refine_search, OQ-7 α).
+Retained for V2.0 rollback safety only. Will be removed in V2.1 cleanup
+(see SPEC-AGENT-V2-CLEANUP-001).
+
+@MX:LEGACY: superseded by SPEC-AGENT-V2-REACT — V2.1 removal target
+
+SPEC-AGENTIC-CRITIQUE-001 — `evaluator` node (Reflexion-style self-critique).
 
 # @MX:ANCHOR: [AUTO] Evaluator node — entry point for self-critique loop.
 # @MX:REASON: fan_in >= 3 (search_node, retry path from itself, future hooks).
