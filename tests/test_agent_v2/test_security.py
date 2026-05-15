@@ -64,6 +64,32 @@ def test_ssrf_172_outside_private_range_not_blocked(empty_allowlist):
     assert ok is True
 
 
+# ── P1-2/4: _is_blocked_host IP canonicalization (numeric/hex/octal/IPv6) ──
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://2130706433/",  # decimal-encoded 127.0.0.1
+        "http://0x7f000001/",  # hex-encoded 127.0.0.1
+        "http://017700000001/",  # octal-encoded 127.0.0.1
+        "http://[::ffff:127.0.0.1]/",  # IPv4-mapped IPv6 loopback
+        "http://[::ffff:10.0.0.1]/",  # IPv4-mapped IPv6 RFC-1918
+        "http://3232235521/",  # decimal-encoded 192.168.0.1
+    ],
+)
+def test_ssrf_blocks_canonicalized_loopback(empty_allowlist, url):
+    ok, err = _ssrf_ok(url)
+    assert ok is False, f"{url} canonicalizes to a blocked IP but passed"
+    assert err
+
+
+def test_ssrf_canonicalization_public_ip_not_blocked(empty_allowlist):
+    # 134744072 == 8.8.8.8 (public) — canonicalization must not over-block.
+    ok, _ = _ssrf_ok("https://134744072/x.jpg")
+    assert ok is True
+
+
 # ── P1-5: validate_args value-type enforcement ─────────────────────────────
 
 

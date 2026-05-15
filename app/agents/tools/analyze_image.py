@@ -9,6 +9,7 @@ same `settings.allowed_image_hosts` cascade used by `RecommendRequest`.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -19,13 +20,65 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Block any canonicalized loopback / private / link-local / RFC-1918 IP.
+
+    Also unwraps IPv4-mapped/-compatible IPv6 (e.g. ::ffff:127.0.0.1) so an
+    embedded loopback is caught after canonicalization.
+    """
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified
+
+
+def _canonical_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Best-effort canonicalization of an IP literal in any common encoding.
+
+    Handles dotted IPv4, IPv6 (incl. IPv4-mapped), and the bare-integer IPv4
+    forms a bypass uses: decimal (2130706433), hex (0x7f000001), octal
+    (017700000001). Returns None when `host` is not an IP literal.
+    """
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    # Bare-number IPv4: decimal / 0x-hex / 0o|0-octal. int(s, 0) covers
+    # 0x/0o prefixes; legacy leading-zero octal needs an explicit base 8.
+    for parse in (lambda s: int(s, 0), lambda s: int(s, 8) if s.startswith("0") and s.isdigit() else None):
+        try:
+            n = parse(host)
+        except (ValueError, TypeError):
+            continue
+        if n is None:
+            continue
+        if 0 <= n <= 0xFFFFFFFF:
+            try:
+                return ipaddress.ip_address(n)
+            except ValueError:
+                continue
+    return None
+
+
 def _is_blocked_host(host: str) -> bool:
-    """Textual bare-IP-literal / loopback / RFC-1918 / link-local match.
+    """Canonicalized-IP + textual loopback / RFC-1918 / link-local match.
+
+    P1-2/4: before the textual prefix checks, attempt
+    `ipaddress.ip_address()` canonicalization so numeric/hex/octal IPv4
+    (http://2130706433/, http://0x7f000001/) and IPv6-mapped loopback
+    (http://[::ffff:127.0.0.1]/) are caught — the prefix-only check missed
+    these. Textual checks remain as the outer layer for hostnames.
 
     No DNS resolution — matches REQ-AGENT-SEC-URL-001's enumerated set.
     """
     if host in {"localhost", "::1"}:
         return True
+    # Canonicalization layer — handles decimal/hex/octal IPv4 and IPv6 forms.
+    # urlparse strips IPv6 brackets already; strip defensively if present.
+    candidate = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    ip = _canonical_ip(candidate)
+    if ip is not None:
+        return _ip_is_blocked(ip)
     # IPv6 loopback may arrive bracket-stripped by urlparse already.
     if host.startswith("127."):  # 127.0.0.0/8 loopback
         return True
@@ -66,7 +119,10 @@ def _ssrf_ok(url: str) -> tuple[bool, str | None]:
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AnalyzeImageResult:
-    image_url = (args.get("image_url") or "").strip()
+    # P1-2/4: source the image URL ONLY from ctx (the real pin/og:image URL
+    # resolved pre-agent by the resolve_image node), never from LLM args —
+    # mirrors search_products. `args` is intentionally ignored for the URL.
+    image_url = str(ctx.get("image_url") or "").strip()
     if not image_url:
         return AnalyzeImageResult(ok=False, error="missing_image_url")
 

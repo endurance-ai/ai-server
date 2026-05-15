@@ -46,5 +46,5 @@ async def agent(state: WorkingState) -> dict[str, Any]:
         "log_events": breadcrumbs,
         # P1-3: real turn_no from state (matches react_loop.py emit convention
         # `state.turn_no or 1`) instead of the placeholder literal 10.
-        "turn_no": state.turn_no or (state.turn_no or 0) + 1,
+        "turn_no": (state.turn_no or 0) + 1,
     }

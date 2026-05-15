@@ -199,7 +199,7 @@ async def telegram_webhook(
         (message.text or "")[:80],
         bool(message.photo_file_id),
         [str(u) for u in message.urls],
-        message.callback_data,
+        (message.callback_data or "")[:64],
     )
 
     # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 — log slash commands at intake

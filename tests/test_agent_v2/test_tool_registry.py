@@ -73,3 +73,52 @@ def test_validate_args_unknown_keys():
 def test_validate_args_accepts_minimal():
     ok, err = validate_args("respond", {"text": "hi"})
     assert ok is True, err
+
+
+# ── P1-C: int-only top_k/n vs int|float min_price/max_price ───────────────
+
+
+def test_validate_args_accepts_float_price():
+    """LLM legitimately sends e.g. 59.99 — must not be rejected (P1-C)."""
+    ok, err = validate_args("search_products", {"text_query": "loafers", "min_price": 59.99, "max_price": 120.0})
+    assert ok is True, err
+    ok, err = validate_args("refine_search", {"action": "cheaper", "max_price": 49.95})
+    assert ok is True, err
+
+
+def test_validate_args_top_k_is_int_only():
+    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 12})
+    assert ok is True, err
+    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 12.5})
+    assert ok is False
+    assert "top_k must be int" in err
+
+
+@pytest.mark.parametrize(
+    ("args", "field"),
+    [
+        ({"text_query": "x", "top_k": True}, "top_k must be int"),
+        ({"text_query": "x", "min_price": True}, "min_price must be number"),
+        ({"text_query": "x", "max_price": False}, "max_price must be number"),
+    ],
+)
+def test_validate_args_rejects_bool(args, field):
+    """bool is an int subclass — rejected for both int-only and number groups."""
+    ok, err = validate_args("search_products", args)
+    assert ok is False
+    assert field in err
+
+
+# ── P1-2/4: analyze_image no longer accepts an LLM-supplied image_url ──────
+
+
+def test_analyze_image_takes_no_args():
+    ok, err = validate_args("analyze_image", {})
+    assert ok is True, err
+
+
+def test_analyze_image_image_url_rejected_as_unknown_key():
+    """SSRF surface removed: any supplied image_url → unknown_keys (P1-2/4)."""
+    ok, err = validate_args("analyze_image", {"image_url": "http://2130706433/"})
+    assert ok is False
+    assert "unknown_keys" in err

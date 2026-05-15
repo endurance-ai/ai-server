@@ -61,7 +61,13 @@ class ToolResult(TypedDict, total=False):
 
 
 class AnalyzeImageArgs(TypedDict, total=False):
-    image_url: str
+    # P1-2/4 (SPEC-AGENT-V2-REACT review): `image_url` is intentionally NOT a
+    # field. Mirrors the SearchProductsArgs hardening — the tool sources the
+    # resolved pin/og:image URL ONLY from ctx (populated pre-agent by the
+    # resolve_image node). Exposing it let a prompt-injected LLM fabricate a
+    # crafted SSRF URL; with no field, validate_args auto-rejects any supplied
+    # `image_url` as unknown_keys.
+    pass
 
 
 class SearchProductsArgs(TypedDict, total=False):
@@ -195,8 +201,10 @@ REGISTRY: dict[str, ToolMetadata] = {
     "analyze_image": {
         "name": "analyze_image",
         "description": (
-            "Analyze a fashion image URL and return structured style info. "
-            "Use when the user provides a photo or Pinterest link and Vision hasn't run."
+            "Analyze the user's fashion image and return structured style info. "
+            "Use when the user provides a photo or Pinterest link and Vision hasn't run. "
+            "Takes NO arguments — do NOT provide an image_url; the tool sources the "
+            "resolved image internally from session state."
         ),
         "args_typeddict": AnalyzeImageArgs,
         "result_typeddict": AnalyzeImageResult,
@@ -330,12 +338,20 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
     # An LLM passing `top_k: {"nested": 1}` or `n: "abc"` would otherwise pass
     # validation and crash deep in a caller. Not a full schema validator —
     # only the fields whose wrong type breaks a downstream call.
-    for key in ("top_k", "n", "min_price", "max_price"):
+    # P1-C: `top_k`/`n` are int-only; `min_price`/`max_price` are typed
+    # `float | None` (SearchProductsArgs/RefineSearchArgs) — the LLM
+    # legitimately sends e.g. 59.99, so accept int OR float there.
+    # bool is a subclass of int — reject it explicitly in both groups.
+    for key in ("top_k", "n"):
         if key in args:
             v = args[key]
-            # bool is a subclass of int — reject it explicitly.
             if not isinstance(v, int) or isinstance(v, bool):
                 return False, f"bad_type: {key} must be int"
+    for key in ("min_price", "max_price"):
+        if key in args:
+            v = args[key]
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                return False, f"bad_type: {key} must be number"
     for key in (
         "brand_likes",
         "brand_dislikes",
