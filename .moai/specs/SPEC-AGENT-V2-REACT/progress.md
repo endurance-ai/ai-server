@@ -45,3 +45,10 @@
 - ruff check app/ + ruff format: all green; pytest tests/test_agent_v2/: 53 passed (was 26; +27 new)
 - Scope: only react_loop.py / refine_search.py / agent.py / analyze_image.py / tool_registry.py + new test file touched; skipped items (JSON-malform streak, all P2) left as-is per instruction
 - T-010 complete: V1 regression migrated — 5n flag-aware / 4n property / 17n skipif / 6n deleted; full suite green both flags
+
+## Wave 8 — Bedrock (nova-lite) compatibility fix (2026-05-15)
+- Runtime verification: langchain-openai 0.3.34 `bind_tools()` does NOT inject `tool_choice` when arg omitted (source-confirmed + real `.ainvoke()` against `nova-lite` returns valid `tool_calls`, `finish_reason=tool_calls`, no HTTP 400). gpt-4o-mini blocked only by OpenAI account quota (429) — request shape valid, unrelated to tool_choice.
+- llm_client.py fix: explicit `bind_tools(..., tool_choice=None)` (lock the no-inject contract against future langchain bumps) + `ChatOpenAI(extra_body={"drop_params": True})` (LiteLLM strips provider-unsupported params for Bedrock instead of 400). Both no-op for OpenAI → AGENT_LLM_MODEL stays swappable. Minimal diff, lazy-singleton + fail-closed preserved.
+- react_loop.py review: no Bedrock-incompatible assumptions broken (tool_call id pass-through, finish_reason not inspected, content-vs-tool_calls via langchain-normalized `.tool_calls`, JSON-malform retry provider-agnostic). 1 latent non-live note: `tc.get("id", it)` fallback would mismatch a Bedrock tool-use id IF LiteLLM omits the id — Nova always returns one (verified); not fixed (minimal-diff).
+- plan.md: OQ-1 false Bedrock premise corrected (`gpt-4o-mini`→`nova-lite` default; Bedrock IS configured infra), OQ-2 Bedrock `tool_choice` caveat + fix documented, §1 summary table rows + HISTORY line added.
+- Tests: tests/test_agent_v2/test_llm_client.py added (2 mock-level cases: no forced tool_choice + drop_params + fail-closed). pytest tests/test_agent_v2/: 55 passed. ruff check + format: green.

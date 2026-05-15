@@ -72,8 +72,17 @@ def get_llm() -> Any:
             api_key=api_key,
             temperature=0.4,
             timeout=max(0.1, settings.AGENT_LLM_TIMEOUT_S),
+            # Bedrock (nova-lite) via LiteLLM rejects `tool_choice` with HTTP 400
+            # (litellm.UnsupportedParamsError). `drop_params` instructs the proxy
+            # to silently strip provider-unsupported params instead of erroring,
+            # keeping AGENT_LLM_MODEL swappable between nova-lite and gpt-4o-mini.
+            extra_body={"drop_params": True},
         )
-        _llm = client.bind_tools(_build_tools_schema())
+        # Explicit `tool_choice=None` → langchain MUST NOT inject a tool_choice
+        # field into the request body. The ReAct loop relies on the model
+        # autonomously choosing tools or terminating with `respond`; omitting
+        # tool_choice is functionally "auto" for OpenAI AND required for Bedrock.
+        _llm = client.bind_tools(_build_tools_schema(), tool_choice=None)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[agent_v2] LLM bind failed: %r", exc)
         return None

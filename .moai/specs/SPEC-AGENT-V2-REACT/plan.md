@@ -8,6 +8,10 @@
 - **Methodology**: DDD (Domain-Driven Development) — `.moai/config/sections/quality.yaml` `development_mode: ddd`. ANALYZE-PRESERVE-IMPROVE 사이클을 모든 brownfield task에 적용. 신규 모듈(`app/agents/**`)은 PRESERVE 단계가 없으므로 ANALYZE → IMPROVE 만 적용 (greenfield 내부 미니 사이클).
 - **Audit**: spec.md 통과. plan.md 본 문서가 OQ 1~10 결정 + Task decomposition + Test strategy + Rollout 까지 완결시킨다. plan-auditor 차회 iteration 입력.
 
+### HISTORY
+
+- **2026-05-15 (runtime verification correction)**: OQ-1 의 false premise *"nova-pro (Bedrock): 본 인프라에 Bedrock 자격증명 미설정"* 을 폐기. Bedrock Nova 는 본 프로젝트 primary LLM (LiteLLM proxy 에 자격증명 구성됨). OQ-1 기본 모델을 `gpt-4o-mini` → `nova-lite` 로 정정. OQ-2 에 Bedrock `tool_choice` 거부 caveat + `llm_client.py` fix 문서화. raw curl + 실제 `.ainvoke()` 로 `nova-lite` tool calling 정상 동작 검증 완료.
+
 ### Blocking prerequisites
 
 1. **[HARD BLOCKER] SPEC-CONVERSATION-LOG-001 v0.3.0 amendment PR** (REQ-AGENT-LOG-EVENT-001). `ai.log_conversation_event` 의 카탈로그에 `tool_call` (20번째 이벤트 타입) 을 추가하고 `app/observability/conversation_log.py` 에 `ToolCallPayload` TypedDict 를 export. 본 SPEC 의 implementation PR 은 amendment PR merge 이전에 절대 merge 불가. plan.md 의 Task 0 으로 분리.
@@ -43,30 +47,37 @@ SPEC §Cross-References 에서 `app/graphs/nodes/router_text.py` 를 deprecated 
 
 ### OQ-1: Agent loop LLM model selection
 
-**Decision**: 기본 `gpt-4o-mini` (via LiteLLM proxy `LITELLM_BASE_URL`). 환경변수 `AGENT_LLM_MODEL` 로 운영자가 override 가능. 미설정 시 `AGENT_V2_REACT_ENABLED` 가 효과적으로 false (fail-closed).
+**Decision**: 기본 `nova-lite` (AWS Bedrock `us.amazon.nova-2-lite-v1:0`, via LiteLLM proxy `LITELLM_BASE_URL` — **본 프로젝트의 primary LLM**, `VISION_MODEL` / `RESPONSE_MODEL` 과 동일 proxy + 동일 alias). 환경변수 `AGENT_LLM_MODEL` 로 운영자가 override 가능 (`gpt-4o-mini` 는 동일 proxy 의 valid alternative alias). 미설정 시 `AGENT_V2_REACT_ENABLED` 가 효과적으로 false (fail-closed).
+
+> **[Plan-phase error correction — 2026-05-15]**: 본 OQ 의 직전 버전은 기본 모델을 `gpt-4o-mini` 로 결정하고 그 근거로 *"nova-pro (Bedrock): 본 인프라에 Bedrock 자격증명 미설정"* 이라 기재했다. **이 전제는 사실과 다르다.** 본 인프라는 Bedrock 자격증명이 LiteLLM proxy 에 이미 구성되어 있으며, Bedrock Nova 가 이 프로젝트의 primary LLM (`VISION_MODEL=nova-lite`, `RESPONSE_MODEL`) 이다. runtime verification (raw curl + 실제 `.ainvoke()`) 으로 `nova-lite` 가 LiteLLM proxy 경유 tool calling 을 정상 지원함을 확인했다. 잘못된 전제를 폐기하고 기본값을 `nova-lite` 로 정정한다.
 
 **Rationale**:
-- 비용: gpt-4o-mini ≈ $0.00015 input / $0.0006 output per 1K tokens. 6-iteration 한턴 ≈ 4K tokens × 6 = 24K → ≈ $0.005/turn. 10K turns/day = $50/day. R4 (cost explosion) 마지노선 안.
-- LiteLLM proxy 호환: 본 프로젝트는 이미 `respond.py` 와 `ask_clarify.py` 에서 `langchain-openai` ChatOpenAI 를 LiteLLM proxy 경유로 사용 (확인된 패턴). gpt-4o-mini 는 동일 proxy 로 라우팅 가능, 추가 인프라 0.
-- Tool selection 정확도: OpenAI Tools API (OQ-2) 를 함께 사용하면 gpt-4o-mini 의 structured output 신뢰도가 gpt-4o 와 차이 < 5% (Anthropic/OpenAI 공식 벤치마크 기준). 본 SPEC 의 7-tool registry 는 단순 (axis 6개 + 3-4 args/tool) — gpt-4o-mini 로 충분.
-- Latency: gpt-4o-mini 평균 0.8–1.2s/call. 6 iter × 1s + 4 tool dispatch × 1s ≈ 10s → REQ-AGENT-PERF-EXHAUST-001 (12s budget) 안.
-- nova-pro (Bedrock): LiteLLM proxy 호환 가능하나 본 인프라에 Bedrock 자격증명 미설정. 도입 비용 = 추가 IAM + LiteLLM config + 검증 → 본 SPEC 범위 외.
-- gpt-4o (full): 8배 비용 ($400/day @ 10K). 본 SPEC 7-tool 단순도에서 ROI 부족. 향후 high-stakes turn 한정 escalation 은 별도 SPEC.
+- **인프라 정합성 (정정된 사실)**: Bedrock Nova 는 본 프로젝트의 primary LLM. `app/channels/vision.py` (`VISION_MODEL`), `app/graphs/nodes/respond.py` (`RESPONSE_MODEL`) 가 이미 동일 LiteLLM proxy 경유 `nova-lite` 사용. agent loop 도 동일 모델 사용 시 인프라/관측/비용 모델 일관성 확보, 추가 인프라 0.
+- LiteLLM proxy 호환: 본 프로젝트는 이미 `respond.py` 와 `ask_clarify.py` 에서 `langchain-openai` ChatOpenAI 를 LiteLLM proxy 경유로 사용 (확인된 패턴). `nova-lite` / `gpt-4o-mini` 모두 동일 proxy alias 로 라우팅 가능.
+- Tool calling 검증 (runtime): raw `POST /v1/chat/completions` `model=nova-lite` + `tools=[...]` → 200, well-formed `tool_calls` 반환 (`finish_reason: tool_calls`). 실제 `bind_tools().ainvoke()` 로도 `search_products` tool call 정상 생성 확인. 본 SPEC 의 7-tool registry 는 단순 (axis 6개 + 3-4 args/tool) — `nova-lite` 로 충분.
+- 비용: Bedrock Nova Lite 는 gpt-4o-mini 동급 또는 더 낮은 토큰 단가. 6-iteration 한턴 토큰 예산은 R4 (cost explosion) 마지노선 안 (기존 분석 유지).
+- Latency: Nova Lite 는 저지연 tier. 6 iter + tool dispatch 합산이 REQ-AGENT-PERF-EXHAUST-001 (12s budget) 안 (기존 분석 유지).
+- `gpt-4o-mini` (alternative): 동일 proxy 의 valid alias 로 남겨둠 — `AGENT_LLM_MODEL=gpt-4o-mini` 한 줄로 swap 가능 (단 OpenAI 계정 quota 별도). high-stakes escalation 은 별도 SPEC.
+- gpt-4o (full): 8배 비용. 본 SPEC 7-tool 단순도에서 ROI 부족. 별도 SPEC.
 
-**Tradeoff accepted**: gpt-4o 보다 tool selection 정확도 ~3% 낮음. Mitigation: R10 의 SQL 모니터링 (per-tool selection 분포). 분포가 비정상이면 prompt 조정 (Task 11) 또는 모델 escalation (별도 SPEC).
+**Tradeoff accepted**: Nova 는 OpenAI 대비 일부 OpenAI-Tools 파라미터 (`tool_choice`) 를 거부 (HTTP 400). Mitigation: OQ-2 의 fix 로 `tool_choice` 미전송 보장 (`nova-lite` AND `gpt-4o-mini` 모두 정상 동작). 그 외 tool selection 정확도 모니터링은 R10 의 SQL (per-tool selection 분포) 로 유지.
 
 **Reversibility**: HIGH. `AGENT_LLM_MODEL` 환경변수 한 줄. 컨테이너 재시작이면 충분.
 
 ### OQ-2: OpenAI Tools API vs JSON-mode parser
 
-**Decision**: **OpenAI Tools API** (structured tool calls via `tools=[...]` + `tool_choice="auto"`) 를 사용. `langchain_openai.ChatOpenAI.bind_tools()` 사용.
+**Decision**: **OpenAI Tools API** (structured tool calls via `tools=[...]`) 를 사용. `langchain_openai.ChatOpenAI.bind_tools()` 사용. **Bedrock caveat: `tool_choice` 파라미터를 절대 전송하지 않는다** (Bedrock 이 HTTP 400 으로 거부 — `litellm.UnsupportedParamsError: bedrock does not support parameters: ['tool_choice']`).
 
 **Rationale**:
 - 본 프로젝트 의 `respond.py` / `ask_clarify.py` 는 이미 `ChatOpenAI` (LangChain) 사용 — symmetry 보장.
 - Tools API 는 schema-enforced output → JSON malformation 발생률 < 0.1% (vs JSON-mode parser ~3-5%). R2 (LLM JSON malformation) mitigation 강도 ↑.
 - TypedDict → OpenAI tools schema 변환은 자동 (Pydantic v2 → JSON Schema → tools schema) — Task 2 의 registry 가 single source.
-- LiteLLM proxy 는 OpenAI Tools API 를 투명하게 pass-through (확인됨).
-- Bedrock/Anthropic 전환 시점 (V3) 에는 LangChain 의 추상화가 동일 API 면으로 흡수 가능 — 본 SPEC 단계 추상화 비용 0.
+- LiteLLM proxy 는 OpenAI Tools API 를 투명하게 pass-through (확인됨). Bedrock Nova 는 `tools=[...]` 자체는 정상 지원 (runtime 검증: well-formed `tool_calls` 반환) — 단 `tool_choice` 파라미터만 거부.
+- `tool_choice` 미전송은 OpenAI 의 default behavior (`"auto"`) 와 functionally equivalent — ReAct loop 은 모델이 자율적으로 tool 선택 또는 `respond` 로 종료하는 데 의존하므로 `tool_choice` 가 불필요. 따라서 `nova-lite` AND `gpt-4o-mini` 양쪽 모두에서 동작 (모델 swap 가능성 유지).
+
+**Bedrock 호환 fix (구현됨, Task 4 — `app/agents/llm_client.py`)**:
+- Runtime 검증으로 installed `langchain-openai 0.3.34` 의 `bind_tools()` 는 `tool_choice` 인자 미전달 시 request body 에 `tool_choice` 를 **주입하지 않음** 을 확인 (source: `if tool_choice:` 가 falsy 면 skip; 실제 `.ainvoke()` 로 `nova-lite` 400 미발생 검증).
+- 그럼에도 향후 langchain 버전 변경에 대비해 명시적 방어를 적용: (i) `bind_tools(..., tool_choice=None)` 로 의도 명시 + 미주입 계약 고정, (ii) `ChatOpenAI(extra_body={"drop_params": True})` 로 LiteLLM 이 provider-unsupported 파라미터를 silently strip 하도록 지시 (어떤 레이어가 `tool_choice` 를 주입하더라도 Bedrock 400 대신 drop). 둘 다 OpenAI 에 no-op → `AGENT_LLM_MODEL` swappable 유지.
 
 **Tradeoff accepted**: 비OpenAI 모델 (예: Claude Sonnet via Bedrock) 으로 swap 시 JSON-mode 폴백 필요 가능성. Mitigation: `app/agents/react_loop.py` 내부에 `_llm_invoke()` 추상화 인터페이스를 두어 V3 에 abstraction 추가 여지 유지. **본 SPEC 에서는 단일 구현 (OpenAI Tools)** 만.
 
@@ -209,8 +220,8 @@ SPEC §Cross-References 에서 `app/graphs/nodes/router_text.py` 를 deprecated 
 
 | OQ | Decision | Reversibility | Cross-SPEC impact |
 |---|---|---|---|
-| 1 | gpt-4o-mini default, fail-closed | HIGH | None |
-| 2 | OpenAI Tools API via `bind_tools` | MEDIUM | None |
+| 1 | `nova-lite` (Bedrock, primary LLM) default, fail-closed; `gpt-4o-mini` alt alias | HIGH | None (plan-phase Bedrock premise corrected 2026-05-15) |
+| 2 | OpenAI Tools API via `bind_tools`; `tool_choice` NOT sent (Bedrock 400) — fix in `llm_client.py` | MEDIUM | None |
 | 3 | Vision 노드 유지 (pre-agent) | HIGH | SPEC-VISION-UNIFY-001 untouched |
 | 4 | Agent immediate, contextual greeting | HIGH | None |
 | 5 | V2.0 binary, V2.1 percentage | HIGH | Future operational SPEC |
