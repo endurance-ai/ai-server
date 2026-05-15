@@ -1,10 +1,11 @@
-"""SPEC-CONVERSATION-LOG-001 / REQ-LOG-CATALOG-001 — 19 TypedDict payload schemas.
+"""SPEC-CONVERSATION-LOG-001 / REQ-LOG-CATALOG-001 — 20 TypedDict payload schemas.
 
-각 TypedDict 는 SPEC §Event Type Catalog 의 항목 1-19 와 1:1 대응한다. `total=False`
+각 TypedDict 는 SPEC §Event Type Catalog 의 항목 1-20 과 1:1 대응한다. `total=False`
 를 채택해 호출자가 최소 키만 채워도 타입 검사를 통과하도록 두고, 카탈로그 evolution
-시 새 키를 한 단계 더 늘려도 호환된다.
+시 새 키를 한 단계 더 늘려도 호환된다. 20번째 `tool_call` (`ToolCallPayload`) 은
+v0.3.0 amendment (SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001) 로 추가됐다.
 
-`__all__` 의 길이(=19)는 CI smoke test (`test_19_event_types_smoke.py`) 에서 강제
+`__all__` 의 길이(=20)는 CI smoke test (`test_20_event_types_smoke.py`) 에서 강제
 검증된다.
 
 NOTE: 본 모듈은 *런타임 검증* 을 하지 않는다. 호출자가 잘못된 payload 를 넘기면 mypy /
