@@ -229,15 +229,6 @@ def _build_graph_v2() -> Any:
 
         msg = state.message
         cb = msg.callback_data or ""
-        logger.info(
-            "🧭 [route_v2] cb=%r text=%r urls=%s photo=%s sel_idx=%s sess_state=%s",
-            cb,
-            (msg.text or "")[:40],
-            bool(msg.urls),
-            bool(msg.photo_file_id),
-            state.selected_item_index,
-            getattr(sess, "state", None),
-        )
         # Picker callback → pick_item (still deterministic).
         if cb.startswith("item:"):
             return "pick_item"
