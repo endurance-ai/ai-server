@@ -112,6 +112,15 @@ class WorkingState(InputState):
     messages: Annotated[list[BaseMessage], _MESSAGES_REDUCER] = Field(default_factory=list)
     log_events: Annotated[list[str], _LIST_ADD] = Field(default_factory=list)
 
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — REQ-ONBOARD-GRAPH-002 onboarding scratchpad.
+    # See plan §5.1. All defaults keep Pydantic extra="forbid" backward-compat:
+    # existing constructors that don't pass these fields stay valid.
+    onboard_stage: str | None = None
+    onboard_selections: dict[str, list[str]] = Field(default_factory=dict)
+    onboard_card_message_id: int | None = None
+    continuous_origin: bool = False
+    onboard_pin_weights: dict[str, Any] | None = None
+
 
 class OutputState(BaseModel):
     """REQ-STATE-004: what the webhook reads back to update SessionStore.

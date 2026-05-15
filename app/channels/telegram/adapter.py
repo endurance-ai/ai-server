@@ -190,6 +190,82 @@ class TelegramAdapter(MessengerAdapter):
             btn_labels,
         )
 
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — multi-row inline keyboard (onboarding cards).
+    async def send_text_with_keyboard(
+        self,
+        chat_id: int,
+        text: str,
+        keyboard: list[list[tuple[str, str]]],
+    ) -> int | None:
+        """Multi-row inline-keyboard variant of `send_text_with_buttons`.
+
+        Returns the platform message_id on success (used for `editMessageReplyMarkup`
+        re-render on toggle), or None on failure.
+        """
+        t0 = time.perf_counter()
+        rows = [
+            [{"text": label, "callback_data": data} for label, data in row]
+            for row in keyboard
+        ]
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": {"inline_keyboard": rows},
+        }
+        result = await self._post("sendMessage", payload)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        ok = bool(result and result.get("ok"))
+        message_id: int | None = None
+        if ok:
+            try:
+                mid = (result or {}).get("result", {}).get("message_id")
+                if isinstance(mid, int):
+                    message_id = mid
+            except Exception:  # noqa: BLE001
+                message_id = None
+        text_preview = text.replace("\n", " ⏎ ")
+        if len(text_preview) > 120:
+            text_preview = text_preview[:120] + "…"
+        total = sum(len(r) for r in keyboard)
+        logger.info(
+            "🐱 [telegram] 🔘 send_keyboard chat=%s elapsed_ms=%d ok=%s msg_id=%s rows=%d buttons=%d msg=%r",
+            _hash_chat_id(chat_id),
+            elapsed,
+            ok,
+            message_id,
+            len(keyboard),
+            total,
+            text_preview,
+        )
+        return message_id
+
+    async def edit_inline_keyboard(
+        self,
+        chat_id: int,
+        message_id: int,
+        keyboard: list[list[tuple[str, str]]],
+    ) -> bool:
+        """`editMessageReplyMarkup` — re-render the inline keyboard in place.
+
+        Used by onboarding toggle handlers to update the ✓ checkmarks without
+        spamming new messages. Returns True on Telegram-reported success.
+        """
+        rows = [
+            [{"text": label, "callback_data": data} for label, data in row]
+            for row in keyboard
+        ]
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_markup": {"inline_keyboard": rows},
+        }
+        try:
+            result = await self._post("editMessageReplyMarkup", payload)
+        except Exception:  # noqa: BLE001
+            logger.debug("🐱 [telegram] edit_inline_keyboard error", exc_info=True)
+            return False
+        return bool(result and result.get("ok"))
+
     async def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> None:
         body: dict = {"callback_query_id": callback_query_id}
         if text:

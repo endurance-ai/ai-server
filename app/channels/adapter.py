@@ -27,6 +27,25 @@ class MessengerAdapter(ABC):
     @abstractmethod
     async def send_chat_action(self, chat_id: int, action: str) -> None: ...
 
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — multi-row inline keyboard for cards
+    # with more than 4 buttons (e.g. 8-option mood card in 4 rows of 2 + footer).
+    async def send_text_with_keyboard(
+        self,
+        chat_id: int,
+        text: str,
+        keyboard: list[list[tuple[str, str]]],
+    ) -> int | None:
+        """Send text with a multi-row inline keyboard.
+
+        `keyboard` is a list of rows, each row a list of (label, callback_data).
+        Returns the platform message_id on success (for editMessageReplyMarkup
+        re-render on toggle), or None on failure. Default implementation falls
+        back to `send_text` so legacy adapters keep working — concrete adapters
+        SHOULD override.
+        """
+        await self.send_text(chat_id, text)
+        return None
+
     async def download_attachment(self, file_id: str) -> bytes:
         raise NotImplementedError("download_attachment is backend-specific")
 

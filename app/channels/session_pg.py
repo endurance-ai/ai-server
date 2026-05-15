@@ -180,9 +180,13 @@ async def _aupdate(session: Session) -> None:
                 vision_outfit_style_node_secondary, vision_outfit_mood_tags,
                 vision_outfit_gender, user_intent, last_results, shown_product_ids,
                 last_critique_summary, boost_keywords, clarify_axis, clarify_value,
-                lang, last_active, ttl_expires_at
+                lang, last_active, ttl_expires_at,
+                onboarded_at, onboard_stage, onboard_selections,
+                onboard_card_message_id, last_pinterest_scrape_url,
+                last_pinterest_scrape_at, last_pinterest_pins
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (chat_id) DO UPDATE SET
@@ -208,7 +212,14 @@ async def _aupdate(session: Session) -> None:
                 clarify_value                      = EXCLUDED.clarify_value,
                 lang                               = EXCLUDED.lang,
                 last_active                        = EXCLUDED.last_active,
-                ttl_expires_at                     = EXCLUDED.ttl_expires_at
+                ttl_expires_at                     = EXCLUDED.ttl_expires_at,
+                onboarded_at                       = EXCLUDED.onboarded_at,
+                onboard_stage                      = EXCLUDED.onboard_stage,
+                onboard_selections                 = EXCLUDED.onboard_selections,
+                onboard_card_message_id            = EXCLUDED.onboard_card_message_id,
+                last_pinterest_scrape_url          = EXCLUDED.last_pinterest_scrape_url,
+                last_pinterest_scrape_at           = EXCLUDED.last_pinterest_scrape_at,
+                last_pinterest_pins                = EXCLUDED.last_pinterest_pins
             """,
             (
                 session.chat_id,
@@ -235,6 +246,13 @@ async def _aupdate(session: Session) -> None:
                 session.lang,
                 now_ts,
                 ttl_expires,
+                session.onboarded_at,
+                session.onboard_stage,
+                Jsonb(_to_jsonable(session.onboard_selections)) if session.onboard_selections else Jsonb({}),
+                session.onboard_card_message_id,
+                session.last_pinterest_scrape_url,
+                session.last_pinterest_scrape_at,
+                Jsonb(_to_jsonable(session.last_pinterest_pins)) if session.last_pinterest_pins is not None else None,
             ),
         )
         await conn.commit()
@@ -276,6 +294,9 @@ def _rehydrate_candidates(raw: Any) -> list[Any]:
 def _row_to_session(cols: list[str], row: Any) -> Session:
     data = dict(zip(cols, row, strict=False))
     last_active = data.get("last_active")
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — 7 onboarding columns (migration 0004).
+    # `getattr(data, key, None)` style via .get() so pre-0004 schemas (or partial
+    # row reads) degrade gracefully to defaults.
     return Session(
         chat_id=data["chat_id"],
         state=SessionState(data.get("state") or "idle"),
@@ -300,4 +321,11 @@ def _row_to_session(cols: list[str], row: Any) -> Session:
         clarify_value=data.get("clarify_value"),
         lang=data.get("lang") or "en",
         last_active=_dt_to_ts(last_active) if last_active else 0.0,
+        onboarded_at=data.get("onboarded_at"),
+        onboard_stage=data.get("onboard_stage"),
+        onboard_selections=dict(data.get("onboard_selections") or {}),
+        onboard_card_message_id=data.get("onboard_card_message_id"),
+        last_pinterest_scrape_url=data.get("last_pinterest_scrape_url"),
+        last_pinterest_scrape_at=data.get("last_pinterest_scrape_at"),
+        last_pinterest_pins=data.get("last_pinterest_pins"),
     )
