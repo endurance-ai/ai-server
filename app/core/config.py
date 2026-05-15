@@ -208,6 +208,13 @@ class Settings(BaseSettings):
     # retry survives the throttle without consuming a ReAct iteration.
     AGENT_LLM_MAX_RETRIES: int = 2
     AGENT_TOOL_MAX_RETRIES: int = 1
+    # Dedicated wall-clock budget for the TERMINAL `respond` dispatch. It sends
+    # the text + up to 12 product cards sequentially (~1-1.7s each via Telegram
+    # send_card) → 12-20s, which structurally exceeds AGENT_TOOL_TIMEOUT_S (5s).
+    # `respond` is never retried (side-effecting + terminal), so a generous
+    # bound here just prevents a spurious mid-carousel TimeoutError from
+    # truncating a legit card batch (SPEC-AGENT-V2-REACT double-send fix).
+    AGENT_RESPOND_TIMEOUT_S: float = 30.0
 
     @field_validator("APIFY_PINTEREST_MAX_ITEMS")
     @classmethod

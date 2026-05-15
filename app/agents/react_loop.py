@@ -500,13 +500,28 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         # LiteLLM). On a transient 5xx/timeout we retry the dispatch up to
         # `tool_max_retries` time(s) with short backoff before recording the
         # tool error and continuing the loop. Non-transient → record now.
+        #
+        # EXCEPTION: the TERMINAL `respond` tool is NEVER retried. Its side
+        # effects (Telegram text + card carousel sends) are not idempotent —
+        # a partial send followed by a full dispatch retry double-sends the
+        # text and duplicates every card the user already saw (the real
+        # SPEC-AGENT-V2-REACT bug). A retry has no benefit here (the user
+        # already saw the message) and only harm; per-message idempotency
+        # tracking would be strictly more complex for zero upside. So for
+        # `respond`: max retries = 0 on ANY exception (transient or not), and
+        # it gets a dedicated generous wall timeout (AGENT_RESPOND_TIMEOUT_S)
+        # so a slow-but-legit 12-card carousel does not raise a false-positive
+        # TimeoutError mid-send. `respond` terminates the loop regardless.
+        is_terminal = bool(REGISTRY[tool_name]["terminates_loop"])
+        effective_max_retries = 0 if is_terminal else tool_max_retries
+        effective_timeout = float(settings.AGENT_RESPOND_TIMEOUT_S) if is_terminal else tool_timeout
         t0 = time.monotonic()
         result: dict[str, Any]
         dispatch_err: str | None = None
-        for attempt in range(tool_max_retries + 1):
+        for attempt in range(effective_max_retries + 1):
             try:
                 dispatcher = _resolve_dispatcher(tool_name)
-                result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=tool_timeout)
+                result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=effective_timeout)
                 dispatch_err = None
                 break
             except (TimeoutError, Exception) as exc:  # noqa: BLE001
@@ -518,7 +533,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                     result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
                     dispatch_err = result["error"]
                 transient = _is_transient(exc)
-                retries_left = attempt < tool_max_retries
+                retries_left = attempt < effective_max_retries
                 if not (transient and retries_left):
                     break
                 backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]

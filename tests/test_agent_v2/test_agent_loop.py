@@ -472,3 +472,174 @@ async def test_tool_dispatch_transient_retry(monkeypatch):
     hist = delta["tool_call_history"]
     assert hist[0]["tool_name"] == "search_products"
     assert hist[0]["error"] is None  # retry cleared the error
+
+
+# ---------------------------------------------------------------------------
+# SPEC-AGENT-V2-REACT — terminal `respond` is NEVER retried (double-send fix).
+# ---------------------------------------------------------------------------
+
+
+class _SlowCardAdapter:
+    """Adapter whose send_card sleeps so N cards exceed the per-tool timeout."""
+
+    def __init__(self, per_card_s: float):
+        self._per_card_s = per_card_s
+        self.text_calls = 0
+        self.card_calls = 0
+        self.card_urls: list[str] = []
+
+    async def send_text(self, chat_id, text):
+        self.text_calls += 1
+        return "tmid"
+
+    async def send_card(self, chat_id, card):
+        import asyncio as _a
+
+        await _a.sleep(self._per_card_s)
+        self.card_calls += 1
+        self.card_urls.append(card.button_url)
+        return f"mid{self.card_calls}"
+
+
+def _cand(i: int):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id=f"p{i}",
+        image_url=f"https://img/{i}.jpg",
+        product_url=f"https://shop/{i}",
+        brand="Acme",
+        name=f"Item {i}",
+        platform="Acme",
+        subcategory="shoes",
+        price=10000 + i,
+    )
+
+
+@pytest.mark.asyncio
+async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
+    """Slow 4-card carousel that would exceed AGENT_TOOL_TIMEOUT_S must NOT
+    trigger a respond retry: text sent once, each card once, status=done."""
+    from app.agents import react_loop as rl
+    from app.channels.session import get_store
+
+    sess = _make_session()
+    store = get_store()
+    store_sess = store.get_or_create(42)
+    store_sess.last_results = [_cand(i) for i in range(4)]
+    store_sess.lang = "en"
+
+    fake = _FakeLLM([_FakeAIMessage([{"name": "respond", "args": {"text": "here you go"}, "id": "1"}])])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+    # Force the generic per-tool timeout tiny so 4×0.05s cards blow past it,
+    # but respond gets its dedicated (generous) AGENT_RESPOND_TIMEOUT_S.
+    monkeypatch.setattr(rl.settings, "AGENT_TOOL_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(rl.settings, "AGENT_RESPOND_TIMEOUT_S", 30.0)
+
+    adapter = _SlowCardAdapter(per_card_s=0.05)
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+    delta = await rl.run_react_loop(_make_state(), sess)
+
+    assert delta["agent_status"] == "done"
+    assert adapter.text_calls == 1  # text sent EXACTLY once (no retry resend)
+    assert adapter.card_calls == 4  # each card sent EXACTLY once
+    assert len(set(adapter.card_urls)) == 4  # no duplicate cards
+    respond_hist = [h for h in delta["tool_call_history"] if h["tool_name"] == "respond"]
+    assert len(respond_hist) == 1  # respond dispatched once — NOT retried
+
+
+@pytest.mark.asyncio
+async def test_respond_transient_before_send_not_retried(monkeypatch):
+    """A real transient error (TimeoutError) from the terminal respond tool
+    before any send must NOT be retried — loop ends gracefully (done)."""
+    from app.agents import react_loop as rl
+
+    fake = _FakeLLM([_FakeAIMessage([{"name": "respond", "args": {"text": "hi"}, "id": "1"}])])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+
+    calls = {"n": 0}
+
+    async def _boom(args, ctx):
+        calls["n"] += 1
+        raise TimeoutError()
+
+    monkeypatch.setattr(rl, "_resolve_dispatcher", lambda name: _boom)
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+
+    assert calls["n"] == 1  # terminal tool NOT retried even on transient
+    assert delta["agent_status"] == "done"  # terminal tool always terminates
+
+
+@pytest.mark.asyncio
+async def test_non_terminal_tool_still_retries_on_transient(monkeypatch):
+    """Regression guard: the earlier transient-retry feature for NON-terminal
+    tools must still work (only `respond` is excluded)."""
+    from app.agents import react_loop as rl
+
+    fake = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "boots"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "done"}, "id": "2"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    monkeypatch.setattr(rl, "_TOOL_BACKOFF", (0.0,))
+
+    calls = {"n": 0}
+
+    async def _flaky(args, ctx):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _FakeHTTPError(503, "Service Unavailable")
+        return {"ok": True, "candidates_count": 3}
+
+    _real = rl._resolve_dispatcher
+    monkeypatch.setattr(rl, "_resolve_dispatcher", lambda name: _flaky if name == "search_products" else _real(name))
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+    assert calls["n"] == 2  # non-terminal tool DID retry (1 fail + 1 success)
+
+
+@pytest.mark.asyncio
+async def test_respond_self_idempotent_on_double_call(monkeypatch):
+    """respond.dispatch is self-idempotent: a second call with the same ctx
+    re-sends neither text nor already-sent cards."""
+    from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.channels.session import get_store
+
+    store = get_store()
+    sess = store.get_or_create(77)
+    sess.last_results = [_cand(0), _cand(1)]
+    sess.lang = "en"
+
+    counts = {"text": 0, "card": 0}
+
+    class _A:
+        async def send_text(self, c, t):
+            counts["text"] += 1
+            return "t"
+
+        async def send_card(self, c, card):
+            counts["card"] += 1
+            return f"m{counts['card']}"
+
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: _A())
+
+    ctx = {"chat_id": 77, "lang": "en"}
+    r1 = await respond_dispatch({"text": "hello"}, ctx)
+    r2 = await respond_dispatch({"text": "hello"}, ctx)  # defensive 2nd entry
+
+    assert r1["ok"] and r2["ok"]
+    assert counts["text"] == 1  # text sent at most once
+    assert counts["card"] == 2  # each card at most once (not 4)
