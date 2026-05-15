@@ -147,3 +147,33 @@ scale-to-zero 시 cold start ~10~17초. 트래픽 패턴 보면서 조절.
 - [`env.md`](env.md) — 환경변수 매트릭스
 - `aws-infra/kiko-ai-servers/portal-ai/CICD.md` — 인프라 측 셋업 가이드 (SSM/IAM/ECR)
 - `aws-infra/kiko-ai-servers/portal-ai/modal/README.md` — Modal 배포
+
+## SPEC-ONBOARD-CARDS-001 — Manual Smoke (Scenario e)
+
+DoD §11.4 scenario (e) requires a **real Apify board URL scrape** which cannot
+be reproduced in CI (Apify creds + live network). Verify during cutover:
+
+1. Set `APIFY_TOKEN` in dev `.env` (token from Apify console, redact in logs).
+2. Confirm startup log line `🎨 [APIFY] provider armed actor=epctex/pinterest-scraper token_len=…`.
+3. In Telegram dev bot, complete onboarding stages 1–3.
+4. At Stage 4 (Pinterest card), tap `[URL 보낼게요]` then paste a real board URL
+   e.g. `https://www.pinterest.com/user/board-name/`.
+5. Observe:
+   - Webhook log: `📥 [webhook] 🎟 command=` absent (text message path).
+   - Apify outbound request completes within 30s (`ApifyTimeoutError` not raised).
+   - Bot replies with completion message + non-zero pin count in stage span metadata.
+6. Issue `/recommend` with a fashion photo and confirm boost weight applied
+   (search results favor mood + color from Stage 1–2 plus Pinterest brand cues).
+
+Cutover order (plan §1.3):
+
+1. Apply Alembic migrations to dev-app Postgres:
+   ```bash
+   uv run alembic upgrade head
+   # 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
+   # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
+   ```
+2. Deploy this codebase with `PINTEREST_BOOTSTRAP_ENABLED=true` and
+   `ONBOARDING_CARDS_ENABLED=true`.
+3. Run smoke 1–6 above.
+4. Roll forward to production once smoke passes.

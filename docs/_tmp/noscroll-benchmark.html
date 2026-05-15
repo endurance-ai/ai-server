@@ -67,10 +67,10 @@
     <div>
       <div class="flex items-center gap-2 text-[11px] uppercase tracking-widest text-zinc-500 mb-1">
         <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-        Benchmark · 2026-05-12
+        Benchmark · v2 · 2026-05-14
       </div>
-      <h1 class="text-[22px] font-semibold text-zinc-900 leading-tight">noscroll 벤치마크 — kiko.ai 적용안</h1>
-      <p class="text-[12px] text-zinc-500 mono mt-1">docs/_tmp/noscroll-benchmark.html</p>
+      <h1 class="text-[22px] font-semibold text-zinc-900 leading-tight">noscroll 벤치마크 — kiko.ai 차용 매트릭스</h1>
+      <p class="text-[12px] text-zinc-500 mono mt-1">docs/_tmp/noscroll-benchmark.html · 직접 사용 + Karpathy 검증 반영</p>
     </div>
     <div class="flex items-center gap-2 text-[12px]">
       <a class="px-3 py-1.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50" href="https://noscroll.com/" target="_blank">noscroll.com ↗</a>
@@ -171,8 +171,8 @@
   <!-- 2. AGENTIC PATTERNS -->
   <section>
     <div class="flex items-end justify-between mb-4">
-      <h2 class="text-[18px] font-semibold">2. kiko.ai 가 훔칠 만한 패턴</h2>
-      <span class="text-[11px] text-zinc-500 mono">7 patterns</span>
+      <h2 class="text-[18px] font-semibold">2. kiko.ai 차용 매트릭스</h2>
+      <span class="text-[11px] text-zinc-500 mono">8 patterns · build status</span>
     </div>
 
     <div class="card overflow-hidden">
@@ -180,53 +180,145 @@
         <thead>
           <tr>
             <th class="text-left w-[170px]">패턴</th>
+            <th class="text-left w-[110px]">상태</th>
             <th class="text-left">noscroll 구현</th>
-            <th class="text-left">kiko.ai 적용안</th>
+            <th class="text-left">kiko 현황 / 액션</th>
           </tr>
         </thead>
         <tbody>
-          <tr class="row-fix">
-            <td><strong>Graph bootstrap</strong></td>
-            <td>X likes / bookmarks / follows 임포트 → 콜드스타트 제거</td>
-            <td>첫 메시지에서 <strong>Pinterest 보드 1개</strong> 또는 <strong>IG saved 1건</strong> 요청 → 10문항 설문 대체</td>
+          <tr class="row-keep">
+            <td><strong>Persona / Voice</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>프롬프트 튜닝 (파인튜닝 X)</td>
+            <td>"kiko" 페르소나 + Puss-in-Boots 톤 (KO/EN sticky). <strong>noscroll엔 없는 강점</strong></td>
           </tr>
-          <tr class="row-fix">
-            <td><strong>2-tier 알림</strong></td>
-            <td>정기 digest + breaking news 인터럽트</td>
-            <td>"Friday drop" 정기 + "저장한 브랜드 신상" 인터럽트 (SPEC-IMPLICIT-FB-001 시그널 활용)</td>
-          </tr>
-          <tr class="row-fix">
-            <td><strong>Reply-to-refine</strong></td>
-            <td>모든 알림에 자연어 응답으로 조정</td>
-            <td>카드 하단에 자연어 슬롯 1개. 파싱 실패 시 <span class="mono">ask_clarify</span> 카드로 폴백</td>
+          <tr class="row-keep">
+            <td><strong>Sticky 다국어</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>한국어 대응 안 됨 (사용자 직접 확인)</td>
+            <td><span class="mono">app/channels/lang.py</span> Hangul detect → 세션 sticky. <strong>noscroll 추월</strong></td>
           </tr>
           <tr class="row-keep">
             <td><strong>Taste over time</strong></td>
-            <td>클릭 · 응답 · 시청시간 → 프로파일 강화</td>
-            <td>이미 implicit-fb 있음 ✅ 명시적 "이 추천 어땠어?" 1턴 회수 루프 추가</td>
-          </tr>
-          <tr class="row-fix">
-            <td><strong>Group chat mode</strong></td>
-            <td>단톡방에 봇 추가 → 그룹 취향 큐레이션</td>
-            <td>친구 2~3명 단톡방에 kiko 추가 → 공동 코디 추천. <span class="mono">session.lang</span> sticky 패턴 적용 가능</td>
-          </tr>
-          <tr class="row-fix">
-            <td><strong>Continuous monitoring</strong></td>
-            <td>LLM 이 24/7 소스 (X/Reddit/HN/Substack) 모니터링</td>
-            <td>저장 브랜드/스타일에 매칭되는 신상 입고 시 푸시 (Modal cron + DB 매칭)</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>클릭 · 응답 → 프로파일 강화</td>
+            <td>SPEC-MEMORY-001 (<span class="mono">user_taste_profile</span> Postgres 영속) + SPEC-IMPLICIT-FB-001 (click 신호)</td>
           </tr>
           <tr class="row-keep">
-            <td><strong>Voice / persona</strong></td>
-            <td>프롬프트 튜닝 (파인튜닝 X)</td>
-            <td>이미 "kiko" 페르소나 적용됨 ✅</td>
+            <td><strong>Reply-to-refine</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>알림에 자연어 응답으로 조정</td>
+            <td>LangGraph <span class="mono">respond</span> + <span class="mono">ask_clarify</span> 카드 폴백 (SPEC-CLARIFY-CARDS-001)</td>
+          </tr>
+          <tr class="row-keep">
+            <td><strong>QR 온보딩</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>SMS 전화번호 노출</td>
+            <td>웹 랜딩에 <span class="mono">@kiko_fashion_ai_bot</span> QR 모달 (스크린샷 확인). <strong>딥링크 토큰 바인딩 여부는 확인 필요</strong></td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Card 온보딩</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>텍스트 beat setting (SMS 한계)</td>
+            <td><strong>kiko는 Telegram 카드 가능</strong>. 무드(8) → 컬러(6) → 핏(4) 멀티셀렉트 → TasteProfile 시드. 넷플릭스 패턴</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Graph bootstrap</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>X likes/bookmarks/follows 임포트</td>
+            <td>Pinterest 보드 URL → Apify 크롤 → Vision 일괄 분석 → TasteProfile 시드. IG는 비공개 saved 한계로 2순위</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>문장 분할 발화</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>1문장씩 끊어 발송 (대화감 ↑)</td>
+            <td><span class="mono">respond</span> 노드 — LLM 출력을 문장 split + 200ms 딜레이. <span class="mono">sendChatAction("typing")</span> 동반</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>/start 가이드</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>첫 입장 시 소개 + 사용법 안내</td>
+            <td>현재 <span class="mono">/start</span> 핸들러 빈약. 소개 3줄 + 사용법 3줄 + 카드 온보딩 진입</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Brand save + 신상 푸시</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>2-tier: 정기 digest + breaking 인터럽트</td>
+            <td><span class="mono">saved_brands</span> 테이블 신설 + 카드에 ❤️ 버튼. <strong>크롤러 자동화 완성 후</strong> 매칭 푸시</td>
+          </tr>
+          <tr>
+            <td><strong>Group chat mode</strong></td>
+            <td><span class="pill bg-blue-200 text-blue-900">🔵 후보 (P3)</span></td>
+            <td>단톡방 봇 추가 → 그룹 큐레이션</td>
+            <td>friends 2~3명 단톡방. multi-chat_id 처리 + per-group TasteProfile 필요. 성장 루프</td>
+          </tr>
+          <tr>
+            <td><strong>Continuous monitoring</strong></td>
+            <td><span class="pill bg-zinc-200 text-zinc-700">⏸ 보류</span></td>
+            <td>24/7 X/Reddit/HN 크롤</td>
+            <td>kiko는 product DB 크롤러가 선결 과제. 자동화 후 phase 2</td>
           </tr>
         </tbody>
       </table>
     </div>
     <p class="text-[12px] text-zinc-500 mt-2">
-      <span class="pill bg-emerald-100 text-emerald-800 mr-1">기존 구현</span>
-      <span class="pill bg-amber-100 text-amber-800">신규 도입 후보</span>
+      <span class="pill bg-emerald-200 text-emerald-900 mr-1">✅ 완료</span>
+      <span class="pill bg-amber-200 text-amber-900 mr-1">🟡 차용 후보 (P1~P2)</span>
+      <span class="pill bg-blue-200 text-blue-900 mr-1">🔵 후보 (P3)</span>
+      <span class="pill bg-zinc-200 text-zinc-700">⏸ 의존성 대기</span>
     </p>
+  </section>
+
+  <!-- 2.5 USER OBSERVATIONS -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">2.5 직접 써본 관찰 (사용자 실험)</h2>
+      <span class="text-[11px] text-zinc-500 mono">5/5 → 5/14, 9 days</span>
+    </div>
+
+    <div class="card overflow-hidden">
+      <table class="w-full text-[13.5px]">
+        <thead>
+          <tr>
+            <th class="text-left">관찰</th>
+            <th class="text-left w-[160px]">평가</th>
+            <th class="text-left w-[260px]">kiko 액션</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>한국어로 해달라고 해도 영어로 답함</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td>kiko sticky 다국어 강점 유지</td>
+          </tr>
+          <tr>
+            <td>페르소나/이모지 거의 없음 (밋밋한 톤)</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td>kiko "kiko" 페르소나 강점 유지</td>
+          </tr>
+          <tr>
+            <td>로딩바/진행 표시 없음 — 그냥 기다림</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td><strong>sendChatAction("typing")</strong> 적용. 응답 동안 "타이핑 중..." 노출</td>
+          </tr>
+          <tr class="row-fix">
+            <td>첫 입장 시 소개말 + 사용법 안내</td>
+            <td><span class="pill bg-amber-200 text-amber-900">👍 차용</span></td>
+            <td><span class="mono">/start</span> 핸들러 개선 (SPEC 후보)</td>
+          </tr>
+          <tr class="row-fix">
+            <td>1문장씩 끊어서 답장 — 진짜 대화 같음</td>
+            <td><span class="pill bg-amber-200 text-amber-900">👍 차용</span></td>
+            <td><span class="mono">respond</span> 노드 split + delay (SPEC 후보)</td>
+          </tr>
+          <tr>
+            <td>Karpathy 어록 5개 중 2개 날짜 오류</td>
+            <td><span class="pill bg-blue-200 text-blue-900">📚 교훈</span></td>
+            <td>아래 §4 참조 — 메타데이터 신뢰 원칙</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <!-- 3. TELEGRAM QR ONBOARDING -->
@@ -288,46 +380,158 @@
     </div>
   </section>
 
-  <!-- 4. NEXT ACTIONS -->
+  <!-- 4. KARPATHY LESSON -->
   <section>
     <div class="flex items-end justify-between mb-4">
-      <h2 class="text-[18px] font-semibold">4. 다음 액션 후보</h2>
-      <span class="text-[11px] text-zinc-500 mono">pick one</span>
+      <h2 class="text-[18px] font-semibold">4. Karpathy 어록 검증 — kiko에 적용할 교훈</h2>
+      <span class="text-[11px] text-zinc-500 mono">5개 중 2개 날짜 오류</span>
     </div>
 
-    <div class="grid md:grid-cols-2 gap-4">
-      <div class="card p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="pill bg-emerald-100 text-emerald-800">A · 추천</span>
-          <span class="text-[11px] text-zinc-500 mono">SPEC-TG-ONBOARD-QR-001</span>
+    <div class="card overflow-hidden">
+      <table class="w-full text-[13px]">
+        <thead>
+          <tr>
+            <th class="text-left w-[40px]">#</th>
+            <th class="text-left">어록</th>
+            <th class="text-left w-[120px]">noscroll</th>
+            <th class="text-left w-[150px]">실제</th>
+            <th class="text-left w-[80px]">평가</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="row-fix">
+            <td>1</td>
+            <td>"The hottest new programming language is English."</td>
+            <td>2025-06</td>
+            <td><strong>2023-01-24</strong></td>
+            <td><span class="pill bg-red-200 text-red-900">❌ 2.5년 ↓</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>2</td>
+            <td>"claim the leverage from the use of agents..."</td>
+            <td>2026-02</td>
+            <td>2026-02 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+          <tr class="row-fix">
+            <td>3</td>
+            <td>"fully give in to the vibes..." (vibe coding)</td>
+            <td>2025-09</td>
+            <td><strong>2025-02-02</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">⚠️ 7개월 ↓</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>4</td>
+            <td>"For now, autocomplete is my sweet spot."</td>
+            <td>2025-10</td>
+            <td>2025-10-17 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>5</td>
+            <td>"express my will to my agents for 16 hours a day."</td>
+            <td>2026-03</td>
+            <td>2026-03-20 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card p-5 mt-4 bg-blue-50 border-blue-200">
+      <div class="text-[11px] uppercase tracking-widest text-blue-700 mb-2">★ Insight</div>
+      <p class="text-[14px] text-blue-950">
+        <strong>noscroll은 출처는 잘 찾지만 timestamp 메타데이터를 LLM에 추론시키는 듯.</strong>
+        팟캐스트(2025-10, 2026-03)처럼 명시적 발행일이 있는 소스는 정확하고,
+        오래된 트윗은 LLM이 "최근에 한 말 같다"로 envelope를 추론하면서 어긋남.
+      </p>
+      <p class="text-[14px] text-blue-950 mt-2">
+        <strong>kiko 적용:</strong> 패션 신상 큐레이션할 때 "FW25 신상" / "5월 입고" 같은 시즌·출시일 메타데이터는
+        <span class="mono">product</span> DB의 신뢰 가능한 컬럼에서만 끌어와야 함. LLM이 이미지·이름 보고 추론하게 두면 같은 함정.
+      </p>
+    </div>
+  </section>
+
+  <!-- 5. PRIORITIZED BACKLOG -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">5. 우선순위 백로그</h2>
+      <span class="text-[11px] text-zinc-500 mono">P0 → P3</span>
+    </div>
+
+    <div class="space-y-3">
+
+      <!-- P0 -->
+      <div class="card p-5 border-l-4 border-l-emerald-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-emerald-200 text-emerald-900">P0 · 즉시</span>
+          <span class="text-[11px] text-zinc-500 mono">no SPEC needed · ~1 PR</span>
         </div>
-        <h3 class="text-[15px] font-semibold mb-1">QR 온보딩</h3>
-        <p class="text-[13px] text-zinc-600">즉시 효용, 기존 web ↔ Telegram 분리 문제 해결. 인프라 적음.</p>
+        <h3 class="text-[15px] font-semibold mb-1">A. 문장 분할 발화 + <span class="mono">sendChatAction</span></h3>
+        <p class="text-[13px] text-zinc-600">
+          <span class="mono">app/graphs/nodes/respond.py</span> 출력을 문장 split (".", "!", "?", "\n\n") + 200ms 딜레이.
+          매 sendMessage 직전 <span class="mono">sendChatAction("typing")</span> 1회. 작은 변경으로 대화 톤이 확 살아남.
+        </p>
       </div>
-      <div class="card p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="pill bg-blue-100 text-blue-800">B</span>
-          <span class="text-[11px] text-zinc-500 mono">SPEC-BOOTSTRAP-001</span>
+
+      <!-- P1 -->
+      <div class="card p-5 border-l-4 border-l-emerald-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-emerald-200 text-emerald-900">P1 · 다음</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-START-GUIDE-001 (가칭)</span>
         </div>
-        <h3 class="text-[15px] font-semibold mb-1">Graph bootstrap</h3>
-        <p class="text-[13px] text-zinc-600">Pinterest / IG 임포트 강화 — 콜드스타트 개선, 첫 추천 품질 ↑</p>
+        <h3 class="text-[15px] font-semibold mb-1">B. <span class="mono">/start</span> 개선 + 카드 온보딩</h3>
+        <p class="text-[13px] text-zinc-600">
+          (1) 소개 3줄 + 사용법 3줄 →
+          (2) 카드 온보딩 (무드 8 · 컬러 6 · 핏 4 멀티셀렉트, <span class="mono">InlineKeyboardButton</span>) →
+          (3) <span class="mono">user_taste_profile</span> 초기 가중치 시드.
+          기존 SPEC-CLARIFY-CARDS-001 인프라 재활용.
+        </p>
       </div>
-      <div class="card p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="pill bg-blue-100 text-blue-800">C</span>
-          <span class="text-[11px] text-zinc-500 mono">SPEC-GROUP-CHAT-001</span>
+
+      <!-- P2 -->
+      <div class="card p-5 border-l-4 border-l-amber-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-amber-200 text-amber-900">P2</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-PINTEREST-BOOTSTRAP-001 (가칭)</span>
         </div>
-        <h3 class="text-[15px] font-semibold mb-1">Group chat mode</h3>
-        <p class="text-[13px] text-zinc-600">신규 성장 루프. multi-session/chat_id 처리 필요 — 중간 난이도.</p>
+        <h3 class="text-[15px] font-semibold mb-1">C. Pinterest 보드 부트스트랩</h3>
+        <p class="text-[13px] text-zinc-600">
+          보드 URL 받기 → Apify로 핀 50~100개 크롤 → Vision 일괄 분석 → TasteProfile 강한 시드.
+          카드 온보딩 대안/병행 경로. IG saved는 비공개 한계로 후순위.
+        </p>
       </div>
-      <div class="card p-5">
-        <div class="flex items-center justify-between mb-2">
-          <span class="pill bg-blue-100 text-blue-800">D</span>
-          <span class="text-[11px] text-zinc-500 mono">SPEC-NOTIFY-2TIER-001</span>
+
+      <!-- P3 -->
+      <div class="card p-5 border-l-4 border-l-blue-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-blue-200 text-blue-900">P3</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-SAVED-BRANDS-001 + SPEC-NOTIFY-2TIER-001 (가칭)</span>
         </div>
-        <h3 class="text-[15px] font-semibold mb-1">2-tier 알림</h3>
-        <p class="text-[13px] text-zinc-600">리텐션 핵심. cron + 신상 매칭 인프라 필요 — 가장 무거움.</p>
+        <h3 class="text-[15px] font-semibold mb-1">D. Brand save + 신상 푸시 (2-tier 알림)</h3>
+        <p class="text-[13px] text-zinc-600">
+          <span class="mono">saved_brands</span> 테이블 + 카드에 ❤️ 버튼 + 명시적 저장 액션 (이미 있는 implicit-fb 보강).
+          신상 매칭 푸시는 <strong>product DB 크롤러 자동화 선결</strong> 후 발동.
+        </p>
       </div>
+
+      <!-- P3+ -->
+      <div class="card p-5 border-l-4 border-l-blue-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-blue-200 text-blue-900">P3+</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-GROUP-CHAT-001 (가칭)</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">E. Group chat mode</h3>
+        <p class="text-[13px] text-zinc-600">
+          친구 단톡방에 kiko 추가 → 공동 코디 추천. multi-chat_id 라우팅 + per-group TasteProfile.
+          성장 루프지만 PMF 확인 후 진입.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="mt-5 p-4 bg-zinc-50 border border-zinc-200 rounded-lg text-[13px] text-zinc-700">
+      <strong>검증 대기:</strong> QR이 <span class="mono">?start=&lt;token&gt;</span> 딥링크인지 확인 (web↔Telegram 계정 바인딩 필요 시). 현재는 봇 진입은 동작 ✅
     </div>
   </section>
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -27,9 +28,11 @@ from app.channels.lang import detect_lang as _detect_lang_text
 from app.channels.lang import session_lang
 from app.channels.router import RoutedIntent
 from app.channels.session import get_store
+from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -59,7 +62,7 @@ _FALLBACKS_EN: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "Couldn't open that link 🙈 Maybe drop the photo straight in?",
     _Flow.VISION_FAIL: "I couldn't read that look. Try a clearer shot for me?",
     _Flow.PHOTO_DIRECT: ("Direct photo uploads aren't ready yet 🙏\nToss me a Pinterest / image link instead 📌"),
-    _Flow.OFF_TOPIC: "Drop a photo or a Pinterest link and I'll get to work 📸",
+    _Flow.OFF_TOPIC: "haha I'm here 🐱 just text me whenever, drop a photo if you want me to search.",
     _Flow.NEW_SEARCH_NEED_IMAGE: "Got it — slide me a photo or a Pinterest link to start 🐱",
     _Flow.TASTE_ACK: "Noted, filed away 📝",
     _Flow.REFINE_NUDGE: "Drop a photo or a Pinterest link first and I'll work my magic 📸",
@@ -74,7 +77,7 @@ _FALLBACKS_KO: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "링크가 안 열려요 🙈 사진을 바로 보내주시면 돼요!",
     _Flow.VISION_FAIL: "사진을 잘 못 읽었어요. 좀 더 또렷한 컷으로 보여주실래요?",
     _Flow.PHOTO_DIRECT: ("사진 직접 업로드는 아직 준비 중이에요 🙏\n핀터레스트 링크나 이미지 URL로 보내주세요 📌"),
-    _Flow.OFF_TOPIC: "사진이나 핀터레스트 링크 하나만 던져주세요, 바로 시작할게요 📸",
+    _Flow.OFF_TOPIC: "ㅎㅎ 나 여기 있어 🐱 그냥 편하게 얘기해. 옷 찾고 싶으면 사진 던지면 돼.",
     _Flow.NEW_SEARCH_NEED_IMAGE: "좋아요! 사진이나 핀터레스트 링크 하나 보내주세요 🐱",
     _Flow.TASTE_ACK: "기억해둘게요 📝",
     _Flow.REFINE_NUDGE: "사진이나 핀터레스트 링크부터 하나 보여주세요 📸",
@@ -215,7 +218,11 @@ _FLOW_INTENT: dict[_Flow, str] = {
     _Flow.LINK_FAIL: "intent: link could not be opened. Ask user to send the photo directly.",
     _Flow.VISION_FAIL: "intent: vision could not read the image. Ask for a clearer shot.",
     _Flow.PHOTO_DIRECT: ("intent: direct photo upload not supported yet. Ask for a Pinterest / image link instead."),
-    _Flow.OFF_TOPIC: "intent: user message is off-topic. Briefly redirect to sending a photo or Pinterest link.",
+    _Flow.OFF_TOPIC: (
+        "intent: user is chatting, not asking for products. Respond naturally as kiko — short, "
+        "friendly, 1~2 sentences. Don't push photos/links unless asked. If conversation drifts "
+        "toward fashion / shopping then briefly mention you can search if they want."
+    ),
     _Flow.NEW_SEARCH_NEED_IMAGE: "intent: user wants a new search but sent no image. Ask for a photo / link.",
     _Flow.TASTE_ACK: "intent: acknowledge taste preference noted. Single short line.",
     _Flow.REFINE_NUDGE: "intent: user wants to refine but no prior search context. Ask for a photo / link first.",
@@ -282,15 +289,70 @@ def _user_prompt(state: WorkingState, flow: _Flow, lang: str) -> str:
 # ── Node ───────────────────────────────────────────────────────────────────
 
 
+# 문장 경계: 영어 ".", "!", "?" / 한국어 "다.", "요.", "죠." 뒤 공백 또는 줄바꿈.
+# 인용부호 / 괄호 안 마침표는 split 하지 않도록 lookahead로 trailing whitespace 요구.
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|(?<=[다요죠]\.)\s+|\n{2,}")
+
+
+def _split_into_chunks(text: str, *, min_chars: int) -> list[str]:
+    """Split a reply into conversational chunks.
+
+    Behavior:
+    - Split on sentence boundaries (regex above).
+    - Merge consecutive short fragments (< min_chars) into the next chunk so we
+      don't ship single-emoji or one-word messages.
+    - Always return at least one chunk (the original text) when the result is
+      empty.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    raw = [p.strip() for p in _SENT_SPLIT_RE.split(text) if p and p.strip()]
+    if not raw:
+        return [text]
+
+    merged: list[str] = []
+    buf = ""
+    for piece in raw:
+        if buf:
+            buf = f"{buf} {piece}".strip()
+        else:
+            buf = piece
+        if len(buf) >= min_chars:
+            merged.append(buf)
+            buf = ""
+    if buf:
+        if merged:
+            merged[-1] = f"{merged[-1]} {buf}".strip()
+        else:
+            merged.append(buf)
+    return merged
+
+
 @observe(name="node.respond", as_type="span")
 async def respond(state: WorkingState) -> dict:
     flow = _classify_flow(state)
     user_text = (state.message.text or "").strip() if state.message else ""
-    # Prefer immediate text-derived language; fall back to sticky session lang
-    # so button-only turns (e.g. clarify card taps) honor the prior message's
-    # language.
+    # 사용자 피드백 — 한국어로 대화하다가 비전/검색 후 영어로 돌아가는 문제.
+    # ingest 의 remember_lang 이 sticky-aware (commands/short text 보존) 이므로
+    # respond 는 sess.lang 만 신뢰. 명시적 강한 신호 (Hangul 다수 OR 다단어 EN)
+    # 가 있을 때만 즉석 감지로 덮어쓴다.
     sess_for_lang = get_store().get_or_create(state.chat_id)
-    lang = _detect_lang(user_text) if user_text else session_lang(sess_for_lang)
+    sticky_lang = session_lang(sess_for_lang)
+    # 강한 신호 = Hangul 음절 ≥ 2 자 OR 영문 단어 ≥ 2 개. 그 외엔 sticky 유지.
+    if user_text:
+        import re as _re
+
+        hangul_count = len(_re.findall(r"[가-힣]", user_text))
+        en_word_count = len(_re.findall(r"\b[A-Za-z]{2,}\b", user_text))
+        if hangul_count >= 2:
+            lang = "ko"
+        elif en_word_count >= 2 and hangul_count == 0:
+            lang = "en"
+        else:
+            lang = sticky_lang
+    else:
+        lang = sticky_lang
     fallback_table = _FALLBACKS_KO if lang == "ko" else _FALLBACKS_EN
     fallback_text = fallback_table[flow]
     # SPEC-AGENTIC-CRITIQUE-001 / REQ-CRITIQUE-RETRY-003 — replace fallback for
@@ -337,14 +399,55 @@ async def respond(state: WorkingState) -> dict:
         preview = preview[:200] + "…"
     logger.info("🐱 [respond] flow=%s lang=%s reply=%r", flow.value, lang, preview)
 
-    # Dispatch
+    # Dispatch — noscroll 벤치마크: 문장 단위로 끊어 발화하면 대화감이 살아남.
+    # 1문장씩 typing action 후 짧은 딜레이를 두고 순차 전송.
+    chunks: list[str]
+    if settings.RESPONSE_SPLIT_ENABLED:
+        chunks = _split_into_chunks(text, min_chars=settings.RESPONSE_SPLIT_MIN_CHARS)
+    else:
+        chunks = [text]
+    if not chunks:
+        chunks = [text]
+    delay_s = max(0.0, settings.RESPONSE_SPLIT_DELAY_MS / 1000.0)
+
     try:
         adapter = get_adapter()
-        await adapter.send_text(state.chat_id, text)
+        total = len(chunks)
+        user_key = user_key_for(state.from_user_id, state.chat_id)
+        for idx, chunk in enumerate(chunks):
+            # 첫 청크 전, 그리고 청크 사이마다 typing 표시 + 자연스러운 딜레이.
+            try:
+                await adapter.send_chat_action(state.chat_id, "typing")
+            except Exception:
+                # typing 표시는 best-effort — 실패해도 본 메시지 전송은 진행.
+                logger.debug("🐱 [respond] typing action failed (non-fatal)", exc_info=True)
+            if delay_s > 0 and len(chunks) > 1:
+                await asyncio.sleep(delay_s)
+            await adapter.send_text(state.chat_id, chunk)
+            # LOG-T19 — emit `bot_text` per chunk. Same thread_id, same
+            # turn_no=10. chunk_index distinguishes per-chunk rows.
+            # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+            try:
+                emit(
+                    event_type="bot_text",
+                    user_key=user_key,
+                    chat_id=state.chat_id,
+                    thread_id=state.thread_id,
+                    turn_no=10,
+                    payload={
+                        "chunk_text": chunk,
+                        "chunk_index": idx,
+                        "total_chunks": total,
+                        "flow": flow.value,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("[respond] bot_text emit best-effort")
+            breadcrumbs.append(f"respond_chunk: idx={idx}/{len(chunks) - 1} len={len(chunk)}")
     except Exception as exc:
         logger.exception("🐱 [respond] ❌ send_text failed (flow=%s, lang=%s)", flow.value, lang)
         breadcrumbs.append(f"respond_send_error: {type(exc).__name__}: {exc}"[:200])
-        return {"response_text": text, "log_events": breadcrumbs}
+        return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}
 
-    breadcrumbs.append(f"respond: flow={flow.value} lang={lang} text_len={len(text)}")
-    return {"response_text": text, "log_events": breadcrumbs}
+    breadcrumbs.append(f"respond: flow={flow.value} lang={lang} text_len={len(text)} chunks={len(chunks)}")
+    return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}

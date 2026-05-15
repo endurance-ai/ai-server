@@ -25,13 +25,26 @@ class FakeAdapter:
         self.buttons: list[tuple[int, str, list]] = []
         self.callback_answers: list[tuple[str, str | None]] = []
         self.bytes_payload: bytes | None = None
-        self.send_card_returns = True
+        # SPEC-CONVERSATION-LOG-001 / LOG-T17 — send_card now returns
+        # ``int | None`` (Telegram message_id). Default mimics success with
+        # an incrementing message_id so tests that previously asserted on
+        # truthy returns keep passing.
+        self.send_card_returns: int | None = 1001
+        self._next_message_id = 1001
 
     async def send_text(self, chat_id, text):
         self.texts.append((chat_id, text))
 
     async def send_card(self, chat_id, card):
         self.cards.append((chat_id, card))
+        if self.send_card_returns is None or self.send_card_returns is False:
+            return None
+        # If a fixed int was set, return it once; if True (legacy), produce a
+        # fresh per-call int so multi-card tests get distinct message_ids.
+        if self.send_card_returns is True:
+            mid = self._next_message_id
+            self._next_message_id += 1
+            return mid
         return self.send_card_returns
 
     async def send_chat_action(self, chat_id, action):

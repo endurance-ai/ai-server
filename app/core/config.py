@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -74,14 +75,20 @@ class Settings(BaseSettings):
     TELEGRAM_WEBHOOK_SECRET: str = ""
     TELEGRAM_API_BASE: str = "https://api.telegram.org"
     TELEGRAM_PUBLIC_URL: str = ""
-    VISION_MODEL: str = "gpt-4o-mini"
+    # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
+    # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
+    # 의 429 Too Many Requests 문제 회피 + Bedrock 별도 quota + 비용 절감.
+    VISION_MODEL: str = "nova-lite"
     BOT_LANGUAGE: str = "en"
     SESSION_TTL_SECONDS: int = 1800
 
     # Routing-LLM (paraphrase/intent classification + critique parsing)
     # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
     ROUTER_MODEL: str = "gpt-4o-mini"
-    ROUTER_TIMEOUT_MS: int = 1500
+    # 1500ms 는 LiteLLM proxy + OpenAI roundtrip (300~2000ms) 에 너무 빡빡해서
+    # 거의 매 턴 timeout fallback 으로 빠짐. 3000ms 로 완화. fallback 자체는
+    # 안전망 역할로 유지 (REQ-LLM-004).
+    ROUTER_TIMEOUT_MS: int = 3000
     ROUTER_MAX_TOKENS: int = 300
     # When the deterministic prefilter cannot classify a text message, fall back
     # to LLM routing. Disable to revert to pure SM behavior (router becomes no-op).
@@ -99,6 +106,11 @@ class Settings(BaseSettings):
     RESPONSE_MODEL: str = "gpt-4o-mini"
     RESPONSE_TIMEOUT_MS: int = 5000
     RESPONSE_MAX_TOKENS: int = 200
+    # noscroll 벤치마크 — 1문장씩 끊어서 발화하면 대화감이 살아남.
+    # respond 노드가 LLM/fallback 출력을 문장 단위로 split → typing action → 짧은 딜레이 → send.
+    RESPONSE_SPLIT_ENABLED: bool = True
+    RESPONSE_SPLIT_DELAY_MS: int = 350
+    RESPONSE_SPLIT_MIN_CHARS: int = 8  # 너무 짧은 조각은 다음 청크와 병합
     # Vision 결과가 약할 때(짧은 description / ambiguous label) ask_clarify 분기 트리거 임계값
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
@@ -152,6 +164,72 @@ class Settings(BaseSettings):
     IMPLICIT_FB_CLICK_WEIGHT: float = 1.0
     # Soft-negative weight applied on rapid re-query. REQ-FB-REQUERY-001.
     IMPLICIT_FB_REQUERY_WEIGHT: float = 0.5
+
+    # SPEC-ONBOARD-CARDS-001 — Onboarding cards + Pinterest bootstrap ────
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    APIFY_TOKEN: str = ""
+    APIFY_PINTEREST_ACTOR: str = "epctex/pinterest-scraper"
+    APIFY_PINTEREST_MAX_ITEMS: int = 80
+    APIFY_PINTEREST_CONCURRENCY: int = 5
+    PINTEREST_BOOTSTRAP_ENABLED: bool = True
+    # 24h TTL — REQ-ONBOARD-PINTEREST-007 cache.
+    PINTEREST_INGEST_CACHE_TTL_S: int = 86400
+    # REQ-ONBOARD-PINTEREST-002 — cap on extracted pin URLs per turn.
+    PINTEREST_MAX_PINS_PER_TURN: int = 20
+    # REQ-ONBOARD-PINTEREST-003 — continuous bootstrap rate-limit window.
+    PINTEREST_CONTINUOUS_RATELIMIT_S: int = 300
+    # continuous Pinterest bootstrap (post-onboarding 핀 URL → 취향만 업데이트)
+    # 활성화. 기본 false — 온보딩 끝난 유저가 핀 던지면 일반 검색 흐름
+    # (resolve_image → vision → search → cards) 으로 가는 게 직관에 맞아서.
+    # 명시적으로 "취향에만 추가" 시나리오 필요할 때 true 로 전환. 사용자 피드백.
+    PINTEREST_CONTINUOUS_ENABLED: bool = False
+    ONBOARDING_CARDS_ENABLED: bool = True
+    # REQ-ONBOARD-SEED-002 — per-keyword seed weight cap. Applied by
+    # `TasteProfileStore.seed_from_onboarding` for both InMemory + Postgres
+    # backends. Recommended range (0, 1].
+    ONBOARDING_SEED_MAX_WEIGHT: float = 0.7
+
+    @field_validator("APIFY_PINTEREST_MAX_ITEMS")
+    @classmethod
+    def _validate_apify_max_items(cls, v: int) -> int:
+        if not (1 <= int(v) <= 100):
+            raise ValueError("APIFY_PINTEREST_MAX_ITEMS must be in [1, 100]")
+        return int(v)
+
+    @field_validator("APIFY_PINTEREST_CONCURRENCY")
+    @classmethod
+    def _validate_apify_concurrency(cls, v: int) -> int:
+        if not (1 <= int(v) <= 20):
+            raise ValueError("APIFY_PINTEREST_CONCURRENCY must be in [1, 20]")
+        return int(v)
+
+    @field_validator("ONBOARDING_SEED_MAX_WEIGHT")
+    @classmethod
+    def _validate_seed_max_weight(cls, v: float) -> float:
+        if not (0.0 < float(v) <= 1.0):
+            raise ValueError("ONBOARDING_SEED_MAX_WEIGHT must be in (0, 1]")
+        return float(v)
+
+    @field_validator("PINTEREST_MAX_PINS_PER_TURN")
+    @classmethod
+    def _validate_max_pins_per_turn(cls, v: int) -> int:
+        if not (1 <= int(v) <= 50):
+            raise ValueError("PINTEREST_MAX_PINS_PER_TURN must be in [1, 50]")
+        return int(v)
+
+    @field_validator("PINTEREST_INGEST_CACHE_TTL_S")
+    @classmethod
+    def _validate_cache_ttl(cls, v: int) -> int:
+        if int(v) < 0:
+            raise ValueError("PINTEREST_INGEST_CACHE_TTL_S must be non-negative")
+        return int(v)
+
+    @field_validator("PINTEREST_CONTINUOUS_RATELIMIT_S")
+    @classmethod
+    def _validate_rate_limit(cls, v: int) -> int:
+        if int(v) < 0:
+            raise ValueError("PINTEREST_CONTINUOUS_RATELIMIT_S must be non-negative")
+        return int(v)
 
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:

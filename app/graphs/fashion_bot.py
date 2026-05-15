@@ -20,7 +20,15 @@ from app.graphs.nodes.ask_clarify import ask_clarify
 from app.graphs.nodes.critique_apply import critique_apply
 from app.graphs.nodes.evaluator import evaluator
 from app.graphs.nodes.ingest import ingest
+from app.graphs.nodes.onboard_color import onboard_color
+from app.graphs.nodes.onboard_fit import onboard_fit
+
+# SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — 6 onboarding nodes.
+from app.graphs.nodes.onboard_intro import onboard_intro
+from app.graphs.nodes.onboard_mood import onboard_mood
+from app.graphs.nodes.onboard_pinterest import onboard_pinterest
 from app.graphs.nodes.pick_item import pick_item
+from app.graphs.nodes.pinterest_ingest import pinterest_ingest
 from app.graphs.nodes.resolve_image import resolve_image
 from app.graphs.nodes.respond import respond
 from app.graphs.nodes.search import search_node
@@ -31,6 +39,7 @@ from app.graphs.routing import (
     _route_after_critique,
     _route_after_evaluator,
     _route_after_ingest,
+    _route_after_onboard_fit,
     _route_after_pick,
     _route_after_resolve,
     _route_after_router_text,
@@ -54,6 +63,23 @@ _INGEST_BRANCHES: dict[str, str] = {
     "resolve_image": "resolve_image",
     "router_text": "router_text",
     "respond": "respond",
+    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — onboarding gate
+    # and continuous Pinterest path. Predicate priorities live in
+    # `_route_after_ingest` (routing.py): onboarding gate first, then
+    # continuous Pinterest, then existing branches.
+    "onboard_intro": "onboard_intro",
+    "onboard_mood": "onboard_mood",
+    "onboard_color": "onboard_color",
+    "onboard_fit": "onboard_fit",
+    "onboard_pinterest": "onboard_pinterest",
+    "pinterest_ingest": "pinterest_ingest",
+}
+
+
+# SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — fit branches on Pinterest flag.
+_ONBOARD_FIT_BRANCHES: dict[str, str] = {
+    "onboard_pinterest": "onboard_pinterest",
+    "__end__": END,
 }
 
 _ROUTER_TEXT_BRANCHES: dict[str, str] = {
@@ -164,6 +190,16 @@ def build_graph() -> Any:
     builder.add_node("send_results", send_results)
     builder.add_node("taste_update", taste_update)
     builder.add_node("respond", respond)
+    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — 6 onboarding nodes.
+    # Always registered; entry is gated by `_route_after_ingest` predicates
+    # (onboarding_required / is_continuous_pinterest). Existing 12 nodes
+    # remain byte-identical (REQ-ONBOARD-GRAPH-001 AC).
+    builder.add_node("onboard_intro", onboard_intro)
+    builder.add_node("onboard_mood", onboard_mood)
+    builder.add_node("onboard_color", onboard_color)
+    builder.add_node("onboard_fit", onboard_fit)
+    builder.add_node("onboard_pinterest", onboard_pinterest)
+    builder.add_node("pinterest_ingest", pinterest_ingest)
     # SPEC-AGENTIC-CRITIQUE-001 — register self-critique nodes only when the
     # feature flag is on (REQ-CRITIQUE-COST-001 — disable produces byte-identical
     # pre-SPEC topology).
@@ -196,6 +232,24 @@ def build_graph() -> Any:
     builder.add_edge("ask_clarify", END)
     # SPEC-CLARIFY-CARDS-001 — apply_clarify 는 항상 search_node 로(unconditional).
     builder.add_edge("apply_clarify", "search_node")
+
+    # ── SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — onboarding edges ──
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
+    # @MX:REASON: REQ-ONBOARD-GRAPH-001 — each onboarding node is per-turn
+    #   terminal (the user's next callback is a separate webhook → fresh graph
+    #   run; ingest gate re-dispatches). The "topology" therefore lives in
+    #   `_route_after_ingest` predicates (ONB-T18), and these edges merely
+    #   terminate each node so the graph never deadlocks.
+    builder.add_edge("onboard_intro", END)
+    builder.add_edge("onboard_mood", END)
+    builder.add_edge("onboard_color", END)
+    # `onboard_fit` may need to branch when Pinterest is disabled — both branches
+    # currently lead to END (completion is internal to the node body), but the
+    # conditional edge is wired explicitly to satisfy the plan §6.2 #4+#5 entry
+    # and to keep room for future "fit → onboard_pinterest" intra-turn routing.
+    builder.add_conditional_edges("onboard_fit", _route_after_onboard_fit, _ONBOARD_FIT_BRANCHES)
+    builder.add_edge("onboard_pinterest", END)
+    builder.add_edge("pinterest_ingest", END)
 
     return builder.compile()
 

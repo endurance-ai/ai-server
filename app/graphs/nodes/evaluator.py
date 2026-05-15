@@ -31,10 +31,12 @@ import httpx
 from pydantic import ValidationError
 
 from app.channels.session import get_store
+from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
 from app.graphs.nodes._evaluator_prompt import SYSTEM_PROMPT, build_user_prompt
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe, update_current_span
 from app.providers.llm import LLMProvider
 
@@ -266,4 +268,28 @@ async def evaluator(state: WorkingState) -> dict:
     if will_exit and score.score < threshold and last_retried:
         delta_dict["critique_exhausted"] = True
 
+    # LOG-T18 — emit `evaluator_run` per iteration. Same turn_no=7; iteration_no
+    # is the distinguisher (REQ-LOG-TURN-001 monotonic non-decreasing).
+    # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+    try:
+        retry_decision = "retry" if score.retry and not will_exit else ("exit" if will_exit else "ship")
+        emit(
+            event_type="evaluator_run",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=7,
+            payload={
+                "iteration_no": iteration,
+                "score": float(score.score),
+                "delta": {"summary": delta_summary} if delta_summary else None,
+                "retry_decision": retry_decision,
+                "exhausted": bool(delta_dict.get("critique_exhausted", False)),
+            },
+            latency_ms=int(elapsed_ms),
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[evaluator] evaluator_run emit best-effort")
+
+    delta_dict["turn_no"] = 7
     return delta_dict

@@ -25,8 +25,10 @@ from langchain_core.messages import SystemMessage
 from app.channels.clarify import ClarifyDelta, parse_callback
 from app.channels.critique import CritiqueDelta
 from app.channels.session import SessionState, get_store
+from app.channels.taste_profile import user_key_for
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ async def apply_clarify(state: WorkingState) -> dict:
         except Exception:
             logger.debug("[apply_clarify] answer_callback_query best-effort")
         breadcrumbs.append("apply_clarify: stale callback")
-        return {"log_events": breadcrumbs}
+        return {"log_events": breadcrumbs, "turn_no": 1}
 
     # ── toast (best-effort) ──────────────────────────────────────────────
     try:
@@ -103,6 +105,8 @@ async def apply_clarify(state: WorkingState) -> dict:
         get_store().update(sess)
         logger.info("[CLARIFY-APPLY] axis=%s value=skip", delta.axis.value)
         breadcrumbs.append(f"apply_clarify: skip axis={delta.axis.value}")
+        # LOG-T15 — emit `clarify_applied` for the skip branch.
+        _emit_clarify_applied(state, axis=delta.axis.value, value=delta.value, added=[])
         # critique_delta 는 None — 검색은 weak-vision 그대로 수행.
         # search_node 는 critique_delta=None 도 정상 처리.
         return {
@@ -110,6 +114,7 @@ async def apply_clarify(state: WorkingState) -> dict:
             "clarify_value": delta.value,
             "clarify_delta": delta,
             "log_events": breadcrumbs,
+            "turn_no": 1,
         }
 
     # ── value 적용 ─────────────────────────────────────────────────────────
@@ -168,6 +173,13 @@ async def apply_clarify(state: WorkingState) -> dict:
     )
     breadcrumbs.append(f"apply_clarify: {summary[:160]}")
 
+    # LOG-T15 — emit `clarify_applied` on the value branch.
+    _emit_clarify_applied(
+        state,
+        axis=delta.axis.value,
+        value=delta.value,
+        added=list(delta.keywords_to_boost),
+    )
     return {
         "clarify_axis": delta.axis,
         "clarify_value": delta.value,
@@ -175,4 +187,32 @@ async def apply_clarify(state: WorkingState) -> dict:
         "critique_delta": legacy_delta,
         "messages": [SystemMessage(content=f"clarify: {summary}")],
         "log_events": breadcrumbs,
+        "turn_no": 1,
     }
+
+
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+def _emit_clarify_applied(
+    state: WorkingState,
+    *,
+    axis: str,
+    value: str,
+    added: list[str],
+) -> None:
+    """LOG-T15 — emit `clarify_applied`. turn_no=1 because this is the callback
+    turn that re-enters the graph after a card tap (REQ-LOG-TURN-001)."""
+    try:
+        emit(
+            event_type="clarify_applied",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=1,
+            payload={
+                "axis": axis,
+                "value": value,
+                "boost_keywords_added": added,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[apply_clarify] clarify_applied emit best-effort")

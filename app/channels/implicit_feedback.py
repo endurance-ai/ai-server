@@ -29,6 +29,7 @@ from app.channels.taste_profile import (
     user_key_for,
 )
 from app.core.config import settings
+from app.observability.conversation_log import emit as _conv_emit
 from app.observability.langfuse import observe, update_current_span
 from app.observability.pii import hash_id
 
@@ -353,6 +354,36 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
         except Exception:  # noqa: BLE001
             logger.exception("[IMPLICIT_FB][no_click] taste reinforcement failed")
 
+    # LOG-T22 — emit `taste_update(source="no_click")` per attribution batch.
+    # thread_id is unknown at this caller; we pass a fresh uuid4 (no callback
+    # correlation needed for background attribution).
+    # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+    if attributed:
+        try:
+            from uuid import uuid4
+
+            agg_brands: list[str] = []
+            agg_keywords: list[str] = []
+            for brand, keywords in attributed:
+                if brand:
+                    agg_brands.append(brand)
+                if keywords:
+                    agg_keywords.extend(keywords)
+            _conv_emit(
+                event_type="taste_update",
+                user_key=user_key_for(from_user_id, chat_id),
+                chat_id=chat_id,
+                thread_id=uuid4(),
+                turn_no=0,
+                payload={
+                    "source": "no_click",
+                    "keywords_delta": {"disliked_added": agg_keywords},
+                    "brands_delta": {"disliked_added": agg_brands},
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("[IMPLICIT_FB][no_click] conversation_log emit best-effort")
+
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     update_current_span(
         metadata={
@@ -442,6 +473,8 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
     filtered_products = [c for c in products if (_product_id_of(c) or "") not in clicked_pids]
     excluded_n = len(products) - len(filtered_products)
 
+    re_query_brands: list[str] = []
+    re_query_keywords: list[str] = []
     if settings.TASTE_PROFILE_ENABLED:
         try:
             taste_store = get_taste_store()
@@ -452,8 +485,10 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
                 keywords = _keywords_for_product(c)
                 if brand:
                     profile.reinforce_disliked_brand(brand, weight=weight)
+                    re_query_brands.append(brand)
                 if keywords:
                     profile.reinforce_disliked_keywords(keywords, weight=weight)
+                    re_query_keywords.extend(keywords)
             taste_store.update(profile)
             logger.info(
                 "[IMPLICIT_FB][re-query] chat_id_hash=%s products=%d excluded_clicked=%d elapsed_since_results_s=%.1f",
@@ -464,6 +499,27 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
             )
         except Exception:  # noqa: BLE001
             logger.exception("[IMPLICIT_FB][re-query] reinforcement failed")
+
+    # LOG-T22 — emit `taste_update(source="re_query")` once per detected
+    # re-query, capturing the aggregated soft-negative signal.
+    # @MX:SPEC: SPEC-CONVERSATION-LOG-001
+    try:
+        from uuid import uuid4
+
+        _conv_emit(
+            event_type="taste_update",
+            user_key=user_key_for(getattr(session, "from_user_id", None), chat_id_int),
+            chat_id=chat_id_int,
+            thread_id=uuid4(),
+            turn_no=0,
+            payload={
+                "source": "re_query",
+                "keywords_delta": {"disliked_added": re_query_keywords},
+                "brands_delta": {"disliked_added": re_query_brands},
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[IMPLICIT_FB][re-query] conversation_log emit best-effort")
 
     update_current_span(
         metadata={

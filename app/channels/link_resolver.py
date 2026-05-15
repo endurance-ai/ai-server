@@ -3,6 +3,7 @@
 Maintains a 1-hour in-memory cache keyed by the original URL string.
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -176,3 +177,46 @@ async def resolve(url: str) -> list[str]:
     logger.info("🔗 [LINK] ✅ 완료 og:image=%s", og)
     _cache_put(url, [og])
     return [og]
+
+
+# @MX:SPEC: SPEC-ONBOARD-CARDS-001
+# REQ-ONBOARD-PINTEREST-005 mode C — batch resolution preserving existing
+# single-URL semantics. Per-URL failures are silently omitted from the result
+# (NOT raised as exceptions). All SSRF / redirect / cache / Pinterest originals
+# policies are inherited from the single-URL `resolve()` since we delegate
+# straight to it under an asyncio.Semaphore.
+async def resolve_batch(urls: list[str], concurrency: int = 5) -> list[str]:
+    """Resolve multiple URLs in parallel with a concurrency cap.
+
+    Each URL goes through the existing `resolve()` pipeline (SSRF, redirect,
+    og:image, Pinterest originals substitution, 1h cache). Per-URL failures
+    are silently dropped — callers receive only successful image URLs.
+
+    Args:
+        urls: Input URLs (may be a mix of Pinterest pins, generic web pages, etc.)
+        concurrency: Max concurrent `resolve()` calls. Defaults to 5.
+
+    Returns:
+        Flat list of image URLs. Order preservation is best-effort (asyncio.gather
+        preserves order across the outer list, but each `resolve()` returns 0..1
+        URLs so the resulting flat list mirrors successful inputs in order).
+    """
+    if not urls:
+        return []
+    capped = max(1, min(int(concurrency), len(urls)))
+    sem = asyncio.Semaphore(capped)
+
+    async def _one(u: str) -> list[str]:
+        async with sem:
+            try:
+                return await resolve(u)
+            except Exception as exc:  # noqa: BLE001 — defensive: never propagate
+                logger.warning("🔗 [LINK][batch] resolve failed url=%s err=%s", u, exc)
+                return []
+
+    results = await asyncio.gather(*(_one(u) for u in urls), return_exceptions=False)
+    out: list[str] = []
+    for r in results:
+        if r:
+            out.extend(r)
+    return out

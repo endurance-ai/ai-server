@@ -35,21 +35,32 @@ def detect_lang(text: str | None) -> str:
 
 
 def remember_lang(sess: Any, text: str | None) -> str:
-    """Update `sess.lang` from `text` if `text` is non-empty.
+    """Update `sess.lang` from `text` if `text` carries a meaningful language signal.
 
-    Returns the resolved language: detected from text when present,
+    Sticky-preserve cases (do NOT overwrite session lang):
+      - command-like prefix (`/start`, `/reset`, ...): commands aren't language
+      - very short text (< 3 chars) without Hangul: e.g. "ㅇㅇ", "ok"
+      - pure punctuation / digits
+
+    Returns the resolved language: detected from text when meaningful,
     otherwise the previously remembered session language (default 'en').
-    Callers that want to *write* the change back to the store must call
-    `get_store().update(sess)` themselves — this helper is store-agnostic.
     """
-    if text and text.strip():
-        lang = detect_lang(text)
-        try:
-            setattr(sess, "lang", lang)
-        except Exception:  # noqa: BLE001
-            pass
-        return lang
-    return getattr(sess, "lang", None) or LANG_EN
+    prior = getattr(sess, "lang", None) or LANG_EN
+    if not text or not text.strip():
+        return prior
+    stripped = text.strip()
+    # Commands never carry a language signal — preserve sticky.
+    if stripped.startswith("/"):
+        return prior
+    # Short text without Hangul → preserve sticky (avoid "ok"/"hi"/"음" 등으로 영구 전환).
+    if len(stripped) < 3 and not _HANGUL_RE.search(stripped):
+        return prior
+    lang = detect_lang(stripped)
+    try:
+        setattr(sess, "lang", lang)
+    except Exception:  # noqa: BLE001
+        pass
+    return lang
 
 
 def session_lang(sess: Any | None) -> str:

@@ -24,6 +24,13 @@ _EXPECTED_NODES_BASE = {
     "send_results",
     "taste_update",
     "respond",
+    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — 6 onboarding nodes.
+    "onboard_intro",
+    "onboard_mood",
+    "onboard_color",
+    "onboard_fit",
+    "onboard_pinterest",
+    "pinterest_ingest",
     "__start__",
     "__end__",
 }
@@ -68,6 +75,9 @@ def test_topology_conditional_edge_sources_match_spec():
         "pick_item",
         "search_node",
         "critique_apply",
+        # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — onboard_fit branches
+        # on PINTEREST_BOOTSTRAP_ENABLED.
+        "onboard_fit",
     }
     if settings.SELF_CRITIQUE_ENABLED:
         expected |= {"evaluator"}

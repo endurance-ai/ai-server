@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import operator
 from typing import Annotated, Any
+from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -53,6 +54,13 @@ class InputState(BaseModel):
     message: ChannelMessage
     chat_id: int
     from_user_id: int | None = None
+
+    # SPEC-CONVERSATION-LOG-001 / REQ-LOG-THREAD-001 / REQ-LOG-TURN-001 —
+    # thread_id seeds at webhook intake (or copied from prior `card_sent` row
+    # for callback Updates per REQ-LOG-THREAD-CALLBACK-001). turn_no increments
+    # node-by-node (see plan §4 mapping table).
+    thread_id: UUID = Field(default_factory=uuid4)
+    turn_no: int = 0
 
 
 class WorkingState(InputState):
@@ -103,6 +111,15 @@ class WorkingState(InputState):
     # plan.md Q4: capped at 3 producers (vision/critique/search).
     messages: Annotated[list[BaseMessage], _MESSAGES_REDUCER] = Field(default_factory=list)
     log_events: Annotated[list[str], _LIST_ADD] = Field(default_factory=list)
+
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — REQ-ONBOARD-GRAPH-002 onboarding scratchpad.
+    # See plan §5.1. All defaults keep Pydantic extra="forbid" backward-compat:
+    # existing constructors that don't pass these fields stay valid.
+    onboard_stage: str | None = None
+    onboard_selections: dict[str, list[str]] = Field(default_factory=dict)
+    onboard_card_message_id: int | None = None
+    continuous_origin: bool = False
+    onboard_pin_weights: dict[str, Any] | None = None
 
 
 class OutputState(BaseModel):

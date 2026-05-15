@@ -13,8 +13,6 @@ which collapses concurrent expired reads to one row deterministically.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -22,39 +20,13 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from app.channels._jsonable import to_jsonable as _to_jsonable
 from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.observability.langfuse import observe
 from app.providers.db_pool import get_pool, run_in_pool_loop
 
 logger = logging.getLogger(__name__)
-
-
-def _to_jsonable(value: Any) -> Any:
-    """5-step cascade per REQ-MEMORY-SESSION-001 acceptance."""
-    if value is None:
-        return None
-    # Pydantic v2 model
-    dump = getattr(value, "model_dump", None)
-    if callable(dump):
-        try:
-            return dump(mode="json")
-        except TypeError:
-            return dump()
-    # dataclass instance
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
-    # list / tuple
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    # dict
-    if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
-    # primitives pass through
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    # fallback string coercion
-    return json.loads(json.dumps(value, default=str))
 
 
 def _ts_to_dt(ts: float) -> datetime:
@@ -208,9 +180,13 @@ async def _aupdate(session: Session) -> None:
                 vision_outfit_style_node_secondary, vision_outfit_mood_tags,
                 vision_outfit_gender, user_intent, last_results, shown_product_ids,
                 last_critique_summary, boost_keywords, clarify_axis, clarify_value,
-                lang, last_active, ttl_expires_at
+                lang, last_active, ttl_expires_at,
+                onboarded_at, onboard_stage, onboard_selections,
+                onboard_card_message_id, last_pinterest_scrape_url,
+                last_pinterest_scrape_at, last_pinterest_pins
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s
             )
             ON CONFLICT (chat_id) DO UPDATE SET
@@ -236,7 +212,14 @@ async def _aupdate(session: Session) -> None:
                 clarify_value                      = EXCLUDED.clarify_value,
                 lang                               = EXCLUDED.lang,
                 last_active                        = EXCLUDED.last_active,
-                ttl_expires_at                     = EXCLUDED.ttl_expires_at
+                ttl_expires_at                     = EXCLUDED.ttl_expires_at,
+                onboarded_at                       = EXCLUDED.onboarded_at,
+                onboard_stage                      = EXCLUDED.onboard_stage,
+                onboard_selections                 = EXCLUDED.onboard_selections,
+                onboard_card_message_id            = EXCLUDED.onboard_card_message_id,
+                last_pinterest_scrape_url          = EXCLUDED.last_pinterest_scrape_url,
+                last_pinterest_scrape_at           = EXCLUDED.last_pinterest_scrape_at,
+                last_pinterest_pins                = EXCLUDED.last_pinterest_pins
             """,
             (
                 session.chat_id,
@@ -263,6 +246,13 @@ async def _aupdate(session: Session) -> None:
                 session.lang,
                 now_ts,
                 ttl_expires,
+                session.onboarded_at,
+                session.onboard_stage,
+                Jsonb(_to_jsonable(session.onboard_selections)) if session.onboard_selections else Jsonb({}),
+                session.onboard_card_message_id,
+                session.last_pinterest_scrape_url,
+                session.last_pinterest_scrape_at,
+                Jsonb(_to_jsonable(session.last_pinterest_pins)) if session.last_pinterest_pins is not None else None,
             ),
         )
         await conn.commit()
@@ -304,6 +294,9 @@ def _rehydrate_candidates(raw: Any) -> list[Any]:
 def _row_to_session(cols: list[str], row: Any) -> Session:
     data = dict(zip(cols, row, strict=False))
     last_active = data.get("last_active")
+    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — 7 onboarding columns (migration 0004).
+    # `getattr(data, key, None)` style via .get() so pre-0004 schemas (or partial
+    # row reads) degrade gracefully to defaults.
     return Session(
         chat_id=data["chat_id"],
         state=SessionState(data.get("state") or "idle"),
@@ -328,4 +321,11 @@ def _row_to_session(cols: list[str], row: Any) -> Session:
         clarify_value=data.get("clarify_value"),
         lang=data.get("lang") or "en",
         last_active=_dt_to_ts(last_active) if last_active else 0.0,
+        onboarded_at=data.get("onboarded_at"),
+        onboard_stage=data.get("onboard_stage"),
+        onboard_selections=dict(data.get("onboard_selections") or {}),
+        onboard_card_message_id=data.get("onboard_card_message_id"),
+        last_pinterest_scrape_url=data.get("last_pinterest_scrape_url"),
+        last_pinterest_scrape_at=data.get("last_pinterest_scrape_at"),
+        last_pinterest_pins=data.get("last_pinterest_pins"),
     )

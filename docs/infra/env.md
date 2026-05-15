@@ -109,6 +109,37 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `CLARIFY_CARDS_ENABLED` | `true` | 카드 모드 ON/OFF (false 시 legacy 텍스트 질문 폴백) |
 | `CLARIFY_MAX_BUTTONS` | `5` | 카드당 최대 버튼 개수 |
 
+## 응답 문장 분할 (noscroll benchmark P0)
+
+`app/graphs/nodes/respond.py` — LLM/fallback 출력을 문장 단위로 분할 발화. 대화감 향상.
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `RESPONSE_SPLIT_ENABLED` | `true` | 문장 분할 ON/OFF |
+| `RESPONSE_SPLIT_DELAY_MS` | `350` | 청크 간 딜레이 (ms) |
+| `RESPONSE_SPLIT_MIN_CHARS` | `8` | 이 값 미만 조각은 다음 청크와 병합 |
+
+## 온보딩 카드 (SPEC-ONBOARD-CARDS-001)
+
+`app/graphs/nodes/onboard_intro.py` + `onboard_mood.py` + `onboard_color.py` + `onboard_fit.py` + `onboard_pinterest.py` + `app/providers/apify.py` — 신규 사용자 `/start` 시 3-stage 카드 온보딩 + Pinterest bootstrap.
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `ONBOARDING_CARDS_ENABLED` | `true` | 온보딩 카드 전체 ON/OFF (false 시 온보딩 없이 일반 검색 진입) |
+| `ONBOARDING_SEED_MAX_WEIGHT` | `0.7` | 카드 선택 기반 TasteProfile 시드 weight 상한. 범위 `(0, 1]` |
+| `PINTEREST_BOOTSTRAP_ENABLED` | `true` | Stage 4 (Pinterest 보드 URL 요청) ON/OFF. false 시 Stage 3 완료 후 바로 완료 메시지 |
+| `APIFY_TOKEN` | `""` | Apify API token. **미설정 시 board/profile 모드(A/B) 비활성 — mode C(개별 핀 URL) 는 동작** |
+| `APIFY_PINTEREST_ACTOR` | `epctex/pinterest-scraper` | Apify actor slug. board + profile 모드 지원. |
+| `APIFY_PINTEREST_MAX_ITEMS` | `80` | 스크래핑 핀 수 상한. 범위 `[1, 100]` |
+| `APIFY_PINTEREST_CONCURRENCY` | `5` | 핀 Vision 배치 동시성. 범위 `[1, 20]` |
+| `PINTEREST_INGEST_CACHE_TTL_S` | `86400` | Pinterest 보드 결과 24h 캐시 TTL |
+| `PINTEREST_MAX_PINS_PER_TURN` | `20` | 단일 턴 추출 핀 URL 상한 (mode C) |
+| `PINTEREST_CONTINUOUS_RATELIMIT_S` | `300` | 연속 Pinterest bootstrap 재호출 rate-limit 윈도우 (초) |
+
+> `APIFY_TOKEN` 은 로그에 절대 출력하지 않음 (REQ-ONBOARD-SEC-001). `apify.py` 의 `_safe_log_url()` 로 URL 도 host + path 앞 8자만 로깅.
+
+cutover 절차: `docs/infra/deployment.md` Scenario (e) 참조.
+
 ## 앱 메타
 
 | 키 | 기본 |

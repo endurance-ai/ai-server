@@ -119,3 +119,39 @@ def test_output_state_defaults():
 def test_output_state_rejects_extra_fields():
     with pytest.raises(ValidationError):
         OutputState(sent_count=1, final_state=SessionState.IDLE, bogus=True)
+
+
+# ── SPEC-CONVERSATION-LOG-001 — thread_id / turn_no on InputState ──────────
+
+
+def test_input_state_thread_id_default_factory_yields_unique_uuids():
+    """REQ-LOG-THREAD-001 — fresh thread_id per InputState instance."""
+    from uuid import UUID
+
+    a = InputState(message=_msg(), chat_id=1)
+    b = InputState(message=_msg(), chat_id=1)
+    assert isinstance(a.thread_id, UUID)
+    assert isinstance(b.thread_id, UUID)
+    assert a.thread_id != b.thread_id
+
+
+def test_input_state_turn_no_defaults_to_zero():
+    """REQ-LOG-TURN-001 — webhook intake starts at turn_no=0."""
+    s = InputState(message=_msg(), chat_id=1)
+    assert s.turn_no == 0
+
+
+def test_input_state_accepts_explicit_thread_and_turn():
+    """Callback Updates resolve a known thread_id; spec allows override at construction."""
+    import uuid
+
+    tid = uuid.uuid4()
+    s = InputState(message=_msg(), chat_id=1, thread_id=tid, turn_no=5)
+    assert s.thread_id == tid
+    assert s.turn_no == 5
+
+
+def test_working_state_inherits_thread_and_turn():
+    s = WorkingState(message=_msg(), chat_id=42)
+    assert s.thread_id is not None
+    assert s.turn_no == 0

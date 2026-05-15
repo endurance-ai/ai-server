@@ -1,13 +1,13 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-10 (v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE flow + 구조화 로그).
+> 마지막 업데이트: 2026-05-15 (v0.6.0 — SPEC-CONVERSATION-LOG-001 이벤트 소싱 + SPEC-ONBOARD-CARDS-001 온보딩 카드 + noscroll benchmark sentence-split).
 
 ## 한 줄 요약
 
 `kikoai/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
-**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 12 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환.
+**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 18 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 + `onboard_intro → … → onboard_pinterest` 온보딩 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환. 모든 webhook turn 에서 `emit()` 로 `ai.log_conversation_event` append-only 기록 (SPEC-CONVERSATION-LOG-001).
 
 ## 책임 분리
 
@@ -23,7 +23,7 @@ Postgres 16 + pgvector + pgroonga
 + PostgREST + nginx shim (자체호스팅)
 ```
 
-**외부 채널 서비스**: Telegram Bot API (`https://api.telegram.org`) — Telegram 소유·운영, HTTPS webhook 방식. Pinterest(`pinterest.com` / `pin.it`) 서버사이드 fetch로 og:image 추출 (P0). Instagram P2 스텁.
+**외부 채널 서비스**: Telegram Bot API (`https://api.telegram.org`) — Telegram 소유·운영, HTTPS webhook 방식. Pinterest(`pinterest.com` / `pin.it`) 서버사이드 fetch로 og:image 추출 (P0). Instagram P2 스텁. **Apify** (`api.apify.com` — `epctex/pinterest-scraper` actor): 온보딩 Stage 4 Pinterest 보드/프로파일 핀 스크래핑 (SPEC-ONBOARD-CARDS-001, 비동기 httpx, `APIFY_TOKEN` 필요).
 
 **v5 인프라**: dev-app Postgres 16 + pgvector + pgroonga (마이그레이션 027 + 030 적용). PostgREST + nginx shim 으로 `DB_URL` 호환 라우팅. SPEC-INFRA-MIGRATE-001 P6 이후 Supabase.com 미사용. Qdrant **사용 안 함**.
 
@@ -48,17 +48,19 @@ graph TB
     subgraph AI["AI Server (EC2 t4g.medium)"]
         REC["POST /recommend"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/graphs/<br/>LangGraph StateGraph (12 nodes)<br/>+ evaluator (Reflexion) + apply_clarify<br/>+ link_resolver + vision (v2 schema)"]
+        CHAN["app/graphs/<br/>LangGraph StateGraph (18 nodes)<br/>+ evaluator (Reflexion) + apply_clarify<br/>+ onboard_intro/mood/color/fit/pinterest + pinterest_ingest<br/>+ link_resolver + vision (v2 schema)"]
         PIPE["pipeline state machine<br/>embed → search → diversify"]
         LITELLM["LiteLLM proxy"]
         LFW["Langfuse web"]
         LFDB[("Langfuse Postgres")]
+        CONVLOG[("ai.log_conversation_event<br/>(append-only event log)")]
     end
 
     subgraph External["External"]
         MODAL["Modal /embed<br/>FashionSigLIP T4"]
         SB[("dev-app Postgres 16<br/>pgvector + pgroonga<br/>+ PostgREST nginx shim")]
         PIN["Pinterest / pin.it<br/>(og:image fetch)"]
+        APIFY["Apify<br/>epctex/pinterest-scraper<br/>(board / profile)"]
     end
 
     FIND -->|POST| REC
@@ -69,6 +71,8 @@ graph TB
     TG_API -->|webhook POST| WH
     WH --> CHAN
     CHAN -->|URL resolve| PIN
+    CHAN -->|Pinterest scrape| APIFY
+    CHAN -. emit .-> CONVLOG
     CHAN --> PIPE
     PIPE -->|sendMessage| TG_API
 
@@ -88,8 +92,8 @@ graph TB
 
     class FIND,V4 app
     class REC,WH,CHAN,PIPE,LITELLM,LFW ai
-    class MODAL,PIN ext
-    class SB,LFDB data
+    class MODAL,PIN,APIFY ext
+    class SB,LFDB,CONVLOG data
     class TG_USER,TG_API chat
 ```
 
@@ -115,8 +119,12 @@ app/
 │   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (kikoai/app analyze.ts 동치)
 │   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
 │   ├── clarify_values.py   # clarify axis 옵션 + 한글 라벨
+│   ├── onboarding_cards.py # 온보딩 카드 빌더 (4 axes: mood/color/fit/pinterest, SPEC-ONBOARD-CARDS-001)
+│   ├── onboarding_values.py # 온보딩 axis 옵션 + KO/EN 라벨 + keywords_to_boost
+│   ├── pinterest_url.py    # Pinterest URL 파싱·검증 (board/profile/pin 모드, SSRF allowlist)
+│   ├── _jsonable.py        # 5-step JSON-serializable cascade 헬퍼 (공용)
 │   └── telegram/
-│       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard)
+│       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard / edit_inline_keyboard)
 │       └── webhook.py      # Telegram Update 파싱
 ├── graphs/                 # LangGraph StateGraph (SPEC-AGENT-001)
 │   ├── fashion_bot.py      # 그래프 빌드 + 모듈 수준 컴파일 캐시 + build_metadata
@@ -134,7 +142,16 @@ app/
 │       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001)
 │       ├── send_results.py # 검색 결과 카드 전송
 │       ├── taste_update.py # 장기 취향 프로파일 업데이트
-│       └── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL)
+│       ├── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL) + sentence-split (RESPONSE_SPLIT_ENABLED)
+│       ├── onboard_intro.py # 온보딩 인트로 — /start + onboarded_at IS NULL 진입점 (SPEC-ONBOARD-CARDS-001)
+│       ├── onboard_mood.py  # Stage 1: 무드 카드
+│       ├── onboard_color.py # Stage 2: 컬러 카드
+│       ├── onboard_fit.py   # Stage 3: 핏 카드 + seed_from_onboarding
+│       ├── onboard_pinterest.py # Stage 4 (선택): Pinterest 보드 URL 요청
+│       ├── pinterest_ingest.py  # Pinterest 핀 스크래핑 → Vision batch → TasteProfile reinforce
+│       ├── _onboard_helpers.py  # 온보딩 내부 헬퍼 (seed, 완료 메시지, stage 전환)
+│       ├── _onboard_stage.py    # 온보딩 stage enum + 전환 테이블
+│       └── _pinterest_helpers.py # 핀 Vision batch + reinforce 헬퍼
 ├── core/
 │   ├── config.py           # Pydantic Settings (env) — 신규 메신저 키 포함
 │   └── auth.py             # verify_internal_token dependency
@@ -147,9 +164,12 @@ app/
 ├── providers/
 │   ├── database.py         # SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업)
 │   ├── embedding.py        # EmbedProvider (Modal HTTP)
-│   └── llm.py              # LLMProvider (LiteLLM HTTP)
+│   ├── llm.py              # LLMProvider (LiteLLM HTTP)
+│   └── apify.py            # ApifyProvider — Pinterest 스크래퍼 (httpx, board/profile/pin 3-mode, ApifyTimeoutError)
 ├── observability/
-│   └── langfuse.py         # @observe 데코레이터 (no-op fallback) + env 자동 주입 수정
+│   ├── langfuse.py         # @observe 데코레이터 (no-op fallback) + env 자동 주입 + current_langfuse_trace_id()
+│   ├── conversation_log.py # 대화 이벤트 로거 — log_event / emit / _truncate (SPEC-CONVERSATION-LOG-001)
+│   └── event_payloads.py   # 19개 이벤트 TypedDict 정의 (SPEC-CONVERSATION-LOG-001)
 └── models/
     ├── request.py          # RecommendRequest (alias 패턴 + image_url SSRF 가드)
     └── response.py         # RecommendResponse (serialization_alias)
@@ -182,14 +202,17 @@ app/
 
 ## LangGraph (SPEC-AGENT-001 — 도입됨)
 
-Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph` 로 구현.
+Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 18-노드 `StateGraph` 로 구현.
 `webhook → graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler(...)]})` 단일 호출 (REQ-AGENT-008).
 
 핵심 분기:
 - `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) — 빈 결과 시 필터 drop fast-path / LLM 평가 점수 < threshold 시 `CritiqueDelta` 생성 후 search 재진입 (max 2회 + 4 안전 가드: iteration cap / stagnation / score regression / 30s wall-clock)
 - `ask_clarify → apply_clarify` 결정형 카드 (SPEC-CLARIFY-CARDS-001) — weak-vision 시 6 axes 인라인 키보드, callback 수신 시 `session.boost_keywords` 누적 (self-critique fast-path 통과)
+- **온보딩 카드 분기** (SPEC-ONBOARD-CARDS-001): `/start` + `sess.onboarded_at IS NULL` → `onboard_intro → onboard_mood → onboard_color → onboard_fit → (PINTEREST_BOOTSTRAP_ENABLED) → onboard_pinterest → pinterest_ingest` 3+1 stage 카드 온보딩. 완료 시 `seed_from_onboarding()` 로 TasteProfile 시드 → `onboarded_at` 기록. Pinterest stage 에서 Apify 스크래핑 + Vision batch → `TasteProfile.reinforce_liked_*` 머지.
 - **KO/EN sticky 언어**: `ingest` 노드가 `app/channels/lang.remember_lang()` 으로 `Session.lang` 갱신 → 이후 버튼 탭도 동일 언어 유지. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` 노드가 `session_lang(sess)` 참조해 KO/EN 텍스트 분기.
 - **`STALE_CRITIQUE` flow**: `respond` 노드에 추가. `crit:*` 콜백이 만료된 카드에 대해 들어올 때 `critique_apply` 가 delta 없이 반환 → `respond` 가 STALE_CRITIQUE flow 로 분류해 "오래된 카드" 안내 메시지 발송. 단, `crit:click:` 콜백은 예외 — `_route_after_critique` 가 `respond` 를 거치지 않고 END 로 직접 라우팅 (SPEC-IMPLICIT-FB-001 / REQ-FB-CLICK-001: 클릭 ack 은 `critique_apply` 안에서 이미 처리, 자연어 응답 없음).
+- **이벤트 소싱 (SPEC-CONVERSATION-LOG-001)**: 모든 노드 + webhook intake 에서 `emit(event_type, payload)` 호출 → fire-and-forget `asyncio.create_task` → `ai.log_conversation_event` 테이블 INSERT. `MEMORY_BACKEND_IS_POSTGRES=False` 시 silent skip. PG outage 시 stderr JSON fallback (tag: `CONV_LOG_FALLBACK`).
+- **sentence-split 발화 (noscroll benchmark)**: `RESPONSE_SPLIT_ENABLED=true` 시 `respond` 노드가 LLM 출력을 문장 단위로 분할 → typing action → `RESPONSE_SPLIT_DELAY_MS` 딜레이 → 각 청크 개별 전송. `RESPONSE_SPLIT_MIN_CHARS` 미만 조각은 다음 청크와 병합.
 
 파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
 
@@ -229,4 +252,5 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 12-노드 `StateGraph
 | 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
 | 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |
 | 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
+| 2026-05-15 | **v0.6.0 — SPEC-CONVERSATION-LOG-001 + SPEC-ONBOARD-CARDS-001 + noscroll sentence-split** (이벤트 소싱: `ai.log_conversation_event` append-only 테이블 (migration 0003), 19 이벤트 TypedDict, `emit()` fire-and-forget, PG failsoft stderr fallback. 온보딩 카드: 6 신규 노드 (onboard_intro/mood/color/fit/pinterest + pinterest_ingest), `app/providers/apify.py` (Apify httpx wrapper, ApifyTimeoutError), `app/channels/onboarding_cards/values/pinterest_url.py` + `_jsonable.py`, migration 0004 (`user_session` + `onboarded_at` 컬럼). noscroll P0: `RESPONSE_SPLIT_ENABLED` 문장 분할 발화. 그래프 노드 수 12 → 18.) |
 | 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `kikoai/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |
