@@ -226,6 +226,16 @@ def _build_graph_v2() -> Any:
         # AWAITING_ITEM_PICK with digit-pick text — keep deterministic fallback.
         if msg.text and sess.state == SessionState.AWAITING_ITEM_PICK:
             return "pick_item"
+        # SPEC-AGENT-V2-REACT §15 Decision 2 — empty/contentless input guard.
+        # Telegram spuriously delivers contentless Updates (service messages,
+        # stickers, blank-text echoes). These are NOT user turns: route to END
+        # SILENTLY (no message sent) rather than spawning the agent on an empty
+        # context (which hallucinates "Oops I can't recall"). All four must be
+        # true: blank text AND no callback AND no urls AND no photo. Callbacks
+        # (clarify:/crit:/onboard:) carry non-empty callback_data and were
+        # routed by the positive branches above, so they never reach here.
+        if not (msg.text or "").strip() and not msg.callback_data and not msg.urls and not msg.photo_file_id:
+            return "__end__"
         # Everything else (text, clarify:* / crit:* callbacks for onboarded users)
         # goes to the agent. ingest.Step C inline-handled boost_keywords for
         # clarify:* before we arrive here.
@@ -235,6 +245,7 @@ def _build_graph_v2() -> Any:
         "pick_item": "pick_item",
         "resolve_image": "resolve_image",
         "agent": "agent",
+        "__end__": END,  # SPEC-AGENT-V2-REACT §15 Decision 2 — silent END for contentless Update
         "pinterest_ingest": "pinterest_ingest",
         "onboard_intro": "onboard_intro",
         "onboard_mood": "onboard_mood",

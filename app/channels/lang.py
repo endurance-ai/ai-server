@@ -16,6 +16,14 @@ from typing import Any
 
 _HANGUL_RE = re.compile(r"[가-힣]")
 
+# SPEC-AGENT-V2-REACT §15 Decision 5 — a single whitespace-delimited token is
+# "URL-like" if it is an http(s):// URL, a www. host, or a bare pin.it /
+# pinterest.com style short link. A link is not a language signal.
+_URL_TOKEN_RE = re.compile(
+    r"^(?:https?://|www\.|(?:[\w-]+\.)*(?:pin\.it|pinterest\.com)/)",
+    re.IGNORECASE,
+)
+
 LANG_KO = "ko"
 LANG_EN = "en"
 
@@ -54,6 +62,13 @@ def remember_lang(sess: Any, text: str | None) -> str:
         return prior
     # Short text without Hangul → preserve sticky (avoid "ok"/"hi"/"음" 등으로 영구 전환).
     if len(stripped) < 3 and not _HANGUL_RE.search(stripped):
+        return prior
+    # URL-only / link-only input → not a language signal, preserve sticky.
+    # A Korean user dropping a Pinterest URL must keep replying in Korean
+    # (exactly like the `/`-command guard). Mixed input (e.g. "이거 봐 https://...")
+    # has a non-URL token → falls through to detect_lang as before.
+    tokens = stripped.split()
+    if tokens and all(_URL_TOKEN_RE.match(t) for t in tokens):
         return prior
     lang = detect_lang(stripped)
     try:

@@ -15,6 +15,7 @@ from app.channels.lang import remember_lang
 from app.channels.router import RoutedDecision, RoutedIntent, route_text
 from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
+from app.core.config import settings
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -133,6 +134,22 @@ async def ingest(state: WorkingState) -> dict:
                 breadcrumbs.append("ingest_v2: clarify boost_keywords accumulated")
     except Exception as exc:  # noqa: BLE001
         logger.debug("[ingest] v2 clarify inline handling failed: %r", exc)
+
+    # SPEC-AGENT-V2-REACT / T-007 §15 Decision 1 — V2 skips `route_text`.
+    # Under the V2 ReAct topology the legacy LLM 4-way router is dead: no V2
+    # routing closure (`_route_after_ingest_v2` / `_route_after_pick_v2` /
+    # `_route_after_vision_v2`), `agent` node, or `react_loop` reads
+    # `state.decision` (consumer audit: only V1-only `_route_after_router_text`
+    # in routing.py, bound exclusively in the V1 graph builder). Returning here
+    # — before the `needs_router` block — preserves the exact shape ingest
+    # returns on the `not needs_router` path (log_events breadcrumbs + turn_no,
+    # plus whatever Step A/B/C accumulated), never invokes `route_text`, and
+    # leaves `decision` unset. Step A (implicit feedback) + Step C (clarify
+    # inline) already ran above, so their side effects are preserved.
+    # @MX:SPEC: SPEC-AGENT-V2-REACT
+    if settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip():
+        _emit_intent_routed(state, None)
+        return {"log_events": breadcrumbs, "turn_no": 1}
 
     # Only invoke router for ambiguous text in RESULTS_SENT / IDLE.
     needs_router = (

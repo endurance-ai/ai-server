@@ -11,6 +11,7 @@
 ### HISTORY
 
 - **2026-05-15 (runtime verification correction)**: OQ-1 의 false premise *"nova-pro (Bedrock): 본 인프라에 Bedrock 자격증명 미설정"* 을 폐기. Bedrock Nova 는 본 프로젝트 primary LLM (LiteLLM proxy 에 자격증명 구성됨). OQ-1 기본 모델을 `gpt-4o-mini` → `nova-lite` 로 정정. OQ-2 에 Bedrock `tool_choice` 거부 caveat + `llm_client.py` fix 문서화. raw curl + 실제 `.ainvoke()` 로 `nova-lite` tool calling 정상 동작 검증 완료.
+- **2026-05-15 (topology-integration redesign)**: 실 Telegram 런타임에서 4개 결함 확인 (route_text V2 미게이팅, empty-input agent 환각, sticky-lang URL flip, V1 state-machine 잔존). T-006/T-007 재설계 + T-007.5(lang URL guard) + T-015(topology-integration redesign) 신설. 총 task **15 → 17** (T-000~T-015 + T-007.5). pick-callback 조사 결론: "empty webhook"은 drop 된 탭이 아니라 별개 contentless Update — pick 경로는 정상, 무수정. OQ resolution 전부 유효 (OQ-4 는 §15 Decision 1/4 로 구현 완성). 무효화된 OQ 없음.
 
 ### Blocking prerequisites
 
@@ -235,7 +236,7 @@ SPEC §Cross-References 에서 `app/graphs/nodes/router_text.py` 를 deprecated 
 
 ## 2. Task Decomposition
 
-총 **15 tasks** (Task 0–14). 모든 task 는 atomic DDD 또는 ANALYZE→IMPROVE 사이클로 완결 가능. 진행은 TodoWrite 로 동기. Status 는 모두 `pending` 으로 시작.
+총 **17 tasks** (Task 0–15 + Task 7.5). Task 0–14 는 구현 완료 (Wave 1-8). Task 6/7 은 §15 redesign 으로 보강, Task 7.5 + Task 15 는 런타임 결함 4종 대응 신설. 모든 task 는 atomic DDD 또는 ANALYZE→IMPROVE 사이클로 완결 가능. 진행은 TodoWrite 로 동기.
 
 ### Task 0 — [BLOCKER] SPEC-CONVERSATION-LOG-001 v0.3.0 amendment PR
 
@@ -396,42 +397,77 @@ SPEC §Cross-References 에서 `app/graphs/nodes/router_text.py` 를 deprecated 
   - Return state delta dict (`{"agent_iterations": ..., "tool_call_history": ..., "agent_status": ..., "response_text": ..., "log_events": [...]}`).
 - **AC**: graph node 호출 시 react_loop 가 invoke 됨. delta dict 가 LangGraph 의 state merge 와 호환.
 
-### Task 6 — `fashion_bot.py` topology edit + `routing.py` onboarding gate
+> **[Topology-integration redesign — 2026-05-15]**: T-006/T-007 의 최초 설계는 V2 토폴로지(노드/엣지)만 분기했고 **`ingest` 노드 본문 안의 V1 잔재를 게이팅하지 않았다**. 런타임 검증(실 Telegram 로그, `AGENT_V2_REACT_ENABLED=true`, `AGENT_LLM_MODEL=nova-lite`)에서 4개 결함 확인:
+> 1. `route_text` LLM 호출이 V2 에서도 매 텍스트 턴 실행 → `TimeoutError → fallback` + 3s 낭비 + V1 `sess.state` 오염.
+> 2. contentless empty Update 가 `_route_after_ingest_v2` 의 fallthrough 로 `agent` 진입 → 빈 컨텍스트로 환각 응답.
+> 3. `remember_lang` 이 Pinterest URL-only 입력을 EN 신호로 오판 → 한국어 사용자에게 영어 응답.
+> 4. V1 state-machine(`awaiting_intent`)이 V2 에서도 routing 을 구동.
+>
+> T-006/T-007 을 아래로 **재설계**한다. Task 7.5(lang URL guard) + Task 15(topology-integration redesign) 신설. 기존 OQ resolution 은 모두 유효 — 단 OQ-4(post-onboarding → agent immediately)의 구현이 ingest 본문 게이팅 누락으로 미완이었음을 §15 가 보강한다. 어떤 OQ 도 무효화되지 않는다.
+
+### Task 6 — `fashion_bot.py` topology edit + `routing.py` onboarding gate (재설계됨)
 
 - **ID**: T-006
 - **REQ**: REQ-AGENT-TOPOLOGY-GATE-001, REQ-AGENT-TOPOLOGY-SUPERSEDE-001, REQ-AGENT-COMPAT-FLAG-001
 - **Dependencies**: T-005
+- **Status**: implemented (Wave 1-7) — §15 가 런타임 결함 #2/#4 의 보강분만 추가. 토폴로지 골격은 변경 없음.
 - **Planned files**:
-  - MODIFY: `app/graphs/fashion_bot.py` (feature-flag gated topology)
-  - MODIFY: `app/graphs/routing.py` (remove 4 routing fns when flag=true; modify _route_after_ingest)
-- **ANALYZE (PRESERVE)**: 현 `fashion_bot.py` 의 21 nodes + 9 conditional edges. Onboarding 6 노드 + `_route_after_onboard_fit` 의 routing 은 절대 건드리지 않음 — characterization test 로 보호.
-- **PRESERVE**: Onboarding regression test (V1 baseline: fresh user → onboard_intro 진입, mood callback → onboard_mood 진입, 모든 6 stage 완료 후 onboarded_at set).
-- **IMPROVE**:
-  - `build_graph()` 내 `if settings.AGENT_V2_REACT_ENABLED:` 분기:
-    - **true 분기**: agent 노드 add_node. 4개 deprecated 노드 (`router_text` passthrough, `critique_apply`, `taste_update`, `respond`) 및 `evaluator` add_node 생략. `apply_self_critique_passthrough` 생략. Edges: `ingest → [_route_after_ingest_v2]`, `resolve_image → vision_node → agent`, `pick_item → agent | END`, `apply_clarify → agent`, `agent → END`.
-    - **false 분기**: 현 토폴로지 그대로 유지 (V1).
-  - `_route_after_ingest_v2`: 기존 `_route_after_ingest` 와 동일 (onboarding gate 우선), **단 onboarded users 의 text branch 가 `"agent"` 로**, callback (item:/clarify:/crit:) 는 적절한 노드로, photo/url 은 `resolve_image` 로.
-  - `routing.py` 의 deprecated 4 fns (`_route_after_router_text`, `_route_after_critique`, `_route_after_evaluator`, `_route_after_search` 의 V2 branch) 는 V2 분기에서 사용 안 함. V1 분기에서는 유지.
+  - MODIFY: `app/graphs/fashion_bot.py` (`_build_graph_v2` 내 `_route_after_ingest_v2` 에 **empty-input END 가드** 추가 — §15 Decision 2)
+  - MODIFY: `app/graphs/routing.py` (V1 분기 무변경. V2 routing fns 는 `fashion_bot.py` 내 클로저로 유지)
+- **ANALYZE (PRESERVE)**: 현 `fashion_bot.py` 의 V1 21 nodes + 9 conditional edges. Onboarding 6 노드 + `_route_after_onboard_fit` 는 절대 건드리지 않음 — characterization test 로 보호. `_build_graph_v2()` 의 노드/엣지 골격(이미 구현됨)은 정상 — 결함은 routing 클로저의 **fallthrough 정책**뿐.
+- **PRESERVE**: `test_v1_topology_unchanged` (flag=false byte-identical), `test_onboarding_subgraph_unchanged`, pick→tap→agent happy-path characterization (아래 §15 Decision 3 의 검증 결과를 회귀 테스트로 고정).
+- **IMPROVE (§15 보강분만)**:
+  - `_route_after_ingest_v2` 의 마지막 `return "agent"` 직전에 **empty-input 가드** 삽입 (정확한 게이트 조건은 §15 Decision 2). contentless Update → `"__end__"` (silent).
+  - `ingest_branches_v2` 에 `"__end__": END` 추가 (가드의 반환값 매핑).
+  - 그 외 V2 토폴로지(노드 add_node 목록, deprecated 노드 미등록, `resolve_image→vision_node→agent`, `pick_item→agent|END`, `apply_clarify→agent`, `agent→END`)는 **변경 없음 — 이미 정확함**.
 - **AC**:
-  - flag=true 시 `GRAPH.get_graph().nodes` 에 deprecated 4개 노드명 부재 + `agent` 노드명 존재.
+  - flag=true 시 `GRAPH.get_graph().nodes` 에 deprecated 5개 노드명(`router_text`/`critique_apply`/`taste_update`/`respond`/`evaluator`) 부재 + `agent` 노드 존재.
   - flag=false 시 V1 토폴로지 byte-identical.
-  - onboarding 6-combination test (REQ-AGENT-TOPOLOGY-GATE-001) green.
+  - onboarding 6-combination test green.
+  - **신규**: contentless Update(text 공백 AND no callback AND no urls AND no photo, onboarding 아님) → 그래프가 어떤 adapter send 도 호출하지 않고 END (§15 AC-2).
+  - **신규**: pick→tap→agent characterization test green (selected_item_index 세팅 → agent 진입 확인).
 
-### Task 7 — `ingest.py` Step C: inline clarify callback handling
+### Task 7 — `ingest.py` V1-잔재 게이팅 + Step C inline clarify (재설계됨)
 
 - **ID**: T-007
-- **REQ**: REQ-AGENT-TOPOLOGY-GATE-001 (mid-onboarding clarify negative path)
+- **REQ**: REQ-AGENT-TOPOLOGY-GATE-001 (mid-onboarding clarify negative path), REQ-AGENT-TOPOLOGY-SUPERSEDE-001 (V2 에서 V1 router 경로 비활성), REQ-AGENT-COMPAT-FLAG-001
 - **Dependencies**: T-006
+- **Status**: Step C 는 구현됨. **route_text 게이팅이 누락 → §15 Decision 1 로 보강.**
 - **Planned files**:
-  - MODIFY: `app/graphs/nodes/ingest.py` (insert Step C between Step B and final return)
-- **ANALYZE (PRESERVE)**: 현 `ingest.py` 의 Step A (implicit feedback lazy attribution) + Step B (conv_log thread_id propagation) 확인. apply_clarify.py 의 `boost_keywords` 누적 로직 추출.
-- **PRESERVE**: ingest 가 photo/text/callback 3 type 에 대해 정상 처리하는 baseline test.
-- **IMPROVE**:
-  - Step C 추가: callback Update 이고 `callback_data.startswith("clarify:")` 일 때:
-    - 사용자가 onboarded → `boost_keywords` 를 session 에 inline 누적 (기존 apply_clarify 의 핵심 로직)
-    - mid-onboarding → 무시 + `node_error` emit (REQ-AGENT-TOPOLOGY-GATE-001 의 negative path)
-  - V2 flag 활성 시에만 Step C 실행 (flag false 시 기존 `apply_clarify` 노드가 처리).
-- **AC**: V2 flag=true 시 clarify callback → session.boost_keywords 누적 → agent 진입 시 keywords 사용 가능. Mid-onboarding clarify → node_error event 기록.
+  - MODIFY: `app/graphs/nodes/ingest.py` (route_text 블록을 V2 에서 skip — §15 Decision 1)
+- **ANALYZE (PRESERVE)**: `ingest.py` 의 Step A(implicit feedback lazy attribution, lines 79-90) + Step B(없음 — thread_id 는 webhook intake 가 InputState 로 주입, ingest 는 `turn_no:1` 만 반환) + Step C(inline clarify, lines 92-135, 이미 구현). `needs_router`/`route_text` 블록(lines 137-167)이 결함 #1 의 원천.
+- **PRESERVE**:
+  - `test_ingest_step_a_unchanged`: implicit feedback Step A 가 route_text 게이팅과 무관하게 동작(Step A 는 route_text 블록보다 먼저 실행 — 순서 보존 필수).
+  - `test_ingest_step_c_unchanged`: clarify:* inline 누적 + mid-onboarding node_error 동작 무변경.
+  - `test_ingest_v1_router_path`: flag=false 시 `route_text` 호출 + `decision` 반환 무변경.
+- **IMPROVE (§15 Decision 1)**:
+  - `needs_router` 계산 직전에 V2 가드 추가: V2 활성(flag=true AND `AGENT_LLM_MODEL` set)이면 `needs_router=False` 강제 → `route_text` 절대 미호출, `_emit_intent_routed(state, None)` 후 `{"log_events":..., "turn_no":1}` 즉시 반환. `decision` 은 None 으로 남음(V2 에서 dead — 어떤 V2 routing/agent 코드도 `state.decision` 미참조, §15 Decision 4 의 consumer 감사로 확인).
+  - Step A/Step C 는 V2 가드보다 **먼저** 실행되므로 무영향.
+- **AC**:
+  - V2 flag=true 시 `route_text` 호출 0회(mock 으로 assert_not_called) — 결함 #1 해소.
+  - `intent_routed` 이벤트는 여전히 emit(decision=None).
+  - flag=false 시 route_text 호출 + decision 반환 byte-identical.
+  - Step C clarify 누적 + mid-onboarding node_error 회귀 0.
+
+### Task 7.5 — `lang.py::remember_lang` URL-only guard (신설)
+
+- **ID**: T-007.5
+- **REQ**: REQ-AGENT-COMPAT-SEMANTIC-001 (sticky-lang 보존), SPEC-MSG-001 sticky-language 계약 보강
+- **Dependencies**: 없음 (parallel-startable, V2 토폴로지와 직교)
+- **근거**: pre-existing SPEC-MSG-001 버그지만 V2 UX 를 사용 불가로 만들어(한국어 사용자가 Pinterest URL 던지면 이후 전 응답 영어) 본 redesign 에 fold. `remember_lang` 은 `/`-command 와 <3-char non-Hangul 만 sticky-preserve 하고 **URL-only 입력은 미가드** → "https://pin.it/abc"(24자, no Hangul) → `detect_lang`=en → sticky 가 en 으로 flip.
+- **Planned files**:
+  - MODIFY: `app/channels/lang.py` (`remember_lang` 에 URL-only guard 1 절 추가)
+  - ADD: `tests/test_agent_v2/` 또는 기존 lang 테스트에 4 케이스
+- **ANALYZE**: `remember_lang` (lang.py:37-63) 의 guard 순서: empty → `/`-command → <3-char non-Hangul → `detect_lang`. URL-only guard 를 `/`-command guard 와 동형으로(early-return prior) 추가.
+- **IMPROVE (§15 Decision 5 — 정확한 게이트)**:
+  - `stripped` 의 모든 whitespace-delimited token 이 URL-like(`scheme://...` 또는 `pin.it/...` 또는 `www.` prefix host)이면 → 언어 신호 아님 → `return prior` (sticky 보존).
+  - 혼합 입력("이거 찾아줘 https://pin.it/x")은 비-URL token("이거","찾아줘") 존재 → 가드 미통과 → 기존대로 `detect_lang`(Hangul 有 → ko). **정상 KO/EN 회귀 0**.
+- **AC**:
+  - "https://pin.it/abc123" (prior=ko) → 반환 "ko", `sess.lang` 무변경 (URL-only).
+  - "https://www.pinterest.com/board/" (prior=en) → "en" 보존.
+  - "이거랑 비슷한 거 https://pin.it/x" → "ko" (혼합 — Hangul 검출 정상).
+  - "casual blazer" → "en" (일반 텍스트 회귀 0).
+  - "캐주얼 블레이저" → "ko" (일반 텍스트 회귀 0).
 
 ### Task 8 — Feature flag + `/health/ready` 노출
 
@@ -538,6 +574,131 @@ SPEC §Cross-References 에서 `app/graphs/nodes/router_text.py` 를 deprecated 
   (see SPEC-AGENT-V2-CLEANUP-001).
   ```
 - **AC**: 5개 모듈 docstring에 "DEPRECATED" + SPEC ID 문자열 존재. V2.1 cleanup SPEC stub 생성 (P3, status=stub).
+
+### Task 15 — Topology-integration redesign (런타임 결함 4종 보강)
+
+- **ID**: T-015
+- **REQ**: REQ-AGENT-TOPOLOGY-SUPERSEDE-001(V1 router 비활성), REQ-AGENT-TOPOLOGY-GATE-001, REQ-AGENT-COMPAT-SEMANTIC-001(sticky-lang)
+- **Dependencies**: T-006, T-007 (이미 구현된 V2 토폴로지 위에 보강)
+- **Methodology**: DDD ANALYZE-PRESERVE-IMPROVE (4개 brownfield edit, 모두 additive/게이팅)
+- **목적**: V2 토폴로지 골격은 정상이나 `ingest`/`lang` 본문의 V1 잔재가 런타임에서 충돌. 4개 게이팅/가드만 추가, 신규 추상화 0.
+
+#### 결함 → 결정 매핑
+
+| # | 런타임 증상 | 원천 파일·라인 | 결정 |
+|---|---|---|---|
+| 1 | 매 텍스트 턴 `route_text` LLM TimeoutError fallback (V2 에서도) | `ingest.py:137-167` `needs_router`/`route_text` | Decision 1 |
+| 2 | contentless empty Update → agent 환각 응답 | `fashion_bot.py:218-232` `_route_after_ingest_v2` fallthrough | Decision 2 |
+| 3 | pick→tap→agent 가 실제로 끊기는가? | `fashion_bot.py:221,247` + `pick_item.py:121-181` | Decision 3 (검증결과: 안 끊김) |
+| 4 | `awaiting_intent` V1 state-machine 이 V2 routing 구동 | `Session.state` consumers | Decision 4 |
+| 5 | Pinterest URL-only → sticky-lang en flip | `lang.py:37-63` `remember_lang` | Decision 5 |
+
+#### Decision 1 — V2 에서 `route_text` 완전 skip
+
+**결정**: V2 활성 시 `ingest` 는 `route_text` 를 **절대 호출하지 않는다**. `decision` 은 None 으로 남기며 이는 V2 에서 완전 dead 다 (consumer 감사: `_route_after_ingest_v2`/`_route_after_pick_v2`/`_route_after_vision_v2`/`agent.py`/`react_loop.py` 중 `state.decision` 참조 0).
+
+**게이트(pseudocode-level)** — `ingest.py` 의 `needs_router` 계산 직전:
+
+```
+v2_active = settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip()
+if v2_active:
+    _emit_intent_routed(state, None)          # intent_routed 이벤트 계약 유지 (decision=None)
+    return {"log_events": breadcrumbs, "turn_no": 1}   # route_text 미진입
+# (이하 기존 needs_router / route_text 블록은 V1 전용으로 유지)
+```
+
+순서 불변식: 이 early-return 은 **Step A(implicit feedback) + Step C(clarify inline) 이후, `needs_router` 이전**에 위치. Step A/C 의 부수효과(re-query, boost_keywords 누적)는 보존된다.
+
+**`sess.state` 미설정 안전성**: V2 에서 `route_text`/`_route_after_router_text` 미사용 → `decision` dead. `sess.state` 는 Decision 4 의 consumer 감사로 V2 안전 확인.
+
+#### Decision 2 — empty/contentless input 가드 (위치: `_route_after_ingest_v2`, 정책: silent END)
+
+**"no actionable input" 정의 (정밀)**: onboarding gate + continuous-pinterest + `cb.startswith("item:")` + photo/url + `AWAITING_ITEM_PICK`+digit-text 가 **모두 미적중**이고, 그리고:
+
+```
+(state.message.text or "").strip() == ""
+AND not state.message.callback_data            # clarify:/crit:/onboard: 콜백은 cb 非공백 → 가드 미통과 (정상 agent 행)
+AND not state.message.urls
+AND not state.message.photo_file_id
+```
+
+**위치 결정 = `_route_after_ingest_v2` 가 `"__end__"` 반환** (대안 평가):
+
+| 위치 | 장점 | 단점 | 채택 |
+|---|---|---|---|
+| (a) routing END | agent 미스폰, LLM 비용 0, 환각 원천 차단, 단일 funnel, routing 단위테스트로 검증 | 없음 (콜백/실입력은 이 지점 이전에 분기 완료) | ✅ |
+| (b) agent 노드 early-return | — | agent 스폰 오버헤드, 가드 로직 중복, routing 결정을 노드가 떠안음 | ✗ |
+| (c) react_loop context-builder | — | LLM 이미 호출되는 계층(환각 발생점), 엔진에 no-op 특수분기 오염 | ✗ |
+
+**정당화**: "agent 가 돌아야 하는가"는 routing 계층의 책임. `_route_after_ingest_v2` 는 V2 의 단일 funnel 이며 END 는 무비용·무발화.
+
+**사용자가 보는 것 = 아무것도 없음 (nudge 금지)**. 근거: Telegram 은 service message / sticker / 빈 텍스트 echo 등 contentless Update 를 spuriously 발생시킨다. 매번 nudge 하면 그게 곧 보고된 UX 버그("over-responding is the bug"). contentless Update 는 사용자 턴이 아니므로 침묵이 정답.
+
+**구현 매핑**: `_route_after_ingest_v2` 마지막 `return "agent"` 직전에 위 조건 → `return "__end__"`; `ingest_branches_v2` 에 `"__end__": END` 추가.
+
+#### Decision 3 — pick-callback 조사 결론 (DEFINITIVE)
+
+**"empty webhook 이 사실 drop 된 pick tap 인가?" → 아니오 (NO).**
+
+증거 체인:
+1. `adapter.py:292-311` — `callback_query` 페이로드 → `callback_data=str(cbq.get("data"))` (탭 = `"item:N"`, 비어있지 않음, well-formed ChannelMessage).
+2. `fashion_bot.py:221` — `if cb.startswith("item:"): return "pick_item"` (탭 콜백 인식, drop 아님).
+3. `pick_item.py:148-181` — `item:N` 경로가 `sess.selected_item_index=idx` + `state` 반환 (`{"selected_item_index": idx, ...}`).
+4. `fashion_bot.py:247` — `_route_after_pick_v2`: `return "agent" if state.selected_item_index is not None else "__end__"` → 탭 후 selected_item_index 세팅됨 → **agent 진입 (정상)**.
+
+**결론**: pick→tap→agent 체인은 V2 에서 **정확히 배선되어 있다**. "empty webhook"(text='' photo=False urls=[] callback empty)은 drop 된 탭이 아니라, **별개의 진짜 contentless Telegram Update** (service msg / sticker / 공백 텍스트 메시지 — `parse_inbound:326` 의 `text = message.get("text") or message.get("caption")` 가 None 이 되어도 ChannelMessage 검증 통과 → `_route_after_ingest_v2` fallthrough 로 `agent` 진입). 따라서 #2 의 진짜 원인 = Decision 2 의 누락된 empty-input 가드. **pick 경로는 무수정.**
+
+#### Decision 4 — `Session.state` consumer 감사 (V1-only vs shared)
+
+`SessionState` enum: IDLE / LINK_RESOLUTION / AWAITING_IMAGE_PICK / VISION_PROCESSING / AWAITING_ITEM_PICK / AWAITING_CLARIFY / AWAITING_INTENT / SEARCHING / RESULTS_SENT.
+
+| Consumer | 읽는 state | 분류 | V2 동작 |
+|---|---|---|---|
+| `ingest.py:143` `needs_router` | RESULTS_SENT/IDLE/AWAITING_INTENT | **V1-only** | Decision 1 으로 V2 미실행 — 무해 |
+| `routing.py:260` `_route_after_ingest`(V1) | AWAITING_INTENT/RESULTS_SENT/IDLE → router_text | **V1-only** | V2 는 `_route_after_ingest_v2` 사용 — 미참조 |
+| `_route_after_ingest_v2` (fashion_bot.py:227) | AWAITING_ITEM_PICK (digit-pick fallback) | **shared** | `pick_item` 이 AWAITING_ITEM_PICK set (pick_item.py:198) — V2 정상 동작 |
+| `implicit_feedback.detect_and_apply_re_query:439` | `state == RESULTS_SENT` | **shared** | V2 엔 send_results 노드 없음 → RESULTS_SENT setter 부재. **알려진 V2 한계** (아래) |
+| onboarding(`onboarding_required` 등) | `onboard_stage`/`onboarded_at` (state 아님) | 무관 | 영향 0 |
+| conv_log emit | `thread_id`/`turn_no` (state 아님) | 무관 | 영향 0 |
+
+**결정**: V2 에서 `sess.state` 를 `IDLE`/미설정으로 두어도 onboarding·conv_log·agent·pick 분기 무손상. `awaiting_intent` 가 V2 routing 을 구동하던 경로(`_route_after_ingest` V1)는 V2 에서 이미 미사용 — Decision 1 으로 `ingest` 본문의 마지막 V1 잔재(route_text)까지 제거되어 OQ-4(post-onboarding→agent immediately) 가 비로소 완성된다.
+
+**알려진 V2 한계 (follow-up, 본 redesign 범위 외 — 결함 아님)**: V2 엔 `RESULTS_SENT` 를 set 하는 노드가 없어 `implicit_feedback` 의 RESULTS_SENT 기반 자동 re-query 가 V2 에서 트리거되지 않는다. 이는 enhancement 의 부재(crash 아님)이며, V2.1 에서 `respond`/`search_products` tool 이 `sess.state=RESULTS_SENT` 를 set 하도록 보강 예정. 본 redesign 은 환각/낭비 호출 차단에 집중하므로 scope 외로 명시.
+
+#### Decision 5 — `remember_lang` URL-only guard
+
+**게이트(정밀)** — 기존 `/`-command guard 와 동형으로, `len(stripped) < 3` guard 직후:
+
+```
+tokens = stripped.split()
+if tokens and all(_is_url_like(t) for t in tokens):
+    return prior          # URL-only/link-only → 언어 신호 아님, sticky 보존
+# _is_url_like(t): t.startswith(("http://","https://")) or t.startswith("www.")
+#                  or re.match(r"^(?:[\w-]+\.)*pin\.it/", t)  (pin.it 단축)
+```
+
+**회귀 안전성**: 혼합 입력(URL + 자연어 토큰)은 비-URL token 존재 → `all(...)` False → 가드 미통과 → 기존 `detect_lang` 경로 그대로 (Hangul 있으면 ko). 일반 텍스트는 URL token 0 → 무영향. KO/EN 정상 검출 회귀 0.
+
+#### File-by-file 구현자 변경 목록 (코드 아님 — 무엇을 할지)
+
+| 파일 | 변경 | 결정 |
+|---|---|---|
+| `app/graphs/nodes/ingest.py` | `needs_router` 계산 직전(Step C 이후, line ~137)에 `v2_active` early-return 절 추가: `_emit_intent_routed(state, None)` 후 `{"log_events":..., "turn_no":1}` 반환. 기존 needs_router/route_text/except 블록은 V1 전용으로 그대로 남김(들여쓰기 무변경). | 1 |
+| `app/graphs/fashion_bot.py` | `_route_after_ingest_v2` 의 `return "agent"` 직전에 empty-input 조건(Decision 2 정의) → `return "__end__"`. `ingest_branches_v2` dict 에 `"__end__": END` 항목 추가. 그 외 V2 토폴로지 무변경. | 2 |
+| `app/channels/lang.py` | `remember_lang` 에 URL-only guard 1 절(<3-char guard 직후, Decision 5 게이트). 모듈 top 에 URL 패턴 정규식 1개 추가 가능. `detect_lang`/`session_lang` 무변경. | 5 |
+| `pick_item.py` / `_route_after_pick_v2` | **변경 없음** (Decision 3: 경로 정상 — 회귀 테스트만 추가). | 3 |
+
+신규 추상화·신규 모듈 0. 4개 파일 중 실변경 3개(ingest/fashion_bot/lang), 1개(pick)는 무변경 회귀고정.
+
+#### Acceptance criteria (fix 별)
+
+- **AC-1 (route_text skip)**: `AGENT_V2_REACT_ENABLED=true` + `AGENT_LLM_MODEL` set 에서 텍스트 턴 처리 시 `app.channels.router.route_text` mock 이 **호출 0회**. `intent_routed` 이벤트는 1회 emit(payload.intent="unknown", decision None). flag=false 시 route_text 1회 호출 + `decision` 반환 byte-identical.
+- **AC-2 (empty-input silent END)**: contentless ChannelMessage(text 공백, callback None, urls [], photo None, onboarding 아님) → 그래프 ainvoke 후 adapter 의 sendMessage/sendPhoto **호출 0회**, 그래프 terminal=END, agent 노드 미진입(span 부재). nudge 메시지 미발생.
+- **AC-3 (pick happy-path 회귀)**: photo/Pinterest-URL → vision(multi) → pick_item carousel → END; 다음 턴 `item:0` 콜백 → pick_item selected_item_index=0 set → `_route_after_pick_v2`="agent" → agent 진입. characterization test 로 고정 (Decision 3 검증 결과).
+- **AC-4 (state-machine 무해)**: V2 에서 `sess.state` 가 IDLE/미설정이어도 onboarding 6-combo + conv_log thread_id + pick AWAITING_ITEM_PICK digit-fallback 회귀 0. RESULTS_SENT re-query 부재는 known-limitation 으로 문서화(테스트는 xfail/skip + 사유).
+- **AC-5 (lang URL guard)**: 위 Task 7.5 AC 5 케이스 green. 기존 lang 테스트 스위트 회귀 0.
+
+- **AC (전체)**: `pytest tests/ -q` under `AGENT_V2_REACT_ENABLED=true` AND `=false` 양쪽 green. 실 Telegram 시나리오(한국어 사용자 + Pinterest URL → vision → pick → tap → 한국어 agent 응답, 중간 contentless Update 무발화)가 결함 #1-4 모두 미재현.
 
 ---
 
