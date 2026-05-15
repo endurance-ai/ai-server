@@ -26,7 +26,7 @@ from app.channels.taste_profile import (
 )
 from app.core.config import settings
 from app.graphs.state import WorkingState
-from app.observability.conversation_log import emit
+from app.observability.conversation_log import emit, scrub_exception_message
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -324,7 +324,8 @@ async def search_node(state: WorkingState) -> dict:
                 payload={
                     "node_name": "search",
                     "exception_type": type(exc).__name__,
-                    "message": str(exc)[:500],
+                    # security P1-01: secret scrub before persist
+                    "message": scrub_exception_message(exc),
                     "recovered": True,
                 },
             )

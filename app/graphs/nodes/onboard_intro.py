@@ -28,25 +28,16 @@ from app.channels.onboarding_cards import (
     build_mood_card,
     build_restart_confirmation_card,
 )
+
+# Restart keyword detection — canonical source (code review P0-2 fix:
+# previously duplicated here with divergent keyword set vs routing.py).
+from app.channels.onboarding_values import is_restart_keyword as _is_restart_keyword
 from app.channels.session import get_store
 from app.graphs.state import WorkingState
 from app.observability.langfuse import observe
 from app.observability.langfuse import update_current_span as update_current_observation
 
 logger = logging.getLogger(__name__)
-
-
-# Re-trigger keywords — exact-match (whitespace-trimmed, case-insensitive)
-# per plan §7.2 decision: Python regex `\b` on Korean is unreliable.
-_RESTART_KEYWORDS_LOWER = frozenset({"/reset", "온보딩 다시", "취향 다시 설정"})
-
-
-def _is_restart_keyword(text: str | None) -> bool:
-    """Plan §7.2 — exact-match (whitespace-trimmed, lowercased) restart trigger."""
-    if not text:
-        return False
-    return text.strip().lower() in _RESTART_KEYWORDS_LOWER
-
 
 # ─── intro lines (sticky lang) ────────────────────────────────────────────────
 _INTRO_LINES_KO: list[str] = [

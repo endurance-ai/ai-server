@@ -56,17 +56,17 @@ from app.graphs.state import WorkingState
 #   short-circuit before existing branches and no other code path duplicates
 #   the predicate.
 
-# Exact-match (whitespace-trimmed, case-insensitive) — plan §7.2: Python regex
-# `\b` is unreliable on Korean text, so we use a fixed allow-list.
-_RESTART_KEYWORDS_LOWER: frozenset[str] = frozenset({"/reset", "온보딩 다시", "취향 다시 설정", "reset taste"})
+# Restart keyword detection — canonical source: app/channels/onboarding_values.py
+# (formerly duplicated in onboard_intro.py with divergent keyword set — code
+# review P0-2 fix).
 _ONBOARDING_ACTIVE_STAGES: frozenset[str] = frozenset({"intro", "mood", "color", "fit", "pinterest"})
 
 
 def _is_restart_keyword(text: str | None) -> bool:
-    """REQ-ONBOARD-ENTRY-002 — exact-match re-trigger keyword detector."""
-    if not text:
-        return False
-    return text.strip().lower() in _RESTART_KEYWORDS_LOWER
+    """REQ-ONBOARD-ENTRY-002 — thin wrapper over canonical helper."""
+    from app.channels.onboarding_values import is_restart_keyword
+
+    return is_restart_keyword(text)
 
 
 def onboarding_required(state: WorkingState, sess: Session) -> bool:

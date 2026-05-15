@@ -21,7 +21,7 @@ from app.channels.session import get_store
 from app.channels.taste_profile import user_key_for
 from app.channels.vision import VisionResult, derive_legacy_dict, derive_legacy_keywords, derive_legacy_label
 from app.graphs.state import WorkingState
-from app.observability.conversation_log import emit
+from app.observability.conversation_log import emit, scrub_exception_message
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,8 @@ def _emit_node_error(state: WorkingState, *, node_name: str, exc: Exception, rec
             payload={
                 "node_name": node_name,
                 "exception_type": type(exc).__name__,
-                "message": str(exc)[:500],
+                # security P1-01: scrub DSN/Bearer/api_key/secrets from exception text
+                "message": scrub_exception_message(exc),
                 "recovered": recovered,
             },
         )

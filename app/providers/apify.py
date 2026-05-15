@@ -102,7 +102,11 @@ async def run_pinterest_scrape(
         return []
 
     actor_id = settings.APIFY_PINTEREST_ACTOR.replace("/", "~")
-    endpoint = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items?token={token}"
+    # @MX:NOTE: Token MUST be passed via Authorization header, NOT URL query
+    # string — Apify access logs / network proxies / httpx DEBUG dumps would
+    # otherwise leak the credential (security review P0-01).
+    endpoint = f"https://api.apify.com/v2/acts/{actor_id}/run-sync-get-dataset-items"
+    headers = {"Authorization": f"Bearer {token}"}
     payload = {
         "startUrls": [{"url": url}],
         "maxItems": max(1, min(int(max_items), 100)),
@@ -114,7 +118,7 @@ async def run_pinterest_scrape(
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await asyncio.wait_for(
-                client.post(endpoint, json=payload),
+                client.post(endpoint, json=payload, headers=headers),
                 timeout=timeout,
             )
     except TimeoutError as exc:

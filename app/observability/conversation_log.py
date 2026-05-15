@@ -30,12 +30,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
-from weakref import WeakSet
 
 from psycopg.types.json import Jsonb
 
@@ -57,9 +57,14 @@ LIST_CAP = 50  # items
 DICT_CAP = 100  # keys
 
 # ── In-flight task retention (R7 — prevent GC of pending log tasks) ────────
-# WeakSet means tasks self-evict once GC'd; `add_done_callback(discard)` is the
-# explicit removal trigger so a finished task is dropped promptly.
-_IN_FLIGHT: WeakSet[asyncio.Task[Any]] = WeakSet()
+# @MX:ANCHOR: 강한 참조(set)로 task 를 보유해야 함. WeakSet 으로 두면 caller 가
+# task 핸들을 버리는 순간 GC 가 PG INSERT 시작 전에 task 를 수거할 수 있어 데이터
+# 손실이 발생한다 (code review P0-1).
+# @MX:REASON: WeakSet GC race — task lifetime must outlive the eventloop tick.
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+# add_done_callback(_IN_FLIGHT.discard) 가 완료된 task 를 즉시 정리하므로 메모리
+# 누수 위험은 없다.
+_IN_FLIGHT: set[asyncio.Task[Any]] = set()
 
 
 def seed_thread() -> UUID:
@@ -123,6 +128,46 @@ def _truncate(payload: Mapping[str, Any], *, event_type: str | None = None) -> d
     return out
 
 
+# ── Secret-scrubbing for node_error messages (security review P1-01) ────────
+# @MX:ANCHOR: 모든 node_error.payload.message 는 이 함수를 거쳐야 한다.
+# @MX:REASON: psycopg DSN / LiteLLM API key / 내부 hostname 이 raw exception
+# 메시지에 섞여 영구 저장될 위험 (security review P1-01).
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+_SCRUB_PATTERNS: tuple[tuple[str, str], ...] = (
+    # postgresql://user:pass@host/db → scheme + redacted credentials
+    (r"postgres(?:ql)?://[^:\s]+:[^@\s]+@[^/\s]+", "postgresql://***:***@***"),
+    # Bearer / API key headers (Apify, OpenAI, etc.)
+    (r"Bearer\s+[A-Za-z0-9._\-]{8,}", "Bearer ***"),
+    (r"sk-[A-Za-z0-9._\-]{16,}", "sk-***"),
+    (r"apify_api_[A-Za-z0-9]{16,}", "apify_api_***"),
+    # query-string token=... (legacy paths, even though we removed it from Apify)
+    (r"(token|api_key|apikey|password|secret|authorization)\s*[=:]\s*[^\s&\"']+",
+     r"\1=***"),
+)
+_SCRUB_RE_CACHE: list[tuple[re.Pattern[str], str]] = []
+
+
+def scrub_exception_message(text: str, *, max_chars: int = 500) -> str:
+    """Strip secrets from an exception message before persisting to a log row.
+
+    Truncates to `max_chars` and applies a deny-list regex sweep. Always safe
+    to call — never raises.
+    """
+    if not _SCRUB_RE_CACHE:
+        for pat, repl in _SCRUB_PATTERNS:
+            try:
+                _SCRUB_RE_CACHE.append((re.compile(pat, re.IGNORECASE), repl))
+            except re.error:
+                pass
+    try:
+        s = str(text)[:max_chars]
+        for pat, repl in _SCRUB_RE_CACHE:
+            s = pat.sub(repl, s)
+        return s
+    except Exception:  # noqa: BLE001
+        return "<scrub-failed>"
+
+
 # ── Stderr fallback (REQ-LOG-FAILSOFT-001 / OQ-5) ──────────────────────────
 
 
@@ -143,10 +188,18 @@ def _stderr_fallback(
 
     Tagged with `"tag": "CONV_LOG_FALLBACK"` so operators can
     `docker logs ... | jq 'select(.tag=="CONV_LOG_FALLBACK")'`.
-    REQUIRED keys per REQ-LOG-FAILSOFT-001 acceptance: event_type, user_key,
-    payload, error_phase. All other keys are recommended (always present
-    unless they were never provided).
+
+    @MX:NOTE: PII / 원본 사용자 텍스트 / Pinterest URL 등은 stderr 에 출력하지
+    않는다 (security review P1-02). 컨테이너 로그 수집 (CloudWatch 등) 은 PG
+    테이블과 다른 보존 정책을 갖고 있고 user_key 기반 DELETE 도 보장 못 하므로
+    GDPR 격차를 만들기 때문. metadata (event_type / user_key / chat_id /
+    error_phase / error_type) 만 남기고 payload 본문은 size 만 기록한다.
     """
+    payload_size = 0
+    try:
+        payload_size = len(payload) if isinstance(payload, Mapping) else 0
+    except Exception:  # noqa: BLE001 — defensive
+        payload_size = -1
     record: dict[str, Any] = {
         "tag": "CONV_LOG_FALLBACK",
         "event_type": event_type,
@@ -154,7 +207,8 @@ def _stderr_fallback(
         "chat_id": chat_id,
         "thread_id": str(thread_id) if thread_id is not None else None,
         "turn_no": turn_no,
-        "payload": payload,
+        # payload 본문 대신 카운트만 — REQ-LOG-PRIVACY-001 cascade 보호
+        "payload_keys": payload_size,
         "langfuse_trace": langfuse_trace,
         "latency_ms": latency_ms,
         "error_phase": error_phase,
@@ -162,7 +216,9 @@ def _stderr_fallback(
     }
     if exc is not None:
         record["error_type"] = type(exc).__name__
-        record["error_msg"] = str(exc)[:500]
+        # error_msg 는 의도적으로 제외 — exception 본문에 DSN/토큰/내부 호스트가
+        # 섞일 수 있어 user_key 기반 GDPR delete 가 닿지 않는 stderr 에 남기지
+        # 않는다 (security review P1-01). error_type 만 운영용으로 노출.
     try:
         line = json.dumps(record, default=str)
     except Exception:  # noqa: BLE001 — last-resort, MUST NOT raise
@@ -171,7 +227,7 @@ def _stderr_fallback(
                 "tag": "CONV_LOG_FALLBACK",
                 "event_type": event_type,
                 "user_key": user_key,
-                "payload": {"_unserializable": True},
+                "payload_keys": payload_size,
                 "error_phase": "encode",
             }
         )

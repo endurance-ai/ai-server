@@ -72,6 +72,11 @@ async def _resolve_thread_id(
     except Exception:  # noqa: BLE001 — pool absent (test env / probe failed)
         return uuid4(), 0
 
+    # @MX:NOTE: 쿼리는 `payload @> %s::jsonb` 컨테인먼트로 GIN(jsonb_ops) 인덱스
+    # idx_log_conv_payload_gin 을 활용 (이전 `payload->>'source_message_id' = %s`
+    # 텍스트 캐스트 형태는 GIN 을 못 타서 seq scan 위험이 있었음 — code review P0-3
+    # / security P1-04). user_key + chat_id 등치 + 30일 윈도우로 후보를 좁힌
+    # 다음 GIN 컨테인먼트로 source_message_id 일치 판별.
     sql = """
         SELECT thread_id, turn_no
         FROM ai.log_conversation_event
@@ -79,13 +84,16 @@ async def _resolve_thread_id(
           AND chat_id = %s
           AND event_type = 'card_sent'
           AND created_at > now() - interval '30 days'
-          AND payload->>'source_message_id' = %s
+          AND payload @> %s::jsonb
         ORDER BY created_at DESC
         LIMIT 1
     """
+    from psycopg.types.json import Jsonb
+
+    needle = Jsonb({"source_message_id": int(source_message_id)})
     try:
         async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(sql, (user_key, chat_id, str(source_message_id)))
+            await cur.execute(sql, (user_key, chat_id, needle))
             row = await cur.fetchone()
     except Exception:  # noqa: BLE001 — REQ-LOG-FAILSOFT-001
         return uuid4(), 0

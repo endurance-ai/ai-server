@@ -167,7 +167,12 @@ be reproduced in CI (Apify creds + live network). Verify during cutover:
 
 Cutover order (plan §1.3):
 
-1. Apply `migrations/versions/0004_*.py` to dev-app Postgres.
+1. Apply Alembic migrations to dev-app Postgres:
+   ```bash
+   uv run alembic upgrade head
+   # 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
+   # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
+   ```
 2. Deploy this codebase with `PINTEREST_BOOTSTRAP_ENABLED=true` and
    `ONBOARDING_CARDS_ENABLED=true`.
 3. Run smoke 1–6 above.

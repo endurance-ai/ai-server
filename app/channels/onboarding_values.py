@@ -75,6 +75,29 @@ STAGE_BOUNDS: dict[str, tuple[int, int]] = {
 }
 
 
+# ── Restart keyword catalog (canonical, single source of truth) ───────────
+# @MX:ANCHOR: routing.py 와 onboard_intro.py 가 이 frozenset 을 공유해야 한다.
+# @MX:REASON: 두 사이트에 별도 정의했을 때 keyword 누락 (예: "reset taste") 으로
+# 일관성이 깨졌던 결함 (code review P0-2) 의 재발 방지.
+# @MX:SPEC: SPEC-ONBOARD-CARDS-001 REQ-ONBOARD-ENTRY-002
+RESTART_KEYWORDS_LOWER: frozenset[str] = frozenset(
+    {"/reset", "온보딩 다시", "취향 다시 설정", "reset taste"}
+)
+
+
+def is_restart_keyword(text: str | None) -> bool:
+    """Exact-match check for onboarding re-trigger keywords.
+
+    `\\b` regex word boundary 는 한글 unicode 에서 신뢰할 수 없으므로 exact match
+    로만 처리. case-insensitive.
+
+    @MX:SPEC: SPEC-ONBOARD-CARDS-001 REQ-ONBOARD-ENTRY-002
+    """
+    if not text:
+        return False
+    return text.strip().lower() in RESTART_KEYWORDS_LOWER
+
+
 def get_option(stage: str, value: str) -> OnboardingOption | None:
     """Lookup helper — returns `None` for unknown stage/value (callback parser
     can use this to validate user-controlled callback_data).
