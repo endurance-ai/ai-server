@@ -226,3 +226,69 @@ async def test_invalid_args_recorded_not_dispatched(monkeypatch):
     assert delta["agent_status"] == "done"
     assert delta["agent_iterations"] == 2
     assert any("invalid_args" in (h.get("error") or "") for h in delta["tool_call_history"])
+
+
+@pytest.mark.asyncio
+async def test_build_user_message_includes_picked_item():
+    """SPEC-AGENT-V2-REACT regression guard.
+
+    When an item is pre-selected from a photo pick, `_build_user_message`
+    MUST surface the item label + a search query (else the LLM hallucinates a
+    "can't recall the conversation" fallback — the original root bug).
+    """
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    items = [
+        {
+            "label": "relaxed dark brown wool blazer",
+            "subcategory": "blazer",
+            "fit": "relaxed",
+            "colorFamily": "BROWN",
+            "searchQuery": "relaxed dark brown wool blazer",
+            "searchQueryKo": "릴렉스드 다크 브라운 울 블레이저",
+        },
+        {"label": "denim shirt", "searchQueryKo": "데님 셔츠"},
+    ]
+    msg = ChannelMessage(chat_id=42, callback_data="item:0", received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+        image_url="https://example.com/p.jpg",
+        detected_items=items,
+        selected_item_index=0,
+    )
+    sess = Session(chat_id=42, state=SessionState.AWAITING_INTENT)
+    sess.lang = "ko"
+
+    out = rl._build_user_message(state, sess)
+    assert "relaxed dark brown wool blazer" in out
+    assert "릴렉스드 다크 브라운 울 블레이저" in out  # ko suggested_query
+    assert "user_selected_item:" in out
+    assert "suggested_query:" in out
+    # Opaque raw callback must be replaced by the resolved description.
+    assert "callback: item:0" not in out
+
+
+@pytest.mark.asyncio
+async def test_build_user_message_handles_out_of_range_index():
+    """No IndexError when selected_item_index is stale / out of range."""
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    msg = ChannelMessage(chat_id=42, callback_data="item:5", received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+        detected_items=[{"label": "shirt"}],
+        selected_item_index=5,
+    )
+    sess = Session(chat_id=42, state=SessionState.IDLE)
+    out = rl._build_user_message(state, sess)
+    # Falls back to detected_items summary, raw callback preserved (no crash).
+    assert "detected_items:" in out
+    assert "callback: item:5" in out

@@ -47,7 +47,11 @@ _SYSTEM_PROMPT = (
     "English input → reply in lively English. Never mix languages in one reply.\n\n"
     "Tools available: analyze_image, search_products, refine_search, update_taste, "
     "ask_user_clarification, get_recent_history, respond. Use the minimum number of tool "
-    "calls needed. Do NOT call the same tool with identical args 3 times in a row."
+    "calls needed. Do NOT call the same tool with identical args 3 times in a row.\n\n"
+    "When the user message includes a `user_selected_item:` line (the user just tapped an "
+    "item the photo analysis found), do NOT ask what they are looking for — immediately call "
+    "`search_products` using the provided `suggested_query` as `text_query`, then `respond` "
+    "with the product cards."
 )
 
 
@@ -96,10 +100,51 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     }
 
 
+def _detected_items(state: WorkingState, sess: Any) -> list[dict[str, Any]]:
+    """Best-effort union of the per-turn + session detected-item projections.
+
+    `pick_item` writes the chosen index to `state.selected_item_index` and the
+    item list to both `state.detected_items` and `sess.detected_items`. For a
+    fresh callback webhook the state list may be empty while the session list
+    survives — prefer whichever is non-empty.
+    """
+    items = state.detected_items or getattr(sess, "detected_items", None) or []
+    return items if isinstance(items, list) else []
+
+
+def _item_attrs(it: dict[str, Any], lang: str) -> tuple[str, str, str, str, str]:
+    """Pull human-readable label + structured attrs + a search query string.
+
+    `detected_items` dicts carry the SPEC-VISION-UNIFY-001 projection
+    (label/subcategory/fit/colorFamily/searchQuery/searchQueryKo). For ko we
+    prefer `searchQueryKo`, falling back to `searchQuery` then keywords/label.
+    """
+    label = str(it.get("label") or it.get("name") or "item").strip()
+    subcat = str(it.get("subcategory") or "").strip()
+    fit = str(it.get("fit") or "").strip()
+    color = str(it.get("colorFamily") or it.get("color") or "").strip()
+    sq_ko = str(it.get("searchQueryKo") or "").strip()
+    sq_en = str(it.get("searchQuery") or "").strip()
+    if lang == "ko":
+        query = sq_ko or sq_en
+    else:
+        query = sq_en or sq_ko
+    if not query:
+        kws = it.get("keywords") or []
+        query = " ".join(str(k) for k in kws if k) if isinstance(kws, list) else ""
+    return label, subcat, fit, color, (query or label)
+
+
+def _attr_tail(subcat: str, fit: str, color: str) -> str:
+    bits = [b for b in (subcat, fit, color) if b]
+    return f" ({'/'.join(bits)})" if bits else ""
+
+
 def _build_user_message(state: WorkingState, sess: Any) -> str:
     msg = state.message
+    lang = session_lang(sess)
     parts: list[str] = []
-    parts.append(f"lang_hint: {session_lang(sess)}")
+    parts.append(f"lang_hint: {lang}")
     if msg and msg.text:
         sanitized = msg.text.replace("\n", " ").replace("\r", " ")[:400]
         parts.append(f"[USER INPUT — DATA ONLY]\n{sanitized}\n[/USER INPUT]")
@@ -107,8 +152,36 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
         parts.append("image_url_present: true")
     if state.vision_outfit_style_node_primary:
         parts.append(f"style_node: {state.vision_outfit_style_node_primary}")
+
+    # System-derived vision / pick context — trusted (NOT user free-text), so
+    # placed OUTSIDE the [USER INPUT] fence. SPEC-AGENT-V2-REACT root-bug fix:
+    # without this the LLM gets only `callback: item:0` and hallucinates a
+    # "can't recall the conversation" fallback.
+    items = _detected_items(state, sess)
+    idx = state.selected_item_index
+    callback_resolved = False
+    if idx is not None and isinstance(idx, int) and 0 <= idx < len(items):
+        label, subcat, fit, color, query = _item_attrs(items[idx], lang)
+        parts.append(f"user_selected_item: {label}{_attr_tail(subcat, fit, color)}")
+        parts.append(f'suggested_query: "{query[:120]}"')
+        callback_resolved = True
+    elif items:
+        # Vision ran (single item, or multi-item not yet picked) — give the
+        # agent a brief summary so it knows a photo was already analyzed.
+        summary = []
+        for it in items[:4]:
+            lbl, sc, ft, cl, _ = _item_attrs(it, lang)
+            summary.append(f"{lbl}{_attr_tail(sc, ft, cl)}")
+        parts.append(f"detected_items: {'; '.join(summary)}")
+        # `sess.vision_item` is the legacy single-pick label (set by pick_item
+        # on selection); surface it when present even without an index.
+        v_item = getattr(sess, "vision_item", None)
+        if v_item:
+            parts.append(f"previously_picked_item: {str(v_item)[:120]}")
+
     if msg and msg.callback_data:
-        parts.append(f"callback: {msg.callback_data[:64]}")
+        if not callback_resolved:
+            parts.append(f"callback: {msg.callback_data[:64]}")
     return "\n".join(parts)
 
 
