@@ -31,10 +31,15 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
+├── agents/              # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT, flag-gated)
+│   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout)
+│   ├── tool_registry.py # 7-tool REGISTRY + validate_args (단일 소스)
+│   ├── llm_client.py    # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유)
+│   └── tools/           # 툴 래퍼 7개: analyze_image, search_products, refine_search, update_taste, ask_user_clarification, get_recent_history, respond
 ├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, lang, vision (+ vision_prompt, clarify, clarify_values, onboarding_cards, onboarding_values, pinterest_url, _jsonable)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
-│   └── nodes/           # 18 노드: ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001)
+│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT)
 ├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
 ├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider, ApifyProvider (SPEC-ONBOARD-CARDS-001)
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler + conversation_log + event_payloads (SPEC-CONVERSATION-LOG-001)
@@ -48,7 +53,7 @@ app/
 |------|------|
 | 프레임워크 | FastAPI + uvicorn |
 | 에이전트 오케스트레이션 | **LangGraph** `>=1.1.10` (SPEC-AGENT-001) |
-| LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드) |
+| LLM | LiteLLM proxy 경유 (httpx) + `langchain-openai` (`respond`/`ask_clarify` 노드). **V2 ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`) via LiteLLM** — `drop_params: true` 로 `tool_choice` 제거 (Bedrock 호환) |
 | 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
 | 벡터 DB | **dev-app Postgres 16 + pgvector + pgroonga** (PostgREST nginx shim, Qdrant 미사용) |
 | Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
@@ -69,7 +74,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 ## 코딩 컨벤션
 
-- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 18-노드 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001) + `onboard_intro → onboard_mood → onboard_color → onboard_fit → onboard_pinterest → pinterest_ingest` 3-stage 온보딩 카드 분기 (SPEC-ONBOARD-CARDS-001). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **V1 (AGENT_V2_REACT_ENABLED=false, 기본)**: 18-노드. `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001) + 온보딩 카드 분기. **V2 (AGENT_V2_REACT_ENABLED=true, flag-gated, default off)**: 온보딩 6 노드 보존 + `agent` 단일 노드가 deprecated 5개(critique_apply/evaluator/respond/taste_update/send_results)를 ReAct loop으로 대체 (SPEC-AGENT-V2-REACT). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
 - **Sticky language (KO/EN)**: `app/channels/lang.py` (`detect_lang` / `remember_lang` / `session_lang`) 가 Hangul 유무로 언어를 판별. `ingest` 노드가 매 텍스트 턴마다 `Session.lang` 을 갱신 — 이후 버튼 탭(텍스트 없음)에도 이전 언어로 응답. `respond` / `send_results` / `pick_item` / `ask_clarify` / `critique_apply` 노드가 `session_lang(sess)` 를 참조해 KO/EN 메시지를 분기.
 - **Bot persona**: `respond` 노드 system prompt 는 "kiko" 페르소나 — Puss-in-Boots 느낌, 친근한 해요체(KO) / lively English(EN). 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 (prompt injection 방어).
 - **구조화 로그 이모지 범례**: 📥 webhook, 🧭 router, 👁 vision, 🔍 search, 🤔 critique/evaluator, 🎨 pipeline, 🐱 bot 발화 (respond/adapter).
@@ -91,9 +96,14 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001) |
-| `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델 |
-| `app/graphs/routing.py` | 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search + 온보딩 분기 포함) |
+| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit (SPEC-AGENT-V2-REACT) |
+| `app/agents/tool_registry.py` | 7-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스) |
+| `app/agents/llm_client.py` | ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유). `AGENT_LLM_MODEL` 미설정 시 fail-closed |
+| `app/graphs/nodes/agent.py` | LangGraph `agent` 노드 — `run_react_loop` 래핑, state delta 반환 (SPEC-AGENT-V2-REACT) |
+| `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001). `AGENT_V2_REACT_ENABLED` 플래그로 V1/V2 토폴로지 분기 |
+| `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델. V2: `agent_iterations`, `tool_call_history`, `agent_status` 3 필드 추가 |
+| `app/graphs/routing.py` | 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search + 온보딩 분기 포함). V2 신규: `first_touch_intro_required` (ONBOARDING_CARDS_ENABLED=false + onboarded_at IS NULL 시 intro 진입 판단) |
+| `app/graphs/nodes/intro.py` | 첫 방문 서비스 소개 메시지 — `ONBOARDING_CARDS_ENABLED=false` 시 신규 사용자(`onboarded_at IS NULL`)에게 1회성 상세 안내 발송, `onboarded_at` 기록 후 턴 종료. KO/EN 분기 (SPEC-AGENT-V2-REACT) |
 | `app/graphs/nodes/onboard_intro.py` | 온보딩 인트로 카드 — `/start` + `onboarded_at IS NULL` 시 진입, 기본 언어 KO 설정 (SPEC-ONBOARD-CARDS-001) |
 | `app/graphs/nodes/onboard_mood.py` | 온보딩 Stage 1 — 무드 카드 (4 axes) |
 | `app/graphs/nodes/onboard_color.py` | 온보딩 Stage 2 — 컬러 카드 |
@@ -133,7 +143,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/providers/apify.py` | Apify Pinterest 스크래퍼 — `run_pinterest_scrape(url, mode, max_items, timeout_s)`. `ApifyTimeoutError` 전용 예외. board/profile/pin 3-mode 지원. httpx 직접 사용 (SDK 미사용, SPEC-ONBOARD-CARDS-001) |
 | `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 + `current_langfuse_trace_id()` export |
 | `app/observability/conversation_log.py` | 대화 이벤트 로거 — `log_event()` (async, never raises) + `emit()` (fire-and-forget asyncio.create_task) + `_truncate()` payload cap. `MEMORY_BACKEND_IS_POSTGRES` 가드. 모든 graph 노드 + webhook intake 에서 호출 (SPEC-CONVERSATION-LOG-001) |
-| `app/observability/event_payloads.py` | 19개 이벤트 타입 TypedDict 정의 (`user_text`, `user_photo`, `intent_routed`, `vision_done`, `search_done`, `diversify_done`, `card_sent`, `card_clicked`, `bot_text`, `taste_update`, `node_error` 등 — SPEC-CONVERSATION-LOG-001) |
+| `app/observability/event_payloads.py` | 20개 이벤트 타입 TypedDict 정의 (`user_text`, `user_photo`, `intent_routed`, `vision_done`, `search_done`, `diversify_done`, `card_sent`, `card_clicked`, `bot_text`, `taste_update`, `node_error`, `tool_call` 등 — SPEC-CONVERSATION-LOG-001 + SPEC-AGENT-V2-REACT) |
 | `app/models/request.py` | RecommendRequest (alias + image_url SSRF 가드) |
 | `app/models/response.py` | RecommendResponse (serialization_alias) |
 
@@ -155,6 +165,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `CLARIFY_CARDS_ENABLED` (기본 `true`) + `CLARIFY_MAX_BUTTONS` (SPEC-CLARIFY-CARDS-001)
 - `RESPONSE_SPLIT_ENABLED` (기본 `true`) + `RESPONSE_SPLIT_DELAY_MS` / `RESPONSE_SPLIT_MIN_CHARS` — 문장 단위 분할 발화 (noscroll benchmark P0)
 - `ONBOARDING_CARDS_ENABLED` (기본 `true`) + `PINTEREST_BOOTSTRAP_ENABLED` (기본 `true`) + `APIFY_TOKEN` / `APIFY_PINTEREST_ACTOR` / `APIFY_PINTEREST_MAX_ITEMS` / `APIFY_PINTEREST_CONCURRENCY` / `ONBOARDING_SEED_MAX_WEIGHT` (SPEC-ONBOARD-CARDS-001)
+- `AGENT_V2_REACT_ENABLED` (기본 `false`, **운영 기본 off**) + `AGENT_LLM_MODEL` (미설정 시 fail-closed — effective gate, 실제 운영값: `nova-lite` via LiteLLM) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S` (SPEC-AGENT-V2-REACT, flag-gated, default off in prod)
 
 ## 관련 프로젝트
 

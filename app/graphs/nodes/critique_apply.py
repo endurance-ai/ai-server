@@ -1,4 +1,10 @@
-"""SPEC-AGENT-001 / REQ-AGENT-004 (node 6/10) — critique_apply.
+"""DEPRECATED — superseded by SPEC-AGENT-V2-REACT (agent loop + tool registry).
+Retained for V2.0 rollback safety only. Will be removed in V2.1 cleanup
+(see SPEC-AGENT-V2-CLEANUP-001). Body lives in `app/agents/tools/refine_search.py`.
+
+@MX:LEGACY: superseded by SPEC-AGENT-V2-REACT — V2.1 removal target
+
+SPEC-AGENT-001 / REQ-AGENT-004 (node 6/10) — critique_apply.
 
 Two paths:
 1. Callback `crit:*` → `critique.parse_callback(callback_data, last_results)`.

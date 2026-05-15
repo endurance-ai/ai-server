@@ -76,6 +76,9 @@ async def test_ingest_router_exception_does_not_propagate(store, monkeypatch):
     async def _boom(*a, **k):
         raise RuntimeError("kaboom")
 
+    # V1-path characterization: pin V2 flag off so ingest invokes route_text
+    # (SPEC-AGENT-V2-REACT §Task 15 — V2 skips route_text by design).
+    monkeypatch.setattr("app.graphs.nodes.ingest.settings.AGENT_V2_REACT_ENABLED", False)
     monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", True)
     monkeypatch.setattr("app.graphs.nodes.ingest.route_text", _boom)
 

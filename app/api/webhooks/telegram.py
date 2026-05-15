@@ -193,12 +193,13 @@ async def telegram_webhook(
     # match the codebase's existing privacy posture (see ingest.py — "Avoid
     # logging raw user text"). from_username is intentionally NOT logged.
     logger.info(
-        "📥 [webhook] inbound update_id=%s user=%s text=%r photo=%s urls=%s",
+        "📥 [webhook] inbound update_id=%s user=%s text=%r photo=%s urls=%s cb=%r",
         update_id,
         hash_id(message.from_user_id),
         (message.text or "")[:80],
         bool(message.photo_file_id),
         [str(u) for u in message.urls],
+        (message.callback_data or "")[:64],
     )
 
     # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 — log slash commands at intake

@@ -189,6 +189,33 @@ class Settings(BaseSettings):
     # backends. Recommended range (0, 1].
     ONBOARDING_SEED_MAX_WEIGHT: float = 0.7
 
+    # SPEC-AGENT-V2-REACT — ReAct agent loop ──────────────────────────────
+    # Binary feature flag (REQ-AGENT-COMPAT-FLAG-001). Default false in prod;
+    # dev env should set true after Task 0 amendment merges.
+    AGENT_V2_REACT_ENABLED: bool = False
+    # Max iterations per turn (REQ-AGENT-LOOP-ITERATION-001).
+    AGENT_MAX_ITERATIONS: int = 6
+    # Per-turn cumulative LLM token budget (REQ-AGENT-PERF-TURN-BUDGET-001).
+    AGENT_TURN_TOKEN_BUDGET: int = 32000
+    # Per-tool dispatch timeout in seconds (REQ-AGENT-FAILURE-TOOL-001).
+    AGENT_TOOL_TIMEOUT_S: float = 5.0
+    # LLM model — empty string = fail-closed (effective flag false).
+    AGENT_LLM_MODEL: str = ""
+    # Per-LLM-call timeout in seconds.
+    AGENT_LLM_TIMEOUT_S: float = 5.0
+    # Transient-error retry knobs (SPEC-AGENT-V2-REACT runtime hardening).
+    # Bedrock Nova bursts get throttled → LiteLLM surfaces HTTP 500; a short
+    # retry survives the throttle without consuming a ReAct iteration.
+    AGENT_LLM_MAX_RETRIES: int = 2
+    AGENT_TOOL_MAX_RETRIES: int = 1
+    # Dedicated wall-clock budget for the TERMINAL `respond` dispatch. It sends
+    # the text + up to 12 product cards sequentially (~1-1.7s each via Telegram
+    # send_card) → 12-20s, which structurally exceeds AGENT_TOOL_TIMEOUT_S (5s).
+    # `respond` is never retried (side-effecting + terminal), so a generous
+    # bound here just prevents a spurious mid-carousel TimeoutError from
+    # truncating a legit card batch (SPEC-AGENT-V2-REACT double-send fix).
+    AGENT_RESPOND_TIMEOUT_S: float = 30.0
+
     @field_validator("APIFY_PINTEREST_MAX_ITEMS")
     @classmethod
     def _validate_apify_max_items(cls, v: int) -> int:

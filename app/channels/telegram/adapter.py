@@ -92,6 +92,16 @@ class TelegramAdapter(MessengerAdapter):
             return None
 
     async def send_text(self, chat_id: int, text: str) -> None:
+        # Hard guard: Telegram rejects empty/whitespace text with HTTP 400
+        # "text must be non-empty". Skip the call entirely regardless of
+        # caller bugs (defends against any future LLM/tool serialization
+        # regression at the lowest layer). SPEC-AGENT-V2-REACT.
+        if not text or not str(text).strip():
+            logger.debug(
+                "🐱 [telegram] ⏭️  send_text skipped (empty/whitespace) chat=%s",
+                _hash_chat_id(chat_id),
+            )
+            return
         t0 = time.perf_counter()
         await self._post("sendMessage", {"chat_id": chat_id, "text": text})
         elapsed = int((time.perf_counter() - t0) * 1000)

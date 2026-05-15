@@ -82,6 +82,17 @@ curl -X POST http://<EIP>:8000/recommend \
   -d @sample_request.json
 ```
 
+## 대화 이벤트 로그 이벤트 타입 (SPEC-CONVERSATION-LOG-001)
+
+`app/observability/event_payloads.py` 에 20개의 TypedDict 정의. `emit(event_type, ...)` 로 fire-and-forget INSERT.
+
+| # | 이벤트 타입 | 발생 위치 | 비고 |
+|---|------------|---------|------|
+| 1–19 | `user_text`, `user_photo`, `user_callback`, `intent_routed`, `vision_done`, `search_done`, `diversify_done`, `card_sent`, `card_clicked`, `bot_text`, `taste_update`, `node_error` 등 | 그래프 노드 + webhook intake | SPEC-CONVERSATION-LOG-001 |
+| 20 | `tool_call` | `app/agents/react_loop.py` | SPEC-AGENT-V2-REACT REQ-AGENT-OBS-001. ReAct loop 내 매 tool dispatch(성공/실패) 후 emit. payload: `tool_name`, `iteration_no`, `latency_ms`, `error`, `args_summary`, `result_summary`. Langfuse span tag: `tool.<tool_name>` |
+
+`tool_call` 이벤트는 `AGENT_V2_REACT_ENABLED=true` 시에만 발생. V1 토폴로지에서는 emit 없음.
+
 ## PII / 마스킹 (백로그)
 
 `@observe` 가 함수 인자를 자동 캡처 — `RecommendRequest.image_url`, `searchQuery` 등 사용자 행동 데이터 포함. 운영 단계 진입 시점에 다음 중 택 1:
