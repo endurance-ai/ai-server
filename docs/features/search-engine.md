@@ -7,7 +7,7 @@
 | 레이어 | 책임 |
 |--------|------|
 | **Postgres RPC** (`search_products_v5`) | dense (HNSW) + sparse (pgroonga) + RRF → top-K |
-| **AI 서버 Python** (`pipeline/diversify.py`) | 다양성 캡 + tolerance + 최종 정렬 |
+| **AI 서버 Python** (`services/diversify_service.py`, thin shim `pipeline/diversify.py`) | 다양성 캡 + tolerance + 최종 정렬 |
 
 근거:
 - DB는 인덱스를 잘 활용하는 영역(벡터/풀텍스트)만 담당
@@ -98,7 +98,7 @@ score = 1/(rrf_k + dense_rank) + 1/(rrf_k + sparse_rank)
 
 ## 다양성 캡 (Python 측)
 
-`app/pipeline/diversify.py`:
+`app/services/diversify_service.py` (thin shim: `app/pipeline/diversify.py`):
 
 ```python
 target = req.final_limit or _tolerance_to_target_count(req.tolerance)
