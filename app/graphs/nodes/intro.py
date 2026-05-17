@@ -21,6 +21,7 @@ from app.channels.factory import get_adapter
 from app.channels.lang import session_lang
 from app.channels.session import get_store
 from app.channels.taste_profile import user_key_for
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -73,6 +74,7 @@ _INTRO_EN = (
 @observe(name="node.intro", as_type="span")
 async def intro(state: WorkingState) -> dict:
     """Send the one-shot service intro, mark introduced, terminate the turn."""
+    node_enter("intro")
     sess = get_store().get_or_create(state.chat_id)
     lang = session_lang(sess)
     text = _INTRO_KO if lang == "ko" else _INTRO_EN
@@ -103,6 +105,7 @@ async def intro(state: WorkingState) -> dict:
     except Exception:  # noqa: BLE001
         logger.debug("🐱 [intro] bot_text emit best-effort", exc_info=True)
 
+    node_done("intro", sent="service_intro", lang=lang)
     return {"log_events": [f"intro: service_intro_sent lang={lang}"]}
 
 

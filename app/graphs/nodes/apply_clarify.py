@@ -27,6 +27,7 @@ from app.channels.critique import CritiqueDelta
 from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
 from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -69,6 +70,7 @@ def _merge_session_boost(sess, new_keywords: list[str]) -> list[str]:
 
 @observe(name="node.apply_clarify", as_type="span")
 async def apply_clarify(state: WorkingState) -> dict:
+    node_enter("apply_clarify")
     msg = state.message
     breadcrumbs: list[str] = []
 
@@ -84,6 +86,7 @@ async def apply_clarify(state: WorkingState) -> dict:
         except Exception:
             logger.debug("[apply_clarify] answer_callback_query best-effort")
         breadcrumbs.append("apply_clarify: stale callback")
+        node_skip("apply_clarify", "stale callback")
         return {"log_events": breadcrumbs, "turn_no": 1}
 
     # ── toast (best-effort) ──────────────────────────────────────────────
@@ -105,6 +108,7 @@ async def apply_clarify(state: WorkingState) -> dict:
         get_store().update(sess)
         logger.info("[CLARIFY-APPLY] axis=%s value=skip", delta.axis.value)
         breadcrumbs.append(f"apply_clarify: skip axis={delta.axis.value}")
+        node_done("apply_clarify", branch="skip", axis=delta.axis.value)
         # LOG-T15 — emit `clarify_applied` for the skip branch.
         _emit_clarify_applied(state, axis=delta.axis.value, value=delta.value, added=[])
         # critique_delta 는 None — 검색은 weak-vision 그대로 수행.
@@ -173,6 +177,7 @@ async def apply_clarify(state: WorkingState) -> dict:
     )
     breadcrumbs.append(f"apply_clarify: {summary[:160]}")
 
+    node_done("apply_clarify", branch="value", axis=delta.axis.value, value=delta.value)
     # LOG-T15 — emit `clarify_applied` on the value branch.
     _emit_clarify_applied(
         state,

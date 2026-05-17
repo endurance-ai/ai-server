@@ -22,6 +22,7 @@ from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
 from app.channels.vision import derive_legacy_keywords, derive_legacy_label
 from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -113,6 +114,7 @@ def _emit_pick_item_done(
 
 @observe(name="node.pick_item", as_type="span")
 async def pick_item(state: WorkingState) -> dict:
+    node_enter("pick_item")
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)
     breadcrumbs: list[str] = []
@@ -135,6 +137,7 @@ async def pick_item(state: WorkingState) -> dict:
                 logger.exception("[pick_item] answer_callback_query failed")
                 breadcrumbs.append(f"pick_item_error: {type(exc).__name__}"[:120])
             breadcrumbs.append(f"pick_item: invalid idx={idx}")
+            node_skip("pick_item", f"invalid idx={idx}")
             return {"log_events": breadcrumbs}
 
         try:
@@ -172,6 +175,7 @@ async def pick_item(state: WorkingState) -> dict:
         get_store().update(sess)
         breadcrumbs.append(f"pick_item: selected idx={idx} label={sess.vision_item}")
         _emit_pick_item_done(state, items=items, picked_index=idx, auto_picked=False)
+        node_done("pick_item", picked_idx=idx, label=sess.vision_item)
         return {
             "selected_item_index": idx,
             "detected_items": items,
@@ -184,6 +188,7 @@ async def pick_item(state: WorkingState) -> dict:
     items = state.detected_items or sess.detected_items
     if not items:
         breadcrumbs.append("pick_item: no items to display")
+        node_skip("pick_item", "no items to display")
         return {"log_events": breadcrumbs}
 
     try:
@@ -192,6 +197,7 @@ async def pick_item(state: WorkingState) -> dict:
     except Exception as exc:  # REQ-AGENT-007
         logger.exception("[pick_item] picker send failed")
         breadcrumbs.append(f"pick_item_error: {type(exc).__name__}: {exc}"[:200])
+        node_skip("pick_item", f"picker send error {type(exc).__name__}")
         return {"log_events": breadcrumbs}
 
     sess.detected_items = items
@@ -200,4 +206,5 @@ async def pick_item(state: WorkingState) -> dict:
     breadcrumbs.append(f"pick_item: picker sent n={len(items)} → END")
     # Carousel sent — no specific pick yet, picked_index=-1.
     _emit_pick_item_done(state, items=items, picked_index=-1, auto_picked=False)
+    node_done("pick_item", picker_sent=len(items))
     return {"detected_items": items, "log_events": breadcrumbs, "turn_no": 4}

@@ -25,6 +25,7 @@ from app.channels.taste_profile import (
     user_key_for,
 )
 from app.core.config import settings
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit, scrub_exception_message
 from app.observability.langfuse import observe
@@ -233,6 +234,7 @@ def _emit_search_done(
 
 @observe(name="node.search", as_type="span")
 async def search_node(state: WorkingState) -> dict:
+    node_enter("search")
     sess = get_store().get_or_create(state.chat_id)
     breadcrumbs: list[str] = []
 
@@ -279,6 +281,7 @@ async def search_node(state: WorkingState) -> dict:
         logger.info("🎬 [search] DEMO_MODE active — returning %d fixture candidates", len(candidates))
         breadcrumbs.append(f"search_node: DEMO_MODE fixture n={len(candidates)}")
         _emit_search_done(state, req=None, candidates=list(candidates), counts={})
+        node_done("search", mode="demo", candidates=len(candidates))
         return {
             "candidates": candidates,
             "messages": [SystemMessage(content=f"search: {len(candidates)} candidate(s) (DEMO_MODE)")],
@@ -289,6 +292,7 @@ async def search_node(state: WorkingState) -> dict:
     if not sess.image_url:
         breadcrumbs.append("search_node: no image_url; cannot search")
         _emit_search_done(state, req=None, candidates=[], counts={})
+        node_skip("search", "no image_url")
         return {"candidates": [], "log_events": breadcrumbs, "turn_no": 6}
 
     delta = state.critique_delta
@@ -331,6 +335,7 @@ async def search_node(state: WorkingState) -> dict:
             )
         except Exception:  # noqa: BLE001
             logger.debug("[search] node_error emit best-effort")
+        node_skip("search", f"recommend error {type(exc).__name__}")
         return {"candidates": [], "log_events": breadcrumbs, "turn_no": 6}
 
     candidates: list[Any] = list(result.candidates) if result and result.candidates else []
@@ -349,6 +354,7 @@ async def search_node(state: WorkingState) -> dict:
     # LOG-T16 — emit at success terminus (REQ-LOG-PAYLOAD-RICH-001).
     _emit_search_done(state, req=req, candidates=candidates, counts=counts)
 
+    node_done("search", candidates=len(candidates), counts=counts)
     return {
         "candidates": candidates,
         "messages": [SystemMessage(content=f"search: {len(candidates)} candidate(s) after diversify+post-filter")],

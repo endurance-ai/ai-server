@@ -32,6 +32,7 @@ from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -143,6 +144,7 @@ async def _send_card_path(state: WorkingState, axis: ClarifyAxis) -> dict:
         body[:80],
     )
     breadcrumbs.append(f"ask_clarify: card axis={axis.value} buttons={len(buttons)}")
+    node_done("ask_clarify", path="card", axis=axis.value, buttons=len(buttons))
     # LOG-T15 — emit `ask_clarify_sent` after the card is dispatched. (@MX:SPEC: SPEC-CONVERSATION-LOG-001)
     try:
         emit(
@@ -203,12 +205,14 @@ async def _legacy_text_path(state: WorkingState) -> dict:
         return {"response_text": text, "log_events": breadcrumbs}
 
     breadcrumbs.append(f"ask_clarify: legacy_text len={len(text)}")
+    node_done("ask_clarify", path="legacy_text", chars=len(text))
     return {"response_text": text, "log_events": breadcrumbs}
 
 
 @observe(name="node.ask_clarify", as_type="span")
 async def ask_clarify(state: WorkingState) -> dict:
     """REQ-CLARIFY-CARD-001 / REQ-CLARIFY-COMPAT-001/002 — 분기 진입점."""
+    node_enter("ask_clarify")
     if not settings.CLARIFY_CARDS_ENABLED:
         return await _legacy_text_path(state)
 

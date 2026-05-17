@@ -373,6 +373,9 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     system_content = _SYSTEM_PROMPT
     if settings.AGENT_V3_PROACTIVE_ENABLED:
         system_content = f"{system_content}\n\n{_PROACTIVE_DIRECTIVE}"
+        logger.info("💡 [v3:proactive] suggest_next_step offered")
+    else:
+        logger.info("💡 [v3:proactive] skip · flag off")
     if settings.AGENT_V3_MEMORY_INJECTION_ENABLED:
         try:
             from app.agents._memory_context import build_memory_context
@@ -381,8 +384,15 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 state, sess, ctx, max_tokens=int(settings.AGENT_V3_MEMORY_MAX_TOKENS)
             )
             system_content = f"{system_content}\n\n{mem_block}"
+            if "(no taste history yet)" in mem_block:
+                logger.info("🧠 [v3:memory] skip · empty (get_recent_history 0 events)")
+            else:
+                logger.info("🧠 [v3:memory] injected · ~chars=%d", len(mem_block))
         except Exception as exc:  # noqa: BLE001 — fail-soft to current system content
             logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
+            logger.info("🧠 [v3:memory] skip · build error")
+    else:
+        logger.info("🧠 [v3:memory] skip · flag off")
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
     messages: list[dict[str, Any]] = [
@@ -398,6 +408,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
 
     for it in range(1, max_iter + 1):
         iterations = it
+        logger.info("🔄 [agent] iter %d/%d", it, max_iter)
 
         # Token budget guard (REQ-AGENT-PERF-TURN-BUDGET-001).
         if token_budget and cumulative_tokens >= token_budget:
@@ -638,6 +649,11 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 await asyncio.sleep(backoff)
         latency_ms = int((time.monotonic() - t0) * 1000)
 
+        if dispatch_err:
+            logger.info("🔧 [tool:%s] → err %s %dms", tool_name, dispatch_err, latency_ms)
+        else:
+            logger.info("🔧 [tool:%s] → ok %dms", tool_name, latency_ms)
+
         history_entry = {
             "iter": it,
             "tool_name": tool_name,
@@ -679,15 +695,23 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         #  - evaluator call does NOT consume a ReAct iteration (in-dispatch
         #    side call) → infinite-loop guard unaffected
         # flag OFF → `result` unchanged → ToolMessage byte-identical V2.
-        if (
-            settings.AGENT_V3_REFLEXION_ENABLED
-            and tool_name in ("search_products", "refine_search")
-            and isinstance(result, dict)
-            and result.get("ok")
-        ):
+        _reflexion_eligible = (
+            tool_name in ("search_products", "refine_search") and isinstance(result, dict) and result.get("ok")
+        )
+        if _reflexion_eligible and settings.AGENT_V3_REFLEXION_ENABLED:
             quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
             if quality is not None:
                 result = {**result, "_quality": quality}
+                if quality.get("skipped") and quality.get("reason") == "deadline":
+                    logger.info("🔬 [v3:reflexion] skip · deadline (residual≤0)")
+                else:
+                    _score = quality.get("score")
+                    _decision = "refine" if quality.get("retry_suggested") else "accept"
+                    logger.info("🔬 [v3:reflexion] eval score=%s → %s", _score, _decision)
+            else:
+                logger.info("🔬 [v3:reflexion] skip · cap/error")
+        elif _reflexion_eligible:
+            logger.info("🔬 [v3:reflexion] skip · flag off")
 
         # Termination check (REQ-AGENT-LOOP-TERMINATION-001).
         if REGISTRY[tool_name]["terminates_loop"]:
@@ -716,6 +740,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     # Strip args_full before persisting.
     for h in history:
         h.pop("args_full", None)
+    logger.info("🏁 [agent] respond · iters=%d tokens≈%d", iterations, cumulative_tokens)
     return {
         "agent_iterations": iterations,
         "agent_status": status,

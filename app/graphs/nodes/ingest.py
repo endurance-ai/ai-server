@@ -16,6 +16,7 @@ from app.channels.router import RoutedDecision, RoutedIntent, route_text
 from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
 from app.core.config import settings
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -53,6 +54,7 @@ def _emit_intent_routed(state: WorkingState, decision: RoutedDecision | None) ->
 
 @observe(name="node.ingest", as_type="span")
 async def ingest(state: WorkingState) -> dict:
+    node_enter("ingest")
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)
     # Sticky language detection — once user types Korean, subsequent button
@@ -149,6 +151,7 @@ async def ingest(state: WorkingState) -> dict:
     # @MX:SPEC: SPEC-AGENT-V2-REACT
     if settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip():
         _emit_intent_routed(state, None)
+        node_done("ingest", route="v2_skip_router", state=sess.state.value)
         return {"log_events": breadcrumbs, "turn_no": 1}
 
     # Only invoke router for ambiguous text in RESULTS_SENT / IDLE.
@@ -162,6 +165,7 @@ async def ingest(state: WorkingState) -> dict:
     if not needs_router:
         # LOG-T11 — emit even when router was skipped (decision stays None).
         _emit_intent_routed(state, None)
+        node_done("ingest", route="no_router", state=sess.state.value)
         return {"log_events": breadcrumbs, "turn_no": 1}
 
     try:
@@ -172,6 +176,7 @@ async def ingest(state: WorkingState) -> dict:
         breadcrumbs.append(f"ingest_error: {type(exc).__name__}")
         fallback_decision = RoutedDecision(intent=RoutedIntent.OFF_TOPIC)
         _emit_intent_routed(state, fallback_decision)
+        node_done("ingest", route="router_error", intent="off_topic")
         # Soft fallback so the graph can still terminate at respond.
         return {
             "decision": fallback_decision,
@@ -181,4 +186,5 @@ async def ingest(state: WorkingState) -> dict:
 
     breadcrumbs.append(f"ingest_router: intent={decision.intent.value}")
     _emit_intent_routed(state, decision)
+    node_done("ingest", route="router", intent=decision.intent.value)
     return {"decision": decision, "log_events": breadcrumbs, "turn_no": 1}

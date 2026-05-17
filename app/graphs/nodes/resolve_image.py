@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from app.channels import link_resolver
 from app.channels.session import get_store
 from app.channels.taste_profile import user_key_for
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -59,6 +60,7 @@ def _emit_link_resolved(
 
 @observe(name="node.resolve_image", as_type="span")
 async def resolve_image(state: WorkingState) -> dict:
+    node_enter("resolve_image")
     msg = state.message
     breadcrumbs: list[str] = []
 
@@ -67,10 +69,12 @@ async def resolve_image(state: WorkingState) -> dict:
         # function sends the user to `respond` which uses the photo-upload
         # fallback template.
         breadcrumbs.append("resolve_image: photo_file_id only — direct upload not supported")
+        node_skip("resolve_image", "direct upload not supported")
         return {"image_url": None, "log_events": breadcrumbs, "turn_no": 2}
 
     if not msg.urls:
         breadcrumbs.append("resolve_image: no urls and no photo")
+        node_skip("resolve_image", "no urls and no photo")
         return {"image_url": None, "log_events": breadcrumbs, "turn_no": 2}
 
     for u in msg.urls:
@@ -95,9 +99,11 @@ async def resolve_image(state: WorkingState) -> dict:
                 logger.exception("[resolve_image] session persist failed")
             breadcrumbs.append(f"resolve_image: ok url={images[0][:80]}")
             _emit_link_resolved(state, url_str, images[0])
+            node_done("resolve_image", resolved="ok")
             return {"image_url": images[0], "log_events": breadcrumbs, "turn_no": 2}
         # Resolver returned no images for this URL — record the failure too.
         _emit_link_resolved(state, url_str, None)
 
     breadcrumbs.append("resolve_image: all urls failed → image_url=None")
+    node_skip("resolve_image", "all urls failed")
     return {"image_url": None, "log_events": breadcrumbs, "turn_no": 2}

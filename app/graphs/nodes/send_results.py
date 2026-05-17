@@ -27,6 +27,7 @@ from app.channels.schemas import BotCard
 from app.channels.session import SessionState, get_store
 from app.channels.taste_profile import user_key_for
 from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -175,10 +176,12 @@ async def _send_text_fallback(adapter, chat_id: int, candidates: list, limit: in
 
 @observe(name="node.send_results", as_type="span")
 async def send_results(state: WorkingState) -> dict:
+    node_enter("send_results")
     breadcrumbs: list[str] = []
     candidates = list(state.candidates)
     if not candidates:
         breadcrumbs.append("send_results: empty candidates (caller should have routed to respond)")
+        node_skip("send_results", "empty candidates")
         return {"log_events": breadcrumbs}
 
     sess = get_store().get_or_create(state.chat_id)
@@ -194,6 +197,7 @@ async def send_results(state: WorkingState) -> dict:
         # and end the node cleanly so the webhook still returns 200.
         logger.error("[send_results] adapter ContextVar not bound: %s", exc)
         breadcrumbs.append(f"send_results_error: {type(exc).__name__}: adapter unbound")
+        node_skip("send_results", "adapter unbound")
         return {"log_events": breadcrumbs}
 
     # Build card list (preserves order, drops invalid).
@@ -307,6 +311,7 @@ async def send_results(state: WorkingState) -> dict:
             breadcrumbs.append(f"send_results: photo fallback → text list n={sent}")
 
     if sent == 0:
+        node_skip("send_results", "nothing dispatched")
         return {"log_events": breadcrumbs + ["send_results: nothing dispatched"]}
 
     # Update session — last_results + accumulate shown_product_ids.
@@ -325,6 +330,7 @@ async def send_results(state: WorkingState) -> dict:
         logger.warning("[send_results] log_impressions failed: %r", exc)
 
     breadcrumbs.append(f"send_results: sent={sent}")
+    node_done("send_results", sent=sent)
     return {
         "sent_candidates": sent_candidates,
         "log_events": breadcrumbs,

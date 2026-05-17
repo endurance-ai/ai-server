@@ -41,6 +41,7 @@ from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
 from app.graphs.nodes._evaluator_prompt import SYSTEM_PROMPT, build_user_prompt
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe, update_current_span
@@ -161,6 +162,7 @@ async def evaluator(state: WorkingState) -> dict:
     is stateless on its inputs — it only mutates the documented WorkingState
     fields.
     """
+    node_enter("evaluator")
     started_ms = time.monotonic() * 1000.0
     iteration = state.critique_retry_count  # 0 on first eval, increments before re-entry
     # REQ-OBS-TRACE-LOOP-001 — attach iteration index to the current span via v3
@@ -298,4 +300,10 @@ async def evaluator(state: WorkingState) -> dict:
         logger.debug("[evaluator] evaluator_run emit best-effort")
 
     delta_dict["turn_no"] = 7
+    node_done(
+        "evaluator",
+        score=f"{score.score:.2f}",
+        retry=score.retry,
+        source=source,
+    )
     return delta_dict

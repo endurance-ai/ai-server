@@ -35,6 +35,7 @@ from app.graphs.nodes._onboard_stage import (
     _write_selection,
     handle_stage_callback,
 )
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.observability.langfuse import observe
 
@@ -80,6 +81,7 @@ async def _finalize_card_only(state: WorkingState) -> dict:
         except Exception:  # noqa: BLE001
             logger.exception("🐱 [ONBOARD] completion text send failed")
 
+    node_done("onboard_fit", branch="completed_card_only")
     return {
         "onboard_stage": "done",
         "onboard_selections": dict(getattr(sess, "onboard_selections", {}) or {}),
@@ -99,6 +101,7 @@ async def onboard_fit(state: WorkingState) -> dict:
 
     @MX:SPEC: SPEC-ONBOARD-CARDS-001
     """
+    node_enter("onboard_fit")
     pinterest_on = _pinterest_enabled()
 
     # When Pinterest is enabled, delegate to the shared stage handler which
@@ -132,6 +135,7 @@ async def onboard_fit(state: WorkingState) -> dict:
                 await adapter.answer_callback_query(msg.callback_query_id, "")
         except Exception:  # noqa: BLE001
             logger.debug("[onboard:fit] stale ack best-effort", exc_info=True)
+        node_skip("onboard_fit", "stale callback")
         return {"onboard_stage": "fit", "log_events": ["onboard_fit: stale_cb"]}
 
     selections = _current_selection(sess, "fit")

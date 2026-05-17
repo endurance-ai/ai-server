@@ -33,6 +33,7 @@ from app.channels.onboarding_cards import (
 # previously duplicated here with divergent keyword set vs routing.py).
 from app.channels.onboarding_values import is_restart_keyword as _is_restart_keyword
 from app.channels.session import get_store
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.langfuse import observe
 from app.observability.langfuse import update_current_span as update_current_observation
@@ -87,6 +88,7 @@ async def onboard_intro(state: WorkingState) -> dict:
 
     @MX:SPEC: SPEC-ONBOARD-CARDS-001
     """
+    node_enter("onboard_intro")
     sess = get_store().get_or_create(state.chat_id)
     lang = session_lang(sess)
     adapter = get_adapter()
@@ -108,6 +110,7 @@ async def onboard_intro(state: WorkingState) -> dict:
         # yes/no callbacks coming back here.
         sess.onboard_stage = "intro"
         get_store().update(sess)
+        node_done("onboard_intro", branch="restart_confirmation", lang=lang)
         return {
             "onboard_stage": "intro",
             "log_events": [f"onboard_intro: restart_confirmation lang={lang}"],
@@ -149,6 +152,7 @@ async def onboard_intro(state: WorkingState) -> dict:
     # rewrites it (additive merge contract per REQ-ONBOARD-SEED-001).
     get_store().update(sess)
 
+    node_done("onboard_intro", branch="stage1_sent", lang=lang)
     return {
         "onboard_stage": "mood",
         "onboard_selections": {"mood": [], "color": [], "fit": []},

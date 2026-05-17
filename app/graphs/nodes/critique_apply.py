@@ -36,6 +36,7 @@ from app.channels.taste_profile import (
     user_key_for,
 )
 from app.core.config import settings
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -77,6 +78,7 @@ def _reinforce_taste(sess, profile: TasteProfile | None, delta: CritiqueDelta) -
 
 @observe(name="node.critique_apply", as_type="span")
 async def critique_apply(state: WorkingState) -> dict:
+    node_enter("critique_apply")
     msg = state.message
     sess = get_store().get_or_create(state.chat_id)
     breadcrumbs: list[str] = []
@@ -287,6 +289,7 @@ async def critique_apply(state: WorkingState) -> dict:
         except Exception:  # noqa: BLE001
             logger.debug("[critique_apply] taste_update(critique) emit best-effort")
 
+    node_done("critique_apply", op=delta.op if delta else None)
     return {
         "critique_delta": delta,
         "presearch_summary": summary,

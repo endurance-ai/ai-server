@@ -147,7 +147,11 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
       flag-gated, no new ranking.
     @MX:SPEC: SPEC-AGENT-V3-REACT
     """
-    if not settings.AGENT_V3_DISLIKE_MEMORY_ENABLED or not cands:
+    if not settings.AGENT_V3_DISLIKE_MEMORY_ENABLED:
+        if cands:
+            logger.info("🚫 [v3:dislike] skip · flag off")
+        return cands
+    if not cands:
         return cands
     user_key = ctx.get("user_key")
     if not user_key:
@@ -161,6 +165,7 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
         logger.debug("[tool.search_products] dislike discount skipped: %r", exc)
         return cands
     if not ex_brands and not ex_keywords:
+        logger.info("🚫 [v3:dislike] skip · no recency-weighted excludes")
         return cands
     eb = {b.lower() for b in ex_brands}
     ek = {k.lower() for k in ex_keywords}
@@ -172,7 +177,14 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
         title = (getattr(c, "title", "") or getattr(c, "name", "") or "").lower()
         return not any(k in title for k in ek)
 
-    return [c for c in cands if _keep(c)]
+    kept = [c for c in cands if _keep(c)]
+    logger.info(
+        "🚫 [v3:dislike] discounted brands=%d kw=%d dropped=%d",
+        len(eb),
+        len(ek),
+        len(cands) - len(kept),
+    )
+    return kept
 
 
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
