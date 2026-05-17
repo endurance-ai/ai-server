@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 from app.core.config import settings
+from app.infrastructure.repositories.search_rpc_contract import validate_rpc_rows
 
 logger = logging.getLogger(__name__)
 
@@ -78,4 +79,9 @@ class SearchRepository:
         """
         import app.pipeline.search as _search_module
 
-        return await _search_module.SupabaseProvider.rpc(_RPC_NAME, params)
+        rows = await _search_module.SupabaseProvider.rpc(_RPC_NAME, params)
+        # REQ-AI-006: validate the RPC response shape BEFORE it flows into
+        # scoring/diversify. validate_rpc_rows returns the ORIGINAL rows
+        # untouched on success (no coercion) so the happy path is
+        # byte-identical; it only adds a structured drift-error branch.
+        return validate_rpc_rows(rows)

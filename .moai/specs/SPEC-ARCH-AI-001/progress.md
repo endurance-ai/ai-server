@@ -218,3 +218,32 @@ risk serialization drift against the HARD Net(1) lock).
 `app/domain/ app/core/types.py`. `import app.main` OK.
 
 STOP — PR6 (RPC contract validation) + PR-final deferred.
+
+### IMPROVE phase — PR6 (RPC contract validation) complete — 2026-05-17
+
+Happy path byte-identical; ONE new error branch added (the only layer
+permitted to). REQ-AI-006, PR6 of 6.
+
+**Files created:**
+- `app/infrastructure/repositories/search_rpc_contract.py` —
+  `SearchRpcRowContract` (Pydantic, PERMISSIVE: only `id` required, all
+  else optional, `extra="allow"`; accepts every shape the pre-PR6 runner
+  accepted incl. absent score/brand, id int|str) + `RpcContractError`
+  (structured: row_index + detail) + `validate_rpc_rows` (returns the
+  ORIGINAL rows untouched on success — no coercion -> happy path identical).
+- `tests/test_arch_ai_001/test_rpc_contract_drift.py` — NEW net file (Net 4,
+  5 tests). Does NOT edit any of the 3 existing golden nets/conftest.
+
+**Files modified:**
+- `app/infrastructure/repositories/search_repository.py` — `search()` now
+  calls `validate_rpc_rows(rows)` after the RPC, before returning (= before
+  scoring/diversify). Returns original rows on success.
+
+**Gate result:**
+51 passed (original 46 ALL still pass + 5 new drift tests). `git diff
+a8eae03` of the 5 existing net files (3 tests + conftest + __init__) EMPTY
+— zero edit to existing golden, new file only. Full collectable suite: 637
+passed (632 baseline + 5 new), 90 skipped, 9 pre-existing failures ONLY,
+zero new. `import app.main` OK. ruff clean.
+
+STOP — PR-final (shim removal) deferred.
