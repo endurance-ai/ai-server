@@ -122,3 +122,34 @@ EXACTLY ONE place — `SearchRepository` (REQ-AI-002, PR2 of 6).
 `(fn_name, params)` byte-identical. ruff clean. `import app.main` OK.
 
 STOP — PR3-6 (di / memory / domain / contract) deferred to later layers.
+
+### IMPROVE phase — PR3 (DI container) complete — 2026-05-17
+
+Pure extraction, zero behavior change. `app/core/di.py` FastAPI Depends
+container created; `app/providers/db_pool.py` `get_pool`/`get_loop` are now
+thin delegating adapters to it (REQ-AI-003, PR3 of 6).
+
+**Files created:**
+- `app/core/di.py` — `provide_settings` (reuses config.get_settings
+  lru_cache singleton, no re-instantiation) / `provide_db_pool` /
+  `provide_db_loop` (read db_pool's `_pool`/`_loop` globals directly so
+  state ownership + string monkeypatches + `db_pool._pool` reads stay
+  byte-identical, no delegation cycle) / `provide_embed_provider`.
+
+**Files modified:**
+- `app/providers/db_pool.py` — `get_pool`/`get_loop` delegate to
+  `di.provide_db_pool`/`provide_db_loop`. All other public symbols
+  (`init_pool`, `close_pool`, `run_in_pool_loop`, `reset_pool_for_test`,
+  `_sanitize_dsn`, `_pool`/`_loop` state) UNCHANGED. RuntimeError messages
+  byte-identical. Pool state stays in db_pool's namespace (NOT moved) so
+  `db_pool._pool` (main.py conv-log probe) + `monkeypatch.setattr(
+  "app.providers.db_pool.get_pool", ...)` (test_conversation_log) keep
+  working.
+
+**Gate result:**
+46 passed (scoped); golden diff empty. Full collectable suite: 632 passed,
+90 skipped, 9 pre-existing failures only (test_critique_loop /
+test_observability — langfuse v3/pydantic env), ZERO new. `import app.main`
+OK. ruff clean on `app/core/ app/providers/db_pool.py`.
+
+STOP — PR4-6 (memory / domain / contract) deferred to later layers.
