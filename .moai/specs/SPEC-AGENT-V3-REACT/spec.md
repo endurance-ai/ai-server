@@ -1,9 +1,9 @@
 ---
 id: SPEC-AGENT-V3-REACT
-version: 0.1.0
-status: draft
+version: 0.2.0
+status: completed
 created_at: 2026-05-16
-updated_at: 2026-05-16
+updated_at: 2026-05-17
 author: hchsa77@gmail.com
 priority: P1
 issue_number: 21
@@ -14,6 +14,7 @@ labels: [agentic, react-loop, memory-injection, reflexion, proactive, dislike-me
 
 ## HISTORY
 
+- 2026-05-17 (v0.2.0): 구현 완료, `status: completed` 로 전환. 마이그레이션 파일명 `0005_*` (계획 `0006_*` 에서 사실 정정). evaluator fix-cycle 1 반영 (test isolation conftest 추가 + 커버리지 보강). 최종 테스트: 810 passed / 9 pre-existing failed / 117 skipped. `Implementation Notes` 섹션 추가.
 - 2026-05-16 (v0.1.0): 초안 작성. 동기 — 사용자 요구 "기존 V2 ReAct 에이전트를 GPT/Claude 급으로 끌어올려라". SPEC-AGENT-V2-REACT 가 (a) 자율 멀티스텝 도구 오케스트레이션을 이미 완성(react_loop.py ~620 LOC, 7-tool, iteration/token/timeout/infinite-loop guard 전부) 했음을 코드 직접 검증으로 확인 — 따라서 V3 는 **새 그래프 토폴로지 없는 증분 강화**다. 4개 갭만 다룬다: (1) 메모리 자동 주입, (2) Reflexion 루프(SPEC-AGENT-V2-REACT OQ-7 종결), (3) 능동 제안, (4) 크로스스레드 dislike 메모리. 각 갭은 **독립 sub-flag** 로 게이트 → 단계적 롤아웃 + 즉시 롤백. 4 sub-flag all-off 시 V2 동작과 **byte-identical**. 기존 `evaluator.py` / TasteProfile store / `conversation_log` 헬퍼는 **래핑만, 재구현 금지**. 본 SPEC 은 SPEC-AGENT-V2-REACT 를 **supersede 하지 않고 increment** 하며, V2 OQ-7 을 "evaluator 헬퍼를 in-loop wrapping" 으로 resolution 한다. RC8 (SPEC-AGENT-V2-CLEANUP-001 의 evaluator V2.1 제거 계획과 충돌) 은 cross-SPEC followup 으로 표기 — V3 plan-audit 비차단. Brownfield Delta SPEC — `[DELTA]` 마커로 V2 대비 증분만 명시.
 
 ---
@@ -450,3 +451,77 @@ Persistence:
 - **Affected modules**: 위 Architecture Snapshot 참조.
 - **Project context**: `/Users/hansangho/Desktop/kikoai/ai/CLAUDE.md`.
 - **Research basis**: `.moai/specs/SPEC-AGENT-V3-REACT/research.md` (코드 경로·라인 직접 검증, 2026-05-16).
+
+---
+
+## Implementation Notes
+
+> 이 섹션은 Run phase 완료 후 추가됨 (2026-05-17). 기존 REQ/EARS 텍스트는 무변경.
+
+### 실제 납품 파일 목록
+
+**신규 소스 파일 (NEW, 3개)**:
+- `app/agents/_memory_context.py` — Gap1 메모리 컨텍스트 빌더 (래핑 전용, 127 LOC)
+- `app/agents/_reflexion.py` — Gap2 evaluator 래핑 헬퍼 (래핑 전용, 81 LOC)
+- `app/agents/tools/suggest_next_step.py` — Gap3 8번째 tool (어댑터 재사용, ≤80 LOC)
+
+**수정 소스 파일 (MODIFIED, 8개)**:
+- `app/agents/react_loop.py` — Gap1 system message 분기 + Gap2 `_maybe_reflexion` 헬퍼 배선 + Gap3 `_PROACTIVE_DIRECTIVE` 상수 + system content 조립 순서
+- `app/agents/tool_registry.py` — Gap3 flag-aware REGISTRY 빌드 (모듈 로드 시점, `_rebuild_registry_for_flag` test helper 추가), `SuggestNextStepArgs/Result` TypedDict
+- `app/agents/tools/update_taste.py` — Gap4 dislike timestamp 기록 (flag-gated)
+- `app/agents/tools/search_products.py` — Gap4 store dislike → exclude 머지 (flag-gated)
+- `app/agents/tools/refine_search.py` — Gap4 동일 패턴
+- `app/channels/taste_profile.py` — Gap4 `disliked_brands_ts`/`disliked_keywords_ts` additive 필드 + `recency_weighted_excludes` 헬퍼
+- `app/channels/taste_profile_pg.py` — Gap4 UPSERT/SELECT/`_row_to_profile` 3-SQL 수정
+- `app/core/config.py` — 5 env 추가 (4 sub-flag bool + `AGENT_V3_MEMORY_MAX_TOKENS` int)
+
+**신규 Alembic 마이그레이션 (1개)**:
+- `migrations/versions/0005_add_taste_dislike_ts.py` — `ai.user_taste_profile` 에 `disliked_brands_ts JSONB DEFAULT '{}'`, `disliked_keywords_ts JSONB DEFAULT '{}'` 컬럼 additive 추가
+
+**신규 테스트 (11개, `tests/test_agent_v3/`)**:
+- `conftest.py`, `_v2_baseline.py`, `test_byte_identical.py`, `test_config_v3.py`, `test_edge_orthogonality.py`, `test_gap1_memory.py`, `test_gap2_reflexion_bound.py`, `test_gap2_reflexion_deadline.py`, `test_gap2_reflexion_eval.py`, `test_gap3_proactive.py`, `test_gap4_dislike.py`, `test_performance_v3.py`, `test_security_v3.py`, `test_wrap_only.py`
+- `tests/test_memory_pg/test_migration_0005.py`
+
+### 마이그레이션 파일명 정정
+
+tasks.md T9 에서 `0006_add_taste_dislike_ts.py` 로 계획되었으나, 실행 시점 `migrations/versions/` 최신 파일이 `0004_*` 임을 확인하여 **`0005_add_taste_dislike_ts.py`** 로 수정. "다음 sequential version" 지시가 권위적. 사실 정정이며 scope 변경 아님.
+
+### Evaluator Fix-Cycle (평가 1회차 후 수정)
+
+evaluator-active 초기 평가에서 2가지 블로킹 이슈 발견, 동일 사이클 내 해결:
+
+1. **테스트 격리 (BLOCKING-1)**: 크로스 테스트 설정 누출로 일부 V3 테스트 오탐 발생. `tests/test_agent_v3/conftest.py` (`_v3_isolation`, autouse, function-scoped) 추가 — `get_settings` LRU 캐시 클리어 + 13개 설정 속성 스냅샷/복원 + taste-store 싱글톤 초기화 + flag-aware REGISTRY 재설정. 5개 V3 테스트 파일에서 중복 fixture 제거 (DRY). **프로덕션 코드 변경 0줄.**
+
+2. **커버리지 미달 (BLOCKING-2)**: 에러 경로 / 브랜치 테스트 추가로 해결. V3 신규/변경 라인 100% 커버리지 달성.
+
+추가 도출 항목:
+- `tool_registry._rebuild_registry_for_flag(enabled)` — 테스트 전용 헬퍼. Gap3 REGISTRY가 모듈 로드 시점에 빌드되므로(OQ-V3-6 resolved), 테스트에서 플래그 전환 후 REGISTRY를 재현하기 위해 필요. 프로덕션 경로 무변경.
+- `_v2_baseline.V2_TASTE_PROFILE_FIELD_REPRS` — AC-4.3 superset 단언용 frozen 상수.
+
+### 테스트 / 품질 결과
+
+| 항목 | 결과 |
+|------|------|
+| `uv run pytest` 전 스위트 | **810 passed / 9 pre-existing failed / 117 skipped** |
+| Net regression | **0** (9 failures = 사전 존재 `.env`-driven 테스트, V3 scope 외) |
+| V3 신규/변경 라인 커버리지 | **100%** |
+| evaluator-active 점수 | **92.8/100 PASS** |
+| manager-quality TRUST5 | **PASS** |
+| ruff lint+format | **clean** |
+
+### 미결 운영 항목 (deferred)
+
+| 항목 | 분류 | 설명 |
+|------|------|------|
+| AC-P.1 200-턴 load smoke | 운영/수동 | 실 Telegram 환경 + 실 LLM 호출 필요. `test_performance_v3.py` 의 mock 기반 p95 어서션으로 구조적 보장 검증 완료. 운영 배포 후 수동 확인 |
+| migration 0005 Docker 검증 | 운영/수동 | testcontainers 로컬 미지원. `test_migration_0005.py` 4개 테스트 Docker-skip (선례: `test_migration_0004`). dev-app postgres 배포 시 수동 `alembic upgrade head` 확인 필요 |
+| **Gap4 배포 순서** | **운영 필수** | **마이그레이션 선행(alembic upgrade head) 후 코드 배포.** `taste_profile_pg._aget_or_create` 의 명시적 RETURNING SELECT 가 컬럼 존재를 요구함. 미-마이그레이션 DB에서 코드 선배포 시 hard fail. |
+
+### 크로스-SPEC 라이브 의존성
+
+SPEC-AGENT-V2-CLEANUP-001 의 followup 조정 계약은 다음을 **모두** 보존해야 V3 Gap2가 정상 동작함:
+1. `evaluator._call_llm` / `_build_fastpath_delta` / `_evaluator_prompt.build_user_prompt` / `CritiqueScore` (그래프 노드 wiring 만 제거, 헬퍼 모듈 보존)
+2. `SELF_CRITIQUE_*` env family 전체 (`MAX_ITERATIONS` / `THRESHOLD` / `TIMEOUT_S`)
+3. `EVALUATOR_*` env family 전체 (`MODEL` / `MAX_TOKENS` / `TEMPERATURE` / `TIMEOUT_S`)
+
+이 env들이 삭제되면 V3 Reflexion 루프가 런타임 오류. **SPEC-AGENT-V2-CLEANUP-001 followup PR 전 이 의존성 명시 필요.** (V3 merge의 blocker 아님 — 구현 완료 시점 기준.)
