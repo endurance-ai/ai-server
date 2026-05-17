@@ -41,7 +41,7 @@ app/
 ├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, lang, vision (+ vision_prompt, clarify, clarify_values, onboarding_cards, onboarding_values, pinterest_url, _jsonable)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
-│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT)
+│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT). [V3 NEW] _trace.py (logging-only node enter/done/skip 헬퍼)
 ├── services/            # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001): embed_service, search_service, diversify_service, database_service
 ├── infrastructure/      # 인프라 레이어 (SPEC-ARCH-AI-001)
 │   ├── repositories/    # SearchRepository (RPC name + param 단일 소스), search_rpc_contract (REQ-AI-006)

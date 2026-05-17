@@ -1,7 +1,7 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-17 (v0.8.0 — SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 + RPC 계약 검증).
+> 마지막 업데이트: 2026-05-17 (v0.9.0 — SPEC-AGENT-V3-REACT V2 증분 강화 4-Gap + SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 + RPC 계약 검증).
 
 ## 한 줄 요약
 
@@ -102,11 +102,13 @@ graph TB
 ```
 app/
 ├── main.py                 # FastAPI 엔트리포인트 + lifespan (messenger adapter + session store + setWebhook)
-├── agents/                 # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT, AGENT_V2_REACT_ENABLED=true 시 활성)
-│   ├── react_loop.py       # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout / tool_call emit)
-│   ├── tool_registry.py    # 7-tool REGISTRY + TypedDict args/result schema + validate_args
+├── agents/                 # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT + SPEC-AGENT-V3-REACT, AGENT_V2_REACT_ENABLED=true 시 활성)
+│   ├── react_loop.py       # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout / tool_call emit). V3: Gap1 memory injection + Gap2 _maybe_reflexion + Gap3 proactive directive
+│   ├── tool_registry.py    # 7-tool(V2)/8-tool(V3 Gap3 ON) REGISTRY + TypedDict args/result schema + validate_args
 │   ├── llm_client.py       # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy). AGENT_LLM_MODEL 미설정 시 fail-closed
-│   └── tools/              # 툴 래퍼 7개: analyze_image / search_products / refine_search / update_taste / ask_user_clarification / get_recent_history / respond
+│   ├── _memory_context.py  # [V3 Gap1 NEW] TasteProfile + 최근 N턴 요약 자동 주입 빌더 (래핑 전용, SPEC-AGENT-V3-REACT)
+│   ├── _reflexion.py       # [V3 Gap2 NEW] evaluator 헬퍼 래핑 — in-loop search 품질 평가 (래핑 전용, SPEC-AGENT-V3-REACT)
+│   └── tools/              # 툴 래퍼 7개(V2)/8개(V3 Gap3 ON): analyze_image / search_products / refine_search / update_taste / ask_user_clarification / get_recent_history / respond + suggest_next_step(V3)
 ├── api/
 │   ├── health.py           # GET /health (liveness, no auth) / GET /health/ready (auth + messenger 상태)
 │   ├── recommend.py        # POST /recommend (X-Internal-Token 인증)
@@ -158,7 +160,8 @@ app/
 │       ├── pinterest_ingest.py  # Pinterest 핀 스크래핑 → Vision batch → TasteProfile reinforce
 │       ├── _onboard_helpers.py  # 온보딩 내부 헬퍼 (seed, 완료 메시지, stage 전환)
 │       ├── _onboard_stage.py    # 온보딩 stage enum + 전환 테이블
-│       └── _pinterest_helpers.py # 핀 Vision batch + reinforce 헬퍼
+│       ├── _pinterest_helpers.py # 핀 Vision batch + reinforce 헬퍼
+│       └── _trace.py            # [V3 NEW] 구조화 node-trace 로깅 헬퍼 (enter/done/skip, logging-only, SPEC-AGENT-V3-REACT)
 ├── core/
 │   ├── config.py           # Pydantic Settings (env) — 신규 메신저 키 포함
 │   ├── auth.py             # verify_internal_token dependency
@@ -245,6 +248,13 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구�
 - ReAct loop: LLM이 7개 도구(`analyze_image` / `search_products` / `refine_search` / `update_taste` / `ask_user_clarification` / `get_recent_history` / `respond`) 중 순차 선택 → `respond` 호출 시 루프 종료. 안전 가드: iteration cap (`AGENT_MAX_ITERATIONS`) / 3-consecutive 동일 호출 무한루프 가드 / token budget (`AGENT_TURN_TOKEN_BUDGET`) / per-LLM timeout + transient retry (`AGENT_LLM_MAX_RETRIES`) / per-tool timeout (`AGENT_TOOL_TIMEOUT_S`) + transient retry (`AGENT_TOOL_MAX_RETRIES`) / terminal respond 전용 타임아웃 (`AGENT_RESPOND_TIMEOUT_S`, 재시도 없음).
 - Deprecated (V2에서 미등록, V1 rollback용 보존): `critique_apply`, `evaluator`, `respond`(graph node), `taste_update`, `send_results`, `channels/router.py`.
 - `ingest` 노드: V2 활성 시 `clarify:*` 콜백을 inline 처리 → `session.boost_keywords` 누적 후 `agent` 로 라우팅.
+
+**V3 강화 (flag-gated, SPEC-AGENT-V3-REACT — 그래프 토폴로지 무변경, `agent` 노드 내부 in-loop 확장만)**:
+- 마스터 `AGENT_V2_REACT_ENABLED=true` + 4개 sub-flag 으로 독립 활성. **4 all-off = V2 byte-identical.**
+- Gap1 (`AGENT_V3_MEMORY_INJECTION_ENABLED`): `_memory_context.py` — TasteProfile(`boost_brands/keywords`) + 최근 5턴(`get_recent_history` 래핑) 요약을 매 루프 system 컨텍스트에 자동 주입. char-cap `AGENT_V3_MEMORY_MAX_TOKENS`*4, 최신 우선 truncation. `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 격리.
+- Gap2 (`AGENT_V3_REFLEXION_ENABLED`): `_reflexion.py` — search/refine dispatch 직후 `evaluator._call_llm` 래핑 in-loop 평가 → quality delta를 ToolMessage `_quality` 로 첨부 → LLM 자율 refine 결정. 잔여-budget `asyncio.wait_for(timeout=remaining)` 강제 취소 (SPEC-AGENT-V2-REACT OQ-7 resolution).
+- Gap3 (`AGENT_V3_PROACTIVE_ENABLED`): `tools/suggest_next_step.py` — 8번째 tool, 어댑터 `send_text_with_buttons` 재사용. `_PROACTIVE_DIRECTIVE` system prompt 추가 (약결과 선제 제안 / 모호 선제 clarify).
+- Gap4 (`AGENT_V3_DISLIKE_MEMORY_ENABLED`): `infrastructure/memory/taste_profile.py` additive ts dict + `recency_weighted_excludes` — 이후 search/refine dispatch 시 자동 디스카운트. Alembic **migration 0005** 선행 필수 (`ai.user_taste_profile` +2 JSONB 컬럼).
 
 **공통 분기**:
 - **온보딩 카드 분기** (SPEC-ONBOARD-CARDS-001): `/start` + `sess.onboarded_at IS NULL` → `onboard_intro → onboard_mood → onboard_color → onboard_fit → (PINTEREST_BOOTSTRAP_ENABLED) → onboard_pinterest → pinterest_ingest` 3+1 stage 카드 온보딩. 완료 시 `seed_from_onboarding()` 로 TasteProfile 시드 → `onboarded_at` 기록. Pinterest stage 에서 Apify 스크래핑 + Vision batch → `TasteProfile.reinforce_liked_*` 머지.
