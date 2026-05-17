@@ -1,7 +1,11 @@
-"""SPEC-CONVERSATION-LOG-001 / LOG-T02 smoke — 19 TypedDicts catalog enforcement.
+"""SPEC-CONVERSATION-LOG-001 / LOG-T02 smoke — 20 TypedDicts catalog enforcement.
 
-REQ-LOG-CATALOG-001 acceptance: `__all__` length == 19 (CI gate). Each TypedDict
+REQ-LOG-CATALOG-001 acceptance: `__all__` length == 20 (CI gate). Each TypedDict
 SHALL be instantiable with the minimum-required keys per SPEC §Event Type Catalog.
+
+Catalog count bumped 19 -> 20 by SPEC-CONVERSATION-LOG-001 v0.3.0 amendment
+(cross-SPEC, driven by SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001):
+`tool_call` is the 20th event type (`ToolCallPayload`).
 """
 
 from __future__ import annotations
@@ -9,17 +13,17 @@ from __future__ import annotations
 import importlib
 
 
-def test_all_exports_exactly_19_typeddicts():
+def test_all_exports_exactly_20_typeddicts():
     mod = importlib.import_module("app.observability.event_payloads")
-    assert len(mod.__all__) == 19, f"__all__ length must be 19, got {len(mod.__all__)}"
+    assert len(mod.__all__) == 20, f"__all__ length must be 20, got {len(mod.__all__)}"
 
 
-def test_star_import_publishes_19_names():
+def test_star_import_publishes_20_names():
     """Plan-mandated smoke: `from app.observability.event_payloads import *`."""
     ns: dict = {}
     exec("from app.observability.event_payloads import *", ns)  # noqa: S102
     public = {k for k in ns if not k.startswith("_")}
-    assert len(public) == 19, f"star-import exposed {len(public)} names, expected 19"
+    assert len(public) == 20, f"star-import exposed {len(public)} names, expected 20"
 
 
 def test_each_typeddict_instantiable_with_minimum_keys():
@@ -39,6 +43,7 @@ def test_each_typeddict_instantiable_with_minimum_keys():
         PinterestIngestPayload,
         SearchDonePayload,
         TasteUpdatePayload,
+        ToolCallPayload,
         UserCallbackPayload,
         UserPhotoPayload,
         UserTextPayload,
@@ -66,8 +71,9 @@ def test_each_typeddict_instantiable_with_minimum_keys():
         BotTextPayload(chunk_text="hi", chunk_index=0, total_chunks=1, flow="GREETING"),
         TasteUpdatePayload(source="free_text", keywords_delta={}, brands_delta={}),
         NodeErrorPayload(node_name="vision", exception_type="ValueError", message="boom", recovered=False),
+        ToolCallPayload(tool_name="search_products", iteration_no=0, latency_ms=120, error=None),
     ]
-    assert len(samples) == 19
+    assert len(samples) == 20
 
 
 def test_all_names_in_module():

@@ -1,4 +1,11 @@
-"""Routing-LLM — paraphrase-aware text classification.
+"""DEPRECATED (when AGENT_V2_REACT_ENABLED=true) — superseded by SPEC-AGENT-V2-REACT.
+The agent LLM's reasoning subsumes deterministic text routing. Retained for V2.0
+rollback safety (V1 path still uses this). Will be removed in V2.1 cleanup
+(see SPEC-AGENT-V2-CLEANUP-001).
+
+@MX:LEGACY: superseded by SPEC-AGENT-V2-REACT — V2.1 removal target
+
+Routing-LLM — paraphrase-aware text classification.
 
 Sits between `scenario.classify_input` (deterministic prefilter) and the
 handler dispatch. Only invoked when the prefilter cannot type a text message

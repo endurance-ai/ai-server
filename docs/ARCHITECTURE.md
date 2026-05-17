@@ -1,13 +1,13 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-15 (v0.6.0 — SPEC-CONVERSATION-LOG-001 이벤트 소싱 + SPEC-ONBOARD-CARDS-001 온보딩 카드 + noscroll benchmark sentence-split).
+> 마지막 업데이트: 2026-05-15 (v0.7.0 — SPEC-AGENT-V2-REACT ReAct 에이전트 루프, flag-gated default off).
 
 ## 한 줄 요약
 
 `kikoai/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
 
-**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, 18 노드 — `search → evaluator` Reflexion 루프 + `ask_clarify → apply_clarify` 결정형 카드 분기 + `onboard_intro → … → onboard_pinterest` 온보딩 카드 분기 포함) → 동일 파이프라인 → 채널 응답 카드로 반환. 모든 webhook turn 에서 `emit()` 로 `ai.log_conversation_event` append-only 기록 (SPEC-CONVERSATION-LOG-001).
+**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, V1: 18 노드 / V2(flag-gated): `agent` 노드 + 온보딩 6 노드 — `search → evaluator` Reflexion 루프는 V2에서 `agent` ReAct loop으로 대체, SPEC-AGENT-V2-REACT) → 동일 파이프라인 → 채널 응답 카드로 반환. 모든 webhook turn 에서 `emit()` 로 `ai.log_conversation_event` append-only 기록 (SPEC-CONVERSATION-LOG-001).
 
 ## 책임 분리
 
@@ -48,7 +48,7 @@ graph TB
     subgraph AI["AI Server (EC2 t4g.medium)"]
         REC["POST /recommend"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/graphs/<br/>LangGraph StateGraph (18 nodes)<br/>+ evaluator (Reflexion) + apply_clarify<br/>+ onboard_intro/mood/color/fit/pinterest + pinterest_ingest<br/>+ link_resolver + vision (v2 schema)"]
+        CHAN["app/graphs/<br/>LangGraph StateGraph<br/>V1(18 nodes): evaluator(Reflexion)+apply_clarify+onboarding<br/>V2(flag-gated): agent(ReAct)+onboarding 6 nodes<br/>+ link_resolver + vision (v2 schema)"]
         PIPE["pipeline state machine<br/>embed → search → diversify"]
         LITELLM["LiteLLM proxy"]
         LFW["Langfuse web"]
@@ -102,6 +102,11 @@ graph TB
 ```
 app/
 ├── main.py                 # FastAPI 엔트리포인트 + lifespan (messenger adapter + session store + setWebhook)
+├── agents/                 # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT, AGENT_V2_REACT_ENABLED=true 시 활성)
+│   ├── react_loop.py       # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout / tool_call emit)
+│   ├── tool_registry.py    # 7-tool REGISTRY + TypedDict args/result schema + validate_args
+│   ├── llm_client.py       # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy). AGENT_LLM_MODEL 미설정 시 fail-closed
+│   └── tools/              # 툴 래퍼 7개: analyze_image / search_products / refine_search / update_taste / ask_user_clarification / get_recent_history / respond
 ├── api/
 │   ├── health.py           # GET /health (liveness, no auth) / GET /health/ready (auth + messenger 상태)
 │   ├── recommend.py        # POST /recommend (X-Internal-Token 인증)
@@ -131,18 +136,20 @@ app/
 │   ├── state.py            # InputState / WorkingState / OutputState (Pydantic v2)
 │   ├── routing.py          # 6개 조건부 엣지 함수
 │   └── nodes/
-│       ├── ingest.py       # Update 파싱 + 세션 로드
+│       ├── ingest.py       # Update 파싱 + 세션 로드 (V2: clarify:* callback inline 처리 포함)
 │       ├── resolve_image.py # Pinterest / pin.it og:image 해석
 │       ├── vision.py       # LiteLLM Vision 패션 아이템 추출
 │       ├── pick_item.py    # 인라인 키보드 picker (콜백 처리)
 │       ├── ask_clarify.py  # weak-vision 시 결정형 카드 (6 axes, no LLM, SPEC-CLARIFY-CARDS-001)
-│       ├── apply_clarify.py # clarify:* 콜백 → session.boost_keywords 누적
-│       ├── critique_apply.py # Routing-LLM + critique refinement
+│       ├── apply_clarify.py # clarify:* 콜백 → session.boost_keywords 누적 [DEPRECATED V2, 롤백 보존]
+│       ├── agent.py        # ReAct agent 노드 — run_react_loop 래핑 (SPEC-AGENT-V2-REACT, V2 전용)
+│       ├── intro.py        # 첫 방문 서비스 소개 — ONBOARDING_CARDS_ENABLED=false 시 신규 사용자 1회성 안내 (SPEC-AGENT-V2-REACT, V2 전용)
+│       ├── critique_apply.py # Routing-LLM + critique refinement [DEPRECATED V2, 롤백 보존]
 │       ├── search.py       # RecommendationPort → 파이프라인 호출
-│       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001)
+│       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001) [DEPRECATED V2, 롤백 보존]
 │       ├── send_results.py # 검색 결과 카드 전송
-│       ├── taste_update.py # 장기 취향 프로파일 업데이트
-│       ├── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL) + sentence-split (RESPONSE_SPLIT_ENABLED)
+│       ├── taste_update.py # 장기 취향 프로파일 업데이트 [DEPRECATED V2, 롤백 보존]
+│       ├── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL) + sentence-split (RESPONSE_SPLIT_ENABLED) [DEPRECATED V2, 롤백 보존]
 │       ├── onboard_intro.py # 온보딩 인트로 — /start + onboarded_at IS NULL 진입점 (SPEC-ONBOARD-CARDS-001)
 │       ├── onboard_mood.py  # Stage 1: 무드 카드
 │       ├── onboard_color.py # Stage 2: 컬러 카드
@@ -169,7 +176,7 @@ app/
 ├── observability/
 │   ├── langfuse.py         # @observe 데코레이터 (no-op fallback) + env 자동 주입 + current_langfuse_trace_id()
 │   ├── conversation_log.py # 대화 이벤트 로거 — log_event / emit / _truncate (SPEC-CONVERSATION-LOG-001)
-│   └── event_payloads.py   # 19개 이벤트 TypedDict 정의 (SPEC-CONVERSATION-LOG-001)
+│   └── event_payloads.py   # 20개 이벤트 TypedDict 정의 (SPEC-CONVERSATION-LOG-001 + tool_call — SPEC-AGENT-V2-REACT)
 └── models/
     ├── request.py          # RecommendRequest (alias 패턴 + image_url SSRF 가드)
     └── response.py         # RecommendResponse (serialization_alias)
@@ -202,17 +209,29 @@ app/
 
 ## LangGraph (SPEC-AGENT-001 — 도입됨)
 
-Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 18-노드 `StateGraph` 로 구현.
+Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구현.
 `webhook → graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler(...)]})` 단일 호출 (REQ-AGENT-008).
 
-핵심 분기:
+`build_graph()` 가 `AGENT_V2_REACT_ENABLED` + `AGENT_LLM_MODEL` 로 토폴로지를 분기:
+
+**V1 토폴로지 (기본, AGENT_V2_REACT_ENABLED=false)**:
 - `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) — 빈 결과 시 필터 drop fast-path / LLM 평가 점수 < threshold 시 `CritiqueDelta` 생성 후 search 재진입 (max 2회 + 4 안전 가드: iteration cap / stagnation / score regression / 30s wall-clock)
 - `ask_clarify → apply_clarify` 결정형 카드 (SPEC-CLARIFY-CARDS-001) — weak-vision 시 6 axes 인라인 키보드, callback 수신 시 `session.boost_keywords` 누적 (self-critique fast-path 통과)
+- **`STALE_CRITIQUE` flow**: `respond` 노드에 추가. `crit:*` 콜백이 만료된 카드에 대해 들어올 때 `critique_apply` 가 delta 없이 반환 → `respond` 가 STALE_CRITIQUE flow 로 분류해 "오래된 카드" 안내 메시지 발송. 단, `crit:click:` 콜백은 예외 — END 로 직접 라우팅 (SPEC-IMPLICIT-FB-001).
+
+**V2 토폴로지 (flag-gated, AGENT_V2_REACT_ENABLED=true + AGENT_LLM_MODEL 설정 시, 운영 default off)**:
+- 온보딩 6 노드(`onboard_intro/mood/color/fit/pinterest` + `pinterest_ingest`) 보존 — 동일 분기 로직.
+- 신규 `intro` 노드: `ONBOARDING_CARDS_ENABLED=false` + `onboarded_at IS NULL` 시 1회성 서비스 안내 발송 → `onboarded_at` 기록 → 턴 종료. 2번째 메시지부터 `agent` 정상 진입.
+- Post-onboarding 텍스트/사진/콜백은 모두 `agent` 단일 노드 → `run_react_loop` (SPEC-AGENT-V2-REACT, `app/agents/`). **ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`) via LiteLLM** (`drop_params: true` 적용, `tool_choice` 필드 제거로 Bedrock 호환).
+- ReAct loop: LLM이 7개 도구(`analyze_image` / `search_products` / `refine_search` / `update_taste` / `ask_user_clarification` / `get_recent_history` / `respond`) 중 순차 선택 → `respond` 호출 시 루프 종료. 안전 가드: iteration cap (`AGENT_MAX_ITERATIONS`) / 3-consecutive 동일 호출 무한루프 가드 / token budget (`AGENT_TURN_TOKEN_BUDGET`) / per-LLM timeout + transient retry (`AGENT_LLM_MAX_RETRIES`) / per-tool timeout (`AGENT_TOOL_TIMEOUT_S`) + transient retry (`AGENT_TOOL_MAX_RETRIES`) / terminal respond 전용 타임아웃 (`AGENT_RESPOND_TIMEOUT_S`, 재시도 없음).
+- Deprecated (V2에서 미등록, V1 rollback용 보존): `critique_apply`, `evaluator`, `respond`(graph node), `taste_update`, `send_results`, `channels/router.py`.
+- `ingest` 노드: V2 활성 시 `clarify:*` 콜백을 inline 처리 → `session.boost_keywords` 누적 후 `agent` 로 라우팅.
+
+**공통 분기**:
 - **온보딩 카드 분기** (SPEC-ONBOARD-CARDS-001): `/start` + `sess.onboarded_at IS NULL` → `onboard_intro → onboard_mood → onboard_color → onboard_fit → (PINTEREST_BOOTSTRAP_ENABLED) → onboard_pinterest → pinterest_ingest` 3+1 stage 카드 온보딩. 완료 시 `seed_from_onboarding()` 로 TasteProfile 시드 → `onboarded_at` 기록. Pinterest stage 에서 Apify 스크래핑 + Vision batch → `TasteProfile.reinforce_liked_*` 머지.
-- **KO/EN sticky 언어**: `ingest` 노드가 `app/channels/lang.remember_lang()` 으로 `Session.lang` 갱신 → 이후 버튼 탭도 동일 언어 유지. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` 노드가 `session_lang(sess)` 참조해 KO/EN 텍스트 분기.
-- **`STALE_CRITIQUE` flow**: `respond` 노드에 추가. `crit:*` 콜백이 만료된 카드에 대해 들어올 때 `critique_apply` 가 delta 없이 반환 → `respond` 가 STALE_CRITIQUE flow 로 분류해 "오래된 카드" 안내 메시지 발송. 단, `crit:click:` 콜백은 예외 — `_route_after_critique` 가 `respond` 를 거치지 않고 END 로 직접 라우팅 (SPEC-IMPLICIT-FB-001 / REQ-FB-CLICK-001: 클릭 ack 은 `critique_apply` 안에서 이미 처리, 자연어 응답 없음).
-- **이벤트 소싱 (SPEC-CONVERSATION-LOG-001)**: 모든 노드 + webhook intake 에서 `emit(event_type, payload)` 호출 → fire-and-forget `asyncio.create_task` → `ai.log_conversation_event` 테이블 INSERT. `MEMORY_BACKEND_IS_POSTGRES=False` 시 silent skip. PG outage 시 stderr JSON fallback (tag: `CONV_LOG_FALLBACK`).
-- **sentence-split 발화 (noscroll benchmark)**: `RESPONSE_SPLIT_ENABLED=true` 시 `respond` 노드가 LLM 출력을 문장 단위로 분할 → typing action → `RESPONSE_SPLIT_DELAY_MS` 딜레이 → 각 청크 개별 전송. `RESPONSE_SPLIT_MIN_CHARS` 미만 조각은 다음 청크와 병합.
+- **KO/EN sticky 언어**: `ingest` 노드가 `app/channels/lang.remember_lang()` 으로 `Session.lang` 갱신 → 이후 버튼 탭도 동일 언어 유지.
+- **이벤트 소싱 (SPEC-CONVERSATION-LOG-001)**: 모든 노드 + webhook intake 에서 `emit(event_type, payload)` 호출 → fire-and-forget `asyncio.create_task` → `ai.log_conversation_event` 테이블 INSERT. `MEMORY_BACKEND_IS_POSTGRES=False` 시 silent skip. PG outage 시 stderr JSON fallback (tag: `CONV_LOG_FALLBACK`). V2에서 `tool_call` 이벤트(20번째 타입) 추가 — react_loop 내 매 tool dispatch마다 emit.
+- **sentence-split 발화 (noscroll benchmark)**: `RESPONSE_SPLIT_ENABLED=true` 시 V1 `respond` 노드가 LLM 출력을 문장 단위로 분할. V2에서는 `agents/tools/respond.py` 가 동일 역할.
 
 파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
 
@@ -254,3 +273,4 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 18-노드 `StateGraph
 | 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
 | 2026-05-15 | **v0.6.0 — SPEC-CONVERSATION-LOG-001 + SPEC-ONBOARD-CARDS-001 + noscroll sentence-split** (이벤트 소싱: `ai.log_conversation_event` append-only 테이블 (migration 0003), 19 이벤트 TypedDict, `emit()` fire-and-forget, PG failsoft stderr fallback. 온보딩 카드: 6 신규 노드 (onboard_intro/mood/color/fit/pinterest + pinterest_ingest), `app/providers/apify.py` (Apify httpx wrapper, ApifyTimeoutError), `app/channels/onboarding_cards/values/pinterest_url.py` + `_jsonable.py`, migration 0004 (`user_session` + `onboarded_at` 컬럼). noscroll P0: `RESPONSE_SPLIT_ENABLED` 문장 분할 발화. 그래프 노드 수 12 → 18.) |
 | 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `kikoai/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |
+| 2026-05-15 | **v0.7.0 — SPEC-AGENT-V2-REACT ReAct 에이전트 루프 (flag-gated, default off)** (`app/agents/` 신규 패키지: `react_loop.py` / `tool_registry.py` / `llm_client.py` / `tools/` 7개 래퍼. `app/graphs/nodes/agent.py` 신규. `WorkingState` +3 필드 (`agent_iterations`, `tool_call_history`, `agent_status`). `fashion_bot.py` — `AGENT_V2_REACT_ENABLED` + `AGENT_LLM_MODEL` 양쪽 설정 시 V2 토폴로지 선택. 6 신규 env vars (`AGENT_V2_REACT_ENABLED` / `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_MODEL` / `AGENT_LLM_TIMEOUT_S`). 20번째 이벤트 타입 `tool_call` 추가. `/health/ready` +2 필드 (`agent_v2_react_enabled` / `agent_llm_model_configured`). 5 deprecated 모듈 (rollback 보존): `critique_apply` / `evaluator` / `respond` / `taste_update` graph nodes + `channels/router.py`.) |

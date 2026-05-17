@@ -45,17 +45,17 @@ def _truncate_log_table():
 
 
 def test_event_payloads_all_length_is_19():
-    """REQ-LOG-CATALOG-001 — 19 event types, no more, no less."""
+    """REQ-LOG-CATALOG-001 — 19 → 20 event types after SPEC-AGENT-V2-REACT (tool_call added)."""
     mod = importlib.import_module("app.observability.event_payloads")
-    assert len(mod.__all__) == 19, f"__all__ length must be 19, got {len(mod.__all__)}"
+    assert len(mod.__all__) == 20, f"__all__ length must be 20, got {len(mod.__all__)}"
 
 
 def test_event_payloads_star_import_exposes_19_typeddicts():
-    """`from app.observability.event_payloads import *` publishes exactly 19 names."""
+    """`from app.observability.event_payloads import *` publishes exactly 20 names (post-V2-REACT)."""
     ns: dict = {}
     exec("from app.observability.event_payloads import *", ns)  # noqa: S102
     public = {k for k in ns if not k.startswith("_")}
-    assert len(public) == 19, f"star-import exposed {len(public)} names, expected 19"
+    assert len(public) == 20, f"star-import exposed {len(public)} names, expected 20"
 
 
 # ───────────────────── (b) taste_update.source AST scan ─────────────────

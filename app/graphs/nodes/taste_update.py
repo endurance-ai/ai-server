@@ -1,4 +1,10 @@
-"""SPEC-AGENT-001 / REQ-AGENT-004 (node 9/10) — taste_update.
+"""DEPRECATED — superseded by SPEC-AGENT-V2-REACT (agent loop + tool registry).
+Retained for V2.0 rollback safety only. Will be removed in V2.1 cleanup
+(see SPEC-AGENT-V2-CLEANUP-001). Body lives in `app/agents/tools/update_taste.py`.
+
+@MX:LEGACY: superseded by SPEC-AGENT-V2-REACT — V2.1 removal target
+
+SPEC-AGENT-001 / REQ-AGENT-004 (node 9/10) — taste_update.
 
 Wraps `app/channels/taste_profile.py::reinforce_*`. Applies a `TasteUpdate`
 (from `state.decision.taste_update`) to the per-user TasteProfile, then hands

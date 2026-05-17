@@ -18,6 +18,7 @@ from pydantic import HttpUrl
 
 from app.channels.recommendation import set_port
 from app.channels.schemas import ChannelMessage
+from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import (
@@ -32,6 +33,21 @@ from app.infrastructure.memory.taste_profile import (
     shutdown_taste_store,
 )
 from tests.conftest_graph import FakeAdapter, StubPort
+
+# SPEC-AGENT-V2-REACT / T-010 (Bucket B2) — these E2E tests assert the V1
+# clarify routing (vision → ask_clarify card; clarify:* callback →
+# apply_clarify → search_node with sticky boost; self-critique fast-path).
+# Under the V2 ReAct topology clarify callbacks route to `agent` (boost_keywords
+# is still accumulated inline by ingest Step C, but the search dispatch is the
+# agent's tool decision) and the evaluator fast-path is folded into the
+# refine_search tool (OQ-7). No deterministic V2 equivalent in this unmocked
+# harness — skipped under flag=true; runs unchanged under flag=false (V1).
+_v2_active = bool(settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip())
+_skip_v1_clarify = pytest.mark.skipif(
+    _v2_active,
+    reason="V1-only clarify→search routing; superseded by SPEC-AGENT-V2-REACT agent loop "
+    "(boost_keywords still accumulated via ingest Step C; search dispatch is agent-mediated)",
+)
 
 
 @pytest.fixture
@@ -90,6 +106,11 @@ async def _run(message: ChannelMessage):
 
 @pytest.mark.asyncio
 async def test_e2e_weak_vision_emits_card_no_search(store, taste_store, stub_port, adapter, monkeypatch):
+    """SPEC-AGENT-V2-REACT / T-010 (Bucket B1, flag-agnostic) — weak vision
+    must produce a bot response and must NOT auto-search this turn. V1 emits a
+    clarify card (SPEC-CLARIFY-CARDS-001); V2 lets the agent respond/ask. We
+    assert the OUTPUT CLASS per REQ-AGENT-COMPAT-SEMANTIC-001.
+    """
     msg = _msg(urls=["https://www.pinterest.com/pin/123/"])
     import app.graphs.nodes.resolve_image as ri
     import app.graphs.nodes.vision as vn
@@ -105,21 +126,27 @@ async def test_e2e_weak_vision_emits_card_no_search(store, taste_store, stub_por
 
     await _run(msg)
 
-    assert adapter.buttons, "clarify card must fire"
-    assert not stub_port.calls, "검색은 다음 turn(콜백) 까지 미진입"
-    # 카드 본문에 표시된 buttons 의 callback 이 모두 clarify:*.
-    _, _, btns = adapter.buttons[0]
-    for _, cb in btns:
-        assert cb.startswith("clarify:")
-    # 세션은 AWAITING_CLARIFY.
-    assert store.get_or_create(42).state == SessionState.AWAITING_CLARIFY
+    # OUTPUT CLASS — some bot response, and no blind search before clarification.
+    assert adapter.buttons or adapter.texts, "weak vision must produce a bot response"
+    assert not stub_port.calls, "검색은 weak vision turn 에 자동 진입하면 안 됨"
+    if not _v2_active:
+        # V1-specific: clarify card with all clarify:* callbacks + AWAITING_CLARIFY.
+        _, _, btns = adapter.buttons[0]
+        for _, cb in btns:
+            assert cb.startswith("clarify:")
+        assert store.get_or_create(42).state == SessionState.AWAITING_CLARIFY
 
 
 # ── E2E #2: clarify:* 콜백 turn → apply_clarify → search_node 진입 ─────────
 
 
+@_skip_v1_clarify
 @pytest.mark.asyncio
 async def test_e2e_clarify_callback_routes_to_search_with_boost(store, taste_store, stub_port, adapter):
+    """SPEC-AGENT-V2-REACT (Bucket B2) — V1 clarify:* → apply_clarify →
+    search_node with sticky boost. Under V2 the search dispatch is the agent's
+    tool decision; no deterministic equivalent without an LLM mock.
+    """
     # 이전 turn 으로 ask_clarify 가 끝났다고 가정 — 세션을 그 상태로 시드.
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_CLARIFY
@@ -142,8 +169,12 @@ async def test_e2e_clarify_callback_routes_to_search_with_boost(store, taste_sto
 # ── E2E #3: skip → 검색 진입하되 boost 추가 없음 ────────────────────────────
 
 
+@_skip_v1_clarify
 @pytest.mark.asyncio
 async def test_e2e_clarify_skip_routes_to_search_without_extra_boost(store, taste_store, stub_port, adapter):
+    """SPEC-AGENT-V2-REACT (Bucket B2) — V1 clarify:skip → search_node without
+    extra boost. Under V2 the search dispatch is agent-mediated.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_CLARIFY
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -184,11 +215,16 @@ async def test_e2e_free_text_during_awaiting_clarify_falls_through(store, taste_
 # ── E2E #5: self-critique fast-path 가 boost_keywords 를 보존 ──────────────
 
 
+@_skip_v1_clarify
 @pytest.mark.asyncio
 async def test_e2e_clarify_boost_survives_self_critique_fastpath(store, taste_store, stub_port, adapter, monkeypatch):
     """R6 / Q7 — clarify 가 정한 boost_keywords 는 자기-비평 fast-path 가
     critique_delta 를 갈아치워도 sticky 하게 살아남아 두 번째 search 요청에도
     실린다.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — exercises the V1 self-critique
+    evaluator fast-path, which is folded into the `refine_search` tool under
+    V2 (OQ-7). No V2 equivalent in this unmocked harness.
     """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_CLARIFY

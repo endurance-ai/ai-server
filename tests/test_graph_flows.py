@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from app.channels.recommendation import set_port
+from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes import respond as respond_module
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
@@ -104,6 +105,24 @@ def _stub_route_text_default(monkeypatch):
     monkeypatch.setattr("app.graphs.nodes.ingest.route_text", _default_route)
 
 
+# SPEC-AGENT-V2-REACT / T-010 — under the V2 ReAct topology every
+# post-onboarding text / critique-callback turn funnels through the single
+# `agent` node (router_text passthrough, critique_apply, taste_update,
+# send_results, respond, evaluator are NOT registered). The flows below assert
+# V1 intermediate routing internals (stub_port wiring, V1 card/critique-button
+# shapes, session result caching) that the agent loop replaces with autonomous
+# LLM tool selection. With no LLM mock in this legacy harness the agent path
+# is non-deterministic, so these tests have no V2 equivalent here and are
+# skipped under flag=true (Bucket B2). The V2 equivalents are covered by
+# tests/test_agent_v2/. Under flag=false they run unchanged (V1 coverage).
+_v2_active = bool(settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip())
+_skip_v1_flow = pytest.mark.skipif(
+    _v2_active,
+    reason="V1-only graph routing internals; superseded by SPEC-AGENT-V2-REACT agent loop "
+    "(see tests/test_agent_v2/ for V2 coverage)",
+)
+
+
 def _state(message, **kw) -> InputState:
     return InputState(message=message, chat_id=message.chat_id, from_user_id=message.from_user_id, **kw)
 
@@ -185,8 +204,16 @@ async def test_multi_item_sends_picker_and_ends(store, taste_store, stub_port, a
 
 @pytest.mark.asyncio
 async def test_weak_vision_routes_to_ask_clarify(store, taste_store, stub_port, adapter, monkeypatch):
-    """Flow #5 / REQ-AGENT-009 + SPEC-CLARIFY-CARDS-001 — weak vision → ask_clarify
-    카드 발행(텍스트 메시지가 아닌 인라인 키보드)."""
+    """Flow #5 / REQ-AGENT-009 — weak/ambiguous vision does NOT blindly search;
+    the bot responds asking the user for more (no silent dead-end).
+
+    SPEC-AGENT-V2-REACT / T-010 (Bucket B1, flag-agnostic) — the V1
+    implementation emits an inline-keyboard clarify card (SPEC-CLARIFY-CARDS-001);
+    under V2 the same semantic guarantee holds via the agent (which either asks
+    for clarification or falls back). Per REQ-AGENT-COMPAT-SEMANTIC-001 we
+    assert the OUTPUT CLASS — some bot output is produced and search is NOT
+    auto-triggered on weak vision — not the internal node sequence or card shape.
+    """
     msg = make_msg(urls=["https://www.pinterest.com/pin/123/"])
     import app.graphs.nodes.resolve_image as ri
     import app.graphs.nodes.vision as vn
@@ -202,19 +229,31 @@ async def test_weak_vision_routes_to_ask_clarify(store, taste_store, stub_port, 
     monkeypatch.setattr(vn.vision_module, "extract", _vision_weak)
 
     await _run(msg)
-    # SPEC-CLARIFY-CARDS-001: 카드 경로 — buttons 발행, texts 는 비어 있음.
-    assert adapter.buttons, f"clarify card must be sent; got buttons={adapter.buttons}"
-    assert not adapter.texts, f"plain text message should not be sent; got {adapter.texts}"
-    chat_id, body, btns = adapter.buttons[0]
-    assert chat_id == 42
-    assert body, "card body must be non-empty"
-    # 마지막 버튼은 항상 skip(REQ-CLARIFY-CARD-002).
-    assert btns[-1][1].endswith(":skip"), f"last button must be skip; got {btns[-1]}"
+    # OUTPUT CLASS — bot produced *some* response (clarify card under V1, agent
+    # reply/fallback under V2); never a silent dead-end.
+    assert adapter.buttons or adapter.texts, (
+        f"weak vision must produce a bot response; buttons={adapter.buttons} texts={adapter.texts}"
+    )
+    # Weak vision must NOT blindly run a product search this turn.
+    assert not stub_port.calls, "weak vision must not auto-search before clarification"
+    if not _v2_active:
+        # V1-specific: SPEC-CLARIFY-CARDS-001 card shape (skip-terminated).
+        chat_id, body, btns = adapter.buttons[0]
+        assert chat_id == 42
+        assert body, "card body must be non-empty"
+        assert btns[-1][1].endswith(":skip"), f"last button must be skip; got {btns[-1]}"
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_weak_vision_legacy_fallback_when_flag_off(store, taste_store, stub_port, adapter, monkeypatch):
-    """REQ-CLARIFY-COMPAT-002 — CLARIFY_CARDS_ENABLED=false 시 자유 텍스트 폴백."""
+    """REQ-CLARIFY-COMPAT-002 — CLARIFY_CARDS_ENABLED=false 시 자유 텍스트 폴백.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — asserts the V1 ask_clarify legacy
+    free-text fallback (CLARIFY_CARDS_ENABLED feature-flag behavior). Under V2
+    weak vision routes to `agent`; there is no ask_clarify legacy-fallback path,
+    so this V1-specific feature-flag behavior has no V2 equivalent.
+    """
     monkeypatch.setattr("app.graphs.nodes.ask_clarify.settings.CLARIFY_CARDS_ENABLED", False)
     msg = make_msg(urls=["https://www.pinterest.com/pin/123/"])
     import app.graphs.nodes.resolve_image as ri
@@ -246,7 +285,15 @@ async def test_weak_vision_legacy_fallback_when_flag_off(store, taste_store, stu
 
 @pytest.mark.asyncio
 async def test_search_empty_routes_to_respond(store, taste_store, stub_port, adapter):
-    """Flow #6 — search returns 0 candidates → respond."""
+    """Flow #6 — an empty/unproductive search turn yields a bot text message
+    and NO product-card carousel.
+
+    SPEC-AGENT-V2-REACT / T-010 (Bucket B1, flag-agnostic) — under V1 empty
+    search routes to the respond node; under V2 the agent (which, with no
+    productive search result, replies in text or falls back) produces the same
+    OUTPUT CLASS: a bot message, no cards. Per REQ-AGENT-COMPAT-SEMANTIC-001 we
+    assert on observable output, not the internal node path or stub_port wiring.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -257,14 +304,20 @@ async def test_search_empty_routes_to_respond(store, taste_store, stub_port, ada
     msg = make_msg(text="something cheaper")
     await _run(msg)
 
-    assert stub_port.calls, "search must have been attempted"
-    assert adapter.texts, "respond must dispatch on empty result"
+    assert adapter.texts, "empty/unproductive turn must dispatch a bot message"
     assert not adapter.cards, "no cards on empty result"
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_search_with_results_full_path(store, taste_store, stub_port, adapter):
-    """Flow #7 / REQ-COMPAT-001/005 — happy path: cards sent + respond closer."""
+    """Flow #7 / REQ-COMPAT-001/005 — happy path: cards sent + respond closer.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — the card-dispatch happy path is
+    agent-tool-mediated under V2 (search_products + respond tools). Without an
+    LLM mock the legacy harness cannot drive it deterministically; V2 coverage
+    lives in tests/test_agent_v2/test_agent_loop.py.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -280,9 +333,15 @@ async def test_search_with_results_full_path(store, taste_store, stub_port, adap
     assert sess_after.state == SessionState.RESULTS_SENT
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_taste_only_update_routes_to_respond_ack(store, taste_store, stub_port, adapter, monkeypatch):
-    """Flow #8 / REQ-COMPAT-003 — explicit taste update via router."""
+    """Flow #8 / REQ-COMPAT-003 — explicit taste update via router.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 router TASTE_UPDATE → taste_update
+    node. Under V2 taste mutation is the agent's `update_taste` tool decision;
+    no deterministic equivalent without an LLM mock.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.RESULTS_SENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -335,9 +394,14 @@ async def test_off_topic_in_results_sent_routes_to_respond(store, taste_store, s
 # ── REQ-COMPAT-001 — tap critique callbacks ────────────────────────────────
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_critique_tap_more_reinforces_taste_and_reruns(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-001 + REQ-COMPAT-003 — `crit:more:0` callback path."""
+    """REQ-COMPAT-001 + REQ-COMPAT-003 — `crit:more:0` callback path.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — crit:* callbacks route to `agent` under
+    V2; taste reinforcement + re-search is the agent's autonomous tool chain.
+    """
     sess = store.get_or_create(42)
     sess.from_user_id = 7
     sess.state = SessionState.RESULTS_SENT
@@ -356,9 +420,14 @@ async def test_critique_tap_more_reinforces_taste_and_reruns(store, taste_store,
     assert "ami" in req.boost_brands
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_critique_tap_less_excludes_brand(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-001 + REQ-COMPAT-006 — `crit:less:0` excludes brand + shown ids."""
+    """REQ-COMPAT-001 + REQ-COMPAT-006 — `crit:less:0` excludes brand + shown ids.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 critique-callback routing; superseded
+    by the agent loop.
+    """
     sess = store.get_or_create(42)
     sess.from_user_id = 7
     sess.state = SessionState.RESULTS_SENT
@@ -377,9 +446,14 @@ async def test_critique_tap_less_excludes_brand(store, taste_store, stub_port, a
     assert "p1" in req.exclude_product_ids
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_critique_tap_cheap_sets_max_price(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-001 / REQ-COMPAT-005 — `crit:cheap:0` sets max_price = price * 0.7."""
+    """REQ-COMPAT-001 / REQ-COMPAT-005 — `crit:cheap:0` sets max_price = price * 0.7.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 critique-callback routing; superseded
+    by the agent loop.
+    """
     sess = store.get_or_create(42)
     sess.from_user_id = 7
     sess.state = SessionState.RESULTS_SENT
@@ -393,9 +467,14 @@ async def test_critique_tap_cheap_sets_max_price(store, taste_store, stub_port, 
     assert req.max_price == 70000  # default ratio 0.7
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_critique_tap_invalid_idx_skips_search(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-001 / REQ-AGENT-007 — stale callback skips search."""
+    """REQ-COMPAT-001 / REQ-AGENT-007 — stale callback skips search.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 stale-callback toast handled by
+    critique_apply; under V2 crit:* routes to `agent`.
+    """
     sess = store.get_or_create(42)
     sess.from_user_id = 7
     sess.state = SessionState.RESULTS_SENT
@@ -409,9 +488,15 @@ async def test_critique_tap_invalid_idx_skips_search(store, taste_store, stub_po
     assert any("out of date" in (t or "").lower() for _, t in adapter.callback_answers)
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_send_results_cards_carry_critique_buttons(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-001 — every card carries crit:* buttons."""
+    """REQ-COMPAT-001 — every card carries crit:* buttons.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 send_results card shape (critique
+    buttons). Under V2 cards are emitted by the agent `respond` tool; the
+    crit:* button structure is a V1 send_results detail with no V2 equivalent.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -428,9 +513,14 @@ async def test_send_results_cards_carry_critique_buttons(store, taste_store, stu
     assert any("Cheaper" in lb for lb in labels)
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_session_caches_last_results_and_shown_ids(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-006 / REQ-COMPAT-007 — shown_product_ids accumulates."""
+    """REQ-COMPAT-006 / REQ-COMPAT-007 — shown_product_ids accumulates.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 search_node session result caching.
+    Under V2 result bookkeeping is mediated by the agent's search tool.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -449,9 +539,15 @@ async def test_session_caches_last_results_and_shown_ids(store, taste_store, stu
 # ── REQ-COMPAT-002 / REQ-COMPAT-005 — text refine in RESULTS_SENT ──────────
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_text_in_results_sent_triggers_critique_path(store, taste_store, stub_port, adapter, monkeypatch):
-    """REQ-COMPAT-002 — free-text refine in RESULTS_SENT routes via router."""
+    """REQ-COMPAT-002 — free-text refine in RESULTS_SENT routes via router.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — V1 router CRITIQUE_TEXT → critique_apply
+    → search with delta. Under V2 free-text refine is the agent's
+    refine_search tool decision.
+    """
     sess = store.get_or_create(42)
     sess.state = SessionState.RESULTS_SENT
     sess.image_url = "https://i.pinimg.com/originals/x.jpg"
@@ -489,9 +585,14 @@ def test_scenario_module_deleted():
 # ── REQ-COMPAT-002 — picker tap → intent reply → search regression ─────────
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_pick_callback_then_intent_text_runs_search(store, taste_store, stub_port, adapter):
-    """REQ-COMPAT-002 — after picker tap (item:0), session is AWAITING_INTENT.
+    """SPEC-AGENT-V2-REACT (Bucket B2) — the bare-pick step is deterministic in
+    V2 (pick_item node preserved) but the follow-up intent-text → search step
+    is agent-tool-mediated; the test asserts the V1 search-routing tail.
+
+    REQ-COMPAT-002 — after picker tap (item:0), session is AWAITING_INTENT.
     Subsequent text reply must run search and dispatch cards. Regression for
     SPEC-AGENT-001 migration: original `_route_after_pick` routed to
     `critique_apply` which had no handler for `item:N` callbacks → silent
@@ -523,9 +624,14 @@ async def test_pick_callback_then_intent_text_runs_search(store, taste_store, st
     assert adapter.cards, f"cards must be dispatched, got texts={adapter.texts}"
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_full_pinterest_flow_pick_then_intent(store, taste_store, stub_port, adapter, monkeypatch):
-    """REQ-COMPAT-002 — end-to-end: Pinterest URL → vision multi → picker →
+    """SPEC-AGENT-V2-REACT (Bucket B2) — the Pinterest→vision→picker prefix is
+    deterministic in V2 but the final intent-text → search → cards step is
+    agent-tool-mediated; the test asserts the V1 search-routing tail.
+
+    REQ-COMPAT-002 — end-to-end: Pinterest URL → vision multi → picker →
     tap → intent text → search → cards dispatched. Validates that resolve_image
     + vision_node persist `image_url` / `detected_items` to the session so the
     later turns can resolve item context.
@@ -605,12 +711,17 @@ async def test_session_image_url_persisted_after_resolve_vision(store, taste_sto
 # ── REQ-AGENT-008 — one webhook = one graph execution ─────────────────────
 
 
+@_skip_v1_flow
 @pytest.mark.asyncio
 async def test_two_consecutive_webhooks_run_two_graph_executions(store, taste_store, stub_port, adapter):
     """REQ-AGENT-008 — each ainvoke is a distinct execution.
 
     Verified by the StubPort.calls counter — two valid search-triggering
     inputs result in two port calls.
+
+    SPEC-AGENT-V2-REACT (Bucket B2) — counts V1 search-node invocations
+    (stub_port.calls == 2). Under V2 the search-tool dispatch is
+    agent-mediated; this is a pure V1 topology detail.
     """
     sess = store.get_or_create(42)
     sess.state = SessionState.AWAITING_INTENT
