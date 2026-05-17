@@ -190,3 +190,31 @@ implicit_feedback errors from the rejected star-shim are fully resolved).
 `import app.main` OK. ruff clean.
 
 STOP — PR5-6 (domain / contract) + PR-final deferred to later layers.
+
+### IMPROVE phase — PR5 (domain/DTO split) complete — 2026-05-17
+
+Additive scaffolding, zero behavior change. Internal domain layer +
+shared type aliases introduced, separate from the Pydantic transport DTOs
+in app/models/ (REQ-AI-005, PR5 of 6).
+
+**Files created (additive only — NO existing file modified):**
+- `app/core/types.py` — framework-agnostic aliases (`RpcRow`, `CountMap`,
+  `LatencyMap`).
+- `app/domain/__init__.py` — re-exports the domain model.
+- `app/domain/search.py` — `SearchCandidate` (frozen slots dataclass) +
+  `search_candidate_from_row` mapper applying the EXACT field coercions the
+  runner uses inline today (missing score -> 0.0, absent brand/name -> "",
+  id -> str). Verified equivalent at runtime.
+
+**Behavior preservation:** `app/models/` (RecommendResponse/Candidate
+Pydantic DTOs) and `app/pipeline/runner.py` serialization path are
+UNTOUCHED — the Net(1) response snapshot is byte-identical. The domain
+layer is the additive seam for SPEC-SEARCH-UNIFY-001 v6 to evolve internal
+types independently; it is not yet wired into the hot path (wiring would
+risk serialization drift against the HARD Net(1) lock).
+
+**Gate result:**
+46 passed; golden diff empty (zero change). ruff clean on
+`app/domain/ app/core/types.py`. `import app.main` OK.
+
+STOP — PR6 (RPC contract validation) + PR-final deferred.
