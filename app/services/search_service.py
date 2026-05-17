@@ -19,6 +19,10 @@ from app.infrastructure.repositories.search_repository import SearchRepository
 from app.infrastructure.repositories.search_repository import (
     embedding_to_pgvector as _embedding_to_pgvector,
 )
+
+# search_rpc_contract imports only pydantic/typing (no app.* back-edge) so a
+# module-top import is cycle-free -- no lazy/seam pattern needed here.
+from app.infrastructure.repositories.search_rpc_contract import RpcContractError
 from app.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -58,7 +62,26 @@ async def search_service(state: PipelineState) -> PipelineState:
     diag_params["query_embedding_dim"] = len(state.embedding)
     logger.info("[STEP 4.5][search] Supabase RPC 호출 시작 — fn=search_products_v5 params=%s", diag_params)
 
-    rows = await SearchRepository.search(params)
+    # REQ-AI-006: SearchRepository.search raises RpcContractError when the RPC
+    # returns a row violating the documented contract. Catch it at the SERVICE
+    # boundary (the contract-raise stays at the repository so the
+    # validate_rpc_rows unit assertions remain valid). We log ONE structured
+    # ERROR line with ONLY the row index + exception class name -- explicitly
+    # NOT str(exc)/the pydantic detail/row values (no row content in logs or
+    # response: avoids info disclosure). Then fail OPEN: rows=[] and continue
+    # the normal empty-result path (matches the codebase's existing
+    # raw_count=0 resilience pattern; persistent drift no longer 502s/DoSes).
+    # The drift is still surfaced (REQ-AI-006 "surface, not silent") via this
+    # ERROR log + the Langfuse trace, without leaking row content.
+    try:
+        rows = await SearchRepository.search(params)
+    except RpcContractError as exc:
+        logger.error(
+            "[STEP 4.5][search] RPC contract drift -- failing open to empty result (row_index=%s exc=%s)",
+            exc.row_index,
+            type(exc).__name__,
+        )
+        rows = []
     state.raw_candidates = rows
     state.counts["raw"] = len(rows)
 

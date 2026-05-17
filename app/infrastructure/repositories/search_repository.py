@@ -10,12 +10,13 @@ RPC name or constructs the param dict.
 the fn_name it passes are identical to the pre-extraction values; the
 characterization Net(3) param snapshot is unchanged.
 
-Patch-seam preservation: the RPC is dispatched through the
-`app.pipeline.search` module's `SupabaseProvider` name (resolved at call
-time) so the existing monkeypatch seam
-(`app.pipeline.search.SupabaseProvider.rpc`) used by the characterization net
-and tests/test_pipeline_with_enhance.py keeps intercepting byte-identically.
-PR3 (REQ-AI-003) introduces DI; relocating the seam is out of scope here.
+Patch-seam preservation: the RPC is dispatched through DatabaseService
+(SPEC-ARCH-AI-001 PR1 DI seam, now wired -- review P1-b). DatabaseService
+resolves the `SupabaseProvider` CLASS attribute at call time; the existing
+monkeypatch seam (`app.pipeline.search.SupabaseProvider.rpc`) mutates that
+same shared class object, so the characterization net and
+tests/test_pipeline_with_enhance.py keep intercepting byte-identically.
+PR3 (REQ-AI-003) introduces full DI; relocating the seam is out of scope.
 """
 
 from __future__ import annotations
@@ -74,12 +75,16 @@ class SearchRepository:
     async def search(params: dict[str, Any]) -> list[dict[str, Any]]:
         """Invoke the `search_products_v5` RPC with the supplied params.
 
-        Dispatched through app.pipeline.search so the monkeypatch seam
-        app.pipeline.search.SupabaseProvider.rpc is honored byte-identically.
+        Dispatched through the SPEC-mandated DatabaseService DI seam
+        (review P1-b: previously DatabaseService was exported but never
+        wired). DatabaseService resolves the SupabaseProvider class attribute
+        at call time; the monkeypatch seam
+        `app.pipeline.search.SupabaseProvider.rpc` mutates that same shared
+        class object, so interception stays byte-identical.
         """
-        import app.pipeline.search as _search_module
+        from app.services.database_service import DatabaseService
 
-        rows = await _search_module.SupabaseProvider.rpc(_RPC_NAME, params)
+        rows = await DatabaseService.rpc(_RPC_NAME, params)
         # REQ-AI-006: validate the RPC response shape BEFORE it flows into
         # scoring/diversify. validate_rpc_rows returns the ORIGINAL rows
         # untouched on success (no coercion) so the happy path is
