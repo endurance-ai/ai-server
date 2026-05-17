@@ -20,9 +20,9 @@ import pytest
 from app.agents import _memory_context
 from app.agents import react_loop as rl
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 # Taste-store reset + settings snapshot/restore handled centrally by
 # tests/test_agent_v3/conftest.py::_v3_isolation (autouse).
@@ -31,7 +31,7 @@ from app.graphs.state import WorkingState
 @pytest.mark.asyncio
 async def test_ac_p_2_memory_assembly_under_50ms(monkeypatch):
     """AC-P.2 — build_memory_context assembly overhead < 50ms."""
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:99")
     prof.liked_brands = {f"b{i}": float(i) for i in range(50)}

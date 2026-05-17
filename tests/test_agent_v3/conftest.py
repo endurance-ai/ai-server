@@ -77,7 +77,7 @@ def _v3_isolation():
             "app.agents.tool_registry",
             "app.agents.tools.update_taste",
             "app.agents.tools.search_products",
-            "app.channels.taste_profile",
+            "app.infrastructure.memory.taste_profile",
         ):
             mod = sys.modules.get(modname)
             if mod is not None and hasattr(mod, "settings"):
@@ -87,7 +87,7 @@ def _v3_isolation():
     snapshot = {a: getattr(live, a) for a in _GUARDED_SETTINGS_ATTRS if hasattr(live, a)}
 
     # 3. Reset taste-store singleton + tool REGISTRY to V2 baseline (pre-test).
-    from app.channels import taste_profile as _tp
+    from app.infrastructure.memory import taste_profile as _tp
 
     _tp._store = None
     try:

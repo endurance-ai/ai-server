@@ -13,9 +13,9 @@ import pytest
 
 from app.agents import react_loop as rl
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 
 class _FakeAIMessage:
@@ -72,7 +72,7 @@ async def test_ac_1_1_taste_and_recent_injected(monkeypatch, _mock_adapter):
     and get_recent_history is NOT in tool_call_history (implicit injection)."""
     monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
 
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     store = get_taste_store()
     prof = store.get_or_create("u:99")
@@ -112,7 +112,7 @@ async def test_ac_1_2_fail_soft_empty(monkeypatch, _mock_adapter):
     """AC-1.2 — flag ON, empty taste + empty history → placeholder, loop OK."""
     monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
 
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     get_taste_store().get_or_create("u:99")  # empty profile
 
@@ -135,7 +135,7 @@ async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
     monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "AGENT_V3_MEMORY_MAX_TOKENS", 60, raising=False)
 
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:99")
     prof.liked_keywords = {f"kw{i}": 1.0 for i in range(50)}
@@ -214,7 +214,7 @@ async def test_build_memory_context_taste_store_failure_fail_soft(monkeypatch):
     def _boom():
         raise RuntimeError("store down")
 
-    monkeypatch.setattr("app.channels.taste_profile.get_taste_store", _boom)
+    monkeypatch.setattr("app.infrastructure.memory.taste_profile.get_taste_store", _boom)
     monkeypatch.setattr(
         "app.agents.tools.get_recent_history.dispatch",
         AsyncMock(return_value={"ok": True, "events": []}),
@@ -227,7 +227,7 @@ async def test_build_memory_context_taste_store_failure_fail_soft(monkeypatch):
 async def test_build_memory_context_includes_disliked_brands(monkeypatch):
     """_memory_context L56 — disliked_brands summary line is emitted."""
     import app.agents._memory_context as mc
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:1")
     prof.disliked_brands = {"shein": 3.0}  # >= exclude threshold 1.5
@@ -244,7 +244,7 @@ async def test_build_memory_context_includes_disliked_brands(monkeypatch):
 async def test_build_memory_context_recent_history_failure_fail_soft(monkeypatch):
     """_memory_context L71-73 — get_recent_history raising → empty recent lines."""
     import app.agents._memory_context as mc
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     get_taste_store().get_or_create("u:1")
 
@@ -261,7 +261,7 @@ async def test_build_memory_context_hard_truncation_fallback(monkeypatch):
     """_memory_context L124-126 — a single oversized taste line still exceeding
     cap*4 after dropping recent lines hits the hard inner-truncation fallback."""
     import app.agents._memory_context as mc
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:1")
     # One enormous liked-keyword token so the taste line alone blows the cap.

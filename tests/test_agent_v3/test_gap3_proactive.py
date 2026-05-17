@@ -14,9 +14,9 @@ import pytest
 from app.agents import react_loop as rl
 from app.agents import tool_registry as tr
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 
 class _FakeAIMessage:

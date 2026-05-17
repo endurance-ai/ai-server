@@ -157,7 +157,7 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     if not user_key:
         return cands
     try:
-        from app.channels.taste_profile import get_taste_store
+        from app.infrastructure.memory.taste_profile import get_taste_store
 
         profile = get_taste_store().get_or_create(user_key)
         ex_brands, ex_keywords = profile.recency_weighted_excludes(time.time())

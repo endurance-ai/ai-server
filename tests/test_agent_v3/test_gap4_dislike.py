@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.channels.taste_profile import TasteProfile
 from app.core.config import settings
+from app.infrastructure.memory.taste_profile import TasteProfile
 
 # Taste-store reset + settings snapshot/restore handled centrally by
 # tests/test_agent_v3/conftest.py::_v3_isolation (autouse).
@@ -27,7 +27,7 @@ from app.core.config import settings
 async def test_ac_4_1_records_ts_and_score(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     r = await dispatch({"source": "free_text", "brand_dislikes": ["Zara"]}, {"user_key": "u:7"})
     assert r["ok"] is True
@@ -39,7 +39,7 @@ async def test_ac_4_1_records_ts_and_score(monkeypatch):
 def test_ac_4_1_serialization_compat_and_old_row_load():
     """New profile serializes via Jsonb-compatible dicts; old short tuple loads
     with empty ts dicts (no KeyError) — REQ-AGENT-V3-DISLIKE-SCHEMA-001."""
-    from app.channels.taste_profile_pg import _row_to_profile
+    from app.infrastructure.memory.taste_profile_pg import _row_to_profile
 
     prof = TasteProfile(user_key="u:7", disliked_brands_ts={"zara": 123.0})
     # Both new dicts are json-serializable.
@@ -97,7 +97,7 @@ async def test_ac_4_2_cross_thread_search_discount(monkeypatch):
     """thread A dislike gucci → thread B search drops gucci candidates."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_brands_ts["gucci"] = time.time()
@@ -118,7 +118,7 @@ async def test_ac_4_2_cross_thread_search_discount(monkeypatch):
 async def test_ac_4_3_flag_off_no_ts_record(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", False, raising=False)
     from app.agents.tools.update_taste import dispatch
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     await dispatch({"source": "free_text", "brand_dislikes": ["Zara"]}, {"user_key": "u:7"})
     prof = get_taste_store().get_or_create("u:7")
@@ -129,7 +129,7 @@ async def test_ac_4_3_flag_off_no_ts_record(monkeypatch):
 def test_ac_4_3_flag_off_discount_noop(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", False, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_brands_ts["gucci"] = time.time()
@@ -146,7 +146,7 @@ def test_ac_4_3_flag_off_discount_noop(monkeypatch):
 async def test_e6_dislike_then_like_pop_semantics(monkeypatch):
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     await dispatch({"source": "free_text", "brand_dislikes": ["ami"]}, {"user_key": "u:7"})
     await dispatch({"source": "free_text", "brand_likes": ["ami"]}, {"user_key": "u:7"})
@@ -188,7 +188,7 @@ async def test_update_taste_keyword_likes_and_dislikes_flag_on(monkeypatch):
     the Gap4 flag-ON keyword-dislike timestamp record path."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     r = await dispatch(
         {
@@ -220,7 +220,7 @@ async def test_update_taste_store_exception_fail_soft(monkeypatch):
         def get_or_create(self, k):
             raise RuntimeError("pg down")
 
-    monkeypatch.setattr("app.channels.taste_profile.get_taste_store", lambda: _BoomStore())
+    monkeypatch.setattr("app.infrastructure.memory.taste_profile.get_taste_store", lambda: _BoomStore())
     r = await ut.dispatch({"source": "free_text", "brand_dislikes": ["zara"]}, {"user_key": "u:7"})
     assert r["ok"] is False
     assert r["error"] == "store_failed:RuntimeError"
@@ -249,7 +249,7 @@ def test_apply_dislike_discount_store_failure_fail_soft(monkeypatch):
     def _boom():
         raise RuntimeError("store down")
 
-    monkeypatch.setattr("app.channels.taste_profile.get_taste_store", _boom)
+    monkeypatch.setattr("app.infrastructure.memory.taste_profile.get_taste_store", _boom)
     cands = [SimpleNamespace(brand="Gucci", name="x", title="x")]
     assert apply_dislike_discount({"user_key": "u:7"}, cands) is cands
 
@@ -259,7 +259,7 @@ def test_apply_dislike_discount_no_excludes_returns_unchanged(monkeypatch):
     recency-weighted excludes → unchanged."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     get_taste_store().get_or_create("u:7")  # clean profile, no dislikes
     cands = [SimpleNamespace(brand="Ami", name="y", title="y")]
@@ -271,7 +271,7 @@ def test_apply_dislike_discount_keyword_title_filter(monkeypatch):
     candidate whose title matches (the _keep title branch)."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_keywords_ts["neon"] = time.time()
@@ -290,7 +290,7 @@ async def test_refine_search_dispatch_applies_dislike_discount(monkeypatch):
     run_text_only_search + apply_dislike_discount + persist."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools import refine_search
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_brands_ts["gucci"] = time.time()
@@ -334,7 +334,7 @@ async def test_search_products_dispatch_runs_dislike_discount(monkeypatch):
     invokes apply_dislike_discount before persisting."""
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools import search_products as sp
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_brands_ts["gucci"] = time.time()

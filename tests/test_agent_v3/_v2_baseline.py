@@ -17,9 +17,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
-from app.channels.taste_profile import TasteProfile
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
+from app.infrastructure.memory.taste_profile import TasteProfile
 
 # ── 6 representative scenario inputs (AC-X.1) ──────────────────────────────
 # (1) photo + "비슷한 거"  (2) "운동복" text search  (3) "더 저렴한 거"

@@ -50,7 +50,7 @@ def test_memory_context_wraps_only():
     tree = _tree("agents/_memory_context.py")
     imps = _imported_names(tree)
     calls = _called_attrs(tree)
-    assert "app.channels.taste_profile.get_taste_store" in imps
+    assert "app.infrastructure.memory.taste_profile.get_taste_store" in imps
     assert "app.agents.tools.get_recent_history.dispatch" in imps
     # Uses the existing boost/exclude helpers, not a new summarizer.
     assert {"boost_brands", "boost_keywords", "exclude_brands"} <= calls
@@ -96,8 +96,8 @@ def test_suggest_next_step_reuses_adapter_only():
 
 
 def test_gap4_reuses_exclude_brands_no_new_ranking():
-    tree = _tree("channels/taste_profile.py")
-    src = (APP / "channels/taste_profile.py").read_text()
+    tree = _tree("infrastructure/memory/taste_profile.py")
+    src = (APP / "infrastructure/memory/taste_profile.py").read_text()
     calls = _called_attrs(tree)
     # The new helper reuses the EXISTING exclude_brands().
     assert "exclude_brands" in calls

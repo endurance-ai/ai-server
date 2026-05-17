@@ -16,9 +16,9 @@ import pytest
 from app.agents import react_loop as rl
 from app.agents import tool_registry as tr
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 
 class _FakeAIMessage:
@@ -123,7 +123,7 @@ async def test_e2_gap2_and_gap4_pairwise(monkeypatch, _adapter):
     monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
 
-    from app.channels.taste_profile import get_taste_store
+    from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:99")
     import time as _t

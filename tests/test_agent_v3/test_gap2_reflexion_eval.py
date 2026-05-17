@@ -12,9 +12,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.agents import _reflexion
-from app.channels.session import Session, SessionState
 from app.graphs.nodes._evaluator_models import CritiqueScore
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 
 def _state() -> WorkingState:

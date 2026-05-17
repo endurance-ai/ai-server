@@ -2,7 +2,7 @@
 
 @MX:NOTE: [AUTO] WRAP-ONLY — composes existing helpers, defines NO new memory
   or summarization algorithm. Wraps:
-  - app.channels.taste_profile.get_taste_store().get_or_create + TasteProfile
+  - app.infrastructure.memory.taste_profile.get_taste_store().get_or_create + TasteProfile
     .boost_brands / .boost_keywords / .exclude_brands
   - app.agents.tools.get_recent_history.dispatch (its own SELECT +
     _summarize_payload 200-char cap is the payload-truncation policy reused)
@@ -36,7 +36,7 @@ _RECENT_N = 5
 def _taste_lines(user_key: str) -> list[str]:
     """Taste summary via existing TasteProfile boost/exclude helpers only."""
     try:
-        from app.channels.taste_profile import get_taste_store
+        from app.infrastructure.memory.taste_profile import get_taste_store
 
         store = get_taste_store()
         profile = store.get_or_create(user_key)
