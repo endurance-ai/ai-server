@@ -94,3 +94,31 @@ created; `app/pipeline/` kept as thin re-export shims (REQ-AI-001, PR1 of 6).
   pydantic v1 env issue) — NOT introduced by PR1.
 
 STOP — PR2-6 (repository / di / memory / domain / contract) deferred to later runs.
+
+### IMPROVE phase — PR2 (SearchRepository) complete — 2026-05-17
+
+Pure extraction, zero behavior change. `app/infrastructure/repositories/`
+created; the `search_products_v5` RPC name + param-dict mapping now live in
+EXACTLY ONE place — `SearchRepository` (REQ-AI-002, PR2 of 6).
+
+**Files created:**
+- `app/infrastructure/__init__.py`
+- `app/infrastructure/repositories/__init__.py` (re-exports `SearchRepository`)
+- `app/infrastructure/repositories/search_repository.py` — `_RPC_NAME =
+  "search_products_v5"` (sole literal) + `SearchRepository.build_params` (the
+  param dict moved VERBATIM from search_service) + `SearchRepository.search`
+  (dispatches via `app.pipeline.search.SupabaseProvider.rpc` seam) +
+  `embedding_to_pgvector` (moved here, co-located with the param map)
+
+**Files modified:**
+- `app/services/search_service.py` — no longer references the RPC name nor
+  builds the param dict; delegates to `SearchRepository.build_params` +
+  `SearchRepository.search`. Diagnostic log text byte-identical. Back-compat
+  `embedding_to_pgvector` re-export preserved for the pipeline shim.
+
+**Gate result:**
+46 passed (same 46). `git diff a8eae03 -- tests/test_arch_ai_001/` empty
+(zero golden change). Net(3) 6/6 param-mapping tests green -> captured
+`(fn_name, params)` byte-identical. ruff clean. `import app.main` OK.
+
+STOP — PR3-6 (di / memory / domain / contract) deferred to later layers.

@@ -1,35 +1,35 @@
-"""Search service (SPEC-ARCH-AI-001 PR1).
+"""Search service (SPEC-ARCH-AI-001 PR1 + PR2).
 
-Search orchestration + query-text selection extracted VERBATIM from the
-former app/pipeline/search.py inline body. The actual RPC invocation still
-goes through SupabaseProvider.rpc exactly as before with identical params;
-moving that call into a repository is PR2 (REQ-AI-002), out of scope here.
+Search orchestration + query-text selection. PR2 (REQ-AI-002): the RPC name
+and param-dict construction moved OUT of this service into
+app/infrastructure/repositories/search_repository.py — this service no longer
+references "search_products_v5" or builds the param dict; it delegates both
+to SearchRepository. The diagnostic log lines below are byte-identical to the
+pre-PR2 text (REQ-AI-007) so no characterization assertion shifts.
 
-SupabaseProvider is resolved at call time via the app.pipeline.search module
-so the existing monkeypatch seam (`app.pipeline.search.SupabaseProvider.rpc`)
-used by the characterization net and tests/test_pipeline_with_enhance.py
-keeps working byte-identically. The lazy import also avoids the
-shim<->service circular import.
+The actual RPC invocation still goes through the
+app.pipeline.search.SupabaseProvider.rpc monkeypatch seam (now dispatched
+inside SearchRepository), with the identical (fn_name, params) tuple; the
+Net(3) param snapshot is unchanged. PR3 (REQ-AI-003) introduces DI.
 """
 
 import logging
 
-from app.core.config import settings
+from app.infrastructure.repositories.search_repository import SearchRepository
+from app.infrastructure.repositories.search_repository import (
+    embedding_to_pgvector as _embedding_to_pgvector,
+)
 from app.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
-
-def embedding_to_pgvector(values: list[float]) -> str:
-    """pgvector text input format: '[v1,v2,...]'."""
-    return "[" + ",".join(f"{v:.7f}" for v in values) + "]"
+# Back-compat re-export: app/pipeline/search.py shim re-exports this name and
+# tests reference _embedding_to_pgvector. The implementation now lives in the
+# repository (single source for the pgvector format alongside the param map).
+embedding_to_pgvector = _embedding_to_pgvector
 
 
 async def search_service(state: PipelineState) -> PipelineState:
-    # Lazy import: resolves the monkeypatch seam at call time and breaks the
-    # app.pipeline.search (shim) <-> app.services.search_service import cycle.
-    import app.pipeline.search as _search_module
-
     if state.embedding is None:
         raise RuntimeError("search_step requires state.embedding (call embed_step first)")
 
@@ -44,32 +44,21 @@ async def search_service(state: PipelineState) -> PipelineState:
     else:
         query_text = req.item.search_query_ko or req.item.search_query
 
-    params = {
-        "query_embedding": embedding_to_pgvector(state.embedding),
-        "query_text": query_text,
-        "brand_filter": req.brand_filter,
-        # DIAG (임시): gender 매핑 깨짐 ('male' vs DB 'men') + subcategory 100% NULL
-        # → 두 hard filter 가 dense 후보 풀을 0으로 만들어 임베딩 검증 불가
-        # 진단 끝나면 원복: "gender_filter": [req.gender] if req.gender else None
-        #                  "subcategory_filter": req.item.subcategory
-        "gender_filter": None,
-        "subcategory_filter": None,
-        "price_min": req.price_filter.min_price if req.price_filter else None,
-        "price_max": req.price_filter.max_price if req.price_filter else None,
-        "tags_filter": None,
-        "k": settings.SEARCH_DEFAULT_K,
-        "rrf_k": 60,
-    }
+    # REQ-AI-002: param mapping + RPC name owned solely by SearchRepository.
+    params = SearchRepository.build_params(
+        embedding=state.embedding,
+        query_text=query_text,
+        brand_filter=req.brand_filter,
+        price_min=req.price_filter.min_price if req.price_filter else None,
+        price_max=req.price_filter.max_price if req.price_filter else None,
+    )
 
     # RPC 입력 파라미터 — query_embedding 은 길어서 dim 만
     diag_params = {k: v for k, v in params.items() if k != "query_embedding"}
     diag_params["query_embedding_dim"] = len(state.embedding)
     logger.info("[STEP 4.5][search] Supabase RPC 호출 시작 — fn=search_products_v5 params=%s", diag_params)
 
-    # NOTE (PR1): the RPC call stays here (dispatched through app.pipeline.search
-    # so the monkeypatch seam app.pipeline.search.SupabaseProvider.rpc is
-    # honored). PR2 (REQ-AI-002) relocates this into SearchRepository.
-    rows = await _search_module.SupabaseProvider.rpc("search_products_v5", params)
+    rows = await SearchRepository.search(params)
     state.raw_candidates = rows
     state.counts["raw"] = len(rows)
 
