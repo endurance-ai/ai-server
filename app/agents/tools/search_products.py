@@ -22,9 +22,11 @@ fabricated-placeholder-URL → Modal regression.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from app.agents.tool_registry import SearchProductsResult
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,47 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
     except Exception as exc:  # noqa: BLE001 — never break the search tool
         logger.debug("[tool.search_products] persist_last_results failed: %r", exc)
         return 0
+
+
+def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
+    """SPEC-AGENT-V3-REACT Gap4 — flag-gated cross-thread dislike discount.
+
+    flag OFF → returns `cands` unchanged (V2 byte-identical; no store read).
+    flag ON → reads the user's TasteProfile recency-weighted dislike excludes
+    and drops candidates whose brand/title matches — REUSING the EXACT same
+    client-side title/brand filter pattern `refine_search` already applies for
+    `exclude_keywords`. No new ranking, no new search algorithm.
+
+    @MX:NOTE: [AUTO] additive — reuses the existing exclude filter pattern,
+      flag-gated, no new ranking.
+    @MX:SPEC: SPEC-AGENT-V3-REACT
+    """
+    if not settings.AGENT_V3_DISLIKE_MEMORY_ENABLED or not cands:
+        return cands
+    user_key = ctx.get("user_key")
+    if not user_key:
+        return cands
+    try:
+        from app.channels.taste_profile import get_taste_store
+
+        profile = get_taste_store().get_or_create(user_key)
+        ex_brands, ex_keywords = profile.recency_weighted_excludes(time.time())
+    except Exception as exc:  # noqa: BLE001 — never break search
+        logger.debug("[tool.search_products] dislike discount skipped: %r", exc)
+        return cands
+    if not ex_brands and not ex_keywords:
+        return cands
+    eb = {b.lower() for b in ex_brands}
+    ek = {k.lower() for k in ex_keywords}
+
+    def _keep(c: Any) -> bool:
+        brand = (getattr(c, "brand", "") or "").lower()
+        if brand and brand in eb:
+            return False
+        title = (getattr(c, "title", "") or getattr(c, "name", "") or "").lower()
+        return not any(k in title for k in ek)
+
+    return [c for c in cands if _keep(c)]
 
 
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
@@ -267,6 +310,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         return SearchProductsResult(
             ok=False, error=f"pipeline_failed:{type(exc).__name__}", candidates_count=0, top_candidates=[]
         )
+
+    # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting
+    # (flag-gated; OFF → cands unchanged → V2 byte-identical).
+    cands = apply_dislike_discount(ctx, cands)
 
     # Persist FULL candidates for the turn so `respond` can render real cards
     # internally (the LLM never hand-serializes cards). LLM context still gets

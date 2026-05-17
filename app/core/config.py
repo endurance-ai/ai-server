@@ -216,6 +216,21 @@ class Settings(BaseSettings):
     # truncating a legit card batch (SPEC-AGENT-V2-REACT double-send fix).
     AGENT_RESPOND_TIMEOUT_S: float = 30.0
 
+    # SPEC-AGENT-V3-REACT — incremental enhancements (4 independent sub-flags) ─
+    # @MX:SPEC: SPEC-AGENT-V3-REACT
+    # Each gates exactly one gap; all default false → byte-identical V2 when
+    # the master gate (AGENT_V2_REACT_ENABLED + AGENT_LLM_MODEL) is active.
+    # Gap1 — auto memory injection (REQ-AGENT-V3-MEM-FLAG-001).
+    AGENT_V3_MEMORY_INJECTION_ENABLED: bool = False
+    # Gap2 — Reflexion loop (REQ-AGENT-V3-REFLEX-FLAG-001).
+    AGENT_V3_REFLEXION_ENABLED: bool = False
+    # Gap3 — proactive suggestion + suggest_next_step tool (REQ-AGENT-V3-PROACT-FLAG-001).
+    AGENT_V3_PROACTIVE_ENABLED: bool = False
+    # Gap4 — cross-thread dislike memory (REQ-AGENT-V3-DISLIKE-FLAG-001).
+    AGENT_V3_DISLIKE_MEMORY_ENABLED: bool = False
+    # Gap1 memory-injection payload token cap (char-approx ×4) (REQ-AGENT-V3-MEM-CAP-001).
+    AGENT_V3_MEMORY_MAX_TOKENS: int = 1500
+
     @field_validator("APIFY_PINTEREST_MAX_ITEMS")
     @classmethod
     def _validate_apify_max_items(cls, v: int) -> int:

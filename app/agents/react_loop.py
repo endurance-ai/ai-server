@@ -72,6 +72,20 @@ _SYSTEM_PROMPT = (
 )
 
 
+# SPEC-AGENT-V3-REACT Gap3 — proactive directive, appended to the system
+# prompt ONLY when AGENT_V3_PROACTIVE_ENABLED. flag OFF → not appended →
+# _SYSTEM_PROMPT byte-identical V2 (REQ-AGENT-V3-PROACT-FLAG-001).
+# @MX:SPEC: SPEC-AGENT-V3-REACT
+_PROACTIVE_DIRECTIVE = (
+    "Be proactive. When a `search_products` / `refine_search` result is weak "
+    "(candidates_count < 3), do NOT just respond with an apology — first call "
+    "`suggest_next_step` to offer concrete follow-up options (similar items, "
+    "different fit, another mood, or broaden). When the user's intent is "
+    "ambiguous, prefer calling `ask_user_clarification` BEFORE searching rather "
+    "than guessing. Always end the turn with `respond`."
+)
+
+
 # Transient-error backoff schedules (seconds). Indexed by attempt number
 # (0-based: the i-th retry sleeps _LLM_BACKOFF[i] before re-issuing). Kept
 # short — the per-turn wall-clock / token budget still bounds total cost.
@@ -255,6 +269,52 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
     return "\n".join(parts)
 
 
+# SPEC-AGENT-V3-REACT Gap2 — per-turn Reflexion bound (REQ-AGENT-V3-REFLEX-BOUND-001).
+_V3_REFLEXION_COUNT_KEY = "_v3_reflexion_count"
+
+
+async def _maybe_reflexion(
+    state: WorkingState, sess: Any, ctx: dict[str, Any], turn_deadline: float
+) -> dict[str, Any] | None:
+    """Run one bounded Reflexion evaluation. Returns the `_quality` dict to
+    merge into the ToolMessage, or None when skipped (cap reached / deadline /
+    error). NEVER mutates `history` or consumes a ReAct iteration.
+
+    @MX:WARN: [AUTO] The evaluator call MUST be wrapped in
+      asyncio.wait_for(timeout=remaining turn budget). Pre-check is
+      insufficient — EVALUATOR_TIMEOUT_S (8s) may exceed the residual budget,
+      so cancel-on-overrun is normative (REQ-AGENT-V3-REFLEX-DEADLINE-001).
+    @MX:REASON: a non-cancelled slow evaluator overruns turn_deadline and the
+      inherited p95<8s budget; the wait_for wrap mechanically bounds it.
+    @MX:SPEC: SPEC-AGENT-V3-REACT
+    """
+    # Bound: per-turn evaluator-call cap = SELF_CRITIQUE_MAX_ITERATIONS.
+    max_calls = max(0, int(settings.SELF_CRITIQUE_MAX_ITERATIONS))
+    count = int(ctx.get(_V3_REFLEXION_COUNT_KEY, 0))
+    if count >= max_calls:
+        return None
+
+    # Residual-budget timeout wrap (REQ-AGENT-V3-REFLEX-DEADLINE-001, D2). The
+    # pre-check alone is insufficient; the wait_for cancels an overrunning
+    # evaluator at the residual boundary (NOT at EVALUATOR_TIMEOUT_S).
+    remaining = max(0.0, turn_deadline - time.monotonic())
+    if remaining <= 0.0:
+        return {"skipped": True, "reason": "deadline"}
+
+    ctx[_V3_REFLEXION_COUNT_KEY] = count + 1
+    try:
+        from app.agents._reflexion import evaluate_search_quality
+
+        quality = await asyncio.wait_for(evaluate_search_quality(state, sess, ctx), timeout=remaining)
+        return quality
+    except TimeoutError:
+        logger.warning("[agent_v3] reflexion cancelled at residual budget boundary")
+        return {"skipped": True, "reason": "deadline"}
+    except Exception as exc:  # noqa: BLE001 — fail-open: never break the loop
+        logger.warning("[agent_v3] reflexion raised, fail-open: %r", exc)
+        return None
+
+
 async def _fallback_respond(state: WorkingState, sess: Any, reason: str) -> dict[str, Any]:
     """REQ-AGENT-LOOP-EXHAUSTION-001 — graceful fallback."""
     lang = session_lang(sess)
@@ -301,9 +361,32 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     ctx = _build_ctx(state, sess)
     user_key = ctx["user_key"]
 
+    # SPEC-AGENT-V3-REACT Gap1 — flag-gated system-context assembly. With the
+    # flag OFF the system content is byte-identical V2 (`_SYSTEM_PROMPT`); the
+    # `_memory_context` module is not even imported. With it ON, a
+    # system-derived, char-capped memory block is appended (the
+    # `_build_user_message` [USER INPUT — DATA ONLY] fence is UNCHANGED).
+    # @MX:SPEC: SPEC-AGENT-V3-REACT
+    # Assembly order is _SYSTEM_PROMPT [+_PROACTIVE_DIRECTIVE] [+memory_context]
+    # (REQ-AGENT-V3-PROACT-PROMPT-001 / E3). Each segment is independently
+    # flag-gated; all flags OFF → byte-identical V2 `_SYSTEM_PROMPT`.
+    system_content = _SYSTEM_PROMPT
+    if settings.AGENT_V3_PROACTIVE_ENABLED:
+        system_content = f"{system_content}\n\n{_PROACTIVE_DIRECTIVE}"
+    if settings.AGENT_V3_MEMORY_INJECTION_ENABLED:
+        try:
+            from app.agents._memory_context import build_memory_context
+
+            mem_block = await build_memory_context(
+                state, sess, ctx, max_tokens=int(settings.AGENT_V3_MEMORY_MAX_TOKENS)
+            )
+            system_content = f"{system_content}\n\n{mem_block}"
+        except Exception as exc:  # noqa: BLE001 — fail-soft to current system content
+            logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
+
     # Use plain dicts to construct messages — avoids langchain message-class imports.
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": _build_user_message(state, sess)},
     ]
 
@@ -583,6 +666,28 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "result_summary": history_entry["result_summary"],
             },
         )
+
+        # ── SPEC-AGENT-V3-REACT Gap2 — Reflexion in-loop evaluation ────────
+        # flag ON & tool ∈ {search_products, refine_search} & result.ok →
+        # wrap the existing evaluator helper, merge a `_quality` marker into
+        # the ToolMessage the LLM sees next so it can AUTONOMOUSLY decide
+        # refine vs respond (V3 never forces a refine).
+        #
+        # Invariants (REQ-AGENT-V3-REFLEX-BOUND-001):
+        #  - per-turn ctx counter `_v3_reflexion_count` < SELF_CRITIQUE_MAX_ITERATIONS
+        #  - evaluator call does NOT touch `history` / `tool_call_history`
+        #  - evaluator call does NOT consume a ReAct iteration (in-dispatch
+        #    side call) → infinite-loop guard unaffected
+        # flag OFF → `result` unchanged → ToolMessage byte-identical V2.
+        if (
+            settings.AGENT_V3_REFLEXION_ENABLED
+            and tool_name in ("search_products", "refine_search")
+            and isinstance(result, dict)
+            and result.get("ok")
+        ):
+            quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
+            if quality is not None:
+                result = {**result, "_quality": quality}
 
         # Termination check (REQ-AGENT-LOOP-TERMINATION-001).
         if REGISTRY[tool_name]["terminates_loop"]:

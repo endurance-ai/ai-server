@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -40,6 +41,13 @@ class TasteProfile:
     price_min_observed: int | None = None
     price_max_observed: int | None = None
     last_active: float = field(default_factory=lambda: time.time())
+    # SPEC-AGENT-V3-REACT Gap4 — additive cross-thread dislike timestamps.
+    # Per-key single last-dislike epoch seconds (OQ-V3-3 resolved). Default
+    # empty so old serialized rows deserialize without KeyError. The existing
+    # disliked_* score dicts + reinforce_disliked_* semantics are UNCHANGED.
+    # @MX:SPEC: SPEC-AGENT-V3-REACT
+    disliked_brands_ts: dict[str, float] = field(default_factory=dict)
+    disliked_keywords_ts: dict[str, float] = field(default_factory=dict)
 
     def reinforce_liked_brand(self, brand: str, weight: float = 1.0) -> None:
         if not brand:
@@ -96,6 +104,41 @@ class TasteProfile:
     def boost_keywords(self, top_n: int = 5) -> list[str]:
         return [k for k, _ in sorted(self.liked_keywords.items(), key=lambda kv: -kv[1])[:top_n]]
 
+    def recency_weighted_excludes(
+        self, now: float, *, half_life_s: float = 60 * 60 * 24 * 30
+    ) -> tuple[list[str], list[str]]:
+        """SPEC-AGENT-V3-REACT Gap4 — recency-weighted dislike exclude lists.
+
+        Returns (exclude_brands, exclude_keywords). Reuses the EXISTING
+        `exclude_brands()` (score>=1.5) as the base brand set, then layers an
+        exponential recency weight on the timestamp dicts (OQ-V3-7 — consistent
+        with the dataclass's existing 0.9 exponential decay philosophy):
+
+            recency = 0.5 ** ((now - ts) / half_life_s)   # ∈ (0, 1]
+
+        A dislike still in the score-threshold base is always excluded; a
+        recently-timestamped dislike (recency >= 0.5, i.e. within one
+        half-life) is also excluded even if its score has decayed below 1.5.
+        Keyword excludes are derived purely from recency (no prior V2 keyword
+        exclude method to reuse — additive, no new ranking). half_life_s
+        defaults to the 30-day taste TTL so this never out-lives the profile.
+
+        @MX:NOTE: [AUTO] additive — reuses exclude_brands(), no schema break,
+          no new search/ranking algorithm.
+        @MX:SPEC: SPEC-AGENT-V3-REACT
+        """
+        hl = max(1.0, float(half_life_s))
+
+        def _recent(ts: float) -> bool:
+            return math.pow(0.5, max(0.0, now - float(ts)) / hl) >= 0.5
+
+        base_brands = set(self.exclude_brands())
+        for b, ts in self.disliked_brands_ts.items():
+            if _recent(ts):
+                base_brands.add(b)
+        ex_keywords = [k for k, ts in self.disliked_keywords_ts.items() if _recent(ts)]
+        return sorted(base_brands), ex_keywords
+
     def _cap(self) -> None:
         if len(self.liked_brands) > _MAX_BRANDS:
             self.liked_brands = dict(sorted(self.liked_brands.items(), key=lambda kv: -kv[1])[:_MAX_BRANDS])
@@ -105,6 +148,14 @@ class TasteProfile:
             self.liked_keywords = dict(sorted(self.liked_keywords.items(), key=lambda kv: -kv[1])[:_MAX_KEYWORDS])
         if len(self.disliked_keywords) > _MAX_KEYWORDS:
             self.disliked_keywords = dict(sorted(self.disliked_keywords.items(), key=lambda kv: -kv[1])[:_MAX_KEYWORDS])
+        # SPEC-AGENT-V3-REACT Gap4 — keep ts dicts bounded too. No-op when the
+        # Gap4 flag is off (dicts stay empty → byte-identical V2 _cap result).
+        if len(self.disliked_brands_ts) > _MAX_BRANDS:
+            self.disliked_brands_ts = dict(sorted(self.disliked_brands_ts.items(), key=lambda kv: -kv[1])[:_MAX_BRANDS])
+        if len(self.disliked_keywords_ts) > _MAX_KEYWORDS:
+            self.disliked_keywords_ts = dict(
+                sorted(self.disliked_keywords_ts.items(), key=lambda kv: -kv[1])[:_MAX_KEYWORDS]
+            )
 
 
 def user_key_for(from_user_id: int | None, chat_id: int) -> str:

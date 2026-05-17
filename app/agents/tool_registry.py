@@ -32,6 +32,8 @@ __all__ = [
     "AskUserClarificationArgs",
     "GetRecentHistoryArgs",
     "RespondArgs",
+    # SPEC-AGENT-V3-REACT Gap3 — 8th tool (flag-gated registration)
+    "SuggestNextStepArgs",
     # Tool results
     "AnalyzeImageResult",
     "SearchProductsResult",
@@ -40,6 +42,7 @@ __all__ = [
     "AskUserClarificationResult",
     "GetRecentHistoryResult",
     "RespondResult",
+    "SuggestNextStepResult",
     # Helpers
     "validate_args",
     "TOOL_NAMES",
@@ -118,6 +121,13 @@ class GetRecentHistoryArgs(TypedDict, total=False):
     event_types: list[str]  # optional filter
 
 
+class SuggestNextStepArgs(TypedDict, total=False):
+    # SPEC-AGENT-V3-REACT Gap3 — proactive follow-up options card.
+    kind: Literal["similar", "fit_change", "different_mood", "broaden", "generic"]
+    options: list[str]
+    prompt: str
+
+
 class RespondArgs(TypedDict, total=False):
     # NOTE (SPEC-AGENT-V2-REACT cards-spam fix): `cards` is intentionally NOT a
     # field. The LLM (esp. nova-lite) cannot serialize search candidates and
@@ -181,6 +191,13 @@ class RespondResult(TypedDict, total=False):
     error: str | None
     text_sent: bool
     cards_sent: int
+
+
+class SuggestNextStepResult(TypedDict, total=False):
+    ok: bool
+    error: str | None
+    card_sent: bool
+    kind: str
 
 
 # ── Metadata + REGISTRY ────────────────────────────────────────────────────
@@ -299,7 +316,60 @@ REGISTRY: dict[str, ToolMetadata] = {
     },
 }
 
+# SPEC-AGENT-V3-REACT Gap3 — flag-aware 8th tool registration. Module-load
+# time branch (OQ-V3-6 resolved): settings are lifespan-fixed so there is no
+# race, and the byte-identical-OFF guard is unambiguous (REGISTRY is exactly
+# the V2 7-tool when AGENT_V3_PROACTIVE_ENABLED is false).
+# @MX:NOTE: [AUTO] flag-aware 8th tool — byte-identical 7-tool when flag OFF
+# @MX:SPEC: SPEC-AGENT-V3-REACT
+from app.core.config import settings as _settings  # noqa: E402
+
+if _settings.AGENT_V3_PROACTIVE_ENABLED:
+    REGISTRY["suggest_next_step"] = {
+        "name": "suggest_next_step",
+        "description": (
+            "Proactively send the user a follow-up options card (similar items, "
+            "fit change, different mood, broaden). Use when results are weak "
+            "(candidates_count < 3) or to offer next steps. Does NOT terminate "
+            "the loop — follow with `respond` once the user has options."
+        ),
+        "args_typeddict": SuggestNextStepArgs,
+        "result_typeddict": SuggestNextStepResult,
+        "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
+        "langfuse_span_tag": "tool.suggest_next_step",
+        "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
+        "terminates_loop": False,
+    }
+
 TOOL_NAMES: tuple[str, ...] = tuple(REGISTRY.keys())
+
+
+def _rebuild_registry_for_flag(enabled: bool) -> None:
+    """Test-only — re-evaluate the Gap3 8th-tool registration.
+
+    Production registers once at module load (OQ-V3-6). Tests that flip
+    `AGENT_V3_PROACTIVE_ENABLED` after import call this to mirror what a
+    fresh interpreter / lifespan boot would produce, then restore.
+    """
+    global TOOL_NAMES
+    REGISTRY.pop("suggest_next_step", None)
+    if enabled:
+        REGISTRY["suggest_next_step"] = {
+            "name": "suggest_next_step",
+            "description": (
+                "Proactively send the user a follow-up options card (similar items, "
+                "fit change, different mood, broaden). Use when results are weak "
+                "(candidates_count < 3) or to offer next steps. Does NOT terminate "
+                "the loop — follow with `respond` once the user has options."
+            ),
+            "args_typeddict": SuggestNextStepArgs,
+            "result_typeddict": SuggestNextStepResult,
+            "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
+            "langfuse_span_tag": "tool.suggest_next_step",
+            "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
+            "terminates_loop": False,
+        }
+    TOOL_NAMES = tuple(REGISTRY.keys())
 
 
 # ── Args validation (REQ-AGENT-TOOL-DISPATCH-001) ─────────────────────────
