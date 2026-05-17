@@ -187,6 +187,38 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     return kept
 
 
+def _is_zero_dense_noise(row: Any) -> bool:
+    """A pure-dense, no-keyword-match RPC row (zero-sentinel pollution).
+
+    iff ``dense_rank is not None AND sparse_rank is None``. This is the EXACT
+    predicate ``search_service`` already uses for its ``dense_only`` log
+    breakdown — single source for "what is dense-only" (no new heuristic).
+    On the zero-sentinel text path such a row carries NO query signal: the
+    zero vector still yields a deterministic pgvector ranking, so RRF assigns
+    it a real fusion score and it pollutes the top instead of sinking.
+    """
+    if not isinstance(row, dict):
+        return False
+    return row.get("dense_rank") is not None and row.get("sparse_rank") is None
+
+
+def _suppress_zero_dense_noise(rows: list[Any]) -> list[Any]:
+    """Drop pure-dense zero-sentinel pollution; keep sparse-only + both.
+
+    Stopgap (SPEC: search-logic rework tracked separately). Applied ONLY in
+    the zero-vector text-only path (caller-gated structurally — see
+    ``run_text_only_search``). Sparse-only and both rows carry the actual
+    pgroonga query and are preserved verbatim in order. Returns the filtered
+    list (may be shorter / empty — few-correct beats many-garbage; downstream
+    empty-result handling already degrades gracefully).
+    """
+    kept = [r for r in rows if not _is_zero_dense_noise(r)]
+    dropped = len(rows) - len(kept)
+    if dropped:
+        logger.info("🧹 [search] zero-dense suppressed · dropped=%d kept=%d", dropped, len(kept))
+    return kept
+
+
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
     try:
@@ -220,9 +252,14 @@ async def run_text_only_search(
     """Text/sparse-only search — reuses the EXISTING search_step + diversify_step.
 
     No image, no Modal call. A zero dense vector is injected so the RPC's
-    pgroonga (sparse) branch fully drives ranking; RRF + diversify push the
-    zero-vector dense noise below the real sparse hits. Shared by
-    `search_products` and `refine_search` text-only paths.
+    pgroonga (sparse) branch carries the query. The zero vector still yields a
+    deterministic pgvector dense ranking (1..50), so ``search_products_v5``'s
+    RRF assigns those dense-only rows real fusion scores — in production they
+    pollute the top instead of sinking (verified: a constant zero-dense item
+    ranked #1 for every unrelated query). STOPGAP (larger search-logic rework
+    tracked separately): pure-dense zero-noise rows are dropped before
+    diversify so only query-relevant (sparse-only / both) rows survive. Shared
+    by `search_products` and `refine_search` text-only paths.
 
     Returns the diversified candidate dicts (pipeline `final_candidates`).
     """
@@ -247,6 +284,15 @@ async def run_text_only_search(
     # Bypass embed_step entirely — sentinel URL never reaches Modal.
     state.embedding = [0.0] * _EMBED_DIM
     state = await search_step(state)
+    # STOPGAP zero-dense suppression. Structurally gated: this function ALWAYS
+    # injects the zero sentinel above; the image path is a separate function
+    # (run_image_search → run_pipeline) that never reaches here. The
+    # `not any(...)` guard is a fail-SAFE — if a future refactor ever wired a
+    # real (non-zero) embedding through this function, the filter self-disables
+    # and behavior stays byte-identical to pre-stopgap.
+    if state.embedding is not None and not any(state.embedding):
+        state.raw_candidates = _suppress_zero_dense_noise(state.raw_candidates)
+        state.counts["raw"] = len(state.raw_candidates)
     state = await diversify_step(state)
     return list(state.final_candidates or [])
 
