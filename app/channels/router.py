@@ -31,8 +31,8 @@ from typing import Any
 import httpx
 
 from app.channels.critique import CritiqueDelta
-from app.channels.session import SessionState
 from app.core.config import settings
+from app.infrastructure.memory.session import SessionState
 from app.providers.llm import LLMProvider
 
 logger = logging.getLogger(__name__)

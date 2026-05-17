@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import pytest
 
 from app.channels import router
-from app.channels.session import SessionState
+from app.infrastructure.memory.session import SessionState
 
 
 @dataclass

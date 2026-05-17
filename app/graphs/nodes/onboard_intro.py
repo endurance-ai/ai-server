@@ -32,8 +32,8 @@ from app.channels.onboarding_cards import (
 # Restart keyword detection — canonical source (code review P0-2 fix:
 # previously duplicated here with divergent keyword set vs routing.py).
 from app.channels.onboarding_values import is_restart_keyword as _is_restart_keyword
-from app.channels.session import get_store
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
 from app.observability.langfuse import observe
 from app.observability.langfuse import update_current_span as update_current_observation
 

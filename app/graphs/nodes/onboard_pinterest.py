@@ -35,14 +35,14 @@ from app.channels.pinterest_url import (
     PinInputProfile,
     classify_pinterest_input,
 )
-from app.channels.session import get_store
-from app.channels.taste_profile import get_taste_store, user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.nodes._onboard_helpers import complete_onboarding
 from app.graphs.nodes._onboard_stage import _emit_onboard_select
 from app.graphs.nodes._pinterest_helpers import ingest_pinterest_pins
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
 from app.observability.langfuse import observe
 from app.observability.langfuse import update_current_span as update_current_observation
 from app.providers.apify import run_pinterest_scrape

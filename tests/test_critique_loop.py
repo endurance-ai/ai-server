@@ -18,21 +18,21 @@ import pytest
 
 from app.channels.recommendation import set_port
 from app.channels.schemas import ChannelMessage
-from app.channels.session import (
+from app.graphs.nodes import evaluator as evaluator_module
+from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
+from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
+from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import (
     InMemorySessionStore,
     SessionState,
     set_store,
     shutdown_store,
 )
-from app.channels.taste_profile import (
+from app.infrastructure.memory.taste_profile import (
     InMemoryTasteProfileStore,
     set_taste_store,
     shutdown_taste_store,
 )
-from app.graphs.nodes import evaluator as evaluator_module
-from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
-from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
-from app.graphs.state import WorkingState
 from tests.conftest_graph import FakeAdapter, FakeCandidate, StubPort
 
 # 본 파일은 SPEC-AGENTIC-CRITIQUE-001 의 critique loop 동작을 검증하는데

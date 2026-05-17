@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from app.channels.session import InMemorySessionStore, SessionState, set_store, shutdown_store
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.nodes.apply_clarify import apply_clarify
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store, shutdown_store
 from tests.conftest_graph import FakeAdapter, make_msg
 
 

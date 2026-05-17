@@ -247,3 +247,48 @@ passed (632 baseline + 5 new), 90 skipped, 9 pre-existing failures ONLY,
 zero new. `import app.main` OK. ruff clean.
 
 STOP — PR-final (shim removal) deferred.
+
+### IMPROVE phase — PR-final (compat shim removal) complete — 2026-05-17
+
+Scope-adjusted shim removal, behavior byte-identical.
+
+**Removed (PR4 channels memory shims) + import sites rewritten:**
+- Deleted `app/channels/{session,session_pg,taste_profile,taste_profile_pg}.py`
+  (the sys.modules-alias shims from PR4).
+- Rewrote ALL ~55 import sites (app/ + non-golden tests/) from
+  `app.channels.{session,session_pg,taste_profile,taste_profile_pg}` to the
+  canonical `app.infrastructure.memory.*`. `app.channels._jsonable`
+  deliberately NOT touched (it was never relocated — stays in channels).
+- `tests/test_conversation_log/test_no_autocleanup.py`: retargeted its
+  hardcoded `SESSION_PG_PATH` from `app/channels/session_pg.py` to
+  `app/infrastructure/memory/session_pg.py` (path-only; structural-guard
+  intent — "session_pg has no log_conversation_event ref" — preserved, file
+  content is move-identical so the verdict is unchanged). This is a
+  non-golden test; permitted per the immutability rule (only the 3
+  test_arch_ai_001 nets + conftest + __init__ are immutable).
+- ruff I001 import re-sort applied to 23 app/ + 20 tests/ files (ordering
+  only from the path swap; zero behavior change; golden net untouched).
+
+**RETAINED (contract-forced deviation — NOT removable):**
+PR1's `app/pipeline/{search,embed,diversify}.py` are KEPT. They are NOT
+dead re-export cruft — they are (a) the @observe-decorated step layer
+(`search_step`/`embed_step`/`diversify_step`) and (b) the IMMUTABLE
+characterization seam: `tests/test_arch_ai_001/conftest.py` (golden,
+un-editable) string-patches `app.pipeline.search.SupabaseProvider.rpc` and
+`app.pipeline.embed.EmbedProvider.embed_image_url`, and
+`test_diversify_characterization.py` does
+`from app.pipeline.diversify import diversify_step`. Removing these modules
+would raise ModuleNotFoundError in the immutable golden suite — a forbidden
+behavior change that cannot be fixed without editing immutable golden
+tests. The [HARD] behavior-preservation contract strictly dominates the
+shim-removal instruction here; these are documented permanent seam anchors.
+
+**Gate result:**
+51 passed (scoped, original 46 + 5 PR6 drift). `git diff a8eae03` of the 5
+existing golden files EMPTY. Full collectable suite: 637 passed, 90
+skipped, exactly the 9 pre-existing baseline failures (5 test_critique_loop
++ 4 test_observability — langfuse v3/pydantic env), ZERO new. `import
+app.main` OK. ruff check + format clean on app/ + tests/.
+
+ALL 6 IMPROVE LAYERS + PR-final COMPLETE. Residual: app-repo doc sync
+(docs/ARCHITECTURE.md, features/*) is a cross-repo app PR, out of scope.

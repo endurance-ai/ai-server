@@ -9,16 +9,6 @@ from __future__ import annotations
 import pytest
 
 from app.channels.recommendation import set_port
-from app.channels.session import (
-    InMemorySessionStore,
-    set_store,
-    shutdown_store,
-)
-from app.channels.taste_profile import (
-    InMemoryTasteProfileStore,
-    set_taste_store,
-    shutdown_taste_store,
-)
 from app.channels.vision import (
     VisionItem,
     VisionResult,
@@ -29,6 +19,16 @@ from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes import respond as respond_module
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.infrastructure.memory.session import (
+    InMemorySessionStore,
+    set_store,
+    shutdown_store,
+)
+from app.infrastructure.memory.taste_profile import (
+    InMemoryTasteProfileStore,
+    set_taste_store,
+    shutdown_taste_store,
+)
 from tests.conftest_graph import FakeAdapter, StubLLM, StubPort, make_msg
 
 
@@ -190,7 +190,7 @@ async def test_rich_search_query_ko_reaches_port_via_intent_text(store, taste_st
 
     # Turn 2: user types intent → routing sees AWAITING_INTENT → critique_apply.
     sess = store.get_or_create(42)
-    from app.channels.session import SessionState
+    from app.infrastructure.memory.session import SessionState
 
     sess.state = SessionState.AWAITING_INTENT
     store.update(sess)

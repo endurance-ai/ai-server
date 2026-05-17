@@ -14,7 +14,6 @@ from pydantic import HttpUrl
 from app.channels.critique import CritiqueDelta
 from app.channels.router import RoutedDecision, RoutedIntent
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, SessionState, set_store
 from app.graphs.routing import (
     _route_after_ingest,
     _route_after_pick,
@@ -24,6 +23,7 @@ from app.graphs.routing import (
     _route_after_vision,
 )
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store
 
 
 @pytest.fixture(autouse=True)

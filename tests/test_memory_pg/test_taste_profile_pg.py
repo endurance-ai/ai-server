@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from app.channels.taste_profile import TasteProfile
-from app.channels.taste_profile_pg import PostgresTasteProfileStore
+from app.infrastructure.memory.taste_profile import TasteProfile
+from app.infrastructure.memory.taste_profile_pg import PostgresTasteProfileStore
 
 
 def test_get_or_create_returns_default_profile():

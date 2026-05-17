@@ -1,7 +1,7 @@
 """PostgresTasteProfileStore — SPEC-MEMORY-001.
 
 Postgres-backed implementation of the `TasteProfileStore` Protocol from
-`app.channels.taste_profile`. Persists weighted dicts as JSONB so float64
+`app.infrastructure.memory.taste_profile`. Persists weighted dicts as JSONB so float64
 precision round-trips. `last_active` is stored as `timestamptz(6)` and
 coerced float ↔ datetime at the boundary (REQ-MEMORY-PERSIST-002).
 

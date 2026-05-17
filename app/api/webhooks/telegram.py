@@ -24,12 +24,12 @@ from app.channels.adapter import MessengerAdapter
 from app.channels.factory import get_adapter
 from app.channels.lang import detect_lang
 from app.channels.schemas import ChannelMessage, ChannelParseError
-from app.channels.taste_profile import user_key_for
 from app.channels.telegram.webhook import verify_secret_token
 from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id

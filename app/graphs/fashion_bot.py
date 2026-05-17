@@ -139,7 +139,7 @@ async def _apply_self_critique_passthrough(state: WorkingState) -> dict:
     search_node code stays untouched.
     """
     from app.channels.critique import CritiqueDelta as LegacyDelta
-    from app.channels.session import get_store
+    from app.infrastructure.memory.session import get_store
 
     pending = state.critique_pending_delta
     breadcrumbs: list[str] = []

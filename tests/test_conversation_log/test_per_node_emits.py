@@ -16,10 +16,10 @@ import pytest
 
 from app.channels.recommendation import ChannelRecommendationResult
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, SessionState, set_store
-from app.channels.taste_profile import InMemoryTasteProfileStore, set_taste_store
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState, WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store
+from app.infrastructure.memory.taste_profile import InMemoryTasteProfileStore, set_taste_store
 from tests.conftest_graph import FakeAdapter, FakeCandidate
 
 
@@ -170,8 +170,8 @@ async def test_log_t14_pick_item_carousel_emits(adapter_ctx):
 @pytest.mark.asyncio
 async def test_log_t16_search_parallel_array_invariant(monkeypatch):
     from app.channels.recommendation import set_port
-    from app.channels.session import get_store
     from app.graphs.nodes.search import search_node
+    from app.infrastructure.memory.session import get_store
 
     sess = get_store().get_or_create(42)
     sess.image_url = "https://example.com/img.jpg"
@@ -203,8 +203,8 @@ async def test_log_t16_search_parallel_array_invariant(monkeypatch):
 @pytest.mark.asyncio
 async def test_log_t16_search_empty_emits_empty_arrays(monkeypatch):
     from app.channels.recommendation import set_port
-    from app.channels.session import get_store
     from app.graphs.nodes.search import search_node
+    from app.infrastructure.memory.session import get_store
 
     sess = get_store().get_or_create(42)
     sess.image_url = "https://example.com/img.jpg"
@@ -371,8 +371,8 @@ async def test_log_t20_taste_update_free_text_emit():
 
 @pytest.mark.asyncio
 async def test_log_t21_critique_apply_click_dual_emit(adapter_ctx):
-    from app.channels.session import get_store
     from app.graphs.nodes.critique_apply import critique_apply
+    from app.infrastructure.memory.session import get_store
 
     sess = get_store().get_or_create(42)
     cand = FakeCandidate(id="p-99", brand="acme")
@@ -393,8 +393,8 @@ async def test_log_t21_critique_apply_click_dual_emit(adapter_ctx):
 
 @pytest.mark.asyncio
 async def test_log_t21_critique_apply_more_emits_taste_update_critique(adapter_ctx):
-    from app.channels.session import get_store
     from app.graphs.nodes.critique_apply import critique_apply
+    from app.infrastructure.memory.session import get_store
 
     sess = get_store().get_or_create(42)
     cand = FakeCandidate(id="p-77", brand="bcorp")

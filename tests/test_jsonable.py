@@ -1,6 +1,6 @@
 """DDD PRESERVE — characterization tests for `_to_jsonable` 5-step cascade.
 
-Captures the *current* behavior of `app.channels.session_pg._to_jsonable` BEFORE
+Captures the *current* behavior of `app.infrastructure.memory.session_pg._to_jsonable` BEFORE
 extraction to `app.channels._jsonable`. After extraction, both import paths
 MUST produce byte-identical results for the same input set (this file imports
 from the new location; pre-extraction it imports from session_pg).

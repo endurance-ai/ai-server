@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import ORJSONResponse
 
 from app.channels.factory import backend_name, get_adapter
-from app.channels.session import get_store
-from app.channels.session_pg import PostgresSessionStore
 from app.core.auth import verify_internal_token
 from app.core.config import settings
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.session_pg import PostgresSessionStore
 from app.providers.database import SupabaseProvider
 from app.providers.embedding import EmbedProvider
 from app.providers.llm import LLMProvider
