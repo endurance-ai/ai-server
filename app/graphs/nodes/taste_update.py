@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 
 from app.channels.router import RoutedIntent, TasteUpdate
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import (
@@ -55,11 +56,13 @@ def _apply(profile: TasteProfile, update: TasteUpdate) -> None:
 
 @observe(name="node.taste_update", as_type="span")
 async def taste_update(state: WorkingState) -> dict:
+    node_enter("taste_update")
     breadcrumbs: list[str] = []
 
     decision = state.decision
     if decision is None or decision.intent != RoutedIntent.TASTE_UPDATE or decision.taste_update is None:
         breadcrumbs.append("taste_update: no taste_update payload — skipping")
+        node_skip("taste_update", "no taste_update payload")
         return {"log_events": breadcrumbs}
 
     sess = get_store().get_or_create(state.chat_id)
@@ -73,6 +76,7 @@ async def taste_update(state: WorkingState) -> dict:
     except Exception as exc:  # REQ-AGENT-007
         logger.exception("[taste_update] reinforce_* raised")
         breadcrumbs.append(f"taste_update_error: {type(exc).__name__}: {exc}"[:200])
+        node_skip("taste_update", f"reinforce error {type(exc).__name__}")
         return {"log_events": breadcrumbs}
 
     summary = _summarize(update)
@@ -100,6 +104,7 @@ async def taste_update(state: WorkingState) -> dict:
         )
     except Exception:  # noqa: BLE001
         logger.debug("[taste_update] emit best-effort")
+    node_done("taste_update", applied=True)
     return {
         "presearch_summary": summary,
         "log_events": breadcrumbs,

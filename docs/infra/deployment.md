@@ -172,6 +172,7 @@ Cutover order (plan §1.3):
    uv run alembic upgrade head
    # 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
    # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
+   # 0005_add_taste_dislike_ts           — ai.user_taste_profile +2 JSONB 컬럼 (SPEC-AGENT-V3-REACT Gap4, AGENT_V3_DISLIKE_MEMORY_ENABLED 활성화 전 선행 필수)
    ```
 2. Deploy this codebase with `PINTEREST_BOOTSTRAP_ENABLED=true` and
    `ONBOARDING_CARDS_ENABLED=true`.

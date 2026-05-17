@@ -51,6 +51,44 @@ from app.graphs.state import WorkingState
 logger = logging.getLogger(__name__)
 
 
+def _flag(b: bool) -> str:
+    return "ON" if b else "OFF"
+
+
+def _log_topology_banner(topology: str) -> None:
+    """Emit ONE prominent INFO line stating the resolved topology + flags.
+
+    Logging-only, never raises. This is the single line that ends the
+    "am I on V1 or V3?" confusion — it reads the real `settings` values
+    and derives ON/OFF per flag.
+    """
+    try:
+        if topology == "v2":
+            v3 = (
+                f"mem={_flag(settings.AGENT_V3_MEMORY_INJECTION_ENABLED)} "
+                f"reflex={_flag(settings.AGENT_V3_REFLEXION_ENABLED)} "
+                f"proact={_flag(settings.AGENT_V3_PROACTIVE_ENABLED)} "
+                f"dislike={_flag(settings.AGENT_V3_DISLIKE_MEMORY_ENABLED)}"
+            )
+            any_v3 = (
+                settings.AGENT_V3_MEMORY_INJECTION_ENABLED
+                or settings.AGENT_V3_REFLEXION_ENABLED
+                or settings.AGENT_V3_PROACTIVE_ENABLED
+                or settings.AGENT_V3_DISLIKE_MEMORY_ENABLED
+            )
+            label = "V3 ReAct active" if any_v3 else "V2 ReAct active"
+            logger.info(
+                "🤖 [topology] %s | V2 gate=on model=%s | V3: %s",
+                label,
+                (settings.AGENT_LLM_MODEL or "?").strip() or "?",
+                v3,
+            )
+        else:
+            logger.info("🤖 [topology] V1 pipeline (legacy) | V2 gate=off (AGENT_V2_REACT_ENABLED/AGENT_LLM_MODEL)")
+    except Exception:  # noqa: BLE001 — banner must never break graph build
+        pass
+
+
 # Topology branch maps — each maps the routing function's return value to a
 # node key understood by langgraph. `__end__` is the canonical sentinel for
 # `END`; we translate it explicitly so routing predicates stay test-friendly.
@@ -303,6 +341,7 @@ def _build_graph_v2() -> Any:
     builder.add_edge("onboard_pinterest", END)
     builder.add_edge("pinterest_ingest", END)
 
+    _log_topology_banner("v2")
     return builder.compile()
 
 
@@ -316,6 +355,7 @@ def build_graph() -> Any:
     if settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip():
         return _build_graph_v2()
 
+    _log_topology_banner("v1")
     builder = StateGraph(WorkingState)
 
     builder.add_node("ingest", ingest)
@@ -397,3 +437,4 @@ def build_graph() -> Any:
 
 # Module-level compiled singleton (REQ-AGENT-001 acceptance #4).
 GRAPH = build_graph()
+_log_topology_banner("v2" if (settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip()) else "v1")

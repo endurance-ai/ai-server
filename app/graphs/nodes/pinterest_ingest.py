@@ -32,6 +32,7 @@ from app.channels.pinterest_url import (
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.nodes._pinterest_helpers import ingest_pinterest_pins
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
@@ -120,6 +121,7 @@ async def pinterest_ingest(state: WorkingState) -> dict:
 
     @MX:SPEC: SPEC-ONBOARD-CARDS-001
     """
+    node_enter("pinterest_ingest")
     sess = get_store().get_or_create(state.chat_id)
     lang = session_lang(sess)
     adapter = get_adapter()
@@ -135,6 +137,7 @@ async def pinterest_ingest(state: WorkingState) -> dict:
             await adapter.send_text(state.chat_id, _RATE_LIMIT_KO if lang == "ko" else _RATE_LIMIT_EN)
         except Exception:  # noqa: BLE001
             logger.debug("[pinterest_ingest] rate-limit reply best-effort", exc_info=True)
+        node_skip("pinterest_ingest", "rate limited")
         return {
             "continuous_origin": True,
             "log_events": ["pinterest_ingest: rate_limited"],
@@ -145,6 +148,7 @@ async def pinterest_ingest(state: WorkingState) -> dict:
     classified = classify_pinterest_input(text_in, max_pins=max_pins)
     if isinstance(classified, PinInputNone):
         # Caller-side predicate should never let this happen, but defend.
+        node_skip("pinterest_ingest", "classifier none")
         return {
             "continuous_origin": True,
             "log_events": ["pinterest_ingest: classifier_none"],
@@ -203,6 +207,7 @@ async def pinterest_ingest(state: WorkingState) -> dict:
         vision_count=outcome.successfully_analyzed,
     )
 
+    node_done("pinterest_ingest", mode=outcome.mode, pins=outcome.successfully_analyzed)
     # NB: `sess.onboarded_at` MUST NOT be modified here (REQ-ONBOARD-PINTEREST-003).
     return {
         "continuous_origin": True,

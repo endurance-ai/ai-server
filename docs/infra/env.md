@@ -160,6 +160,23 @@ cutover 절차: `docs/infra/deployment.md` Scenario (e) 참조.
 
 > `AGENT_LLM_MODEL` 은 로그에 모델명만 노출 — API key 는 `LITELLM_MASTER_KEY` 경유, 직접 노출 없음.
 
+## ReAct V3 증분 강화 (SPEC-AGENT-V3-REACT, 마스터 `AGENT_V2_REACT_ENABLED=true` 시에만 유효)
+
+4개 sub-flag 모두 **운영 기본 `false`**. 4 all-off = V2 byte-identical (단일 회귀 가드). 단계적 롤아웃: Gap1 → Gap4 → Gap3 → Gap2 순 (위험 낮은 순). **Gap4 활성화 전 Alembic migration 0005 선행 필수**.
+
+| 키 | 기본 | 용도 |
+|----|-----|-----|
+| `AGENT_V3_MEMORY_INJECTION_ENABLED` | `false` | Gap1: TasteProfile + 최근 5턴 요약을 system context에 자동 주입 (메모리 자동 주입) |
+| `AGENT_V3_REFLEXION_ENABLED` | `false` | Gap2: search/refine 결과를 evaluator 헬퍼로 평가 → quality delta → LLM 자율 refine (SPEC-AGENT-V2-REACT OQ-7 resolution). 잔여-budget `asyncio.wait_for` 강제 취소 |
+| `AGENT_V3_PROACTIVE_ENABLED` | `false` | Gap3: 8번째 tool `suggest_next_step` 등록 + system prompt 능동성 지침 |
+| `AGENT_V3_DISLIKE_MEMORY_ENABLED` | `false` | Gap4: TasteProfile dislike timestamp additive 필드 + 이후 search 자동 디스카운트. **migration 0005 선행 필수** |
+| `AGENT_V3_MEMORY_MAX_TOKENS` | `1500` | Gap1 메모리 주입 페이로드 token cap (char 근사 ×4) |
+
+Gap2 Reflexion은 기존 SPEC-AGENTIC-CRITIQUE-001 env를 재사용 (live dependency로 보존 필요):
+- `SELF_CRITIQUE_MAX_ITERATIONS` — Reflexion 호출 횟수 상한
+- `SELF_CRITIQUE_TIMEOUT_S` — turn_deadline과 함께 잔여-budget 계산 기준
+- `EVALUATOR_MODEL` / `EVALUATOR_MAX_TOKENS` / `EVALUATOR_TEMPERATURE` / `EVALUATOR_TIMEOUT_S` — `evaluator._call_llm` 직접 참조
+
 ## 앱 메타
 
 | 키 | 기본 |

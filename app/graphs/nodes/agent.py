@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.observability.langfuse import observe
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 async def agent(state: WorkingState) -> dict[str, Any]:
     from app.agents.react_loop import run_react_loop
 
+    node_enter("agent")
     sess = get_store().get_or_create(state.chat_id)
     try:
         delta = await run_react_loop(state, sess)
@@ -38,6 +40,12 @@ async def agent(state: WorkingState) -> dict[str, Any]:
     breadcrumbs = [
         f"agent: iters={delta.get('agent_iterations')} status={delta.get('agent_status')}",
     ]
+    node_done(
+        "agent",
+        iters=delta.get("agent_iterations"),
+        status=delta.get("agent_status"),
+        tools=len(delta.get("tool_call_history", []) or []),
+    )
     return {
         "agent_iterations": delta.get("agent_iterations", 0),
         "agent_status": delta.get("agent_status", "exhausted"),

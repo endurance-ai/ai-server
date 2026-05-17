@@ -9,9 +9,11 @@ Thin wrapper over TasteProfileStore.update.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from app.agents.tool_registry import UpdateTasteResult
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +35,41 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> UpdateTasteResu
         store = get_taste_store()
         profile = store.get_or_create(user_key)
 
+        brand_dislikes = list(args.get("brand_dislikes", []) or [])
+        keyword_dislikes = list(args.get("keyword_dislikes", []) or [])
+
         for b in args.get("brand_likes", []) or []:
             profile.reinforce_liked_brand(b)
-        for b in args.get("brand_dislikes", []) or []:
+        for b in brand_dislikes:
             profile.reinforce_disliked_brand(b)
         likes = list(args.get("keyword_likes", []) or [])
-        dislikes = list(args.get("keyword_dislikes", []) or [])
         if likes:
             profile.reinforce_liked_keywords(likes)
-        if dislikes:
-            profile.reinforce_disliked_keywords(dislikes)
+        if keyword_dislikes:
+            profile.reinforce_disliked_keywords(keyword_dislikes)
+
+        # SPEC-AGENT-V3-REACT Gap4 — flag-gated last-dislike timestamp record.
+        # flag OFF → ts dicts stay empty → V2 byte-identical (no extra writes).
+        # @MX:SPEC: SPEC-AGENT-V3-REACT
+        if settings.AGENT_V3_DISLIKE_MEMORY_ENABLED:
+            now = time.time()
+            for b in brand_dislikes:
+                bb = (b or "").strip().lower()
+                if bb:
+                    profile.disliked_brands_ts[bb] = now
+            for k in keyword_dislikes:
+                kk = (k or "").strip().lower()
+                if kk:
+                    profile.disliked_keywords_ts[kk] = now
+            if brand_dislikes or keyword_dislikes:
+                logger.info(
+                    "🚫 [v3:dislike] ts recorded brands=%d kw=%d",
+                    len(brand_dislikes),
+                    len(keyword_dislikes),
+                )
+        elif brand_dislikes or keyword_dislikes:
+            logger.info("🚫 [v3:dislike] skip · flag off")
+
         store.update(profile)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[tool.update_taste] raised: %r", exc)

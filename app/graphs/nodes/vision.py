@@ -18,6 +18,7 @@ from langchain_core.messages import SystemMessage
 
 from app.channels import vision as vision_module
 from app.channels.vision import VisionResult, derive_legacy_dict, derive_legacy_keywords, derive_legacy_label
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import user_key_for
@@ -115,10 +116,12 @@ def _outfit_mood_tags(result: VisionResult, top_n: int = 5) -> list[str]:
 
 @observe(name="node.vision", as_type="span")
 async def vision_node(state: WorkingState) -> dict:
+    node_enter("vision_node")
     if not state.image_url:
         # No image to analyse — skip the LLM, but DO emit so the conversation
         # log shows the node executed (recovered=True path).
         _emit_vision_done(state, None, error="no_image_url")
+        node_skip("vision_node", "no image_url")
         return {"log_events": ["vision_node: no image_url; skipping"], "turn_no": 3}
 
     # DEMO_MODE — skip Vision LLM, return fixture after a short wait so the
@@ -142,6 +145,7 @@ async def vision_node(state: WorkingState) -> dict:
             logger.exception("👁 [vision] ❌ vision.extract raised")
             _emit_vision_done(state, None, error=f"{type(exc).__name__}: {str(exc)[:200]}")
             _emit_node_error(state, node_name="vision", exc=exc, recovered=True)
+            node_skip("vision_node", f"extract error {type(exc).__name__}")
             return {
                 "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
                 "turn_no": 3,
@@ -157,6 +161,7 @@ async def vision_node(state: WorkingState) -> dict:
         result = _legacy_to_vision_result(result)
     elif not isinstance(result, VisionResult):
         _emit_vision_done(state, None, error=f"unexpected_type:{type(result).__name__}")
+        node_skip("vision_node", f"unexpected type {type(result).__name__}")
         return {
             "log_events": [f"vision_node: unexpected type {type(result).__name__}"],
             "turn_no": 3,
@@ -206,6 +211,7 @@ async def vision_node(state: WorkingState) -> dict:
     # LOG-T13 — emit BEFORE return so the row reflects the v2 schema payload.
     _emit_vision_done(state, result)
 
+    node_done("vision_node", items=len(result.items), apparel=result.isApparel)
     return {
         "detected_items": detected,
         "vision_result": result,

@@ -40,6 +40,7 @@ from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.nodes._onboard_helpers import complete_onboarding
 from app.graphs.nodes._onboard_stage import _emit_onboard_select
 from app.graphs.nodes._pinterest_helpers import ingest_pinterest_pins
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
@@ -138,6 +139,7 @@ async def onboard_pinterest(state: WorkingState) -> dict:
 
     @MX:SPEC: SPEC-ONBOARD-CARDS-001
     """
+    node_enter("onboard_pinterest")
     sess = get_store().get_or_create(state.chat_id)
     lang = session_lang(sess)
     adapter = get_adapter()
@@ -158,6 +160,7 @@ async def onboard_pinterest(state: WorkingState) -> dict:
         await _show_card(state, sess, adapter, lang)
         sess.onboard_stage = "pinterest"
         get_store().update(sess)
+        node_done("onboard_pinterest", branch="card_sent")
         return {
             "onboard_stage": "pinterest",
             "log_events": ["onboard_pinterest: card_sent"],
@@ -303,6 +306,7 @@ async def onboard_pinterest(state: WorkingState) -> dict:
         except Exception:  # noqa: BLE001
             logger.exception("🐱 [ONBOARD] completion text send failed")
 
+    node_done("onboard_pinterest", branch="ingest_done", pins=outcome.successfully_analyzed)
     return {
         "onboard_stage": "done",
         "onboard_pin_weights": None,

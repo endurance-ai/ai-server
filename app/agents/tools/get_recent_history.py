@@ -93,11 +93,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> GetRecentHistor
 
         pool = get_pool()
         params: list[Any] = [user_key]
-        sql = "SELECT event_type, payload, ts FROM ai.log_conversation_event WHERE user_key=%s"
+        sql = "SELECT event_type, payload, created_at FROM ai.log_conversation_event WHERE user_key=%s"
         if event_types:
             sql += " AND event_type = ANY(%s)"
             params.append(event_types)
-        sql += " ORDER BY ts DESC LIMIT %s"
+        sql += " ORDER BY created_at DESC LIMIT %s"
         params.append(n)
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(sql, tuple(params))

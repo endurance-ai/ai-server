@@ -94,7 +94,7 @@ async def _aget_or_create(user_key: str) -> TasteProfile:
               SET user_key = EXCLUDED.user_key
             RETURNING user_key, liked_brands, disliked_brands, liked_keywords,
                       disliked_keywords, price_min_observed, price_max_observed,
-                      last_active
+                      last_active, disliked_brands_ts, disliked_keywords_ts
             """,
             (user_key,),
         )
@@ -114,17 +114,20 @@ async def _aupdate(profile: TasteProfile) -> None:
                 user_key, liked_brands, disliked_brands,
                 liked_keywords, disliked_keywords,
                 price_min_observed, price_max_observed,
-                last_active, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                last_active, updated_at,
+                disliked_brands_ts, disliked_keywords_ts
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_key) DO UPDATE SET
-                liked_brands       = EXCLUDED.liked_brands,
-                disliked_brands    = EXCLUDED.disliked_brands,
-                liked_keywords     = EXCLUDED.liked_keywords,
-                disliked_keywords  = EXCLUDED.disliked_keywords,
-                price_min_observed = EXCLUDED.price_min_observed,
-                price_max_observed = EXCLUDED.price_max_observed,
-                last_active        = EXCLUDED.last_active,
-                updated_at         = EXCLUDED.updated_at
+                liked_brands         = EXCLUDED.liked_brands,
+                disliked_brands      = EXCLUDED.disliked_brands,
+                liked_keywords       = EXCLUDED.liked_keywords,
+                disliked_keywords    = EXCLUDED.disliked_keywords,
+                price_min_observed   = EXCLUDED.price_min_observed,
+                price_max_observed   = EXCLUDED.price_max_observed,
+                last_active          = EXCLUDED.last_active,
+                updated_at           = EXCLUDED.updated_at,
+                disliked_brands_ts   = EXCLUDED.disliked_brands_ts,
+                disliked_keywords_ts = EXCLUDED.disliked_keywords_ts
             """,
             (
                 profile.user_key,
@@ -136,6 +139,8 @@ async def _aupdate(profile: TasteProfile) -> None:
                 profile.price_max_observed,
                 last_active_dt,
                 last_active_dt,
+                Jsonb(profile.disliked_brands_ts),
+                Jsonb(profile.disliked_keywords_ts),
             ),
         )
         await conn.commit()
@@ -182,6 +187,11 @@ async def _adelete(user_key: str) -> None:
 
 
 def _row_to_profile(row: Any) -> TasteProfile:
+    # SPEC-AGENT-V3-REACT Gap4 — +2 trailing positions with backward-compat
+    # default ({}) so a (defensively short) pre-migration tuple still loads
+    # without IndexError. The migration default '{}' is the primary guarantee;
+    # this slice is the belt-and-braces fallback (REQ-AGENT-V3-DISLIKE-SCHEMA-001).
+    row = list(row)
     (
         user_key,
         liked_brands,
@@ -191,7 +201,9 @@ def _row_to_profile(row: Any) -> TasteProfile:
         price_min,
         price_max,
         last_active,
-    ) = row
+    ) = row[:8]
+    disliked_brands_ts = row[8] if len(row) > 8 else {}
+    disliked_keywords_ts = row[9] if len(row) > 9 else {}
     return TasteProfile(
         user_key=user_key,
         liked_brands=dict(liked_brands or {}),
@@ -201,4 +213,6 @@ def _row_to_profile(row: Any) -> TasteProfile:
         price_min_observed=price_min,
         price_max_observed=price_max,
         last_active=_dt_to_ts(last_active) if last_active else 0.0,
+        disliked_brands_ts=dict(disliked_brands_ts or {}),
+        disliked_keywords_ts=dict(disliked_keywords_ts or {}),
     )

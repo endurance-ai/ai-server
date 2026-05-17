@@ -35,6 +35,7 @@ from app.channels.lang import session_lang
 from app.channels.router import RoutedIntent
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import user_key_for
@@ -337,6 +338,7 @@ def _split_into_chunks(text: str, *, min_chars: int) -> list[str]:
 
 @observe(name="node.respond", as_type="span")
 async def respond(state: WorkingState) -> dict:
+    node_enter("respond")
     flow = _classify_flow(state)
     user_text = (state.message.text or "").strip() if state.message else ""
     # 사용자 피드백 — 한국어로 대화하다가 비전/검색 후 영어로 돌아가는 문제.
@@ -453,7 +455,9 @@ async def respond(state: WorkingState) -> dict:
     except Exception as exc:
         logger.exception("🐱 [respond] ❌ send_text failed (flow=%s, lang=%s)", flow.value, lang)
         breadcrumbs.append(f"respond_send_error: {type(exc).__name__}: {exc}"[:200])
+        node_done("respond", flow=flow.value, lang=lang, send="error")
         return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}
 
     breadcrumbs.append(f"respond: flow={flow.value} lang={lang} text_len={len(text)} chunks={len(chunks)}")
+    node_done("respond", flow=flow.value, lang=lang, chunks=len(chunks))
     return {"response_text": text, "log_events": breadcrumbs, "turn_no": 10}

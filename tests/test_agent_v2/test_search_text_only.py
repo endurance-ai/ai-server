@@ -176,6 +176,124 @@ async def test_text_query_alone_is_sufficient(monkeypatch):
 # ── refine_search: was image-mandatory (sent "" to Modal) — now text-only ──
 
 
+# ── STOPGAP: zero-dense noise suppression on the zero-sentinel text path ───
+#
+# Live-log root cause: a constant zero-dense item (dense_rank set, no sparse
+# match) ranked #1 for EVERY unrelated text query. RRF gives the zero vector's
+# deterministic pgvector ranking a real fusion score, so it pollutes the top
+# instead of sinking. Stopgap: drop pure-dense rows before diversify on the
+# zero-sentinel path ONLY. The image path (run_pipeline) is unaffected.
+
+# Mixed RPC rows for a "black shorts" style query. Only p1 is the genuine
+# pgroonga hit (sparse_rank set); p2 is dense+sparse (both → keep); p3/p4 are
+# pure zero-dense pollution (dense_rank set, sparse_rank None → drop).
+_BLACK_SHORTS_ROWS = [
+    {
+        "id": "e640f7d4",
+        "name": "Auralee Herringbone Shirt",
+        "brand": "Auralee",
+        "score": 0.0164,
+        "dense_rank": 1,
+        "sparse_rank": None,
+    },  # zero-noise #1 in prod
+    {
+        "id": "p1",
+        "name": "Black Cotton Shorts",
+        "brand": "Uniqlo",
+        "score": 0.0150,
+        "dense_rank": None,
+        "sparse_rank": 1,
+    },  # real sparse hit
+    {
+        "id": "p2",
+        "name": "Black Cargo Shorts",
+        "brand": "Stussy",
+        "score": 0.0140,
+        "dense_rank": 7,
+        "sparse_rank": 3,
+    },  # both → keep
+    {
+        "id": "p3",
+        "name": "Beige Linen Coat",
+        "brand": "Lemaire",
+        "score": 0.0130,
+        "dense_rank": 2,
+        "sparse_rank": None,
+    },  # zero-noise
+]
+
+
+@pytest.mark.asyncio
+async def test_zero_sentinel_text_path_drops_dense_only_keeps_sparse(monkeypatch):
+    """(a) Zero-sentinel text path drops dense_rank!=None & sparse_rank==None
+    rows and keeps sparse-only + both."""
+    seen: dict[str, object] = {}
+
+    async def fake_search_step(state):
+        seen["embedding_all_zero"] = not any(state.embedding or [1])
+        state.raw_candidates = [dict(r) for r in _BLACK_SHORTS_ROWS]
+        return state
+
+    async def fake_diversify_step(state):
+        # diversify reads raw_candidates; we surface what survived the filter.
+        state.final_candidates = list(state.raw_candidates)
+        return state
+
+    monkeypatch.setattr("app.pipeline.search.search_step", fake_search_step)
+    monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
+
+    res = await sp.dispatch({"text_query": "black shorts"}, {"chat_id": 1, "image_url": ""})
+
+    assert res["ok"] is True
+    assert seen["embedding_all_zero"] is True  # zero sentinel confirmed
+    # 4 rows in → 2 zero-noise dropped (Auralee shirt, Lemaire coat) → 2 kept.
+    assert res["candidates_count"] == 2
+    kept_ids = {c["product_id"] for c in res["top_candidates"]}
+    assert kept_ids == {"p1", "p2"}  # sparse-only + both survive
+    assert "e640f7d4" not in kept_ids  # the prod #1 zero-noise is gone
+
+
+def test_is_zero_dense_noise_predicate():
+    assert sp._is_zero_dense_noise({"dense_rank": 1, "sparse_rank": None}) is True
+    assert sp._is_zero_dense_noise({"dense_rank": None, "sparse_rank": 2}) is False  # sparse-only
+    assert sp._is_zero_dense_noise({"dense_rank": 3, "sparse_rank": 4}) is False  # both
+    assert sp._is_zero_dense_noise({"dense_rank": None, "sparse_rank": None}) is False
+    assert sp._is_zero_dense_noise("not-a-dict") is False
+
+
+@pytest.mark.asyncio
+async def test_image_path_real_embedding_is_unaffected_by_suppression(monkeypatch):
+    """(b) A real (non-zero) embedding path is UNAFFECTED — run_pipeline owns
+    ranking; the dense-only suppression must NOT trigger there."""
+    captured: dict[str, object] = {}
+
+    class FakeResp:
+        # Same shape that would be zero-noise on the text path: dense-only.
+        # On the IMAGE path dense is meaningful → these MUST all be kept.
+        results = [
+            type("C", (), {"id": "img1", "name": "Wool Coat", "brand": "A", "price": 200})(),
+            type("C", (), {"id": "img2", "name": "Wool Scarf", "brand": "A", "price": 50})(),
+        ]
+
+    async def fake_run_pipeline(req):
+        captured["image_url"] = req.image_url
+        return FakeResp()
+
+    async def boom_search_step(state):  # text path must NOT be entered
+        raise AssertionError("search_step (text path) called on image path")
+
+    monkeypatch.setattr("app.pipeline.runner.run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr("app.pipeline.search.search_step", boom_search_step)
+
+    real = "https://i.pinimg.com/originals/aa/bb/cc.jpg"
+    res = await sp.dispatch({"text_query": "winter outfit"}, {"chat_id": 1, "image_url": real})
+
+    assert res["ok"] is True
+    assert captured["image_url"] == real
+    # BOTH results survive — suppression never runs on the image path.
+    assert res["candidates_count"] == 2
+
+
 @pytest.mark.asyncio
 async def test_refine_search_text_only_routes_to_sparse(monkeypatch):
     import app.agents.tools.refine_search as rf

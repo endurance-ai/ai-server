@@ -31,15 +31,17 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
 ├── api/                 # 라우터 (recommend, health, webhooks/telegram)
-├── agents/              # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT, flag-gated)
-│   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout)
-│   ├── tool_registry.py # 7-tool REGISTRY + validate_args (단일 소스)
+├── agents/              # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT + SPEC-AGENT-V3-REACT, flag-gated)
+│   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout). V3: Gap1 memory injection + Gap2 _maybe_reflexion + Gap3 proactive directive 포함
+│   ├── tool_registry.py # 7-tool REGISTRY + validate_args (단일 소스). V3 Gap3 flag ON 시 8-tool (suggest_next_step 추가)
 │   ├── llm_client.py    # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유)
-│   └── tools/           # 툴 래퍼 7개: analyze_image, search_products, refine_search, update_taste, ask_user_clarification, get_recent_history, respond
+│   ├── _memory_context.py  # [V3 Gap1 NEW] TasteProfile + 최근 N턴 요약 자동 주입 빌더 (래핑 전용)
+│   ├── _reflexion.py       # [V3 Gap2 NEW] evaluator 헬퍼 래핑 — in-loop Reflexion 평가 (래핑 전용)
+│   └── tools/           # 툴 래퍼 7개(V2) / 8개(V3 Gap3 ON): analyze_image, search_products, refine_search, update_taste, ask_user_clarification, get_recent_history, respond + suggest_next_step(V3)
 ├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, link_resolver, session, lang, vision (+ vision_prompt, clarify, clarify_values, onboarding_cards, onboarding_values, pinterest_url, _jsonable)
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
-│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT)
+│   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT). [V3 NEW] _trace.py (logging-only node enter/done/skip 헬퍼)
 ├── services/            # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001): embed_service, search_service, diversify_service, database_service
 ├── infrastructure/      # 인프라 레이어 (SPEC-ARCH-AI-001)
 │   ├── repositories/    # SearchRepository (RPC name + param 단일 소스), search_rpc_contract (REQ-AI-006)
@@ -79,10 +81,10 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 ## 코딩 컨벤션
 
-- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **V1 (AGENT_V2_REACT_ENABLED=false, 기본)**: 18-노드. `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001) + 온보딩 카드 분기. **V2 (AGENT_V2_REACT_ENABLED=true, flag-gated, default off)**: 온보딩 6 노드 보존 + `agent` 단일 노드가 deprecated 5개(critique_apply/evaluator/respond/taste_update/send_results)를 ReAct loop으로 대체 (SPEC-AGENT-V2-REACT). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **V1 (AGENT_V2_REACT_ENABLED=false, 기본)**: 18-노드. `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) + `ask_clarify → apply_clarify` 결정형 카드 분기 (SPEC-CLARIFY-CARDS-001) + 온보딩 카드 분기. **V2 (AGENT_V2_REACT_ENABLED=true, flag-gated, default off)**: 온보딩 6 노드 보존 + `agent` 단일 노드가 deprecated 5개(critique_apply/evaluator/respond/taste_update/send_results)를 ReAct loop으로 대체 (SPEC-AGENT-V2-REACT). **V3 (AGENT_V2_REACT_ENABLED=true + 4개 V3 sub-flag, 각 default off)**: V2 그래프 토폴로지 무변경 — `agent` 노드 내부의 `run_react_loop` 에 4개 강화를 in-loop 추가 (SPEC-AGENT-V3-REACT, byte-identical-off 가드). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
 - **Sticky language (KO/EN)**: `app/channels/lang.py` (`detect_lang` / `remember_lang` / `session_lang`) 가 Hangul 유무로 언어를 판별. `ingest` 노드가 매 텍스트 턴마다 `Session.lang` 을 갱신 — 이후 버튼 탭(텍스트 없음)에도 이전 언어로 응답. `respond` / `send_results` / `pick_item` / `ask_clarify` / `critique_apply` 노드가 `session_lang(sess)` 를 참조해 KO/EN 메시지를 분기.
 - **Bot persona**: `respond` 노드 system prompt 는 "kiko" 페르소나 — Puss-in-Boots 느낌, 친근한 해요체(KO) / lively English(EN). 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 (prompt injection 방어).
-- **구조화 로그 이모지 범례**: 📥 webhook, 🧭 router, 👁 vision, 🔍 search, 🤔 critique/evaluator, 🎨 pipeline, 🐱 bot 발화 (respond/adapter).
+- **구조화 로그 이모지 범례**: 📥 webhook, 🧭 router, 👁 vision, 🔍 search, 🧹 zero-dense suppress (text-only 스톱갭), 🤔 critique/evaluator, 🎨 pipeline, 🐱 bot 발화 (respond/adapter). **트레이싱(logging-only, SPEC-AGENT-V3-REACT observability)**: 🤖 topology 배너(startup), ▶️/✅/⏭️ graph node enter/done/skip, 🔄 ReAct agent-iter, 🔧 tool dispatch, 🏁 agent 종료(respond), 🧠 v3:memory(Gap1), 🔬 v3:reflexion(Gap2 — 🤔 와 충돌 회피용 별도 마커), 💡 v3:proactive(Gap3), 🚫 v3:dislike(Gap4).
 - **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 그래프 노드는 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
@@ -101,9 +103,12 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit (SPEC-AGENT-V2-REACT) |
-| `app/agents/tool_registry.py` | 7-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스) |
+| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit (SPEC-AGENT-V2-REACT). V3: Gap1 memory injection + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` (SPEC-AGENT-V3-REACT) |
+| `app/agents/tool_registry.py` | 7-tool(V2)/8-tool(V3 Gap3 ON) REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). V3: `SuggestNextStepArgs/Result` + flag-aware 모듈-로드 분기 (SPEC-AGENT-V3-REACT) |
 | `app/agents/llm_client.py` | ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유). `AGENT_LLM_MODEL` 미설정 시 fail-closed |
+| `app/agents/_memory_context.py` | [V3 Gap1 NEW] `build_memory_context(state, sess, ctx) -> str` — TasteProfile + 최근 N턴(기본 5) 요약 자동 주입, char-cap(`AGENT_V3_MEMORY_MAX_TOKENS`*4), `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 (SPEC-AGENT-V3-REACT) |
+| `app/agents/_reflexion.py` | [V3 Gap2 NEW] `evaluate_search_quality(...) -> dict` — `evaluator._call_llm`/`_build_fastpath_delta` 래핑, fail-open(score=1.0), 빈결과 fastpath. 자체 LLM 프롬프트 신규 정의 없음 (SPEC-AGENT-V3-REACT) |
+| `app/agents/tools/suggest_next_step.py` | [V3 Gap3 NEW] 8번째 tool — `_adapter_ctx.get_adapter()` + `send_text_with_buttons` 재사용 (≤80 LOC, 새 카드 렌더 없음, `terminates_loop=False`) (SPEC-AGENT-V3-REACT) |
 | `app/graphs/nodes/agent.py` | LangGraph `agent` 노드 — `run_react_loop` 래핑, state delta 반환 (SPEC-AGENT-V2-REACT) |
 | `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 + `build_callback_handler` (SPEC-AGENT-001). `AGENT_V2_REACT_ENABLED` 플래그로 V1/V2 토폴로지 분기 |
 | `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델. V2: `agent_iterations`, `tool_call_history`, `agent_status` 3 필드 추가 |
@@ -186,7 +191,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `AGENT_V2_REACT_ENABLED` (기본 `false`, **운영 기본 off**) + `AGENT_LLM_MODEL` (미설정 시 fail-closed — effective gate, 실제 운영값: `nova-lite` via LiteLLM) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S` (SPEC-AGENT-V2-REACT, flag-gated, default off in prod)
 - **[V3 — SPEC-AGENT-V3-REACT]** 마스터 `AGENT_V2_REACT_ENABLED=true` 시에만 유효한 4개 sub-flag (모두 **운영 기본 `false`**, all-off 시 V2 byte-identical):
   - `AGENT_V3_MEMORY_INJECTION_ENABLED` (기본 `false`) — Gap1: TasteProfile + 최근 5턴 요약을 system context에 자동 주입
-  - `AGENT_V3_REFLEXION_ENABLED` (기본 `false`) — Gap2: search/refine 결과를 기존 evaluator 헬퍼로 평가 → quality delta 첨부 → LLM 자율 refine
+  - `AGENT_V3_REFLEXION_ENABLED` (기본 `false`) — Gap2: search/refine 결과를 기존 evaluator 헬퍼로 평가 → quality delta 첨부 → LLM 자율 refine (SPEC-AGENT-V2-REACT OQ-7 resolution)
   - `AGENT_V3_PROACTIVE_ENABLED` (기본 `false`) — Gap3: 8번째 tool `suggest_next_step` 등록 + system prompt 능동성 지침
   - `AGENT_V3_DISLIKE_MEMORY_ENABLED` (기본 `false`) — Gap4: 크로스스레드 dislike timestamp + 자동 디스카운트 (Alembic 0005 마이그레이션 선행 필수)
   - `AGENT_V3_MEMORY_MAX_TOKENS` (기본 `1500`) — Gap1 메모리 주입 페이로드 token cap (char 근사: *4)
