@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from app.channels.taste_profile import (
+from app.infrastructure.memory.taste_profile import (
     InMemoryTasteProfileStore,
     TasteProfile,
     user_key_for,

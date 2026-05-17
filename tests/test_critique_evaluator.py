@@ -13,7 +13,6 @@ import httpx
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, set_store
 from app.graphs.nodes import evaluator as evaluator_module
 from app.graphs.nodes._evaluator_models import (
     CritiqueDelta,
@@ -22,6 +21,7 @@ from app.graphs.nodes._evaluator_models import (
 )
 from app.graphs.nodes.evaluator import evaluator
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, set_store
 
 
 @pytest.fixture(autouse=True)

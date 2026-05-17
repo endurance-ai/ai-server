@@ -13,20 +13,20 @@ from datetime import UTC, datetime
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import (
-    InMemorySessionStore,
-    SessionState,
-    set_store,
-)
-from app.channels.taste_profile import (
-    InMemoryTasteProfileStore,
-    set_taste_store,
-)
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.nodes.onboard_color import onboard_color
 from app.graphs.nodes.onboard_fit import onboard_fit
 from app.graphs.nodes.onboard_mood import onboard_mood
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import (
+    InMemorySessionStore,
+    SessionState,
+    set_store,
+)
+from app.infrastructure.memory.taste_profile import (
+    InMemoryTasteProfileStore,
+    set_taste_store,
+)
 
 
 # ────────────────────────────────────────────────────────────────────────────

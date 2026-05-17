@@ -1,6 +1,6 @@
 """SPEC-CONVERSATION-LOG-001 / LOG-T25 — REQ-LOG-RETENTION-001 no-auto-cleanup.
 
-`app/channels/session_pg.py` 에서 `log_conversation_event` 라는 문자열이
+`app/infrastructure/memory/session_pg.py` 에서 `log_conversation_event` 라는 문자열이
 나타나지 않음을 AST + raw text scan 으로 검증.
 
 REQ-LOG-RETENTION-001: 세션 TTL cleanup 이 conversation event log 를 cascade
@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-SESSION_PG_PATH = REPO_ROOT / "app" / "channels" / "session_pg.py"
+SESSION_PG_PATH = REPO_ROOT / "app" / "infrastructure" / "memory" / "session_pg.py"
 
 
 # Override autouse Docker-dependent fixture from conftest — pure AST scan.

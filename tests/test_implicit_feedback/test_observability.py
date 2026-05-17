@@ -72,7 +72,7 @@ async def test_no_raw_chat_id_in_span_payload():
 @pytest.mark.asyncio
 async def test_re_query_triggered_false_span(fake_candidates):
     from app.channels import implicit_feedback as ifb
-    from app.channels.session import Session, SessionState
+    from app.infrastructure.memory.session import Session, SessionState
 
     captured: list[dict] = []
 

@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import SessionState, get_store
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import SessionState, get_store
 
 
 def _make_state(text: str = "casual blazer recommendation") -> WorkingState:

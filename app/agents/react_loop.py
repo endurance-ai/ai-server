@@ -31,9 +31,9 @@ from langchain_core.messages import ToolMessage
 from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
-from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 
 logger = logging.getLogger(__name__)

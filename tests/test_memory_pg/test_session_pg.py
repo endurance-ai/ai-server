@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from app.channels.session import SessionState
-from app.channels.session_pg import PostgresSessionStore, _to_jsonable
+from app.infrastructure.memory.session import SessionState
+from app.infrastructure.memory.session_pg import PostgresSessionStore, _to_jsonable
 
 
 def test_get_or_create_creates_default_session():

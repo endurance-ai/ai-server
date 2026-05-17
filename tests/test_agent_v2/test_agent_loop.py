@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import Session, SessionState
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState
 
 
 class _FakeAIMessage:
@@ -521,7 +521,7 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     """Slow 4-card carousel that would exceed AGENT_TOOL_TIMEOUT_S must NOT
     trigger a respond retry: text sent once, each card once, status=done."""
     from app.agents import react_loop as rl
-    from app.channels.session import get_store
+    from app.infrastructure.memory.session import get_store
 
     sess = _make_session()
     store = get_store()
@@ -647,7 +647,7 @@ async def test_respond_self_idempotent_on_double_call(monkeypatch):
     re-sends neither text nor already-sent cards."""
     from app.agents.tools.respond import dispatch as respond_dispatch
     from app.agents.tools.search_products import CARDS_READY_KEY
-    from app.channels.session import get_store
+    from app.infrastructure.memory.session import get_store
 
     store = get_store()
     sess = store.get_or_create(77)

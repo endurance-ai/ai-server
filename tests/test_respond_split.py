@@ -58,10 +58,10 @@ def test_split_never_returns_empty_for_nonempty_input() -> None:
 @pytest.mark.asyncio
 async def test_respond_emits_typing_then_text_per_chunk(monkeypatch) -> None:
     """3문장 응답이 들어오면 청크가 여러 개로 분리되고 매 청크마다 typing 이 1회씩 선행된다."""
-    from app.channels.session import InMemorySessionStore, set_store
     from app.graphs.nodes import _adapter_ctx
     from app.graphs.nodes import respond as respond_module
     from app.graphs.state import WorkingState
+    from app.infrastructure.memory.session import InMemorySessionStore, set_store
     from tests.conftest_graph import FakeAdapter, make_msg
 
     # 어댑터 / 스토어 주입.

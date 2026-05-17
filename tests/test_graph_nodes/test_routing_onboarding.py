@@ -14,7 +14,6 @@ import pytest
 from pydantic import HttpUrl
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, set_store
 from app.graphs.routing import (
     _is_restart_keyword,
     _resolve_onboard_stage_target,
@@ -23,6 +22,7 @@ from app.graphs.routing import (
     onboarding_required,
 )
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, set_store
 
 
 @pytest.fixture(autouse=True)

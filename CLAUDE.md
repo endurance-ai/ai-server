@@ -42,11 +42,16 @@ app/
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
 │   └── nodes/           # 18 노드 (V1) / 14 노드 (V2 — agent+intro 신규, deprecated 5개 미등록): ingest, resolve_image, vision, pick_item, ask_clarify, apply_clarify, critique_apply, search, evaluator, send_results, taste_update, respond + onboard_intro, onboard_mood, onboard_color, onboard_fit, onboard_pinterest, pinterest_ingest (SPEC-ONBOARD-CARDS-001) + agent, intro (SPEC-AGENT-V2-REACT)
-├── pipeline/            # 검색 파이프라인 (embed → search → diversify)
+├── services/            # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001): embed_service, search_service, diversify_service, database_service
+├── infrastructure/      # 인프라 레이어 (SPEC-ARCH-AI-001)
+│   ├── repositories/    # SearchRepository (RPC name + param 단일 소스), search_rpc_contract (REQ-AI-006)
+│   └── memory/          # 메모리 저장소 — session, session_pg, taste_profile, taste_profile_pg (app/channels/에서 이전)
+├── domain/              # 도메인 모델 — SearchResult, Candidate (app/models/과 분리된 도메인 타입)
+├── pipeline/            # 검색 파이프라인 thin shim (SPEC-ARCH-AI-001): @observe 래핑 + 테스트 seam 재노출 → 실제 로직은 app/services/ 에 위치
 ├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider, ApifyProvider (SPEC-ONBOARD-CARDS-001)
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler + conversation_log + event_payloads (SPEC-CONVERSATION-LOG-001)
 ├── models/              # Pydantic request/response
-└── core/                # config (env)
+├── core/                # config (env) + di.py (DI 컨테이너 — provide_db_pool / provide_settings / provide_embed_provider, SPEC-ARCH-AI-001 REQ-AI-003) + types.py
 ```
 
 ## 기술 스택
@@ -124,7 +129,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/nodes/evaluator.py` | search 결과 평가 → 빈 결과 fast-path (필터 drop) / LLM 평가 → `CritiqueDelta` 재시도 (SPEC-AGENTIC-CRITIQUE-001, 최대 2회 + 4 안전 가드) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
 | `app/channels/lang.py` | 언어 감지 헬퍼 — `detect_lang` / `remember_lang` / `session_lang`. Hangul 유무 기준 KO/EN 판별, `Session.lang` sticky 갱신 |
-| `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함. `Session.lang: str = "en"` (sticky 언어 필드) |
+| `app/infrastructure/memory/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함. `Session.lang: str = "en"` (sticky 언어 필드). 구 경로: `app/channels/session.py` (SPEC-ARCH-AI-001 이전) |
 | `app/channels/vision.py` | LiteLLM 경유 Vision 패션 아이템 추출 — v2 schema (SPEC-VISION-UNIFY-001): `styleNode`/`sensitivityTags`/`mood`/`palette`/`style`/`items[]` (subcategory/fit/colorFamily/searchQuery/searchQueryKo). flag: `VISION_SCHEMA_V2` |
 | `app/channels/vision_prompt.py` | Vision v2 schema 프롬프트 + JSON 스키마 정의 (kikoai/app `analyze.ts` 동치) |
 | `app/channels/clarify.py` | clarify 카드 빌더 (6 axes: category_pick / formality / fit / occasion / subcategory_disambiguation / generic_fallback) |
@@ -137,11 +142,24 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/telegram/webhook.py` | Telegram Update 파싱 |
 | `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
 | `app/pipeline/state.py` | PipelineState 정의 |
-| `app/pipeline/embed.py` | Modal /embed 호출 |
+| `app/pipeline/embed.py` | thin @observe shim — 실제 로직은 `app/services/embed_service.py`에 위치 (SPEC-ARCH-AI-001) |
 | `app/pipeline/enhance_query.py` | LLM 기반 sparse 쿼리 정제 (SPEC-PIPELINE-001, feature flag 기본 off) |
-| `app/pipeline/search.py` | `search_products_v5` RPC (PostgREST 경유) |
-| `app/pipeline/diversify.py` | 다양성 캡 + tolerance |
+| `app/pipeline/search.py` | thin @observe shim — 실제 로직은 `app/services/search_service.py` + `app/infrastructure/repositories/search_repository.py`에 위치. 테스트 monkeypatch seam(`SupabaseProvider.rpc`) 재노출 (SPEC-ARCH-AI-001) |
+| `app/pipeline/diversify.py` | thin @observe shim — 실제 로직은 `app/services/diversify_service.py`에 위치 (SPEC-ARCH-AI-001) |
 | `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
+| `app/services/search_service.py` | 검색 오케스트레이션 + 3-tier query_text 선택. `RpcContractError` 캐치 → 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006, SPEC-ARCH-AI-001) |
+| `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + tolerance 산술. banker's rounding 포함 (`int(round(10 + t*10))`) (SPEC-ARCH-AI-001) |
+| `app/services/embed_service.py` | Modal /embed 래핑 (SPEC-ARCH-AI-001) |
+| `app/services/database_service.py` | `SupabaseProvider` pass-through 래퍼 (SPEC-ARCH-AI-001) |
+| `app/infrastructure/repositories/search_repository.py` | `SearchRepository` — `_RPC_NAME = "search_products_v5"` (단일 소스) + `build_params` + `search`. `embedding_to_pgvector` 공동 위치 (SPEC-ARCH-AI-001 REQ-AI-002) |
+| `app/infrastructure/repositories/search_rpc_contract.py` | `SearchRpcRowContract` Pydantic 모델 + `RpcContractError` + `validate_rpc_rows`. 드리프트 시 구조화 에러 (REQ-AI-006). 허용: id absent → 에러, score/brand absent → 허용, extra 컬럼 허용 |
+| `app/infrastructure/memory/session.py` | (구 `app/channels/session.py`) `SessionStore` Protocol + `InMemorySessionStore` (SPEC-ARCH-AI-001) |
+| `app/infrastructure/memory/session_pg.py` | (구 `app/channels/session_pg.py`) Postgres 기반 세션 저장소 (SPEC-ARCH-AI-001) |
+| `app/infrastructure/memory/taste_profile.py` | (구 `app/channels/taste_profile.py`) TasteProfile 도메인 모델 (SPEC-ARCH-AI-001) |
+| `app/infrastructure/memory/taste_profile_pg.py` | (구 `app/channels/taste_profile_pg.py`) Postgres 기반 취향 프로파일 저장소 (SPEC-ARCH-AI-001) |
+| `app/core/di.py` | DI 컨테이너 — `provide_db_pool` / `provide_settings` / `provide_embed_provider`. `db_pool` 모듈 글로벌 상태 위임 어댑터로 유지 (byte-identical, REQ-AI-003) |
+| `app/core/types.py` | 공유 타입 — `ProductRow` 등 (SPEC-ARCH-AI-001) |
+| `app/domain/search.py` | 도메인 타입 — `SearchResult`, `Candidate` (app/models/ DTO 와 분리) (SPEC-ARCH-AI-001) |
 | `app/providers/database.py` | SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업) |
 | `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증 |
 | `app/providers/llm.py` | LiteLLM HTTP |

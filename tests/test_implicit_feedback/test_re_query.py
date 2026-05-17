@@ -8,7 +8,7 @@ import pytest
 
 
 def _make_session_results_sent(last_active_offset_s: float, results: list):
-    from app.channels.session import Session, SessionState
+    from app.infrastructure.memory.session import Session, SessionState
 
     return Session(
         chat_id=31,
@@ -66,7 +66,7 @@ async def test_re_query_non_fresh_query_no_trigger(fake_candidates, in_memory_ta
 @pytest.mark.asyncio
 async def test_re_query_idle_state_no_trigger(fake_candidates, in_memory_taste_store):
     from app.channels.implicit_feedback import detect_and_apply_re_query
-    from app.channels.session import Session, SessionState
+    from app.infrastructure.memory.session import Session, SessionState
 
     sess = Session(
         chat_id=1,

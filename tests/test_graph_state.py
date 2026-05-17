@@ -9,8 +9,8 @@ from langchain_core.messages import SystemMessage
 from pydantic import ValidationError
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import SessionState
 from app.graphs.state import InputState, OutputState, WorkingState
+from app.infrastructure.memory.session import SessionState
 
 
 def _msg(chat_id: int = 42) -> ChannelMessage:

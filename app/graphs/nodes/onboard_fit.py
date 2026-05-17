@@ -24,8 +24,6 @@ from typing import Any
 from app.channels.lang import session_lang
 from app.channels.onboarding_cards import build_fit_card, build_pinterest_card, parse_onboard_callback
 from app.channels.onboarding_values import STAGE_BOUNDS
-from app.channels.session import get_store
-from app.channels.taste_profile import get_taste_store, user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.nodes._onboard_helpers import complete_onboarding
@@ -37,6 +35,8 @@ from app.graphs.nodes._onboard_stage import (
 )
 from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)

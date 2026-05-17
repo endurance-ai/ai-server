@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.channels.session import Session, SessionState, set_store
+from app.infrastructure.memory.session import Session, SessionState, set_store
 
 
 class _FakeStore:

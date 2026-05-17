@@ -18,8 +18,8 @@ from datetime import UTC, datetime
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, SessionState, set_store
 from app.graphs.state import InputState
+from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store
 
 
 @pytest.fixture

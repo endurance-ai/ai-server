@@ -63,7 +63,7 @@ class PipelineState:
 
 ## 각 step
 
-### 1. `embed_step` — `app/pipeline/embed.py`
+### 1. `embed_step` — `app/pipeline/embed.py` (thin shim → `app/services/embed_service.py`)
 
 ```python
 state.embedding = await EmbedProvider.embed_image_url(state.request.image_url)
@@ -91,7 +91,9 @@ LLM(LiteLLM 프록시 경유 gpt-4o-mini)으로 raw `search_query` / `search_que
 | 출력 | `state.enhanced_query`, `state.enhanced_query_ko`, `state.enhance_query_status` (`ok`/`fallback`/`disabled`/`skipped`) |
 | 폴백 [HARD] | timeout / 5xx / 4xx / network / empty / parse_error / length_invalid 모두 raw 쿼리 사용 (raise 금지) |
 
-### 2. `search_step` — `app/pipeline/search.py`
+### 2. `search_step` — `app/pipeline/search.py` (thin shim → `app/services/search_service.py` + `app/infrastructure/repositories/search_repository.py`)
+
+> **SPEC-ARCH-AI-001**: RPC 이름(`"search_products_v5"`)과 파라미터 빌드는 `SearchRepository`에 단일 소스. 응답 행은 `SearchRpcRowContract`로 검증 — 드리프트 시 `RpcContractError` + 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006). 외부 행동 byte-identical.
 
 ```python
 rows = await SupabaseProvider.rpc("search_products_v5", {
@@ -115,7 +117,7 @@ rows = await SupabaseProvider.rpc("search_products_v5", {
 
 상세: [`search-engine.md`](search-engine.md).
 
-### 3. `diversify_step` — `app/pipeline/diversify.py`
+### 3. `diversify_step` — `app/pipeline/diversify.py` (thin shim → `app/services/diversify_service.py`)
 
 ```python
 target = req.final_limit or _tolerance_to_target_count(req.tolerance)

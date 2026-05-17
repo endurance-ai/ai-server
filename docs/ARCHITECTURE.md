@@ -1,7 +1,7 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-15 (v0.7.0 — SPEC-AGENT-V2-REACT ReAct 에이전트 루프, flag-gated default off).
+> 마지막 업데이트: 2026-05-17 (v0.8.0 — SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 + RPC 계약 검증).
 
 ## 한 줄 요약
 
@@ -119,7 +119,7 @@ app/
 │   ├── link_resolver.py    # Pinterest / og:image URL 해석
 │   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
 │   ├── lang.py             # detect_lang / remember_lang / session_lang — KO/EN sticky 언어 감지
-│   ├── session.py          # SessionStore Protocol + InMemorySessionStore 구현체 (set_store_factory/set_store/reset_store 주입 지점). Session.lang 필드 포함
+│   ├── session.py          # (구 channels/session.py — SPEC-ARCH-AI-001 이전) SessionStore Protocol + InMemorySessionStore
 │   ├── vision.py           # LiteLLM 경유 Vision 추출 (v2 schema, SPEC-VISION-UNIFY-001)
 │   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (kikoai/app analyze.ts 동치)
 │   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
@@ -161,15 +161,34 @@ app/
 │       └── _pinterest_helpers.py # 핀 Vision batch + reinforce 헬퍼
 ├── core/
 │   ├── config.py           # Pydantic Settings (env) — 신규 메신저 키 포함
-│   └── auth.py             # verify_internal_token dependency
-├── pipeline/
+│   ├── auth.py             # verify_internal_token dependency
+│   ├── di.py               # DI 컨테이너 — provide_db_pool / provide_settings / provide_embed_provider (SPEC-ARCH-AI-001 REQ-AI-003)
+│   └── types.py            # 공유 타입 (SPEC-ARCH-AI-001)
+├── domain/
+│   └── search.py           # 도메인 타입 — SearchResult, Candidate (SPEC-ARCH-AI-001)
+├── services/               # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001 PR1)
+│   ├── embed_service.py    # Modal /embed 래핑
+│   ├── search_service.py   # 검색 오케스트레이션 + query_text 선택 + RpcContractError 핸들링 (REQ-AI-006)
+│   ├── diversify_service.py # 브랜드/플랫폼 캡 + tolerance (banker's rounding)
+│   └── database_service.py # SupabaseProvider pass-through
+├── infrastructure/         # 인프라 레이어 (SPEC-ARCH-AI-001 PR2-5)
+│   ├── repositories/
+│   │   ├── search_repository.py   # SearchRepository — _RPC_NAME 단일 소스 + build_params + search (REQ-AI-002)
+│   │   └── search_rpc_contract.py # SearchRpcRowContract Pydantic + RpcContractError + validate_rpc_rows (REQ-AI-006)
+│   └── memory/
+│       ├── session.py          # (구 channels/session.py) SessionStore Protocol + InMemorySessionStore
+│       ├── session_pg.py       # (구 channels/session_pg.py) Postgres 기반 세션 저장소
+│       ├── taste_profile.py    # (구 channels/taste_profile.py) TasteProfile 도메인 모델
+│       └── taste_profile_pg.py # (구 channels/taste_profile_pg.py) Postgres 기반 취향 프로파일 저장소
+├── pipeline/               # thin @observe shim 레이어 (SPEC-ARCH-AI-001 — 실제 로직은 services/로 이전)
 │   ├── state.py            # PipelineState (state → state)
-│   ├── embed.py            # Step 1: Modal /embed
-│   ├── search.py           # Step 2: search_products_v5 RPC (PostgREST 경유)
-│   ├── diversify.py        # Step 3: 브랜드/플랫폼 캡 + tolerance
+│   ├── embed.py            # shim → embed_service + EmbedProvider 재노출 (monkeypatch seam)
+│   ├── search.py           # shim → search_service + SupabaseProvider 재노출 (monkeypatch seam)
+│   ├── diversify.py        # shim → diversify_service + _tolerance_to_target_count 재노출
 │   └── runner.py           # 파이프라인 조립 + @observe
 ├── providers/
 │   ├── database.py         # SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업)
+│   ├── db_pool.py          # psycopg3 AsyncConnectionPool 초기화 + di.py 위임 어댑터 (SPEC-ARCH-AI-001 REQ-AI-003)
 │   ├── embedding.py        # EmbedProvider (Modal HTTP)
 │   ├── llm.py              # LLMProvider (LiteLLM HTTP)
 │   └── apify.py            # ApifyProvider — Pinterest 스크래퍼 (httpx, board/profile/pin 3-mode, ApifyTimeoutError)
@@ -187,7 +206,7 @@ app/
 | 레이어 | 책임 |
 |--------|------|
 | Postgres (`search_products_v5` RPC) | dense (HNSW) + sparse (pgroonga BM25) + RRF → top-K 후보 반환 |
-| Python (`pipeline/diversify.py`) | 다양성 캡 (브랜드 max 2 / 플랫폼 max 3), tolerance 적용, 최종 정렬 |
+| Python (`services/diversify_service.py`, thin shim `pipeline/diversify.py`) | 다양성 캡 (브랜드 max 2 / 플랫폼 max 3), tolerance 적용, 최종 정렬 |
 
 **근거**: DB는 인덱스를 잘 활용하는 것 (벡터/풀텍스트), Python은 비즈니스 로직 (변경 빈도 높은 다양성/리랭크/A/B).
 
@@ -255,6 +274,7 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구�
 | [`features/search-engine.md`](features/search-engine.md) | v5 RPC + RRF + 다양성 캡 |
 | [`features/observability.md`](features/observability.md) | Langfuse 통합 + LiteLLM callback |
 | [`infra/env.md`](infra/env.md) | 환경변수 매트릭스 |
+| [`infra/search-rpc-contract.md`](infra/search-rpc-contract.md) | `search_products_v5` RPC 입출력 계약 + 드리프트 동작 (SPEC-ARCH-AI-001 REQ-AI-006) |
 | [`infra/deployment.md`](infra/deployment.md) | EC2 docker-compose + Modal 배포 |
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
 | `docs/plans/archive/` | 과거 Qdrant 기반 설계 (참고만) |
@@ -273,5 +293,6 @@ Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구�
 | 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
 | 2026-05-15 | **v0.6.0 — SPEC-CONVERSATION-LOG-001 + SPEC-ONBOARD-CARDS-001 + noscroll sentence-split** (이벤트 소싱: `ai.log_conversation_event` append-only 테이블 (migration 0003), 19 이벤트 TypedDict, `emit()` fire-and-forget, PG failsoft stderr fallback. 온보딩 카드: 6 신규 노드 (onboard_intro/mood/color/fit/pinterest + pinterest_ingest), `app/providers/apify.py` (Apify httpx wrapper, ApifyTimeoutError), `app/channels/onboarding_cards/values/pinterest_url.py` + `_jsonable.py`, migration 0004 (`user_session` + `onboarded_at` 컬럼). noscroll P0: `RESPONSE_SPLIT_ENABLED` 문장 분할 발화. 그래프 노드 수 12 → 18.) |
 | 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `kikoai/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |
+| 2026-05-17 | **v0.8.0 — SPEC-ARCH-AI-001 서비스/인프라 레이어 추출** (`app/services/` 4개 서비스, `app/infrastructure/repositories/` SearchRepository + RPC 계약 검증, `app/infrastructure/memory/` 세션/취향 프로파일 이전, `app/core/di.py` DI 컨테이너, `app/domain/` 도메인 타입. `app/pipeline/` thin shim 으로 리팩토링. 외부 행동 byte-identical (REQ-AI-007), characterization net 46+5=51 통과. `RpcContractError` 신규 — 드리프트 시 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006). `docs/infra/search-rpc-contract.md` 신규.) |
 | 2026-05-15 | **v0.7.0 — SPEC-AGENT-V2-REACT ReAct 에이전트 루프 (flag-gated, default off)** (`app/agents/` 신규 패키지: `react_loop.py` / `tool_registry.py` / `llm_client.py` / `tools/` 7개 래퍼. `app/graphs/nodes/agent.py` 신규. `WorkingState` +3 필드 (`agent_iterations`, `tool_call_history`, `agent_status`). `fashion_bot.py` — `AGENT_V2_REACT_ENABLED` + `AGENT_LLM_MODEL` 양쪽 설정 시 V2 토폴로지 선택. 6 신규 env vars (`AGENT_V2_REACT_ENABLED` / `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_MODEL` / `AGENT_LLM_TIMEOUT_S`). 20번째 이벤트 타입 `tool_call` 추가. `/health/ready` +2 필드 (`agent_v2_react_enabled` / `agent_llm_model_configured`). 5 deprecated 모듈 (rollback 보존): `critique_apply` / `evaluator` / `respond` / `taste_update` graph nodes + `channels/router.py`.) |
 | 2026-05-17 | **v0.8.0 — SPEC-AGENT-V3-REACT V2 증분 강화 4-Gap (flag-gated, all default off)** (그래프 토폴로지 무변경 — in-loop/registry/store 변경만. `app/agents/_memory_context.py` (Gap1 신규): TasteProfile + 최근 5턴 요약 system context 자동 주입, char-cap+truncation. `app/agents/_reflexion.py` (Gap2 신규): evaluator 헬퍼 래핑, in-loop search 품질 평가, quality delta → ToolMessage 첨부, LLM 자율 refine, 잔여-budget asyncio.wait_for 강제 취소. `app/agents/tools/suggest_next_step.py` (Gap3 신규): 8번째 tool, 어댑터 재사용. `tool_registry.py` + `react_loop.py` + `update_taste.py` + `search_products.py` + `refine_search.py` + `taste_profile.py` + `taste_profile_pg.py` + `config.py` 수정. Alembic 0005 (`ai.user_taste_profile` +2 JSONB 컬럼). 5 신규 env (`AGENT_V3_*`). tests/test_agent_v3/ 신규 디렉토리 (14개 파일). all-off = V2 byte-identical 기계 검증. 810 passed / 9 pre-existing failed / 117 skipped.) |

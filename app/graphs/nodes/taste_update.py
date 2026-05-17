@@ -16,14 +16,14 @@ from __future__ import annotations
 import logging
 
 from app.channels.router import RoutedIntent, TasteUpdate
-from app.channels.session import get_store
-from app.channels.taste_profile import (
+from app.graphs.nodes._trace import node_done, node_enter, node_skip
+from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import (
     TasteProfile,
     get_taste_store,
     user_key_for,
 )
-from app.graphs.nodes._trace import node_done, node_enter, node_skip
-from app.graphs.state import WorkingState
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 

@@ -30,7 +30,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> UpdateTasteResu
         return UpdateTasteResult(ok=False, error="missing_user_key", applied=False)
 
     try:
-        from app.channels.taste_profile import get_taste_store
+        from app.infrastructure.memory.taste_profile import get_taste_store
 
         store = get_taste_store()
         profile = store.get_or_create(user_key)
