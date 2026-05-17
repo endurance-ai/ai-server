@@ -48,12 +48,18 @@ def test_migration_0004_adds_all_7_columns(pg_dsn: str):
 
 
 def test_migration_0004_downgrade_drops_all_7_columns(pg_dsn: str):
-    """Downgrade -1 (to 0003) removes the 7 columns; re-upgrade restores them."""
+    """Downgrade to 0003 removes the 7 columns; re-upgrade restores them.
+
+    Uses the absolute target "0003" (0004's down_revision) rather than the
+    relative "-1" so the test stays correct regardless of how many later
+    migrations exist beyond 0004 (e.g. 0005+). With "-1" the target would
+    track the Alembic head and only revert the newest migration.
+    """
     from alembic import command
 
     cfg = _alembic_config(pg_dsn)
 
-    command.downgrade(cfg, "-1")
+    command.downgrade(cfg, "0003")
     cols_after_down = _column_names(pg_dsn, "ai", "user_session")
     overlap = EXPECTED_NEW_COLUMNS & cols_after_down
     assert not overlap, f"columns still present after downgrade: {overlap}"
@@ -84,8 +90,10 @@ def test_migration_0004_backfills_existing_onboarded_at(pg_dsn: str):
     from alembic import command
 
     cfg = _alembic_config(pg_dsn)
-    # Start from the 0003 state.
-    command.downgrade(cfg, "-1")
+    # Start from the 0003 state (absolute target — 0004's down_revision —
+    # so we land at the genuine pre-0004 schema regardless of later
+    # migrations; "-1" would only revert the current head).
+    command.downgrade(cfg, "0003")
 
     # Insert a row using the pre-0004 schema.
     with psycopg.connect(pg_dsn) as conn, conn.cursor() as cur:

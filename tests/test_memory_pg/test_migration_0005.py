@@ -44,7 +44,11 @@ def test_migration_0005_downgrade_drops_then_reupgrade(pg_dsn: str):
     from alembic import command
 
     cfg = _alembic_config(pg_dsn)
-    command.downgrade(cfg, "-1")
+    # Absolute target "0004" (0005's down_revision) instead of relative "-1":
+    # reverts exactly the 0005 dislike-ts columns regardless of how many
+    # later migrations exist (a future 0006+ would make "-1" track head and
+    # revert the wrong migration).
+    command.downgrade(cfg, "0004")
     cols_after_down = _column_names(pg_dsn, "ai", "user_taste_profile")
     overlap = EXPECTED_NEW_COLUMNS & cols_after_down
     assert not overlap, f"columns still present after downgrade: {overlap}"
@@ -71,7 +75,10 @@ def test_migration_0005_default_empty_object_backward_compat(pg_dsn: str):
     from alembic import command
 
     cfg = _alembic_config(pg_dsn)
-    command.downgrade(cfg, "-1")  # to 0004
+    # Absolute target "0004" (0005's down_revision) — lands at the genuine
+    # pre-0005 schema regardless of head; relative "-1" would only revert
+    # the newest migration once a 0006+ exists.
+    command.downgrade(cfg, "0004")
 
     with psycopg.connect(pg_dsn) as conn, conn.cursor() as cur:
         cur.execute(
