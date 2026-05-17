@@ -153,3 +153,40 @@ test_observability — langfuse v3/pydantic env), ZERO new. `import app.main`
 OK. ruff clean on `app/core/ app/providers/db_pool.py`.
 
 STOP — PR4-6 (memory / domain / contract) deferred to later layers.
+
+### IMPROVE phase — PR4 (memory relocation) complete — 2026-05-17
+
+Pure module move, zero logic change. `session.py`/`session_pg.py`/
+`taste_profile.py`/`taste_profile_pg.py` relocated `app/channels/` ->
+`app/infrastructure/memory/` (REQ-AI-004, PR4 of 6, highest blast — 57 sites).
+
+**Files moved (git mv, content verbatim):**
+- `app/channels/session.py` -> `app/infrastructure/memory/session.py`
+- `app/channels/session_pg.py` -> `app/infrastructure/memory/session_pg.py`
+- `app/channels/taste_profile.py` -> `app/infrastructure/memory/taste_profile.py`
+- `app/channels/taste_profile_pg.py` -> `.../memory/taste_profile_pg.py`
+
+**Internal cross-imports rewritten to canonical path (only change in moved
+files):** `session_pg` `from app.channels.session` ->
+`from app.infrastructure.memory.session`; `taste_profile_pg`
+`from app.channels.taste_profile` -> `.../memory.taste_profile`.
+`app.channels._jsonable` import unchanged (not relocated). ruff I001
+import-block re-sort applied to session_pg (ordering only, no behavior).
+
+**Shims (sys.modules alias — fully transparent):**
+The 4 old `app/channels/` paths `sys.modules[__name__] = _canonical` so the
+old import path IS the same module object. This was REQUIRED:
+`tests/test_implicit_feedback/conftest.py` monkeypatches the private
+`app.channels.taste_profile._store` global — a star-re-export shim (first
+attempt) created a separate namespace and broke 7 tests with
+AttributeError. The sys.modules alias makes every attribute (private state
+included), class identity, and import resolve byte-identically.
+
+**Gate result:**
+46 passed (scoped); golden diff empty. Full collectable suite: 632 passed,
+90 skipped, 9 pre-existing failures ONLY (test_critique_loop /
+test_observability), ZERO new failures/errors (verified the 7 transient
+implicit_feedback errors from the rejected star-shim are fully resolved).
+`import app.main` OK. ruff clean.
+
+STOP — PR5-6 (domain / contract) + PR-final deferred to later layers.
