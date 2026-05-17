@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture
 def pg_taste_store(pool_initialized):  # type: ignore[no-untyped-def]
-    from app.channels.taste_profile_pg import PostgresTasteProfileStore
+    from app.infrastructure.memory.taste_profile_pg import PostgresTasteProfileStore
 
     return PostgresTasteProfileStore()
 

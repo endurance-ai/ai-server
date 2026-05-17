@@ -24,11 +24,11 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from app.channels.taste_profile import (
+from app.core.config import settings
+from app.infrastructure.memory.taste_profile import (
     get_taste_store,
     user_key_for,
 )
-from app.core.config import settings
 from app.observability.conversation_log import emit as _conv_emit
 from app.observability.langfuse import observe, update_current_span
 from app.observability.pii import hash_id
@@ -432,7 +432,7 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
     window_s = max(0, int(settings.IMPLICIT_FB_REQUERY_WINDOW_S))
 
     try:
-        from app.channels.session import SessionState
+        from app.infrastructure.memory.session import SessionState
 
         triggered = (
             inbound_is_fresh_query

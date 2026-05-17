@@ -18,20 +18,20 @@ from pydantic import HttpUrl
 
 from app.channels.recommendation import set_port
 from app.channels.schemas import ChannelMessage
-from app.channels.session import (
+from app.core.config import settings
+from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
+from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import (
     InMemorySessionStore,
     SessionState,
     set_store,
     shutdown_store,
 )
-from app.channels.taste_profile import (
+from app.infrastructure.memory.taste_profile import (
     InMemoryTasteProfileStore,
     set_taste_store,
     shutdown_taste_store,
 )
-from app.core.config import settings
-from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
-from app.graphs.state import WorkingState
 from tests.conftest_graph import FakeAdapter, StubPort
 
 # SPEC-AGENT-V2-REACT / T-010 (Bucket B2) — these E2E tests assert the V1

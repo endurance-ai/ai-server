@@ -12,17 +12,17 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import (
-    InMemorySessionStore,
-    set_store,
-)
-from app.channels.taste_profile import (
-    InMemoryTasteProfileStore,
-    set_taste_store,
-)
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.nodes.pinterest_ingest import pinterest_ingest
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import (
+    InMemorySessionStore,
+    set_store,
+)
+from app.infrastructure.memory.taste_profile import (
+    InMemoryTasteProfileStore,
+    set_taste_store,
+)
 
 
 class FakeAdapter:

@@ -145,8 +145,8 @@ async def _send_last_results_cards(adapter: Any, ctx: dict[str, Any], chat_id: i
         return 0
     try:
         from app.channels.lang import session_lang
-        from app.channels.session import get_store
         from app.graphs.nodes.send_results import _candidate_to_card
+        from app.infrastructure.memory.session import get_store
 
         sess = get_store().get_or_create(int(chat_id))
         candidates = list(getattr(sess, "last_results", None) or [])

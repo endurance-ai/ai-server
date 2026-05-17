@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.channels.session import get_store
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
 from app.observability.langfuse import observe
 
 logger = logging.getLogger(__name__)

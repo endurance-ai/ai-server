@@ -12,7 +12,6 @@ import pytest
 from pydantic import HttpUrl
 
 from app.channels.schemas import ChannelMessage
-from app.channels.session import InMemorySessionStore, SessionState, set_store
 from app.core.config import settings
 from app.graphs.routing import (
     _route_after_ingest,
@@ -22,6 +21,7 @@ from app.graphs.routing import (
     _route_after_vision,
 )
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store
 
 
 @pytest.fixture(autouse=True)

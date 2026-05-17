@@ -139,7 +139,7 @@ async def _apply_self_critique_passthrough(state: WorkingState) -> dict:
     search_node code stays untouched.
     """
     from app.channels.critique import CritiqueDelta as LegacyDelta
-    from app.channels.session import get_store
+    from app.infrastructure.memory.session import get_store
 
     pending = state.critique_pending_delta
     breadcrumbs: list[str] = []
@@ -204,13 +204,13 @@ def _build_graph_v2() -> Any:
 
     def _route_after_ingest_v2(state: WorkingState) -> str:
         # Onboarding gate FIRST (preserved).
-        from app.channels.session import SessionState, get_store
         from app.graphs.routing import (
             _resolve_onboard_stage_target,
             first_touch_intro_required,
             is_continuous_pinterest,
             onboarding_required,
         )
+        from app.infrastructure.memory.session import SessionState, get_store
 
         sess = get_store().get_or_create(state.chat_id)
         if onboarding_required(state, sess):

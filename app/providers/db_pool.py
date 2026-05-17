@@ -40,15 +40,22 @@ def _sanitize_dsn(dsn: str) -> str:
 
 
 def get_pool() -> AsyncConnectionPool:
-    if _pool is None:
-        raise RuntimeError("db pool not initialized; call init_pool() during lifespan")
-    return _pool
+    """Thin delegating adapter to the DI container (SPEC-ARCH-AI-001 PR3,
+    REQ-AI-003). State still lives in this module's `_pool` global; the DI
+    provider reads it, so `db_pool._pool` reads and string monkeypatches on
+    `app.providers.db_pool.get_pool` remain byte-identical. The RuntimeError
+    message is unchanged."""
+    from app.core.di import provide_db_pool
+
+    return provide_db_pool()
 
 
 def get_loop() -> asyncio.AbstractEventLoop:
-    if _loop is None:
-        raise RuntimeError("db pool loop not initialized")
-    return _loop
+    """Thin delegating adapter to the DI container (REQ-AI-003). Byte-identical
+    RuntimeError message; `_loop` global remains the state owner."""
+    from app.core.di import provide_db_loop
+
+    return provide_db_loop()
 
 
 def run_in_pool_loop(coro: Any) -> Any:

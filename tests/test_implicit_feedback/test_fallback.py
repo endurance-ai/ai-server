@@ -54,7 +54,7 @@ async def test_record_click_stale_returns_zero(in_memory_taste_store):
 @pytest.mark.asyncio
 async def test_detect_requery_no_state_no_trigger():
     from app.channels import implicit_feedback as ifb
-    from app.channels.session import Session, SessionState
+    from app.infrastructure.memory.session import Session, SessionState
 
     sess = Session(chat_id=1, state=SessionState.IDLE)
     triggered = await ifb.detect_and_apply_re_query(sess, inbound_is_fresh_query=True)

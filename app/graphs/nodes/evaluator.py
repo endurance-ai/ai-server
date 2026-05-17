@@ -36,12 +36,12 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from app.channels.session import get_store
-from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._evaluator_models import CritiqueDelta, CritiqueScore
 from app.graphs.nodes._evaluator_prompt import SYSTEM_PROMPT, build_user_prompt
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe, update_current_span
 from app.providers.llm import LLMProvider

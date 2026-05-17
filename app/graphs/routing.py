@@ -45,9 +45,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.channels.router import RoutedIntent
-from app.channels.session import Session, SessionState, get_store
 from app.core.config import settings
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import Session, SessionState, get_store
 
 # ── SPEC-ONBOARD-CARDS-001 — entry/gating predicates ─────────────────────────
 # @MX:SPEC: SPEC-ONBOARD-CARDS-001

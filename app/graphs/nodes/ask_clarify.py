@@ -28,11 +28,11 @@ from app.channels.clarify_values import (
     get_options,
 )
 from app.channels.lang import session_lang
-from app.channels.session import SessionState, get_store
-from app.channels.taste_profile import user_key_for
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import SessionState, get_store
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 

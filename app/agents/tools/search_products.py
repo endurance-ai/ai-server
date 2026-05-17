@@ -112,7 +112,7 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
     if chat_id is None or not cands:
         return 0
     try:
-        from app.channels.session import get_store
+        from app.infrastructure.memory.session import get_store
 
         store = get_store()
         sess = store.get_or_create(int(chat_id))

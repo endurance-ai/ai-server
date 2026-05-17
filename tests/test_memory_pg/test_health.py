@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.channels import session as session_mod
-from app.channels import taste_profile as taste_mod
-from app.channels.session import InMemorySessionStore
-from app.channels.session_pg import PostgresSessionStore
-from app.channels.taste_profile import InMemoryTasteProfileStore
+from app.infrastructure.memory import session as session_mod
+from app.infrastructure.memory import taste_profile as taste_mod
+from app.infrastructure.memory.session import InMemorySessionStore
+from app.infrastructure.memory.session_pg import PostgresSessionStore
+from app.infrastructure.memory.taste_profile import InMemoryTasteProfileStore
 
 
 @pytest.mark.asyncio

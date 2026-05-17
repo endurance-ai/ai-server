@@ -46,7 +46,7 @@ async def _one_iteration(chat_id: int) -> float:
         detect_and_apply_re_query,
         log_impressions,
     )
-    from app.channels.session import Session, SessionState
+    from app.infrastructure.memory.session import Session, SessionState
 
     candidates = _make_candidates(5)
     sess = Session(

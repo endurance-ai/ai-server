@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.channels.critique import CritiqueDelta
 from app.channels.router import RoutedDecision
 from app.channels.schemas import ChannelMessage
-from app.channels.session import SessionState
+from app.infrastructure.memory.session import SessionState
 
 __all__ = ["InputState", "OutputState", "WorkingState"]
 

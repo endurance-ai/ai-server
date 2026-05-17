@@ -21,8 +21,8 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from app.channels._jsonable import to_jsonable as _to_jsonable
-from app.channels.session import Session, SessionState
 from app.core.config import settings
+from app.infrastructure.memory.session import Session, SessionState
 from app.observability.langfuse import observe
 from app.providers.db_pool import get_pool, run_in_pool_loop
 

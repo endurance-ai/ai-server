@@ -11,23 +11,23 @@ from __future__ import annotations
 import pytest
 
 from app.channels.recommendation import set_port
-from app.channels.session import (
-    InMemorySessionStore,
-    SessionState,
-    set_store,
-    shutdown_store,
-)
-from app.channels.taste_profile import (
-    InMemoryTasteProfileStore,
-    set_taste_store,
-    shutdown_taste_store,
-)
 from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes import respond as respond_module
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.nodes.ask_clarify import _FALLBACK as ASK_CLARIFY_FALLBACK
 from app.graphs.state import InputState
+from app.infrastructure.memory.session import (
+    InMemorySessionStore,
+    SessionState,
+    set_store,
+    shutdown_store,
+)
+from app.infrastructure.memory.taste_profile import (
+    InMemoryTasteProfileStore,
+    set_taste_store,
+    shutdown_taste_store,
+)
 from tests.conftest_graph import FakeAdapter, FakeCandidate, StubLLM, StubPort, make_msg
 
 # ── Fixtures ───────────────────────────────────────────────────────────────

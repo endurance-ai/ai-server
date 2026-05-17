@@ -7,7 +7,7 @@ backends. Postgres path goes through the testcontainers fixture in
 
 from __future__ import annotations
 
-from app.channels.taste_profile import InMemoryTasteProfileStore
+from app.infrastructure.memory.taste_profile import InMemoryTasteProfileStore
 
 
 def test_inmemory_seed_adds_new_keywords():

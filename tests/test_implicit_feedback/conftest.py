@@ -68,7 +68,7 @@ async def pg_pool_with_impressions(pg_container) -> AsyncGenerator[None]:  # noq
 @pytest.fixture
 def in_memory_taste_store(monkeypatch):
     """Force an in-memory TasteProfile store for fast unit tests."""
-    from app.channels import taste_profile as _tp
+    from app.infrastructure.memory import taste_profile as _tp
 
     store = _tp.InMemoryTasteProfileStore()
     monkeypatch.setattr(_tp, "_store", store)

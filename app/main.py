@@ -10,23 +10,23 @@ from fastapi.responses import ORJSONResponse
 from app.api import router
 from app.channels import link_resolver
 from app.channels.factory import get_adapter, reset_adapter
-from app.channels.session import (
+from app.channels.telegram.adapter import TelegramAdapter
+from app.channels.telegram.webhook import setup_webhook
+from app.core.config import settings
+from app.infrastructure.memory.session import (
     InMemorySessionStore,
     init_store,
     set_store_factory,
     shutdown_store,
 )
-from app.channels.session_pg import PostgresSessionStore
-from app.channels.taste_profile import (
+from app.infrastructure.memory.session_pg import PostgresSessionStore
+from app.infrastructure.memory.taste_profile import (
     InMemoryTasteProfileStore,
     init_taste_store,
     set_taste_store_factory,
     shutdown_taste_store,
 )
-from app.channels.taste_profile_pg import PostgresTasteProfileStore
-from app.channels.telegram.adapter import TelegramAdapter
-from app.channels.telegram.webhook import setup_webhook
-from app.core.config import settings
+from app.infrastructure.memory.taste_profile_pg import PostgresTasteProfileStore
 from app.observability.langfuse import flush as langfuse_flush
 from app.providers import db_pool
 from app.providers.database import SupabaseProvider

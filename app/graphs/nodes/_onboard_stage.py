@@ -25,10 +25,10 @@ from app.channels.onboarding_cards import (
     parse_onboard_callback,
 )
 from app.channels.onboarding_values import STAGE_BOUNDS
-from app.channels.session import get_store
-from app.channels.taste_profile import user_key_for
 from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 
 logger = logging.getLogger(__name__)

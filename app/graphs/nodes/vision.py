@@ -17,10 +17,10 @@ import logging
 from langchain_core.messages import SystemMessage
 
 from app.channels import vision as vision_module
-from app.channels.session import get_store
-from app.channels.taste_profile import user_key_for
 from app.channels.vision import VisionResult, derive_legacy_dict, derive_legacy_keywords, derive_legacy_label
 from app.graphs.state import WorkingState
+from app.infrastructure.memory.session import get_store
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit, scrub_exception_message
 from app.observability.langfuse import observe
 

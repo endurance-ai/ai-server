@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.channels.session_pg import PostgresSessionStore
+from app.infrastructure.memory.session_pg import PostgresSessionStore
 
 
 def test_round_trip_empty_onboarding_columns():
