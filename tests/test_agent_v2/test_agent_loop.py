@@ -553,6 +553,15 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
 
     monkeypatch.setattr("app.pipeline.search.search_step", _fake_search_step)
     monkeypatch.setattr("app.pipeline.diversify.diversify_step", _fake_diversify_step)
+    # This is the only test in this file using the REAL dispatcher + a
+    # search_step-level mock (others patch _resolve_dispatcher), so it reaches
+    # the genuine v6 run_text_only_search → EmbedProvider.embed_text. Patch it
+    # (same app.pipeline.embed seam as embed_image_url) so no Modal call fires
+    # offline in CI ('Event loop is closed'). v6 test-seam re-point.
+    monkeypatch.setattr(
+        "app.pipeline.embed.EmbedProvider.embed_text",
+        AsyncMock(return_value=[0.1] * 768),
+    )
 
     fake = _FakeLLM(
         [

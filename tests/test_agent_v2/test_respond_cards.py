@@ -28,6 +28,21 @@ class _FakeStore:
         self._sess = sess
 
 
+@pytest.fixture(autouse=True)
+def _mock_embed_text(monkeypatch):
+    """v6 text-only path calls EmbedProvider.embed_text before search_step.
+    These tests mock search_step/diversify_step but drive the text path
+    (image_url=""), so embed_text must also be patched (same app.pipeline.embed
+    re-export seam as embed_image_url) — otherwise a real Modal call fires and
+    fails offline in CI ('Event loop is closed'). Re-point of the v6 test seam,
+    mirrors tests/test_agent_v2/test_search_text_only.py::_mock_embed_text.
+    """
+    monkeypatch.setattr(
+        "app.pipeline.embed.EmbedProvider.embed_text",
+        AsyncMock(return_value=[0.1] * 768),
+    )
+
+
 def _candidate(i: int):
     from app.models.response import Candidate
 
