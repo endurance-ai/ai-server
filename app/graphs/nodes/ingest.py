@@ -115,6 +115,25 @@ async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) 
         return
     delivered = await send_hybrid_batch(adapter, state.chat_id, ctx=None, offset=None)
     breadcrumbs.append(f"ingest: cards:more delivered={delivered}")
+    if delivered == 0:
+        # Nothing left to page (the "더보기" button is normally suppressed when
+        # there is no next batch, but a stale tap can still arrive). Don't go
+        # silent — nudge toward a fresh/refined search.
+        try:
+            from app.channels.lang import session_lang
+
+            lang = session_lang(sess)
+        except Exception:  # noqa: BLE001
+            lang = "en"
+        msg = (
+            "이게 마지막이에요 🐱 다른 스타일로 찾아볼까요? 원하는 걸 알려주세요!"
+            if lang == "ko"
+            else "That's the last of them 🐱 Want me to look for a different style? Just tell me!"
+        )
+        try:
+            await adapter.send_text(state.chat_id, msg)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[ingest] cards:more empty-notice send failed: %r", exc)
 
 
 @observe(name="node.ingest", as_type="span")

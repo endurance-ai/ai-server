@@ -211,7 +211,7 @@ def _build_summary(batch: list[Any], lang: str) -> str:
         name_html = _html_escape(name)
         if purl:
             name_html = f'<a href="{_html_escape(purl)}">{name_html}</a>'
-        bits = [f"{i}"]
+        bits = [f"{i}."]
         if brand:
             bits.append(f"<b>{_html_escape(brand)}</b>")
         bits.append(name_html)
@@ -241,17 +241,23 @@ def _like_callback_for(c: Any, idx: int) -> str:
     return f"card:like:{pid}"
 
 
-def _build_keyboard(batch: list[Any], lang: str) -> list[list[tuple[str, str]]]:
-    """Row 1: number like-buttons 1️⃣..5️⃣ (card:like). Row 2: footer
-    [더보기/More] (cards:more) + [다르게 찾기/Refine] (cards:refine)."""
+def _build_keyboard(batch: list[Any], lang: str, has_more: bool = True) -> list[list[tuple[str, str]]]:
+    """Row 1: number like-buttons 1️⃣..5️⃣ (card:like). Row 2: footer —
+    [더보기/More] (cards:more) ONLY when another batch exists, plus
+    [다르게 찾기/Refine] (cards:refine) always."""
     like_row: list[tuple[str, str]] = []
     for i, c in enumerate(batch):
         emoji = _NUM_EMOJI[i] if i < len(_NUM_EMOJI) else str(i + 1)
         like_row.append((emoji, _like_callback_for(c, i)))
+    footer: list[tuple[str, str]] = []
     if lang == "ko":
-        footer = [("➕ 더보기", "cards:more"), ("🔄 다르게 찾기", "cards:refine")]
+        if has_more:
+            footer.append(("➕ 더보기", "cards:more"))
+        footer.append(("🔄 다르게 찾기", "cards:refine"))
     else:
-        footer = [("➕ More", "cards:more"), ("🔄 Refine", "cards:refine")]
+        if has_more:
+            footer.append(("➕ More", "cards:more"))
+        footer.append(("🔄 Refine", "cards:refine"))
     return [like_row, footer]
 
 
@@ -394,7 +400,7 @@ async def send_hybrid_batch(
         # Summary text + inline keyboard (carries the buy links + actions the
         # media group cannot). HTML so the item names are tappable links.
         summary = _build_summary(batch, lang)
-        keyboard = _build_keyboard(batch, lang)
+        keyboard = _build_keyboard(batch, lang, has_more=len(eligible) > len(batch))
         try:
             if hasattr(adapter, "send_text_with_keyboard"):
                 await adapter.send_text_with_keyboard(

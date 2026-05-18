@@ -188,7 +188,8 @@ async def test_respond_hybrid_summary_ko(monkeypatch):
     from app.agents.tools import respond as respond_tool
     from app.agents.tools.search_products import CARDS_READY_KEY
 
-    set_store(_FakeStore(_session_with_results(5, lang="ko")))
+    # 8 results → first batch is 5, a next batch exists → 더보기 shown.
+    set_store(_FakeStore(_session_with_results(8, lang="ko")))
     try:
         adapter = _adapter(group_ok=True)
         monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
@@ -197,10 +198,34 @@ async def test_respond_hybrid_summary_ko(monkeypatch):
         res = await respond_tool.dispatch({"text": "찾았어요!"}, ctx)
 
         assert res["cards_sent"] == 5
-        (_, summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
+        (_, summary, keyboard), kwargs = adapter.send_text_with_keyboard.await_args
         assert "추려봤어요" in summary
+        assert summary.splitlines()[2].startswith("1.")  # numbered "1." format
+        assert kwargs.get("parse_mode") == "HTML"
         assert "더보기" in keyboard[-1][0][0]
         assert "다르게 찾기" in keyboard[-1][1][0]
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_respond_hybrid_no_more_button_when_single_batch(monkeypatch):
+    """≤5 results → no next batch → [더보기] suppressed, [다르게 찾기] kept."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    set_store(_FakeStore(_session_with_results(5, lang="ko")))
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        res = await respond_tool.dispatch({"text": "찾았어요!"}, {"chat_id": 42, CARDS_READY_KEY: True})
+
+        assert res["cards_sent"] == 5
+        (_, _summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
+        footer_labels = [b[0] for b in keyboard[-1]]
+        assert not any("더보기" in lbl for lbl in footer_labels)
+        assert any("다르게 찾기" in lbl for lbl in footer_labels)
     finally:
         set_store(None)
 
