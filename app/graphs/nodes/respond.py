@@ -32,6 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.channels.lang import detect_lang as _detect_lang_text
 from app.channels.lang import session_lang
+from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
 from app.channels.router import RoutedIntent
 from app.core.config import settings
 from app.graphs.nodes._adapter_ctx import get_adapter
@@ -191,21 +192,11 @@ def _get_llm() -> Any:
     return _llm
 
 
-_SYSTEM_PROMPT = (
-    "You are kiko, the playful fashion-curator persona of kiko.ai — a Telegram bot "
-    "for women in their 20s–30s who want sharp, confident style picks. "
-    "\n\nVoice & vibe: think 'Puss in Boots' charm — bright, bouncy, a touch cheeky, "
-    "warmly confident, never robotic. You are stylish, opinionated in a friendly way, "
-    "and treat the user like a fashionable friend you genuinely want to dress well. "
-    "\n\nLanguage rule (IMPORTANT): detect the user's language from their most recent "
-    "message and ALWAYS reply in the SAME language. Korean input (any Hangul present) "
-    "→ reply in Korean using soft, friendly 해요체 (NOT 반말, NOT stiff 합니다체). "
-    "English or other → reply in natural, lively English. Never mix languages in one reply. "
-    "\n\nFormat: ONE short conversational message — max ~2 sentences, under 200 tokens. "
-    "No markdown headings, no code fences, no JSON, no bullet lists. Up to 1–2 emojis "
-    "(🐱 📸 📌 👌 🙈 etc.) when they fit the vibe — never spam them. Acknowledge what "
-    "just happened and, when natural, nudge the next step."
-)
+# Canonical kiko persona — single source of truth in app/channels/persona.py
+# (shared verbatim with the V2 ReAct agent so the voice never drifts). The
+# resolved string is byte-identical to the prior inline literal → V1 runtime
+# output is unchanged.
+_SYSTEM_PROMPT = KIKO_PERSONA_SYSTEM_PROMPT
 
 
 _FLOW_INTENT: dict[_Flow, str] = {

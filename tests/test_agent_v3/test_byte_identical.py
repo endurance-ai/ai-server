@@ -17,18 +17,31 @@ import json
 
 import pytest
 
+from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
 from app.core.config import settings
 from tests.test_agent_v3 import _v2_baseline as bl
 
-# Captured against pre-gap V2 (2026-05-17). These literals are the contract.
+# Re-baselined 2026-05-18 for the SPEC-AGENT-V2-REACT persona-drift fix: the V2
+# ReAct system prompt now embeds the CANONICAL kiko persona verbatim (shared
+# with V1 `respond.py` via `app/channels/persona.py`) instead of a thin drifting
+# "Voice:" one-liner. The persona enrichment is an INTENDED V2 base change — the
+# frozen anchor below is updated once to the new V2 base, NOT patched per-gap.
+#
+# This anchor's job is "with all 4 V3 sub-flags OFF, system_content ==
+# _SYSTEM_PROMPT (no V3 block appended)". That semantic is independently and
+# more robustly guarded by test_gap1_memory.py / test_gap3_proactive.py, which
+# compare the assembled system message to the LIVE `rl._SYSTEM_PROMPT`. To keep
+# THIS frozen anchor from silently re-drifting from the real persona, the
+# persona segment is referenced from the shared constant (single source of
+# truth) rather than re-typed; only the V2 ReAct-operational text is literal.
 _FROZEN_SYSTEM_PROMPT = (
-    "You are kiko, a playful fashion-curator AI for kiko.ai. You operate as a ReAct agent: "
-    "decide which tool to call at each step. ALWAYS end with the `respond` tool which sends "
-    "the final natural-language reply to the user. `respond` takes ONLY a `text` argument — "
-    "never pass cards or product data; the system attaches the search result cards "
-    "automatically from the most recent search.\n\n"
-    "Voice: bright, bouncy, like Puss-in-Boots. Korean input → reply in 해요체 Korean. "
-    "English input → reply in lively English. Never mix languages in one reply.\n\n"
+    f"{KIKO_PERSONA_SYSTEM_PROMPT}\n\n"
+    "OPERATING MODE — you operate as a ReAct agent: decide which tool to call at "
+    "each step. ALWAYS end with the `respond` tool which sends the final "
+    "natural-language reply to the user (written in the kiko voice and language "
+    "rules above). `respond` takes ONLY a `text` argument — never pass cards or "
+    "product data; the system attaches the search result cards automatically "
+    "from the most recent search.\n\n"
     "Tools available: analyze_image, search_products, refine_search, update_taste, "
     "ask_user_clarification, get_recent_history, respond. Use the minimum number of tool "
     "calls needed. Do NOT call the same tool with identical args 3 times in a row.\n\n"

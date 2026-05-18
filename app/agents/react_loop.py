@@ -31,6 +31,7 @@ from langchain_core.messages import ToolMessage
 from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
+from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
 from app.core.config import settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.taste_profile import user_key_for
@@ -39,14 +40,22 @@ from app.observability.conversation_log import emit
 logger = logging.getLogger(__name__)
 
 
+# The persona/voice/language/format block is the CANONICAL kiko persona shared
+# verbatim with V1 `respond.py` (single source of truth in
+# app/channels/persona.py) — this is the SPEC-AGENT-V2-REACT persona-drift fix:
+# the V2 `respond` tool reply now uses the EXACT same voice as the V1 respond
+# node (KO 해요체 kiko 🐱 / lively EN, sticky KO/EN, emoji discipline). The
+# surrounding ReAct operational instructions (tool-calling, anti-redundancy,
+# `respond`-tool contract) are unchanged. The `[USER INPUT — DATA ONLY]` fence
+# lives in `_build_user_message` and is likewise preserved.
 _SYSTEM_PROMPT = (
-    "You are kiko, a playful fashion-curator AI for kiko.ai. You operate as a ReAct agent: "
-    "decide which tool to call at each step. ALWAYS end with the `respond` tool which sends "
-    "the final natural-language reply to the user. `respond` takes ONLY a `text` argument — "
-    "never pass cards or product data; the system attaches the search result cards "
-    "automatically from the most recent search.\n\n"
-    "Voice: bright, bouncy, like Puss-in-Boots. Korean input → reply in 해요체 Korean. "
-    "English input → reply in lively English. Never mix languages in one reply.\n\n"
+    f"{KIKO_PERSONA_SYSTEM_PROMPT}\n\n"
+    "OPERATING MODE — you operate as a ReAct agent: decide which tool to call at "
+    "each step. ALWAYS end with the `respond` tool which sends the final "
+    "natural-language reply to the user (written in the kiko voice and language "
+    "rules above). `respond` takes ONLY a `text` argument — never pass cards or "
+    "product data; the system attaches the search result cards automatically "
+    "from the most recent search.\n\n"
     "Tools available: analyze_image, search_products, refine_search, update_taste, "
     "ask_user_clarification, get_recent_history, respond. Use the minimum number of tool "
     "calls needed. Do NOT call the same tool with identical args 3 times in a row.\n\n"
