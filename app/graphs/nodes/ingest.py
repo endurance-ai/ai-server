@@ -1,10 +1,10 @@
 """SPEC-AGENT-001 / REQ-AGENT-004 (node 1/10) — ingest.
 
-Normalizes the inbound message into WorkingState. For text in RESULTS_SENT or
-IDLE, invokes `app.channels.router.route_text` to write `decision`. The actual
-branching off ingest is in `routing._route_after_ingest`.
-
-Wraps: `app/channels/router.py::route_text` (text branch only).
+Normalizes the inbound message into WorkingState. SPEC-AGENT-V2-CLEANUP-001:
+the ReAct agent topology is now the only topology, so ingest never invokes the
+legacy LLM 4-way `route_text` router — it returns early after the implicit
+feedback + clarify-inline steps. The actual branching off ingest is in the
+inline `_route_after_ingest_v2` closure in `fashion_bot.py`.
 """
 
 from __future__ import annotations
@@ -12,11 +12,9 @@ from __future__ import annotations
 import logging
 
 from app.channels.lang import remember_lang
-from app.channels.router import RoutedDecision, RoutedIntent, route_text
-from app.core.config import settings
 from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
-from app.infrastructure.memory.session import SessionState, get_store
+from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
@@ -25,18 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 # @MX:SPEC: SPEC-CONVERSATION-LOG-001
-def _emit_intent_routed(state: WorkingState, decision: RoutedDecision | None) -> None:
+def _emit_intent_routed(state: WorkingState) -> None:
     """LOG-T11 — emit `intent_routed` at the success terminus of `ingest`.
 
-    Never raises. Captures intent label + optional critique_delta summary
-    (None when decision is missing or has no critique delta).
+    SPEC-AGENT-V2-CLEANUP-001 — the legacy LLM router was removed, so `ingest`
+    never produces a `decision`; the intent label is always "unknown". Never
+    raises.
     """
     try:
-        intent = decision.intent.value if decision is not None else "unknown"
-        critique_summary: str | None = None
-        if decision is not None and getattr(decision, "critique_delta", None) is not None:
-            cd = decision.critique_delta
-            critique_summary = f"op={cd.op}"
         emit(
             event_type="intent_routed",
             user_key=user_key_for(state.from_user_id, state.chat_id),
@@ -44,8 +38,8 @@ def _emit_intent_routed(state: WorkingState, decision: RoutedDecision | None) ->
             thread_id=state.thread_id,
             turn_no=1,
             payload={
-                "intent": intent,
-                "critique_delta_summary": critique_summary,
+                "intent": "unknown",
+                "critique_delta_summary": None,
             },
         )
     except Exception:  # noqa: BLE001
@@ -92,19 +86,13 @@ async def ingest(state: WorkingState) -> dict:
     except Exception as exc:  # noqa: BLE001 — never block webhook
         logger.warning("[ingest] implicit feedback steps failed: %r", exc)
 
-    # SPEC-AGENT-V2-REACT / T-007 Step C — inline clarify:* callback handling
-    # when V2 ReAct topology is active. For onboarded users, accumulate
-    # boost_keywords directly into the session so the agent can use them on
-    # the next iteration. Mid-onboarding clarify is ignored + node_error logged.
+    # SPEC-AGENT-V2-CLEANUP-001 — inline clarify:* callback handling. For
+    # onboarded users, accumulate boost_keywords directly into the session so
+    # the agent can use them on the next iteration. Mid-onboarding clarify is
+    # ignored + node_error logged.
     try:
-        from app.core.config import settings as _settings
-
         cb_data = msg.callback_data or ""
-        if (
-            _settings.AGENT_V2_REACT_ENABLED
-            and (_settings.AGENT_LLM_MODEL or "").strip()
-            and cb_data.startswith("clarify:")
-        ):
+        if cb_data.startswith("clarify:"):
             if getattr(sess, "onboarded_at", None) is None:
                 breadcrumbs.append("ingest_v2: clarify mid-onboarding ignored")
                 emit(
@@ -137,54 +125,11 @@ async def ingest(state: WorkingState) -> dict:
     except Exception as exc:  # noqa: BLE001
         logger.debug("[ingest] v2 clarify inline handling failed: %r", exc)
 
-    # SPEC-AGENT-V2-REACT / T-007 §15 Decision 1 — V2 skips `route_text`.
-    # Under the V2 ReAct topology the legacy LLM 4-way router is dead: no V2
-    # routing closure (`_route_after_ingest_v2` / `_route_after_pick_v2` /
-    # `_route_after_vision_v2`), `agent` node, or `react_loop` reads
-    # `state.decision` (consumer audit: only V1-only `_route_after_router_text`
-    # in routing.py, bound exclusively in the V1 graph builder). Returning here
-    # — before the `needs_router` block — preserves the exact shape ingest
-    # returns on the `not needs_router` path (log_events breadcrumbs + turn_no,
-    # plus whatever Step A/B/C accumulated), never invokes `route_text`, and
-    # leaves `decision` unset. Step A (implicit feedback) + Step C (clarify
-    # inline) already ran above, so their side effects are preserved.
-    # @MX:SPEC: SPEC-AGENT-V2-REACT
-    if settings.AGENT_V2_REACT_ENABLED and (settings.AGENT_LLM_MODEL or "").strip():
-        _emit_intent_routed(state, None)
-        node_done("ingest", route="v2_skip_router", state=sess.state.value)
-        return {"log_events": breadcrumbs, "turn_no": 1}
-
-    # Only invoke router for ambiguous text in RESULTS_SENT / IDLE.
-    needs_router = (
-        msg.text
-        and not msg.photo_file_id
-        and not msg.urls
-        and not msg.callback_data
-        and sess.state in (SessionState.RESULTS_SENT, SessionState.IDLE, SessionState.AWAITING_INTENT)
-    )
-    if not needs_router:
-        # LOG-T11 — emit even when router was skipped (decision stays None).
-        _emit_intent_routed(state, None)
-        node_done("ingest", route="no_router", state=sess.state.value)
-        return {"log_events": breadcrumbs, "turn_no": 1}
-
-    try:
-        decision: RoutedDecision = await route_text(msg.text or "", sess.state, sess.last_results)
-    except Exception as exc:  # REQ-AGENT-007 — never propagate
-        logger.exception("[ingest] router.route_text raised")
-        # Strip exception detail (may carry user text echoed by upstream LLM)
-        breadcrumbs.append(f"ingest_error: {type(exc).__name__}")
-        fallback_decision = RoutedDecision(intent=RoutedIntent.OFF_TOPIC)
-        _emit_intent_routed(state, fallback_decision)
-        node_done("ingest", route="router_error", intent="off_topic")
-        # Soft fallback so the graph can still terminate at respond.
-        return {
-            "decision": fallback_decision,
-            "log_events": breadcrumbs,
-            "turn_no": 1,
-        }
-
-    breadcrumbs.append(f"ingest_router: intent={decision.intent.value}")
-    _emit_intent_routed(state, decision)
-    node_done("ingest", route="router", intent=decision.intent.value)
-    return {"decision": decision, "log_events": breadcrumbs, "turn_no": 1}
+    # SPEC-AGENT-V2-CLEANUP-001 — the ReAct agent topology is the only
+    # topology, so ingest NEVER invokes the legacy LLM 4-way `route_text`
+    # router (no routing closure / `agent` node / `react_loop` reads
+    # `state.decision`). Return here after Step A (implicit feedback) +
+    # Step C (clarify inline) side effects; `decision` stays unset.
+    _emit_intent_routed(state)
+    node_done("ingest", route="agent_skip_router", state=sess.state.value)
+    return {"log_events": breadcrumbs, "turn_no": 1}
