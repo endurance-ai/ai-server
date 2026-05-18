@@ -1,22 +1,26 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-18 (v1.0.0 — V3 ReAct 에이전트 영구 단일 토폴로지 + 하이브리드 카드 결과 전송. V1 18-노드 토폴로지·플래그 분기 제거).
+> 마지막 업데이트: 2026-05-18 (v1.1.0 — bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등).
 
 ## 한 줄 요약
 
-`kikoai/app`(Next.js) 또는 Telegram 사용자로부터 패션 아이템을 받아, **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense HNSW + sparse pgroonga + RRF) → 다양성 캡 → ReAct agent 응답** 으로 돌려준다.
+**Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면** — webhook → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v5` RPC (dense HNSW + sparse pgroonga + RRF) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
+
+`kikoai/app`(Next.js)은 현재 web UI + Postgres DB 역할로 축소되어 있다. 과거 IG 이미지 검색용으로 설계된 `POST /recommend` 경로는 코드상 존재하지만 **현재 운영에서 거의 호출되지 않는다.**
 
 ## 책임 분리
 
 | 레이어 | 담당 서비스 | 주요 책임 |
 |--------|------------|----------|
-| 채널·UI | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, GPT-4o-mini Vision, R2 이미지, v4 폴백 검색 |
-| **AI 오케스트레이션** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, 검색 파이프라인, Telegram webhook, 온보딩, 이벤트 로그** |
+| **Telegram 봇 채널** | Telegram Bot API | 메시지 수신·발신 transport (이 서버에서 블랙박스) |
+| **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
-| 벡터 DB | dev-app Postgres 16 + pgvector + pgroonga | `search_products_v5` RPC, HNSW + BM25 + RRF |
-| LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅, 모든 LLM·embed 호출 |
-| 봇 transport | Telegram Bot API | 메시지 수신·발신 (이 서버에서는 블랙박스) |
+| 벡터 DB | dev-app Postgres 16 + pgvector + pgroonga | `search_products_v5` RPC, HNSW + BM25 + RRF. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
+| LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
+| web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
+
+> Telegram bot 플로우는 `kikoai/app`을 **전혀 거치지 않는다** — Vision 처리도 이 서버(`app/channels/vision.py`)가 독자적으로 수행하며, DB만 공유한다.
 
 > **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 환경변수 `DB_URL`/`DB_TOKEN` (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), PostgREST shim `http://172.31.59.31:3001` 경유. Qdrant 미사용.
 
@@ -24,37 +28,35 @@
 
 ## 시스템 토폴로지
 
+주 플로우(실선)는 Telegram 봇 경로다. `/recommend` 경로(점선·회색)는 코드상 존재하나 현재 운영에서 거의 호출되지 않는다.
+
 ```mermaid
 flowchart TB
-    subgraph App["kikoai/app (dev-app EC2)"]
-        FIND["/api/find/search"]
-        V4["/api/search-products\n(v4 폴백)"]
-    end
-
-    subgraph TG["Telegram"]
+    subgraph TG["Telegram (주 채널)"]
         TG_USER["사용자"]
         TG_API["Telegram Bot API"]
     end
 
-    subgraph AI["kikoai/ai (dev-ai EC2)"]
-        REC["POST /recommend\nX-Internal-Token"]
+    subgraph AI["kikoai/ai (dev-ai EC2) — 주 서버"]
         WH["POST /webhooks/telegram"]
-        GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)"]
+        GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
         PIPE["pipeline runner\nembed → search → diversify"]
         LITELLM["LiteLLM proxy\nnova-lite via Bedrock"]
         LFW["Langfuse self-host"]
+        REC["POST /recommend\n(현재 미사용)"]
     end
 
     subgraph Ext["External"]
         MODAL["Modal /embed\nFashionSigLIP T4"]
-        PG[("dev-app Postgres\npgvector + pgroonga\nPostgREST nginx shim")]
+        PG[("dev-app Postgres\npgvector + pgroonga\nPostgREST nginx shim\n※ app과 DB만 공유")]
         CONVLOG[("ai.log_conversation_event\n(append-only)")]
         APIFY["Apify Pinterest scraper"]
     end
 
-    FIND -->|POST| REC
-    FIND -.v4 fallback.-> V4
-    V4 --> PG
+    subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
+        FIND["/api/find/search\n(현재 미사용)"]
+        V4["/api/search-products\n(v4 폴백, 현재 미사용)"]
+    end
 
     TG_USER -->|메시지| TG_API
     TG_API -->|webhook| WH
@@ -63,21 +65,29 @@ flowchart TB
     GRAPH -.emit.-> CONVLOG
     GRAPH --> PIPE
     PIPE -->|sendMediaGroup / sendMessage| TG_API
-
-    REC --> PIPE
     PIPE -->|embed| MODAL
     PIPE -->|search_products_v5 RPC| PG
     PIPE -.LLM.-> LITELLM
     PIPE -.trace.-> LFW
 
-    classDef app fill:#1565c0,color:#fff
+    FIND -. "현재 미사용" .-> REC
+    FIND -. "v4 fallback" .-> V4
+    V4 -. "" .-> PG
+    REC -. "" .-> PIPE
+
+    classDef primary fill:#ef6c00,color:#fff
     classDef ai fill:#0277bd,color:#fff
     classDef ext fill:#6a1b9a,color:#fff
     classDef data fill:#2e7d32,color:#fff
+    classDef muted fill:#757575,color:#fff
     classDef chat fill:#ef6c00,color:#fff
 
-    class FIND,V4 app
-    class REC,WH,GRAPH,PIPE,LITELLM,LFW ai
+    class TG_USER,TG_API primary
+    class WH,GRAPH,PIPE,LITELLM,LFW ai
+    class REC muted
+    class MODAL,APIFY ext
+    class PG,CONVLOG data
+    class FIND,V4 muted
     class MODAL,APIFY ext
     class PG,CONVLOG data
     class TG_USER,TG_API chat
@@ -244,6 +254,15 @@ flowchart LR
 ```
 
 재시작 키워드(`/reset`, "온보딩 다시" 등) 수신 시 언제든 `onboard_intro`로 강제 복귀.
+
+### 보조 입구 — `POST /recommend` (현재 운영 미사용)
+
+`app/api/recommend.py`가 제공하는 REST 엔드포인트. `kikoai/app`의 IG 이미지 검색 기능(`/api/find/search`)이 `X-Internal-Token` 헤더를 붙여 AI 서버에 직접 POST하는 경로로 설계되었으나, 현재 `kikoai/app`은 web + DB 역할로 축소되어 **이 경로는 현재 운영에서 거의 호출되지 않는다.** 코드·엔드포인트·파이프라인은 그대로 존재하며, 호출되면 Telegram 봇 플로우와 동일한 `pipeline runner`(embed → search → diversify)를 실행하고 `RecommendResponse`를 JSON으로 반환한다.
+
+```
+kikoai/app → POST /recommend → pipeline runner → search_products_v5 RPC → RecommendResponse (JSON)
+(현재 운영 미사용)
+```
 
 ---
 
@@ -444,3 +463,4 @@ app/
 | 2026-05-17 | v0.8.0 | SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 |
 | 2026-05-17 | v0.9.0 | SPEC-AGENT-V3-REACT V3 4-Gap 증분 강화 (flag-gated) |
 | 2026-05-18 | **v1.0.0** | **SPEC-AGENT-V2-CLEANUP-001 — V3 ReAct 영구 단일 토폴로지 (V1 18-노드 + 모든 feature flag 제거). 하이브리드 카드 결과 전송 (send_hybrid_batch). ARCHITECTURE.md 전면 재작성.** |
+| 2026-05-18 | **v1.1.0** | **bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등. Telegram 봇이 Vision도 독자 처리함을 명시 (app과 DB만 공유).** |
