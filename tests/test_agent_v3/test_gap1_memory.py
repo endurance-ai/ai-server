@@ -70,7 +70,6 @@ def _mock_adapter(monkeypatch):
 async def test_ac_1_1_taste_and_recent_injected(monkeypatch, _mock_adapter):
     """AC-1.1 — flag ON: system msg carries taste 'ami' + recent summaries,
     and get_recent_history is NOT in tool_call_history (implicit injection)."""
-    monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
 
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -110,7 +109,6 @@ async def test_ac_1_1_taste_and_recent_injected(monkeypatch, _mock_adapter):
 @pytest.mark.asyncio
 async def test_ac_1_2_fail_soft_empty(monkeypatch, _mock_adapter):
     """AC-1.2 — flag ON, empty taste + empty history → placeholder, loop OK."""
-    monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
 
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -132,7 +130,6 @@ async def test_ac_1_2_fail_soft_empty(monkeypatch, _mock_adapter):
 @pytest.mark.asyncio
 async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
     """AC-1.3 — small cap → block ≤ cap*4, newest turn kept, oldest dropped."""
-    monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "AGENT_V3_MEMORY_MAX_TOKENS", 60, raising=False)
 
     from app.infrastructure.memory.taste_profile import get_taste_store
@@ -162,7 +159,6 @@ async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
 @pytest.mark.asyncio
 async def test_ac_1_3_budget_guard_still_triggers(monkeypatch, _mock_adapter):
     """AC-1.3 — injection does not disable the cumulative token budget guard."""
-    monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "AGENT_TURN_TOKEN_BUDGET", 50, raising=False)
     monkeypatch.setattr(
         "app.agents.tools.get_recent_history.dispatch",
@@ -182,15 +178,16 @@ async def test_ac_1_3_budget_guard_still_triggers(monkeypatch, _mock_adapter):
 
 
 @pytest.mark.asyncio
-async def test_ac_1_4_flag_off_byte_identical_and_no_memory_path(monkeypatch, _mock_adapter):
-    """AC-1.4 — flag OFF: system msg == V2 _SYSTEM_PROMPT, memory path 0 calls."""
-    monkeypatch.setattr(settings, "AGENT_V3_MEMORY_INJECTION_ENABLED", False, raising=False)
-
+async def test_memory_injection_is_unconditional(monkeypatch, _mock_adapter):
+    """SPEC-AGENT-V2-CLEANUP-001 — memory injection is now ALWAYS on: the
+    builder is invoked and the system message is no longer the bare
+    _SYSTEM_PROMPT (proactive directive + memory block are appended).
+    """
     grh_spy = AsyncMock(return_value={"ok": True, "events": []})
     monkeypatch.setattr("app.agents.tools.get_recent_history.dispatch", grh_spy)
     import app.agents._memory_context as mc
 
-    mc_spy = MagicMock()
+    mc_spy = AsyncMock(return_value="[MEMORY CONTEXT — SYSTEM DERIVED]\n(no taste history yet)\n[/MEMORY CONTEXT]")
     monkeypatch.setattr(mc, "build_memory_context", mc_spy)
 
     llm = _respond_once()
@@ -198,9 +195,9 @@ async def test_ac_1_4_flag_off_byte_identical_and_no_memory_path(monkeypatch, _m
 
     await rl.run_react_loop(_state(), _sess())
     sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
-    assert sys_msg == rl._SYSTEM_PROMPT  # byte-identical V2
-    mc_spy.assert_not_called()  # memory builder never invoked
-    grh_spy.assert_not_awaited()  # no DB SELECT via memory path
+    assert sys_msg != rl._SYSTEM_PROMPT  # proactive + memory always appended
+    assert rl._PROACTIVE_DIRECTIVE in sys_msg
+    mc_spy.assert_awaited()  # memory builder always invoked
 
 
 # ── BLOCKING-2 — _memory_context internal-helper coverage ──────────────────

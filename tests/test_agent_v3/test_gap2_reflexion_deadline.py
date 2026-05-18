@@ -72,7 +72,6 @@ def _fast_backoff(monkeypatch):
 async def test_ac_2_5_slow_evaluator_cancelled_at_residual_boundary(monkeypatch, _adapter):
     """AC-2.5 — 20s evaluator stub cancelled at residual boundary (~0.3s, NOT
     8s); ToolMessage proceeds skipped; turn completes within turn_deadline."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "EVALUATOR_TIMEOUT_S", 8.0, raising=False)
 
     monkeypatch.setattr(
@@ -123,7 +122,6 @@ async def test_ac_2_5_slow_evaluator_cancelled_at_residual_boundary(monkeypatch,
 @pytest.mark.asyncio
 async def test_ac_2_6_remaining_zero_skips_evaluator(monkeypatch, _adapter):
     """AC-2.6(a) — remaining<=0 → evaluator 0 calls, skipped marker, proceed."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     eval_spy = AsyncMock(return_value={"score": 0.5})
     monkeypatch.setattr("app.agents._reflexion.evaluate_search_quality", eval_spy)
 
@@ -139,7 +137,6 @@ async def test_ac_2_6_remaining_zero_skips_evaluator(monkeypatch, _adapter):
 @pytest.mark.asyncio
 async def test_ac_2_6_fast_evaluator_positive_control(monkeypatch, _adapter):
     """AC-2.6(b) — fast evaluator, ample budget → normal _quality attached."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
         AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": []}),

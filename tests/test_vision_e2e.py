@@ -16,7 +16,6 @@ from app.channels.vision import (
     VisionStyleNode,
 )
 from app.graphs.fashion_bot import GRAPH
-from app.graphs.nodes import respond as respond_module
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
 from app.infrastructure.memory.session import (
@@ -29,7 +28,7 @@ from app.infrastructure.memory.taste_profile import (
     set_taste_store,
     shutdown_taste_store,
 )
-from tests.conftest_graph import FakeAdapter, StubLLM, StubPort, make_msg
+from tests.conftest_graph import FakeAdapter, StubPort, make_msg
 
 
 @pytest.fixture
@@ -72,13 +71,6 @@ def adapter():
 @pytest.fixture(autouse=True)
 def disable_router_llm(monkeypatch):
     monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", False)
-
-
-@pytest.fixture(autouse=True)
-def stub_respond_llm(monkeypatch):
-    fake = StubLLM(content="Okay.")
-    monkeypatch.setattr(respond_module, "_llm", fake)
-    return fake
 
 
 @pytest.mark.asyncio

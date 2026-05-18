@@ -13,7 +13,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.config import settings
 from app.infrastructure.memory.taste_profile import TasteProfile
 
 # Taste-store reset + settings snapshot/restore handled centrally by
@@ -25,7 +24,6 @@ from app.infrastructure.memory.taste_profile import TasteProfile
 
 @pytest.mark.asyncio
 async def test_ac_4_1_records_ts_and_score(monkeypatch):
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -95,7 +93,6 @@ def test_ac_4_2_score_threshold_brand_always_excluded():
 @pytest.mark.asyncio
 async def test_ac_4_2_cross_thread_search_discount(monkeypatch):
     """thread A dislike gucci → thread B search drops gucci candidates."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -111,32 +108,33 @@ async def test_ac_4_2_cross_thread_search_discount(monkeypatch):
     assert [c.brand for c in out] == ["Ami"]  # gucci discounted
 
 
-# ── AC-4.3 — flag OFF byte-identical ───────────────────────────────────────
+# ── SPEC-AGENT-V2-CLEANUP-001 — dislike memory is now unconditional ────────
 
 
 @pytest.mark.asyncio
-async def test_ac_4_3_flag_off_no_ts_record(monkeypatch):
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", False, raising=False)
+async def test_dislike_ts_recorded_unconditionally(monkeypatch):
+    """The dislike timestamp is always recorded (the flag was removed)."""
     from app.agents.tools.update_taste import dispatch
     from app.infrastructure.memory.taste_profile import get_taste_store
 
     await dispatch({"source": "free_text", "brand_dislikes": ["Zara"]}, {"user_key": "u:7"})
     prof = get_taste_store().get_or_create("u:7")
-    assert prof.disliked_brands_ts == {}  # flag OFF → no ts
-    assert prof.disliked_brands["zara"] >= 1.0  # V2 score path unchanged
+    assert "zara" in prof.disliked_brands_ts  # ts always recorded now
+    assert prof.disliked_brands["zara"] >= 1.0  # score path unchanged
 
 
-def test_ac_4_3_flag_off_discount_noop(monkeypatch):
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", False, raising=False)
+def test_dislike_discount_applies_unconditionally(monkeypatch):
+    """The cross-thread dislike discount always runs (the flag was removed)."""
     from app.agents.tools.search_products import apply_dislike_discount
     from app.infrastructure.memory.taste_profile import get_taste_store
 
     prof = get_taste_store().get_or_create("u:7")
     prof.disliked_brands_ts["gucci"] = time.time()
+    prof.reinforce_disliked_brand("gucci")
     get_taste_store().update(prof)
     cands = [SimpleNamespace(brand="Gucci", name="bag", title="bag")]
     out = apply_dislike_discount({"user_key": "u:7"}, cands)
-    assert out is cands  # exact same list object — byte-identical no-op
+    assert out == []  # the disliked-brand candidate is dropped
 
 
 # ── E6 — dislike then like keeps reinforce_* pop semantics; ts is last only ─
@@ -144,7 +142,6 @@ def test_ac_4_3_flag_off_discount_noop(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_e6_dislike_then_like_pop_semantics(monkeypatch):
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -186,7 +183,6 @@ async def test_update_taste_missing_user_key():
 async def test_update_taste_keyword_likes_and_dislikes_flag_on(monkeypatch):
     """update_taste L47/L49 + L61-63 — keyword likes/dislikes branches AND
     the Gap4 flag-ON keyword-dislike timestamp record path."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.update_taste import dispatch
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -233,7 +229,6 @@ async def test_update_taste_store_exception_fail_soft(monkeypatch):
 def test_apply_dislike_discount_no_user_key_returns_unchanged(monkeypatch):
     """search_products.apply_dislike_discount — flag ON but ctx has no
     user_key → returns the same list object (early return branch)."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
 
     cands = [SimpleNamespace(brand="Gucci", name="x", title="x")]
@@ -243,7 +238,6 @@ def test_apply_dislike_discount_no_user_key_returns_unchanged(monkeypatch):
 def test_apply_dislike_discount_store_failure_fail_soft(monkeypatch):
     """search_products.apply_dislike_discount — store raising → cands unchanged
     (best-effort, never breaks search)."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
 
     def _boom():
@@ -257,7 +251,6 @@ def test_apply_dislike_discount_store_failure_fail_soft(monkeypatch):
 def test_apply_dislike_discount_no_excludes_returns_unchanged(monkeypatch):
     """search_products.apply_dislike_discount — flag ON, profile has no
     recency-weighted excludes → unchanged."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -269,7 +262,6 @@ def test_apply_dislike_discount_no_excludes_returns_unchanged(monkeypatch):
 def test_apply_dislike_discount_keyword_title_filter(monkeypatch):
     """search_products.apply_dislike_discount — recency keyword exclude drops a
     candidate whose title matches (the _keep title branch)."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools.search_products import apply_dislike_discount
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -288,7 +280,6 @@ def test_apply_dislike_discount_keyword_title_filter(monkeypatch):
 async def test_refine_search_dispatch_applies_dislike_discount(monkeypatch):
     """refine_search.dispatch (changed line) — real dispatch path runs
     run_text_only_search + apply_dislike_discount + persist."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools import refine_search
     from app.infrastructure.memory.taste_profile import get_taste_store
 
@@ -332,7 +323,6 @@ def test_cap_truncates_ts_dicts_when_over_limit():
 async def test_search_products_dispatch_runs_dislike_discount(monkeypatch):
     """search_products.dispatch (changed call site L316) — real dispatch path
     invokes apply_dislike_discount before persisting."""
-    monkeypatch.setattr(settings, "AGENT_V3_DISLIKE_MEMORY_ENABLED", True, raising=False)
     from app.agents.tools import search_products as sp
     from app.infrastructure.memory.taste_profile import get_taste_store
 

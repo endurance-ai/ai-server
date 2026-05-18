@@ -65,7 +65,6 @@ def _fast_backoff(monkeypatch):
 @pytest.mark.asyncio
 async def test_ac_2_1_quality_merged_then_autonomous_refine(monkeypatch, _adapter):
     """AC-2.1 — low score merged into ToolMessage; LLM autonomously refines."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
 
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
@@ -103,7 +102,6 @@ async def test_ac_2_1_quality_merged_then_autonomous_refine(monkeypatch, _adapte
 @pytest.mark.asyncio
 async def test_ac_2_1_high_score_llm_may_respond(monkeypatch, _adapter):
     """AC-2.1 — high score still merged, LLM free to respond (no forced refine)."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
         AsyncMock(return_value={"ok": True, "candidates_count": 9, "top_candidates": []}),
@@ -127,7 +125,6 @@ async def test_ac_2_1_high_score_llm_may_respond(monkeypatch, _adapter):
 @pytest.mark.asyncio
 async def test_ac_2_3_evaluator_call_capped(monkeypatch, _adapter):
     """AC-2.3 — 6 search calls but evaluator capped at SELF_CRITIQUE_MAX_ITERATIONS."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "SELF_CRITIQUE_MAX_ITERATIONS", 2, raising=False)
     monkeypatch.setattr(settings, "AGENT_MAX_ITERATIONS", 8, raising=False)
 
@@ -153,7 +150,6 @@ async def test_ac_2_3_evaluator_call_capped(monkeypatch, _adapter):
 async def test_ac_2_3_infinite_loop_guard_and_history_untouched(monkeypatch, _adapter):
     """AC-2.3 — identical args 3x → infinite-loop guard fires; Reflexion does
     not pollute tool_call_history (history identical pre/post evaluation)."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "SELF_CRITIQUE_MAX_ITERATIONS", 5, raising=False)
 
     monkeypatch.setattr(
@@ -175,14 +171,13 @@ async def test_ac_2_3_infinite_loop_guard_and_history_untouched(monkeypatch, _ad
 
 
 @pytest.mark.asyncio
-async def test_ac_2_4_flag_off_byte_identical_no_evaluator(monkeypatch, _adapter):
-    """AC-2.4 — flag OFF: ToolMessage == V2 json.dumps(...)[:2000], no _quality,
-    evaluator path 0 calls."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", False, raising=False)
-
+async def test_reflexion_is_unconditional_quality_merged(monkeypatch, _adapter):
+    """SPEC-AGENT-V2-CLEANUP-001 — Reflexion is now ALWAYS on: a search result
+    gets the `_quality` marker merged and the evaluator path IS invoked.
+    """
     result = {"ok": True, "candidates_count": 5, "top_candidates": [{"brand": "ami"}]}
     monkeypatch.setattr("app.agents.tools.search_products.dispatch", AsyncMock(return_value=result))
-    eval_spy = AsyncMock(return_value={"score": 0.1})
+    eval_spy = AsyncMock(return_value={"score": 0.1, "retry_suggested": False})
     monkeypatch.setattr("app.agents._reflexion.evaluate_search_quality", eval_spy)
 
     llm = _FakeLLM(
@@ -194,9 +189,8 @@ async def test_ac_2_4_flag_off_byte_identical_no_evaluator(monkeypatch, _adapter
     monkeypatch.setattr(rl, "get_llm", lambda: llm)
 
     await rl.run_react_loop(_state(), _sess())
-    eval_spy.assert_not_awaited()
+    eval_spy.assert_awaited()
     from langchain_core.messages import ToolMessage
 
     tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
-    assert tool_msgs[-1].content == json.dumps(result, default=str)[:2000]
-    assert "_quality" not in tool_msgs[-1].content
+    assert "_quality" in tool_msgs[-1].content

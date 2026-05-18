@@ -8,12 +8,15 @@ import pkgutil
 import app.graphs.nodes as nodes_pkg
 
 
-def test_ten_nodes_present():
-    """REQ-AGENT-004 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001 +
-    SPEC-ONBOARD-CARDS-001 — 18 node modules: original 12 + 6 onboarding nodes.
+def test_node_inventory_matches_v2_topology():
+    """SPEC-AGENT-V2-CLEANUP-001 — the V1-only node modules (critique_apply,
+    search, taste_update, respond) were deleted with the V1 topology.
+    evaluator + send_results are preserved (evaluator helpers wrap into
+    _reflexion.py; send_results._candidate_to_card is reused by tools/respond).
 
     Excludes private modules (`_adapter_ctx`, `_evaluator_models`,
-    `_onboard_helpers`, `_onboard_stage`, `_pinterest_helpers`) and __init__.
+    `_onboard_helpers`, `_onboard_stage`, `_pinterest_helpers`, `_trace`,
+    `_evaluator_prompt`) and __init__.
     """
     public = []
     for _, name, _ in pkgutil.iter_modules(nodes_pkg.__path__):
@@ -29,11 +32,7 @@ def test_ten_nodes_present():
             "pick_item",
             "ask_clarify",
             "apply_clarify",
-            "critique_apply",
-            "search",
             "send_results",
-            "taste_update",
-            "respond",
             "evaluator",
             # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — Phase 4.
             "onboard_intro",
@@ -62,12 +61,10 @@ def test_each_node_exposes_async_callable():
         "pick_item": "pick_item",
         "ask_clarify": "ask_clarify",
         "apply_clarify": "apply_clarify",
-        "critique_apply": "critique_apply",
-        "search": "search_node",
         "send_results": "send_results",
-        "taste_update": "taste_update",
-        "respond": "respond",
         "evaluator": "evaluator",
+        "agent": "agent",
+        "intro": "intro",
     }
     for module_name, fn_name in name_map.items():
         mod = importlib.import_module(f"app.graphs.nodes.{module_name}")

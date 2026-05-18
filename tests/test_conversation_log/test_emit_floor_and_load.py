@@ -24,7 +24,11 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GRAPH_NODES_DIR = REPO_ROOT / "app" / "graphs" / "nodes"
 
-# 12 LangGraph nodes per SPEC-AGENT-001 / SPEC-CONVERSATION-LOG-001 plan §4.15.
+# SPEC-AGENT-V2-CLEANUP-001 — the V1-only nodes (search.py, critique_apply.py,
+# respond.py, taste_update.py) were deleted with the V1 topology. The emit
+# floor invariant applies to the preserved deterministic-funnel + reused nodes.
+# The `agent` node emits via the ReAct loop's tool_call events (react_loop.py),
+# not in the node file, so it is intentionally not in this AST file list.
 NODE_FILES = [
     "ingest.py",
     "resolve_image.py",
@@ -32,12 +36,10 @@ NODE_FILES = [
     "pick_item.py",
     "ask_clarify.py",
     "apply_clarify.py",
-    "search.py",
     "evaluator.py",
-    "critique_apply.py",
     "send_results.py",
-    "respond.py",
-    "taste_update.py",
+    "intro.py",
+    "pinterest_ingest.py",
 ]
 
 
@@ -77,10 +79,10 @@ def test_each_node_contains_at_least_one_emit_call(node_filename: str):
     assert n >= 1, f"{node_filename} contains 0 emit() calls; SPEC requires ≥ 1"
 
 
-def test_total_emit_calls_across_12_nodes_at_least_12():
-    """Aggregate sanity check — total emit sites ≥ 12 (one floor per node)."""
+def test_total_emit_calls_across_nodes_at_least_floor():
+    """Aggregate sanity check — total emit sites ≥ one floor per node."""
     total = sum(_count_emit_calls(GRAPH_NODES_DIR / f) for f in NODE_FILES)
-    assert total >= 12, f"Total emit() sites across 12 nodes = {total}, expected ≥ 12"
+    assert total >= len(NODE_FILES), f"Total emit() sites = {total}, expected ≥ {len(NODE_FILES)}"
 
 
 # ───────────────── (b) 100-turn synthetic load smoke (PG) ───────────────
