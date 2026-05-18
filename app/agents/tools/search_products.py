@@ -4,12 +4,12 @@ Routes to one of two EXISTING search entrypoints — never a new algorithm:
 
 - Photo-pick path: a real resolved image URL is present in ``ctx`` (pin /
   og:image resolved by the upstream resolve_image step). Use the full
-  ``run_pipeline`` (dense image embedding + sparse pgroonga + RRF).
-- Text-only path: no real image at all. Build a ``PipelineState`` with a
-  zero dense vector and drive the SAME ``search_step`` + ``diversify_step``
-  the pipeline uses. The pgroonga sparse branch carries the query; the zero
-  dense vector contributes only noise that RRF + diversify rank below the
-  real sparse hits (verified against the live 78k catalog).
+  ``run_pipeline`` (image embedding → v6 RPC).
+- Text-only path: no real image at all. SPEC-SEARCH-V6-001: build a
+  ``PipelineState`` with a REAL text embedding (``EmbedProvider.embed_text``
+  — same FashionSigLIP L2 space, cross-modal cosine valid) and drive the SAME
+  ``search_step`` + ``diversify_step``. v6 is embedding-first; the old
+  zero-dense + pgroonga sparse trick is gone (pgroonga/v5 were dropped).
 
 The LLM NEVER supplies an image URL (the arg is removed from the tool
 schema). Imagery is sourced internally from ``ctx`` only — this kills the
@@ -29,14 +29,10 @@ from app.agents.tool_registry import SearchProductsResult
 
 logger = logging.getLogger(__name__)
 
-# Number of FashionSigLIP dims (Modal /embed). The text-only path injects a
-# zero vector of this width so dense never matches anything meaningful and
-# the sparse (pgroonga) branch fully drives ranking.
-_EMBED_DIM = 768
-
 # RFC 2606 `.invalid` TLD — provably non-resolvable. Used ONLY to satisfy the
-# unmodifiable RecommendRequest.image_url field on the text-only path. It is
-# NEVER sent to Modal (embed_step is bypassed; embedding is injected directly).
+# required RecommendRequest.image_url field on the text-only path. It is NEVER
+# sent to Modal (embed_step is bypassed; the text embedding is injected via
+# EmbedProvider.embed_text directly — SPEC-SEARCH-V6-001).
 _TEXT_ONLY_SENTINEL = "https://text-only.invalid/none"
 
 
@@ -71,6 +67,10 @@ def _to_card_candidate(cand: Any) -> Any:
     try:
         from app.models.response import Candidate
 
+        # v6 rows carry `distance` (cosine, ASC=better). score = 1.0 - distance
+        # preserves the downstream "higher=better, RPC order" semantics;
+        # str(bigint int) is stable so dedup/like callbacks are unaffected
+        # (SPEC-SEARCH-V6-001).
         return Candidate(
             id=str(cand["id"]),
             brand=cand.get("brand", ""),
@@ -80,9 +80,9 @@ def _to_card_candidate(cand: Any) -> Any:
             product_url=cand.get("product_url"),
             platform=cand.get("platform"),
             subcategory=cand.get("subcategory"),
-            score=float(cand.get("score", 0.0)),
-            dense_rank=cand.get("dense_rank"),
-            sparse_rank=cand.get("sparse_rank"),
+            score=float(1.0 - cand.get("distance", 1.0)),
+            dense_rank=None,
+            sparse_rank=None,
         )
     except Exception:  # noqa: BLE001
         return cand
@@ -182,36 +182,15 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     return kept
 
 
-def _is_zero_dense_noise(row: Any) -> bool:
-    """A pure-dense, no-keyword-match RPC row (zero-sentinel pollution).
-
-    iff ``dense_rank is not None AND sparse_rank is None``. This is the EXACT
-    predicate ``search_service`` already uses for its ``dense_only`` log
-    breakdown — single source for "what is dense-only" (no new heuristic).
-    On the zero-sentinel text path such a row carries NO query signal: the
-    zero vector still yields a deterministic pgvector ranking, so RRF assigns
-    it a real fusion score and it pollutes the top instead of sinking.
-    """
-    if not isinstance(row, dict):
-        return False
-    return row.get("dense_rank") is not None and row.get("sparse_rank") is None
-
-
-def _suppress_zero_dense_noise(rows: list[Any]) -> list[Any]:
-    """Drop pure-dense zero-sentinel pollution; keep sparse-only + both.
-
-    Stopgap (SPEC: search-logic rework tracked separately). Applied ONLY in
-    the zero-vector text-only path (caller-gated structurally — see
-    ``run_text_only_search``). Sparse-only and both rows carry the actual
-    pgroonga query and are preserved verbatim in order. Returns the filtered
-    list (may be shorter / empty — few-correct beats many-garbage; downstream
-    empty-result handling already degrades gracefully).
-    """
-    kept = [r for r in rows if not _is_zero_dense_noise(r)]
-    dropped = len(rows) - len(kept)
-    if dropped:
-        logger.info("🧹 [search] zero-dense suppressed · dropped=%d kept=%d", dropped, len(kept))
-    return kept
+# SPEC-SEARCH-V6-001: the zero-dense stopgap (_is_zero_dense_noise /
+# _suppress_zero_dense_noise / the _EMBED_DIM zero-vector injection / the
+# "embedding all-zero" suppression block) was DELETED — not a silent
+# safety-net removal. Its sole precondition was a zero query vector, which the
+# old v5 + pgroonga text path injected so the sparse branch carried the query.
+# Under v6 the text path sends a REAL embed_text() vector (no pgroonga, no
+# zero vector), so the precondition can never hold; the filter would be dead
+# code. v6's embedding-first ranking + distance ASC ordering already places
+# the genuinely relevant rows on top, so the stopgap is obsolete by design.
 
 
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
@@ -244,50 +223,54 @@ async def run_text_only_search(
     color_family: str | None = None,
     top_k: int = 15,
 ) -> list[Any]:
-    """Text/sparse-only search — reuses the EXISTING search_step + diversify_step.
+    """Text-only search — reuses the EXISTING search_step + diversify_step.
 
-    No image, no Modal call. A zero dense vector is injected so the RPC's
-    pgroonga (sparse) branch carries the query. The zero vector still yields a
-    deterministic pgvector dense ranking (1..50), so ``search_products_v5``'s
-    RRF assigns those dense-only rows real fusion scores — in production they
-    pollute the top instead of sinking (verified: a constant zero-dense item
-    ranked #1 for every unrelated query). STOPGAP (larger search-logic rework
-    tracked separately): pure-dense zero-noise rows are dropped before
-    diversify so only query-relevant (sparse-only / both) rows survive. Shared
-    by `search_products` and `refine_search` text-only paths.
+    SPEC-SEARCH-V6-001: no image, no Modal IMAGE call. A REAL text embedding
+    is injected via ``EmbedProvider.embed_text`` (same FashionSigLIP L2 space
+    — cross-modal cosine valid), then the SAME v6 ``search_step`` +
+    ``diversify_step`` run. embed_step is still bypassed; the sentinel URL is
+    retained ONLY to satisfy the required RecommendRequest.image_url field and
+    is NEVER sent to Modal. Shared by `search_products` and `refine_search`
+    text-only paths.
 
     Returns the diversified candidate dicts (pipeline `final_candidates`).
     """
     from app.models.request import AnalyzedItem, RecommendRequest
     from app.pipeline.diversify import diversify_step
+
+    # EmbedProvider is re-exported by app.pipeline.embed (the same monkeypatch
+    # seam the characterization net uses for embed_image_url), so the text
+    # embedding goes through the consistent codebase seam.
+    from app.pipeline.embed import EmbedProvider
     from app.pipeline.search import search_step
     from app.pipeline.state import PipelineState
 
+    # SPEC-SEARCH-V6-001: carry the REAL Vision/text category into the item so
+    # search_service → build_params normalizes it to a canonical 20-family
+    # token. `AnalyzedItem.category` is a required str: when there is no Vision
+    # item (`category is None`) keep the legacy "apparel" placeholder — it
+    # normalizes to `other` (gate skipped), the correct graceful degrade.
     item = AnalyzedItem(
         id="agent-v2-text",
         category=category or "apparel",
         subcategory=None,
         fit=fit,
         color_family=color_family,
-        # Force the English/free-text query into the sparse slot. We
-        # deliberately do NOT set search_query_ko so search_step uses this
-        # value verbatim against the (English-indexed) pgroonga column.
         search_query=text_query,
     )
     req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
     state = PipelineState(request=req)
-    # Bypass embed_step entirely — sentinel URL never reaches Modal.
-    state.embedding = [0.0] * _EMBED_DIM
+    # Bypass embed_step (image path) — inject a REAL text embedding instead.
+    # The sentinel URL never reaches Modal.
+    # Invariant guard (review P1-1): both current callers already ensure a
+    # non-empty query (search_products.dispatch no_query gate; refine_search
+    # `or "fashion"`), but this helper is shared/public — embedding an empty
+    # string is meaningless, so fail fast & explicitly rather than POST "" to
+    # Modal. Caught by the caller's dispatch try/except → ok=False.
+    if not text_query.strip():
+        raise ValueError("run_text_only_search requires a non-empty text_query")
+    state.embedding = await EmbedProvider.embed_text(text_query)
     state = await search_step(state)
-    # STOPGAP zero-dense suppression. Structurally gated: this function ALWAYS
-    # injects the zero sentinel above; the image path is a separate function
-    # (run_image_search → run_pipeline) that never reaches here. The
-    # `not any(...)` guard is a fail-SAFE — if a future refactor ever wired a
-    # real (non-zero) embedding through this function, the filter self-disables
-    # and behavior stays byte-identical to pre-stopgap.
-    if state.embedding is not None and not any(state.embedding):
-        state.raw_candidates = _suppress_zero_dense_noise(state.raw_candidates)
-        state.counts["raw"] = len(state.raw_candidates)
     state = await diversify_step(state)
     return list(state.final_candidates or [])
 
@@ -301,7 +284,7 @@ async def run_image_search(
     color_family: str | None = None,
     top_k: int = 15,
 ) -> list[Any]:
-    """Photo-pick path — full existing `run_pipeline` (dense image + sparse + RRF).
+    """Photo-pick path — full existing `run_pipeline` (image embedding → v6 RPC).
 
     `image_url` MUST be an externally-resolved URL sourced from ctx (never an
     LLM arg, never a placeholder).
@@ -309,6 +292,11 @@ async def run_image_search(
     from app.models.request import AnalyzedItem, RecommendRequest
     from app.pipeline.runner import run_pipeline
 
+    # SPEC-SEARCH-V6-001: `category` is the REAL Vision garment category
+    # (ctx.vision_category). It flows into AnalyzedItem → search_service →
+    # build_params → to_canonical_family (the canonical 20-family gate). The
+    # "apparel" fallback only applies when no Vision item is present; it
+    # normalizes to `other` (gate skipped).
     item = AnalyzedItem(
         id="agent-v2",
         category=category or "apparel",
@@ -333,14 +321,25 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
 
     top_k = int(args.get("top_k") or 15)
-    category = args.get("style_node_primary")
+    # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
+    # REAL Vision garment category from ctx (`vision_category`, set in
+    # react_loop._build_ctx from state.vision_selected_item / detected_items).
+    # Previously this read `args.get("style_node_primary")` — a brand STYLE-NODE
+    # letter (A–Z), NOT a garment category — which always normalized to `other`
+    # so the v6 family gate never engaged on the primary (Telegram bot) path.
+    # `style_node_primary` remains a separate concept used elsewhere; we no
+    # longer mislabel it as the search category here. Text-only / no-Vision
+    # turn → vision_category None → to_canonical_family → `other` → gate
+    # skipped (correct graceful degrade; never fabricate a category).
+    category = ctx.get("vision_category")
     fit = args.get("fit")
     color_family = args.get("color_family")
 
     try:
         if has_image:
-            # Photo-pick: real resolved image drives dense; text_query (or the
-            # category) seeds sparse. NEVER an LLM-supplied / placeholder URL.
+            # Photo-pick: real resolved image drives the v6 query embedding.
+            # text_query is informational only (v6 has no text param). NEVER an
+            # LLM-supplied / placeholder URL.
             query = text_query or category or "fashion item"
             cands = await run_image_search(
                 image_url=str(ctx_image),

@@ -1,7 +1,7 @@
 """Database service -- the designated DI seam over SupabaseProvider.
 
 SPEC-ARCH-AI-001 PR1 introduced this seam; review P1-b WIRED it:
-``SearchRepository.search`` now dispatches its ``search_products_v5`` RPC
+``SearchRepository.search`` now dispatches its ``search_products_v6`` RPC
 through ``DatabaseService.rpc`` instead of calling ``SupabaseProvider`` (via
 the pipeline module) directly, so this is the real RPC chokepoint and no
 longer dead code.

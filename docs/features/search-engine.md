@@ -1,100 +1,67 @@
-# 검색 엔진 v5
+# 검색 엔진 v6
 
-> Supabase pgvector(HNSW) + pgroonga(BM25) + RRF. AI 서버는 RPC 호출 + 다양성 캡만 담당.
+> dev-app Postgres pgvector(HNSW) embedding-first. AI 서버는 RPC 호출 + 다양성 캡만 담당.
+> v5 (dense HNSW + sparse pgroonga + RRF) → v6 마이그레이션: SPEC-SEARCH-V6-001.
 
-## 책임 경계 (B 옵션)
+## 책임 경계
 
 | 레이어 | 책임 |
 |--------|------|
-| **Postgres RPC** (`search_products_v5`) | dense (HNSW) + sparse (pgroonga) + RRF → top-K |
+| **Postgres RPC** (`search_products_v6`) | embedding cosine distance ASC → top-K. FILTER2 canonical family gate. `degraded` flag (style-node filter drop → category-only fallback) |
 | **AI 서버 Python** (`services/diversify_service.py`, thin shim `pipeline/diversify.py`) | 다양성 캡 + tolerance + 최종 정렬 |
 
 근거:
-- DB는 인덱스를 잘 활용하는 영역(벡터/풀텍스트)만 담당
-- 비즈니스 로직(다양성/리랭크/A/B)은 변경 빈도가 높으므로 Python 측에 둠 — 핫리로드 + 평가 스크립트 옆에서 작성
+- DB는 인덱스를 잘 활용하는 영역(벡터)만 담당
+- 비즈니스 로직(다양성/리랭크/family normalization)은 Python 측 — 핫리로드 + 평가 스크립트 옆에서 작성
 
-## RPC 인터페이스
-
-`kikoai/app/supabase/migrations/030_search_products_v5.sql`:
+## RPC 인터페이스 (v6)
 
 ```sql
-search_products_v5(
-  query_embedding vector(768),
-  query_text text DEFAULT NULL,
-  brand_filter text[] DEFAULT NULL,
-  gender_filter text[] DEFAULT NULL,
-  subcategory_filter text DEFAULT NULL,
-  price_min integer DEFAULT NULL,
-  price_max integer DEFAULT NULL,
-  tags_filter text[] DEFAULT NULL,
-  k integer DEFAULT 50,
-  rrf_k integer DEFAULT 60
+search_products_v6(
+  query_embedding   vector(768),           -- FashionSigLIP L2-normalized, required
+  p_style_node_id   text    DEFAULT NULL,  -- style-node filter (always NULL from AI server)
+  p_category        text    DEFAULT NULL,  -- canonical family token (20-token set, or "other")
+  p_subcategory     text    DEFAULT NULL,  -- always NULL (products.subcategory 100% NULL)
+  p_brand_names     text[]  DEFAULT NULL,  -- optional brand filter
+  p_limit           integer DEFAULT 50     -- top-K
 ) RETURNS TABLE (
-  id uuid,
-  brand text, name text, price integer,
-  image_url text, product_url text, platform text,
-  subcategory text, color text, material text, style_node text,
-  gender text[], tags text[],
-  dense_rank integer, sparse_rank integer,
-  dense_score double precision, sparse_score double precision,
-  score double precision   -- RRF score
+  id          bigint,          -- products.id (bigint; PostgREST may return int or str)
+  brand       text,
+  name        text,
+  price       integer,
+  image_url   text,
+  product_url text,
+  platform    text,
+  subcategory text,
+  distance    double precision, -- cosine distance ASC (lower = more similar)
+  degraded    boolean           -- true = style-node filter dropped → category-only fallback
 )
 ```
 
+> **v5 → v6 변경 요약**: `query_text`/`gender_filter`/`subcategory_filter`/`price_min`/`price_max`/`tags_filter`/`k`/`rrf_k` 파라미터 제거. 응답 컬럼 `score`/`dense_rank`/`sparse_rank`/`dense_score`/`sparse_score` 제거 → `distance`/`degraded` 추가. `id` uuid → bigint.
+
 ## 알고리즘
 
-### Hard filter (in-RPC)
+### v6 검색 (embedding-first)
 
 ```
-in_stock = true
-brand_filter (활성 시)
-gender_filter (활성 시)
-subcategory_filter (활성 시)
-price_min/max (활성 시)
-tags_filter (활성 시)
+query_embedding → cosine distance (HNSW pgvector)
+→ ORDER BY distance ASC → LIMIT p_limit
 ```
 
-### Dense (HNSW)
+- `vector_ip_ops` HNSW (FashionSigLIP L2-normalized → cosine ≈ inner product)
+- v5의 sparse(pgroonga) + RRF 완전 제거
+- `product_search_text` 헬퍼 함수 드롭됨
 
-```sql
-SELECT id, 1 - (embedding <=> query_embedding) AS sim,
-       row_number() OVER (...) AS r
-FROM products
-WHERE embedding IS NOT NULL AND <hard_filter>
-ORDER BY embedding <=> query_embedding ASC
-LIMIT k * 4
-```
+### FILTER2 — canonical family gate
 
-- `vector_ip_ops` HNSW (FashionSigLIP은 L2-normalized → cos ≈ inner product)
-- `m=16, ef_construction=200` (마이그레이션 027)
-- 런타임 튜닝: `SET LOCAL hnsw.ef_search = N` (기본 40)
+`p_category` 가 `CANONICAL_FAMILIES` 의 20개 토큰 중 하나 (예: `"outerwear"`, `"tops"`) 이면 family gate 활성. `"other"` 이거나 빈값이면 gate 스킵 (cosine-only degrade — 의도된 동작, NOT broken).
 
-### Sparse (pgroonga)
+클라이언트 정규화는 `app/infrastructure/repositories/category_family.py:to_canonical_family()` 가 단일 소스. Vision 7-enum(`Outer/Top/Bottom/Shoes/Bag/Dress/Accessories`) → 정규 토큰 매핑 포함.
 
-```sql
-SELECT id, pgroonga_score(p.tableoid, p.ctid) AS sim,
-       row_number() OVER (...) AS r
-FROM products p
-WHERE product_search_text(p) &@~ query_text
-  AND <hard_filter>
-ORDER BY pgroonga_score(...) DESC
-LIMIT k * 4
-```
+### text query path (v6)
 
-- `product_search_text(p)` = `brand || ' ' || name || ' ' || description || ' ' || material || ' ' || color`
-- pgroonga 한국어 토크나이저 (027 인덱스 정의와 동일 표현식)
-
-> **주의**: `pgroonga_score` 는 실제 테이블의 시스템 컬럼(`tableoid`, `ctid`) 필요. CTE 의 `SELECT p.*` 결과로는 동작하지 않음 — 두 CTE 모두 `products` 직접 참조.
-
-### RRF (Reciprocal Rank Fusion)
-
-```
-score = 1/(rrf_k + dense_rank) + 1/(rrf_k + sparse_rank)
-```
-
-- `rrf_k = 60` (기본)
-- dense 또는 sparse 한 쪽만 매칭되면 그 항만 기여
-- 최종 ORDER BY `score DESC`
+텍스트 전용 턴: `EmbedProvider.embed_text(text_query)` → Modal `POST /embed/text` → 768-dim 벡터 (동일 FashionSigLIP L2 공간 — cross-modal cosine 유효). v5의 zero-dense + pgroonga 트릭 및 `_suppress_zero_dense_noise` stopgap 완전 제거.
 
 ## 다양성 캡 (Python 측)
 
@@ -105,7 +72,7 @@ target = req.final_limit or _tolerance_to_target_count(req.tolerance)
 brand_cap    = SEARCH_BRAND_CAP * 3 if req.brand_filter else SEARCH_BRAND_CAP   # 2 또는 6
 platform_cap = SEARCH_PLATFORM_CAP                                              # 3
 
-for c in raw_candidates:                # RRF 순서 유지
+for c in raw_candidates:                # distance ASC 순서 유지
     if seen_brand[c.brand] >= brand_cap: continue
     if seen_platform[c.platform] >= platform_cap: continue
     out.append(c)
@@ -118,45 +85,48 @@ for c in raw_candidates:                # RRF 순서 유지
 | 0.5 | 15 (medium, 기본) |
 | 1.0 | 20 (loose) |
 
-## 응답 모양
+## 응답 모양 (v6)
 
 ```json
 {
-  "id": "uuid",
+  "id": "12345678901",
   "brand": "Acme",
   "name": "Cropped Hoodie",
   "price": 89000,
   "imageUrl": "https://...",
   "productUrl": "https://...",
   "platform": "shopamomento",
-  "subcategory": "hoodie",
-  "score": 0.0317,
-  "denseRank": 3,
-  "sparseRank": 7
+  "subcategory": null,
+  "score": 0.8317,
+  "denseRank": null,
+  "sparseRank": null
 }
 ```
+
+> `score = 1.0 - distance` (runner 변환 — higher=better downstream 시맨틱 유지). `denseRank`/`sparseRank` 는 항상 `null` (v6에서 제거됨).
 
 ## v4 (Next.js) 폴백
 
 AI 서버 5xx/timeout 시 Next.js 의 `/api/find/search` 가 기존 v4 검색(`/api/search-products`) 을 in-process 호출.
 
-| | v4 (Next.js, 폴백) | v5 (이 서버) |
+| | v4 (Next.js, 폴백) | v6 (이 서버) |
 |---|---|---|
-| 알고리즘 | enum 가중합 (13차원) | dense + sparse + RRF |
-| 데이터 의존 | `product_ai_analysis` INNER JOIN | `products.embedding` (FashionSigLIP) |
+| 알고리즘 | enum 가중합 (13차원) | embedding cosine (FashionSigLIP) |
+| 데이터 의존 | 별도 분석 테이블 | `products.embedding` (FashionSigLIP) |
 | 다양성 | brand 2 / platform 3 (동일) | brand 2 / platform 3 (동일) |
-
-v4는 점진적으로 폐기 예정 (v5 검증 후).
 
 ## 평가 / 디버깅
 
-- **검색 디버거**: kikoai/app `/admin/search-debugger` (v4 기반, v5 토글은 미작성 — 백로그)
-- **로그**: `search_quality_logs` 테이블 (v4 만 기록 중. v5 로깅은 백로그)
+- **로그**: `[STEP 4.5][search]` — `category raw→canonical family_gate` 라인으로 family gate 활성 여부 확인
+- **로그**: `[STEP 4.6][search]` — `distance_dist min/median/max` + `degraded_count`
 - **trace**: Langfuse `recommend_pipeline` → `pipeline.search` span 의 input/output 전체 노출
 
-## 관련 마이그레이션
+## 관련 파일
 
 | 파일 | 내용 |
 |------|------|
-| `kikoai/app/supabase/migrations/027_product_embeddings_and_pgroonga.sql` | embedding 컬럼 + HNSW + pgroonga 인덱스 + bulk_update RPC + coverage 뷰 |
-| `kikoai/app/supabase/migrations/030_search_products_v5.sql` | 본 RPC (`search_products_v5`) + `product_search_text` 헬퍼 |
+| `app/infrastructure/repositories/category_family.py` | `CANONICAL_FAMILIES` (20 tokens) + `to_canonical_family()` — family gate 단일 소스 |
+| `app/infrastructure/repositories/search_repository.py` | `_RPC_NAME = "search_products_v6"` + `build_params` (6-key) |
+| `app/infrastructure/repositories/search_rpc_contract.py` | v6 row contract (`distance`+`degraded`) |
+| `app/providers/embedding.py` | `embed_image_url` + `embed_text` (v6 text path) |
+| `infra/search-rpc-contract.md` | RPC 계약 상세 + drift 동작 |

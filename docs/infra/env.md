@@ -7,7 +7,7 @@
 | 키 | 용도 | 노출 |
 |----|------|------|
 | `DB_URL` | PostgREST 엔드포인트 base URL. 현재 dev-app EC2 의 nginx PostgREST shim (`http://172.31.59.31:3001`) 을 가리킴 — Supabase.com 미사용 (SPEC-INFRA-MIGRATE-001 P6 이후, P8 에서 SUPABASE_URL → DB_URL 리네임) | 서버 전용 |
-| `DB_TOKEN` | PostgREST service JWT — `search_products_v5` RPC 호출 (구 SUPABASE_SERVICE_ROLE_KEY) | 서버 전용 |
+| `DB_TOKEN` | PostgREST service JWT — `search_products_v6` RPC 호출 (구 SUPABASE_SERVICE_ROLE_KEY) | 서버 전용 |
 | `MODAL_EMBED_URL` | Modal `/embed` 엔드포인트 base URL | 서버 전용 |
 | `MODAL_EMBED_TOKEN` | Modal Bearer token (`EMBED_AUTH_TOKEN` 과 동일) | 서버 전용 |
 | `LITELLM_BASE_URL` | LiteLLM proxy base URL | 서버 전용 |

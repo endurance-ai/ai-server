@@ -1,7 +1,16 @@
-"""Net (1) -- run_pipeline end-to-end response snapshot.
+"""Net (1) -- run_pipeline end-to-end response snapshot
+(v6-migrated by SPEC-SEARCH-V6-001).
 
 Full path: run_pipeline -> embed (fixed vector) -> enhance_query (disabled)
--> search RPC (fixed hand-authored rows) -> diversify -> RecommendResponse.
+-> v6 search RPC (fixed hand-authored rows) -> diversify -> RecommendResponse.
+
+v6 rows carry `distance` (cosine, ASC=better) + `degraded`; the runner maps
+score = 1.0 - distance and sets dense_rank/sparse_rank = None. The rows below
+set distance = 1.0 - score so the locked `score` golden values are preserved
+verbatim (the v5 score-equivalence subject is retired with SPEC basis; the
+SAME end-to-end snapshot guard is preserved against v6). diversify is
+order-preserving and never reads score/distance, so the brand/platform cap
+survivor logic is byte-identical — only the rank fields change (-> None).
 
 Locks resp.item_id, resp.results (ordered (id,brand,score,dense_rank,
 sparse_rank) tuples), and the full resp.counts dict. resp.latency_ms VALUES
@@ -19,8 +28,9 @@ from app.pipeline.runner import run_pipeline
 
 
 # 14 rows: 4 brands (uniqlo/cos/zara/musinsa) + blank, 3 platforms
-# (shop/market/web). One row (r7) omits `score` -> runner Candidate float
-# default 0.0. One row (r9) omits `brand` -> .get("brand","") -> "".
+# (shop/market/web). One row (r7) omits `distance` -> runner score
+# = 1.0 - default(1.0) = 0.0. One row (r9) omits `brand` -> "".
+# v6 shape: distance (= 1.0 - target_score) + degraded; no score/ranks.
 def _rows() -> list[dict]:
     def mk(i, brand, platform, score, dense, sparse, *, no_score=False, no_brand=False):
         d: dict = {
@@ -31,13 +41,14 @@ def _rows() -> list[dict]:
             "product_url": f"https://shop/{i}",
             "platform": platform,
             "subcategory": "knit",
-            "dense_rank": dense,
-            "sparse_rank": sparse,
+            "degraded": False,
         }
         if not no_brand:
             d["brand"] = brand
         if not no_score:
-            d["score"] = score
+            # distance = 1.0 - score so runner's score = 1.0 - distance
+            # reproduces the locked golden score verbatim.
+            d["distance"] = 1.0 - score
         return d
 
     return [
@@ -100,15 +111,17 @@ def _tuples(resp):
 #  p12 uniqlo/mkt  DROP brand cap (uniqlo>=2)
 #  p13 musinsa/shp DROP brand cap (musinsa>=2)
 #  -> survivors: p0,p1,p3,p4,p5,p6,p7,p8  (8 rows; target 15 not reached)
+# v6: dense_rank/sparse_rank are always None (runner sets them None); score
+# is preserved (distance = 1.0 - score round-trips exactly).
 _EXPECTED_BASE = [
-    ("p0", "uniqlo", 0.95, 1, 1),
-    ("p1", "uniqlo", 0.94, 2, 2),
-    ("p3", "cos", 0.92, 4, None),
-    ("p4", "cos", 0.91, None, 4),
-    ("p5", "zara", 0.90, 5, 5),
-    ("p6", "zara", 0.89, 6, 6),
-    ("p7", "musinsa", 0.0, 7, 7),
-    ("p8", "musinsa", 0.87, 8, 8),
+    ("p0", "uniqlo", 0.95, None, None),
+    ("p1", "uniqlo", 0.94, None, None),
+    ("p3", "cos", 0.92, None, None),
+    ("p4", "cos", 0.91, None, None),
+    ("p5", "zara", 0.90, None, None),
+    ("p6", "zara", 0.89, None, None),
+    ("p7", "musinsa", 0.0, None, None),
+    ("p8", "musinsa", 0.87, None, None),
 ]
 _EXPECTED_COUNTS_BASE = {"raw": 14, "after_diversify": 8, "final": 8}
 
@@ -158,15 +171,15 @@ async def test_characterize_run_pipeline_brand_filter(fixed_embed, patch_rpc, br
         ids = [t[0] for t in tuples]
         assert ids == ["p0", "p1", "p2", "p4", "p5", "p6", "p7", "p8", "p10"]
         assert tuples == [
-            ("p0", "uniqlo", 0.95, 1, 1),
-            ("p1", "uniqlo", 0.94, 2, 2),
-            ("p2", "uniqlo", 0.93, 3, 3),
-            ("p4", "cos", 0.91, None, 4),
-            ("p5", "zara", 0.90, 5, 5),
-            ("p6", "zara", 0.89, 6, 6),
-            ("p7", "musinsa", 0.0, 7, 7),
-            ("p8", "musinsa", 0.87, 8, 8),
-            ("p10", "cos", 0.85, 10, 10),
+            ("p0", "uniqlo", 0.95, None, None),
+            ("p1", "uniqlo", 0.94, None, None),
+            ("p2", "uniqlo", 0.93, None, None),
+            ("p4", "cos", 0.91, None, None),
+            ("p5", "zara", 0.90, None, None),
+            ("p6", "zara", 0.89, None, None),
+            ("p7", "musinsa", 0.0, None, None),
+            ("p8", "musinsa", 0.87, None, None),
+            ("p10", "cos", 0.85, None, None),
         ]
         assert resp.counts == {"raw": 14, "after_diversify": 9, "final": 9}
 

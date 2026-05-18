@@ -82,7 +82,7 @@ docker compose logs -f
 
 ## 첫 배포 절차
 
-1. **Supabase migration 적용** — `kikoai/app/supabase/migrations/030_search_products_v5.sql`
+1. **DB migration 적용** — `search_products_v6` RPC + `category_canonical` 테이블 (dev-app Postgres). `search_products_v5`/pgroonga/`product_search_text` DROPPED.
 2. **Modal `/embed` 배포** — `aws-infra/kiko-ai-servers/portal-ai/modal/embed_app.py` (`modal deploy`)
 3. **EC2 docker compose up** — Langfuse + LiteLLM + 빈 ai-server (이미지 미존재 → ai-server 만 fail)
 4. **Langfuse 첫 회원가입** → 프로젝트 `kiko.ai` 생성 → API Keys 발급 → `.env` 채움
