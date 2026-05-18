@@ -6,13 +6,10 @@
     .boost_brands / .boost_keywords / .exclude_brands
   - app.agents.tools.get_recent_history.dispatch (its own SELECT +
     _summarize_payload 200-char cap is the payload-truncation policy reused)
-@MX:SPEC: SPEC-AGENT-V3-REACT
 
 Produces a single system-derived string fenced by
-`[MEMORY CONTEXT — SYSTEM DERIVED]` … `[/MEMORY CONTEXT]`. Called ONLY from
-`run_react_loop` when `AGENT_V3_MEMORY_INJECTION_ENABLED` is true; with the
-flag off this module is never imported (dead code) so V2 messages stay
-byte-identical (REQ-AGENT-V3-MEM-FLAG-001).
+`[MEMORY CONTEXT — SYSTEM DERIVED]` … `[/MEMORY CONTEXT]`. SPEC-AGENT-V2-CLEANUP-001
+— memory injection is now unconditional; `run_react_loop` always calls this.
 
 Sizing (REQ-AGENT-V3-MEM-CAP-001): the whole block is capped at
 `max_tokens * 4` chars. Taste summary is preserved first, then recent turns

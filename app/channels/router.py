@@ -1,9 +1,11 @@
-"""DEPRECATED (when AGENT_V2_REACT_ENABLED=true) — superseded by SPEC-AGENT-V2-REACT.
-The agent LLM's reasoning subsumes deterministic text routing. Retained for V2.0
-rollback safety (V1 path still uses this). Will be removed in V2.1 cleanup
-(see SPEC-AGENT-V2-CLEANUP-001).
+"""DEPRECATED — superseded by SPEC-AGENT-V2-REACT / SPEC-AGENT-V2-CLEANUP-001.
+The agent LLM's reasoning subsumes deterministic text routing. `route_text` is
+no longer called by any code path (the V1 topology was removed). This module is
+retained ONLY because `app/graphs/state.py` imports `RoutedDecision` as the
+type of the (now always-None) `WorkingState.decision` field. Do not delete
+without first removing that field + import.
 
-@MX:LEGACY: superseded by SPEC-AGENT-V2-REACT — V2.1 removal target
+@MX:LEGACY: route_text() is dead; only the RoutedDecision type is still imported
 
 Routing-LLM — paraphrase-aware text classification.
 

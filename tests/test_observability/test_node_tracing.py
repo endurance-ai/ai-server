@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import inspect
 
+# SPEC-AGENT-V2-CLEANUP-001 — V1-only node entrypoints (critique_apply,
+# search, taste_update, respond) were deleted with the V1 topology. evaluator
+# + send_results are preserved (helpers reused by _reflexion / tools.respond).
 NODE_FUNCS = [
     ("app.graphs.nodes.ingest", "ingest"),
     ("app.graphs.nodes.resolve_image", "resolve_image"),
@@ -11,17 +14,13 @@ NODE_FUNCS = [
     ("app.graphs.nodes.pick_item", "pick_item"),
     ("app.graphs.nodes.ask_clarify", "ask_clarify"),
     ("app.graphs.nodes.apply_clarify", "apply_clarify"),
-    ("app.graphs.nodes.critique_apply", "critique_apply"),
-    ("app.graphs.nodes.search", "search_node"),
     ("app.graphs.nodes.evaluator", "evaluator"),
     ("app.graphs.nodes.send_results", "send_results"),
-    ("app.graphs.nodes.taste_update", "taste_update"),
-    ("app.graphs.nodes.respond", "respond"),
 ]
 
 
-def test_all_12_nodes_have_observe_decoration() -> None:
-    """All 12 entry functions are decorated; verifiable via source inspection."""
+def test_all_nodes_have_observe_decoration() -> None:
+    """All preserved entry functions are decorated; verifiable via source."""
     import importlib
 
     for module_path, func_name in NODE_FUNCS:

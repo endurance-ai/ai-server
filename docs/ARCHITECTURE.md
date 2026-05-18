@@ -1,308 +1,462 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-17 (v0.9.0 — SPEC-AGENT-V3-REACT V2 증분 강화 4-Gap + SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 + RPC 계약 검증).
+> 마지막 업데이트: 2026-05-18 (v1.1.0 — bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등).
 
 ## 한 줄 요약
 
-`kikoai/app`(Next.js 모놀리스)에서 IG Vision 분석 끝난 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유, dense+sparse+RRF) → 다양성 캡 → product 리스트 반환**.
+**Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면** — webhook → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v5` RPC (dense HNSW + sparse pgroonga + RRF) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
 
-**Telegram 채널**: Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면 webhook → **LangGraph StateGraph** (`app/graphs/`, V1: 18 노드 / V2(flag-gated): `agent` 노드 + 온보딩 6 노드 — `search → evaluator` Reflexion 루프는 V2에서 `agent` ReAct loop으로 대체, SPEC-AGENT-V2-REACT) → 동일 파이프라인 → 채널 응답 카드로 반환. 모든 webhook turn 에서 `emit()` 로 `ai.log_conversation_event` append-only 기록 (SPEC-CONVERSATION-LOG-001).
+`kikoai/app`(Next.js)은 현재 web UI + Postgres DB 역할로 축소되어 있다. 과거 IG 이미지 검색용으로 설계된 `POST /recommend` 경로는 코드상 존재하지만 **현재 운영에서 거의 호출되지 않는다.**
 
 ## 책임 분리
 
-```
-[dev-app EC2 — kikoai/app + Postgres]         [dev-ai EC2 — kikoai/ai]                  [Modal]
-─────────────────────────────────────         ────────────────────────────              ──────────
-Next.js standalone (Auth.js v5)               AI 서버 (FastAPI)                          FashionSigLIP /embed
-Apify 스크래핑 + R2 + Postgres                  ├─ 검색 오케스트레이션                       (T4, scale-to-zero)
-GPT-4o-mini Vision (LiteLLM 경유)              ├─ Telegram webhook + 채널 어댑터             단건 + 배치
-검색 결과 렌더                                  LiteLLM proxy + Postgres                   Modal Volume 에 weights 캐시
-v4 검색 (폴백 전용)                             Langfuse web + Postgres
-Postgres 16 + pgvector + pgroonga
-+ PostgREST + nginx shim (자체호스팅)
-```
+| 레이어 | 담당 서비스 | 주요 책임 |
+|--------|------------|----------|
+| **Telegram 봇 채널** | Telegram Bot API | 메시지 수신·발신 transport (이 서버에서 블랙박스) |
+| **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
+| 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
+| 벡터 DB | dev-app Postgres 16 + pgvector + pgroonga | `search_products_v5` RPC, HNSW + BM25 + RRF. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
+| LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
+| web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
 
-**외부 채널 서비스**: Telegram Bot API (`https://api.telegram.org`) — Telegram 소유·운영, HTTPS webhook 방식. Pinterest(`pinterest.com` / `pin.it`) 서버사이드 fetch로 og:image 추출 (P0). Instagram P2 스텁. **Apify** (`api.apify.com` — `epctex/pinterest-scraper` actor): 온보딩 Stage 4 Pinterest 보드/프로파일 핀 스크래핑 (SPEC-ONBOARD-CARDS-001, 비동기 httpx, `APIFY_TOKEN` 필요).
+> Telegram bot 플로우는 `kikoai/app`을 **전혀 거치지 않는다** — Vision 처리도 이 서버(`app/channels/vision.py`)가 독자적으로 수행하며, DB만 공유한다.
 
-**v5 인프라**: dev-app Postgres 16 + pgvector + pgroonga (마이그레이션 027 + 030 적용). PostgREST + nginx shim 으로 `DB_URL` 호환 라우팅. SPEC-INFRA-MIGRATE-001 P6 이후 Supabase.com 미사용. Qdrant **사용 안 함**.
+> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 환경변수 `DB_URL`/`DB_TOKEN` (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), PostgREST shim `http://172.31.59.31:3001` 경유. Qdrant 미사용.
 
-> **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. env 변수는 `DB_URL`/`DB_TOKEN` 으로 리네임 완료 (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), nginx PostgREST shim (`http://172.31.59.31:3001/rest/v1/...`) 으로 라우팅.
-
-`enhance_query` LLM 리파인 step 은 백로그 — 현재 파이프라인은 직선 (embed → search → diversify).
+---
 
 ## 시스템 토폴로지
 
+주 플로우(실선)는 Telegram 봇 경로다. `/recommend` 경로(점선·회색)는 코드상 존재하나 현재 운영에서 거의 호출되지 않는다.
+
 ```mermaid
-graph TB
-    subgraph App["Next.js (dev-app EC2)"]
-        FIND["/api/find/search"]
-        V4["/api/search-products (v4 폴백)"]
+flowchart TB
+    subgraph TG["Telegram (주 채널)"]
+        TG_USER["사용자"]
+        TG_API["Telegram Bot API"]
     end
 
-    subgraph Chat["Telegram"]
-        TG_USER["Telegram 사용자"]
-        TG_API["Telegram Bot API<br/>api.telegram.org"]
-    end
-
-    subgraph AI["AI Server (EC2 t4g.medium)"]
-        REC["POST /recommend"]
+    subgraph AI["kikoai/ai (dev-ai EC2) — 주 서버"]
         WH["POST /webhooks/telegram"]
-        CHAN["app/graphs/<br/>LangGraph StateGraph<br/>V1(18 nodes): evaluator(Reflexion)+apply_clarify+onboarding<br/>V2(flag-gated): agent(ReAct)+onboarding 6 nodes<br/>+ link_resolver + vision (v2 schema)"]
-        PIPE["pipeline state machine<br/>embed → search → diversify"]
-        LITELLM["LiteLLM proxy"]
-        LFW["Langfuse web"]
-        LFDB[("Langfuse Postgres")]
-        CONVLOG[("ai.log_conversation_event<br/>(append-only event log)")]
+        GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
+        PIPE["pipeline runner\nembed → search → diversify"]
+        LITELLM["LiteLLM proxy\nnova-lite via Bedrock"]
+        LFW["Langfuse self-host"]
+        REC["POST /recommend\n(현재 미사용)"]
     end
 
-    subgraph External["External"]
-        MODAL["Modal /embed<br/>FashionSigLIP T4"]
-        SB[("dev-app Postgres 16<br/>pgvector + pgroonga<br/>+ PostgREST nginx shim")]
-        PIN["Pinterest / pin.it<br/>(og:image fetch)"]
-        APIFY["Apify<br/>epctex/pinterest-scraper<br/>(board / profile)"]
+    subgraph Ext["External"]
+        MODAL["Modal /embed\nFashionSigLIP T4"]
+        PG[("dev-app Postgres\npgvector + pgroonga\nPostgREST nginx shim\n※ app과 DB만 공유")]
+        CONVLOG[("ai.log_conversation_event\n(append-only)")]
+        APIFY["Apify Pinterest scraper"]
     end
 
-    FIND -->|POST| REC
-    FIND -.fallback.-> V4
-    V4 --> SB
+    subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
+        FIND["/api/find/search\n(현재 미사용)"]
+        V4["/api/search-products\n(v4 폴백, 현재 미사용)"]
+    end
 
     TG_USER -->|메시지| TG_API
-    TG_API -->|webhook POST| WH
-    WH --> CHAN
-    CHAN -->|URL resolve| PIN
-    CHAN -->|Pinterest scrape| APIFY
-    CHAN -. emit .-> CONVLOG
-    CHAN --> PIPE
-    PIPE -->|sendMessage| TG_API
-
-    REC --> PIPE
+    TG_API -->|webhook| WH
+    WH --> GRAPH
+    GRAPH -->|Pinterest scrape| APIFY
+    GRAPH -.emit.-> CONVLOG
+    GRAPH --> PIPE
+    PIPE -->|sendMediaGroup / sendMessage| TG_API
     PIPE -->|embed| MODAL
-    PIPE -->|RPC search_products_v5| SB
-    PIPE -. trace .-> LFW
-    PIPE -. LLM .-> LITELLM
-    LITELLM -. trace .-> LFW
-    LFW --> LFDB
+    PIPE -->|search_products_v5 RPC| PG
+    PIPE -.LLM.-> LITELLM
+    PIPE -.trace.-> LFW
 
-    classDef app fill:#1565c0,color:#fff
+    FIND -. "현재 미사용" .-> REC
+    FIND -. "v4 fallback" .-> V4
+    V4 -.-> PG
+    REC -.-> PIPE
+
+    classDef primary fill:#ef6c00,color:#fff
     classDef ai fill:#0277bd,color:#fff
     classDef ext fill:#6a1b9a,color:#fff
     classDef data fill:#2e7d32,color:#fff
-    classDef chat fill:#ef6c00,color:#fff
+    classDef muted fill:#757575,color:#fff
 
-    class FIND,V4 app
-    class REC,WH,CHAN,PIPE,LITELLM,LFW ai
-    class MODAL,PIN,APIFY ext
-    class SB,LFDB,CONVLOG data
-    class TG_USER,TG_API chat
+    class TG_USER,TG_API primary
+    class WH,GRAPH,PIPE,LITELLM,LFW ai
+    class REC muted
+    class MODAL,APIFY ext
+    class PG,CONVLOG data
+    class FIND,V4 muted
 ```
+
+---
+
+## 플로우별 다이어그램
+
+### (a) Telegram 한 턴 플로우
+
+webhook 수신부터 사용자 응답까지의 전체 라우팅 경로.
+
+```mermaid
+flowchart TD
+    WH["POST /webhooks/telegram"] --> INGEST["ingest\nUpdate 파싱, 세션 로드\nclarify:/cards:/implicit_feedback: 콜백 인라인 처리"]
+
+    INGEST -->|"/start + onboarded_at IS NULL\n또는 onboard: 콜백\n또는 재시작 키워드"| OB_INTRO["onboard_intro"]
+    INGEST -->|"ONBOARDING_CARDS_ENABLED=false\n+ 첫 방문"| INTRO["intro\n1회성 서비스 안내"]
+    INGEST -->|"사진 첨부 + item picker 필요"| PICK["pick_item\n아이템 선택 카드"]
+    INGEST -->|"Vision 결과 약함"| CLARIFY["ask_clarify\n6-axes 결정형 카드\n(LLM 호출 없음)"]
+    INGEST -->|"일반 텍스트·사진·콜백"| AGENT["agent\nReAct loop"]
+
+    CLARIFY -->|"clarify:* 콜백"| APPLY["apply_clarify\nboost_keywords 누적"]
+    APPLY --> AGENT
+
+    OB_INTRO --> OB_MOOD["onboard_mood"] --> OB_COLOR["onboard_color"] --> OB_FIT["onboard_fit"]
+    OB_FIT -->|"PINTEREST_BOOTSTRAP_ENABLED"| OB_PIN["onboard_pinterest"]
+    OB_PIN --> PIN_ING["pinterest_ingest\nApify + Vision batch\n→ TasteProfile reinforce"]
+    OB_FIT & PIN_ING -->|"완료"| AGENT
+
+    PICK -->|"URL 해석 필요"| RESOLVE["resolve_image\nPinterest og:image"]
+    RESOLVE --> VISION["vision_node\nGPT-4o-mini Vision v2 schema"]
+    VISION --> AGENT
+
+    AGENT -->|"respond 툴 호출 → 하이브리드 카드 전송"| TG["Telegram Bot API\nsendMediaGroup + summary text"]
+
+    classDef node fill:#1565c0,color:#fff
+    classDef onboard fill:#2e7d32,color:#fff
+    classDef agent fill:#ef6c00,color:#fff
+    classDef ext fill:#6a1b9a,color:#fff
+
+    class INGEST,PICK,RESOLVE,VISION,CLARIFY,APPLY,INTRO node
+    class OB_INTRO,OB_MOOD,OB_COLOR,OB_FIT,OB_PIN,PIN_ING onboard
+    class AGENT agent
+    class TG,WH ext
+```
+
+### (b) ReAct agent loop 내부
+
+`agent` 노드가 호출하는 `run_react_loop`의 내부 구조. V3 강화는 모두 **무조건 활성** (플래그 제거됨).
+
+```mermaid
+flowchart TD
+    START["run_react_loop 진입\nGap1: build_memory_context\nTasteProfile + 최근 5턴 → system context 주입"] --> LLM["LLM 호출\nnova-lite via LiteLLM\nGap3: _PROACTIVE_DIRECTIVE system prompt"]
+
+    LLM -->|"tool_call 선택"| DISPATCH["tool dispatch\n_resolve_dispatcher(tool_name)"]
+
+    DISPATCH --> T1["analyze_image"]
+    DISPATCH --> T2["search_products\nGap4: apply_dislike_discount\n(unconditional)"]
+    DISPATCH --> T3["refine_search\nGap4: apply_dislike_discount"]
+    DISPATCH --> T4["update_taste"]
+    DISPATCH --> T5["ask_user_clarification"]
+    DISPATCH --> T6["get_recent_history"]
+    DISPATCH --> T7["suggest_next_step\nGap3: 선제 제안 버튼 전송"]
+    DISPATCH --> T8["respond\n→ send_hybrid_batch\n루프 종료"]
+
+    T2 & T3 -->|"Gap2: search 직후"| REFLEX["_maybe_reflexion\nevaluator._call_llm 래핑\nquality delta → ToolMessage 첨부"]
+    REFLEX --> GUARD
+
+    T1 & T4 & T5 & T6 & T7 --> GUARD["안전 가드 체크\n① iteration cap (AGENT_MAX_ITERATIONS, default 6)\n② 3-consecutive 동일 호출 무한루프 가드\n③ turn token budget\n④ per-tool / per-LLM timeout + 재시도\n⑤ turn deadline asyncio.wait_for"]
+
+    GUARD -->|"루프 계속"| LLM
+    GUARD -->|"cap 초과 / timeout"| FALLBACK["_fallback_respond\n오류 안내 발송"]
+    T8 --> END["agent 노드 반환\nstate delta"]
+
+    classDef tool fill:#0277bd,color:#fff
+    classDef core fill:#ef6c00,color:#fff
+    classDef v3 fill:#c62828,color:#fff
+    classDef guard fill:#f57f17,color:#fff
+
+    class T1,T2,T3,T4,T5,T6,T7,T8 tool
+    class START,LLM,DISPATCH,GUARD,END core
+    class REFLEX v3
+    class FALLBACK guard
+```
+
+**V3 강화 요약 (모두 unconditional):**
+
+| Gap | 모듈 | 동작 |
+|-----|------|------|
+| Gap1 Memory | `agents/_memory_context.py` | TasteProfile + 최근 5턴 요약을 매 루프 system context에 주입 (char-cap `AGENT_V3_MEMORY_MAX_TOKENS`×4) |
+| Gap2 Reflexion | `agents/_reflexion.py` | search/refine 직후 `evaluator._call_llm` 래핑으로 품질 평가 → quality delta를 ToolMessage에 첨부 → LLM 자율 refine 결정. 잔여 budget 기준 deadline 강제 취소 |
+| Gap3 Proactive | `agents/tools/suggest_next_step.py` | 8번째 tool. `_PROACTIVE_DIRECTIVE` system prompt + 약결과·모호 시 선제 제안 버튼 전송 |
+| Gap4 Dislike | `infrastructure/memory/taste_profile.py` | 크로스스레드 dislike timestamp → recency-weighted 디스카운트. `search_products`/`refine_search`/`update_taste` 에서 unconditional 적용 |
+
+> Gap2가 의존하는 `evaluator.py` (graph 노드로는 제거됨)의 `_call_llm`·`_build_fastpath_delta` 헬퍼 모듈과 `SELF_CRITIQUE_*`/`EVALUATOR_*` 환경변수는 **의도적으로 보존**됨.
+
+### (c) 검색 파이프라인 + 하이브리드 결과 전달
+
+`/recommend` 엔드포인트와 `respond` 툴 모두 이 파이프라인을 사용한다.
+
+```mermaid
+flowchart LR
+    INPUT["이미지 URL\n또는 텍스트 쿼리"] --> EMBED["embed_service\nModal /embed\nFashionSigLIP → 512-dim 벡터\n텍스트 입력 시 zero-dense 벡터 ⚠"]
+
+    EMBED --> SEARCH["search_service\nSearchRepository\nsearch_products_v5 RPC\nPostgREST nginx shim\ndense HNSW + sparse pgroonga + RRF → top-50"]
+
+    SEARCH --> DIV["diversify_service\n브랜드 max 2 / 플랫폼 max 3\ntolerance 적용 → top-15"]
+
+    DIV --> HYBRID["send_hybrid_batch\nagents/tools/respond.py"]
+
+    HYBRID -->|"정상 경로"| ALBUM["sendMediaGroup\n상위 5개 사진 1개 버블 (원자적)"]
+    HYBRID -->|"개별 사진 실패·broken URL"| FALLBACK["per-card fallback\nsend_results._candidate_to_card 재사용"]
+
+    ALBUM --> SUMMARY["summary text (HTML)\n번호 목록 + 상품 링크\n인라인 키보드:\n❤️ 숫자 버튼 → implicit_feedback.record_click\n[더보기] (다음 배치 있을 때만)\n[다르게 찾기] → cards:refine"]
+
+    classDef service fill:#1565c0,color:#fff
+    classDef ext fill:#6a1b9a,color:#fff
+    classDef result fill:#2e7d32,color:#fff
+    classDef warn fill:#c62828,color:#fff
+
+    class EMBED,SEARCH,DIV,HYBRID service
+    class INPUT ext
+    class ALBUM,SUMMARY,FALLBACK result
+```
+
+> **알려진 제약**: 텍스트 쿼리 시 zero-dense 벡터가 주입되어 pgroonga sparse에만 의존함. zero-dense 행은 억제 로직으로 처리되지만 검색 품질 제한이 있음 (추적 중, 이 문서 범위 밖).
+
+**검색 책임 경계:**
+
+| 레이어 | 책임 |
+|--------|------|
+| Postgres (`search_products_v5` RPC) | dense (HNSW) + sparse (pgroonga BM25) + RRF → top-K 후보 반환 |
+| Python (`diversify_service.py`) | 브랜드/플랫폼 다양성 캡, tolerance 산술 (banker's rounding), 최종 정렬 |
+
+### (d) 온보딩 서브그래프 (6 노드)
+
+`ONBOARDING_CARDS_ENABLED=true` + `onboarded_at IS NULL` 시 진입. `routing.py::onboarding_required()` 가 게이트.
+
+```mermaid
+flowchart LR
+    START(["ingest\n/start 또는 첫 방문"]) --> INTRO["onboard_intro\n언어 KO 기본 설정\n인트로 카드 발송"]
+
+    INTRO -->|"onboard:mood:*"| MOOD["onboard_mood\nStage 1 — 무드 4-axes 카드"]
+    MOOD -->|"onboard:color:*"| COLOR["onboard_color\nStage 2 — 컬러 카드"]
+    COLOR -->|"onboard:fit:*"| FIT["onboard_fit\nStage 3 — 핏 카드\n+ seed_from_onboarding → TasteProfile 시드\n+ onboarded_at 기록"]
+
+    FIT -->|"PINTEREST_BOOTSTRAP_ENABLED=true"| PIN["onboard_pinterest\nStage 4 (선택)\nPinterest 보드 URL 요청"]
+    FIT -->|"Pinterest 비활성"| AGENT(["agent\nReAct loop 진입"])
+
+    PIN -->|"URL 수신"| INGEST_PIN["pinterest_ingest\nApify board/profile 스크래핑\nVision batch → TasteProfile.reinforce_liked_*"]
+    PIN -->|"건너뜀"| AGENT
+
+    INGEST_PIN --> AGENT
+
+    classDef onboard fill:#2e7d32,color:#fff
+    classDef gate fill:#1565c0,color:#fff
+    classDef terminal fill:#ef6c00,color:#fff
+
+    class INTRO,MOOD,COLOR,FIT,PIN,INGEST_PIN onboard
+    class START gate
+    class AGENT terminal
+```
+
+재시작 키워드(`/reset`, "온보딩 다시" 등) 수신 시 언제든 `onboard_intro`로 강제 복귀.
+
+### 보조 입구 — `POST /recommend` (현재 운영 미사용)
+
+`app/api/recommend.py`가 제공하는 REST 엔드포인트. `kikoai/app`의 IG 이미지 검색 기능(`/api/find/search`)이 `X-Internal-Token` 헤더를 붙여 AI 서버에 직접 POST하는 경로로 설계되었으나, 현재 `kikoai/app`은 web + DB 역할로 축소되어 **이 경로는 현재 운영에서 거의 호출되지 않는다.** 코드·엔드포인트·파이프라인은 그대로 존재하며, 호출되면 Telegram 봇 플로우와 동일한 `pipeline runner`(embed → search → diversify)를 실행하고 `RecommendResponse`를 JSON으로 반환한다.
+
+```
+kikoai/app → POST /recommend → pipeline runner → search_products_v5 RPC → RecommendResponse (JSON)
+(현재 운영 미사용)
+```
+
+---
+
+## 그래프 노드 역할 표
+
+현재 15개 노드 (+ `__start__`/`__end__`).
+
+| 노드 | 역할 | 비고 |
+|------|------|------|
+| `ingest` | Update 파싱, 세션 로드, 콜백 인라인 처리 (`clarify:*`/`cards:*`/`implicit_feedback:`) | 매 턴 진입점 |
+| `intro` | 첫 방문 서비스 소개 (1회성) | `ONBOARDING_CARDS_ENABLED=false` + `onboarded_at IS NULL` 시만 진입 |
+| `resolve_image` | Pinterest / pin.it og:image URL 해석 | `link_resolver.py` 활용 |
+| `vision_node` | LiteLLM Vision v2 schema 패션 아이템 추출 | `styleNode/mood/palette/items[].searchQuery` |
+| `pick_item` | 복수 아이템 선택 인라인 키보드 | 콜백으로 단일 아이템 특정 |
+| `ask_clarify` | weak-vision 시 6-axes 결정형 카드 | LLM 호출 없음, `CLARIFY_CARDS_ENABLED` |
+| `apply_clarify` | `clarify:*` 콜백 → `session.boost_keywords` 누적 | ingest 인라인 처리로 대부분 처리됨 |
+| `agent` | ReAct loop 실행 (`run_react_loop`) | V3 강화 전부 여기에 |
+| `onboard_intro` | 온보딩 Stage 0 인트로 카드, 언어 KO 기본 설정 | `ONBOARDING_CARDS_ENABLED` 필요 |
+| `onboard_mood` | 온보딩 Stage 1 — 무드 4-axes | |
+| `onboard_color` | 온보딩 Stage 2 — 컬러 | |
+| `onboard_fit` | 온보딩 Stage 3 — 핏 카드 + TasteProfile 시드 + `onboarded_at` 기록 | |
+| `onboard_pinterest` | 온보딩 Stage 4 (선택) — Pinterest 보드 URL 요청 | `PINTEREST_BOOTSTRAP_ENABLED` |
+| `pinterest_ingest` | Apify 스크래핑 → Vision batch → TasteProfile reinforce | `APIFY_TOKEN` 필요 |
+| `_trace.py` | 구조화 node-trace 로깅 헬퍼 (`▶️`/`✅`/`⏭️`) | logging-only, 노드 아님 |
+
+> **제거된 노드 (언급 불가):** `router_text`, `critique_apply`, `search` (graph node), `send_results` (graph node), `taste_update` (graph node), `respond` (graph node), `evaluator` (graph node), `apply_self_critique`.
+> `evaluator.py` 파일은 **Gap2 헬퍼 보존** 목적으로 존재하며 graph에 등록되지 않음.
+
+---
 
 ## 디렉토리
 
 ```
 app/
-├── main.py                 # FastAPI 엔트리포인트 + lifespan (messenger adapter + session store + setWebhook)
-├── agents/                 # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-REACT + SPEC-AGENT-V3-REACT, AGENT_V2_REACT_ENABLED=true 시 활성)
-│   ├── react_loop.py       # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout / tool_call emit). V3: Gap1 memory injection + Gap2 _maybe_reflexion + Gap3 proactive directive
-│   ├── tool_registry.py    # 7-tool(V2)/8-tool(V3 Gap3 ON) REGISTRY + TypedDict args/result schema + validate_args
-│   ├── llm_client.py       # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy). AGENT_LLM_MODEL 미설정 시 fail-closed
-│   ├── _memory_context.py  # [V3 Gap1 NEW] TasteProfile + 최근 N턴 요약 자동 주입 빌더 (래핑 전용, SPEC-AGENT-V3-REACT)
-│   ├── _reflexion.py       # [V3 Gap2 NEW] evaluator 헬퍼 래핑 — in-loop search 품질 평가 (래핑 전용, SPEC-AGENT-V3-REACT)
-│   └── tools/              # 툴 래퍼 7개(V2)/8개(V3 Gap3 ON): analyze_image / search_products / refine_search / update_taste / ask_user_clarification / get_recent_history / respond + suggest_next_step(V3)
+├── main.py                  # FastAPI 엔트리포인트 + lifespan (DB/adapter 워밍업 + setWebhook)
+├── agents/                  # ReAct 에이전트 패키지 (항상 활성)
+│   ├── react_loop.py        # run_react_loop — iteration cap / 무한루프 가드 / token budget / deadline
+│   │                        #   Gap1 build_memory_context, Gap2 _maybe_reflexion, Gap3 proactive directive
+│   ├── tool_registry.py     # 8-tool REGISTRY + TypedDict 스키마 + validate_args (단일 소스)
+│   ├── llm_client.py        # ChatOpenAI 싱글톤 (LiteLLM proxy, AGENT_LLM_MODEL)
+│   ├── _memory_context.py   # Gap1: TasteProfile + 최근 5턴 요약 system context 주입 빌더
+│   ├── _reflexion.py        # Gap2: evaluator._call_llm 래핑, quality delta 생성
+│   └── tools/               # 8개 툴 래퍼
+│       ├── analyze_image.py
+│       ├── search_products.py  # Gap4: apply_dislike_discount unconditional
+│       ├── refine_search.py    # Gap4: apply_dislike_discount unconditional
+│       ├── update_taste.py
+│       ├── ask_user_clarification.py
+│       ├── get_recent_history.py
+│       ├── respond.py          # send_hybrid_batch — album + summary text + inline keyboard
+│       └── suggest_next_step.py  # Gap3: 8번째 tool, 선제 제안 버튼
 ├── api/
-│   ├── health.py           # GET /health (liveness, no auth) / GET /health/ready (auth + messenger 상태)
-│   ├── recommend.py        # POST /recommend (X-Internal-Token 인증)
-│   └── webhooks/
-│       └── telegram.py     # POST /webhooks/telegram (X-Telegram-Bot-Api-Secret-Token 인증)
-├── channels/               # 채널 어댑터 레이어 (SPEC-MSG-001)
-│   ├── schemas.py          # 채널 공통 Pydantic 스키마
-│   ├── adapter.py          # MessengerAdapter ABC
-│   ├── factory.py          # MESSENGER_BACKEND 기반 어댑터 팩토리
-│   ├── link_resolver.py    # Pinterest / og:image URL 해석
-│   ├── recommendation.py   # RecommendationPort Protocol + ChannelRecommendationRequest/Result DTO + PipelineRecommendationPort 구현
-│   ├── lang.py             # detect_lang / remember_lang / session_lang — KO/EN sticky 언어 감지
-│   ├── session.py          # (구 channels/session.py — SPEC-ARCH-AI-001 이전) SessionStore Protocol + InMemorySessionStore
-│   ├── vision.py           # LiteLLM 경유 Vision 추출 (v2 schema, SPEC-VISION-UNIFY-001)
-│   ├── vision_prompt.py    # Vision v2 프롬프트 + JSON 스키마 (kikoai/app analyze.ts 동치)
-│   ├── clarify.py          # clarify 카드 빌더 (6 axes, SPEC-CLARIFY-CARDS-001)
-│   ├── clarify_values.py   # clarify axis 옵션 + 한글 라벨
-│   ├── onboarding_cards.py # 온보딩 카드 빌더 (4 axes: mood/color/fit/pinterest, SPEC-ONBOARD-CARDS-001)
-│   ├── onboarding_values.py # 온보딩 axis 옵션 + KO/EN 라벨 + keywords_to_boost
-│   ├── pinterest_url.py    # Pinterest URL 파싱·검증 (board/profile/pin 모드, SSRF allowlist)
-│   ├── _jsonable.py        # 5-step JSON-serializable cascade 헬퍼 (공용)
+│   ├── health.py            # GET /health (liveness) / GET /health/ready (auth + 상태)
+│   ├── recommend.py         # POST /recommend (X-Internal-Token)
+│   └── webhooks/telegram.py # POST /webhooks/telegram (X-Telegram-Bot-Api-Secret-Token)
+├── channels/                # 채널 어댑터 레이어
+│   ├── adapter.py           # MessengerAdapter ABC
+│   ├── factory.py           # MESSENGER_BACKEND 기반 팩토리
+│   ├── persona.py           # kiko 페르소나 system prompt (단일 소스)
+│   ├── lang.py              # detect_lang / remember_lang / session_lang (KO/EN sticky)
+│   ├── recommendation.py    # RecommendationPort Protocol + DTO + PipelineRecommendationPort
+│   ├── link_resolver.py     # Pinterest / pin.it og:image 해석
+│   ├── vision.py            # Vision v2 schema 추출 (SPEC-VISION-UNIFY-001)
+│   ├── vision_prompt.py     # Vision v2 프롬프트 + JSON 스키마
+│   ├── clarify.py           # clarify 카드 빌더 (6 axes)
+│   ├── onboarding_cards.py  # 온보딩 카드 빌더 (mood/color/fit/pinterest)
+│   ├── pinterest_url.py     # URL 파싱·검증 (board/profile/pin, SSRF allowlist)
+│   ├── _jsonable.py         # 5-step JSON-serializable cascade 헬퍼
 │   └── telegram/
-│       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard / edit_inline_keyboard)
-│       └── webhook.py      # Telegram Update 파싱
-├── graphs/                 # LangGraph StateGraph (SPEC-AGENT-001)
-│   ├── fashion_bot.py      # 그래프 빌드 + 모듈 수준 컴파일 캐시 + build_metadata
-│   ├── state.py            # InputState / WorkingState / OutputState (Pydantic v2)
-│   ├── routing.py          # 6개 조건부 엣지 함수
-│   └── nodes/
-│       ├── ingest.py       # Update 파싱 + 세션 로드 (V2: clarify:* callback inline 처리 포함)
-│       ├── resolve_image.py # Pinterest / pin.it og:image 해석
-│       ├── vision.py       # LiteLLM Vision 패션 아이템 추출
-│       ├── pick_item.py    # 인라인 키보드 picker (콜백 처리)
-│       ├── ask_clarify.py  # weak-vision 시 결정형 카드 (6 axes, no LLM, SPEC-CLARIFY-CARDS-001)
-│       ├── apply_clarify.py # clarify:* 콜백 → session.boost_keywords 누적 [DEPRECATED V2, 롤백 보존]
-│       ├── agent.py        # ReAct agent 노드 — run_react_loop 래핑 (SPEC-AGENT-V2-REACT, V2 전용)
-│       ├── intro.py        # 첫 방문 서비스 소개 — ONBOARDING_CARDS_ENABLED=false 시 신규 사용자 1회성 안내 (SPEC-AGENT-V2-REACT, V2 전용)
-│       ├── critique_apply.py # Routing-LLM + critique refinement [DEPRECATED V2, 롤백 보존]
-│       ├── search.py       # RecommendationPort → 파이프라인 호출
-│       ├── evaluator.py    # 결과 평가 + 빈 결과 fast-path / LLM critique 재시도 (SPEC-AGENTIC-CRITIQUE-001) [DEPRECATED V2, 롤백 보존]
-│       ├── send_results.py # 검색 결과 카드 전송
-│       ├── taste_update.py # 장기 취향 프로파일 업데이트 [DEPRECATED V2, 롤백 보존]
-│       ├── respond.py      # 자연어 reply (ChatOpenAI, RESPONSE_MODEL) + sentence-split (RESPONSE_SPLIT_ENABLED) [DEPRECATED V2, 롤백 보존]
-│       ├── onboard_intro.py # 온보딩 인트로 — /start + onboarded_at IS NULL 진입점 (SPEC-ONBOARD-CARDS-001)
-│       ├── onboard_mood.py  # Stage 1: 무드 카드
-│       ├── onboard_color.py # Stage 2: 컬러 카드
-│       ├── onboard_fit.py   # Stage 3: 핏 카드 + seed_from_onboarding
-│       ├── onboard_pinterest.py # Stage 4 (선택): Pinterest 보드 URL 요청
-│       ├── pinterest_ingest.py  # Pinterest 핀 스크래핑 → Vision batch → TasteProfile reinforce
-│       ├── _onboard_helpers.py  # 온보딩 내부 헬퍼 (seed, 완료 메시지, stage 전환)
-│       ├── _onboard_stage.py    # 온보딩 stage enum + 전환 테이블
-│       ├── _pinterest_helpers.py # 핀 Vision batch + reinforce 헬퍼
-│       └── _trace.py            # [V3 NEW] 구조화 node-trace 로깅 헬퍼 (enter/done/skip, logging-only, SPEC-AGENT-V3-REACT)
-├── core/
-│   ├── config.py           # Pydantic Settings (env) — 신규 메신저 키 포함
-│   ├── auth.py             # verify_internal_token dependency
-│   ├── di.py               # DI 컨테이너 — provide_db_pool / provide_settings / provide_embed_provider (SPEC-ARCH-AI-001 REQ-AI-003)
-│   └── types.py            # 공유 타입 (SPEC-ARCH-AI-001)
-├── domain/
-│   └── search.py           # 도메인 타입 — SearchResult, Candidate (SPEC-ARCH-AI-001)
-├── services/               # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001 PR1)
-│   ├── embed_service.py    # Modal /embed 래핑
-│   ├── search_service.py   # 검색 오케스트레이션 + query_text 선택 + RpcContractError 핸들링 (REQ-AI-006)
+│       ├── adapter.py       # TelegramAdapter (sendMessage/sendPhoto/sendMediaGroup/InlineKeyboard)
+│       └── webhook.py       # Telegram Update 파싱
+├── graphs/                  # LangGraph StateGraph
+│   ├── fashion_bot.py       # build_graph() — 단일 영구 토폴로지, _log_topology_banner
+│   ├── state.py             # InputState / WorkingState / OutputState (Pydantic v2)
+│   ├── routing.py           # 조건부 엣지 (onboarding_required, first_touch_intro_required 등)
+│   └── nodes/               # 15개 노드 + 헬퍼
+│       ├── evaluator.py     # [Gap2 헬퍼 보존] graph 노드 아님; _call_llm/_build_fastpath_delta 만 사용
+│       └── ... (노드 역할 표 참고)
+├── services/                # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001)
+│   ├── embed_service.py     # Modal /embed 래핑
+│   ├── search_service.py    # 검색 오케스트레이션 + query_text 3-tier 선택 + RpcContractError 핸들링
 │   ├── diversify_service.py # 브랜드/플랫폼 캡 + tolerance (banker's rounding)
-│   └── database_service.py # SupabaseProvider pass-through
-├── infrastructure/         # 인프라 레이어 (SPEC-ARCH-AI-001 PR2-5)
+│   └── database_service.py  # SupabaseProvider pass-through
+├── infrastructure/          # 인프라 레이어
 │   ├── repositories/
-│   │   ├── search_repository.py   # SearchRepository — _RPC_NAME 단일 소스 + build_params + search (REQ-AI-002)
-│   │   └── search_rpc_contract.py # SearchRpcRowContract Pydantic + RpcContractError + validate_rpc_rows (REQ-AI-006)
+│   │   ├── search_repository.py   # SearchRepository (_RPC_NAME 단일 소스, build_params, search)
+│   │   └── search_rpc_contract.py # SearchRpcRowContract + RpcContractError + validate_rpc_rows
 │   └── memory/
-│       ├── session.py          # (구 channels/session.py) SessionStore Protocol + InMemorySessionStore
-│       ├── session_pg.py       # (구 channels/session_pg.py) Postgres 기반 세션 저장소
-│       ├── taste_profile.py    # (구 channels/taste_profile.py) TasteProfile 도메인 모델
-│       └── taste_profile_pg.py # (구 channels/taste_profile_pg.py) Postgres 기반 취향 프로파일 저장소
-├── pipeline/               # thin @observe shim 레이어 (SPEC-ARCH-AI-001 — 실제 로직은 services/로 이전)
-│   ├── state.py            # PipelineState (state → state)
-│   ├── embed.py            # shim → embed_service + EmbedProvider 재노출 (monkeypatch seam)
-│   ├── search.py           # shim → search_service + SupabaseProvider 재노출 (monkeypatch seam)
-│   ├── diversify.py        # shim → diversify_service + _tolerance_to_target_count 재노출
-│   └── runner.py           # 파이프라인 조립 + @observe
-├── providers/
-│   ├── database.py         # SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업)
-│   ├── db_pool.py          # psycopg3 AsyncConnectionPool 초기화 + di.py 위임 어댑터 (SPEC-ARCH-AI-001 REQ-AI-003)
-│   ├── embedding.py        # EmbedProvider (Modal HTTP)
-│   ├── llm.py              # LLMProvider (LiteLLM HTTP)
-│   └── apify.py            # ApifyProvider — Pinterest 스크래퍼 (httpx, board/profile/pin 3-mode, ApifyTimeoutError)
+│       ├── session.py           # SessionStore Protocol + InMemorySessionStore
+│       ├── session_pg.py        # Postgres 기반 세션 저장소
+│       ├── taste_profile.py     # TasteProfile 도메인 모델 (Gap4 dislike ts 포함)
+│       └── taste_profile_pg.py  # Postgres 기반 취향 프로파일 저장소
+├── pipeline/                # thin @observe shim (실제 로직은 services/ 에)
+│   ├── runner.py            # 파이프라인 조립 + @observe
+│   ├── embed.py / search.py / diversify.py  # shim + monkeypatch seam 재노출
+│   └── state.py             # PipelineState
+├── providers/               # 외부 시스템 클라이언트
+│   ├── database.py          # SupabaseProvider (PostgREST 클라이언트, 논리명 유지)
+│   ├── embedding.py         # Modal HTTP + 응답 스키마 검증
+│   ├── llm.py               # LiteLLM HTTP
+│   └── apify.py             # Apify Pinterest 스크래퍼 (board/profile/pin, ApifyTimeoutError)
 ├── observability/
-│   ├── langfuse.py         # @observe 데코레이터 (no-op fallback) + env 자동 주입 + current_langfuse_trace_id()
-│   ├── conversation_log.py # 대화 이벤트 로거 — log_event / emit / _truncate (SPEC-CONVERSATION-LOG-001)
-│   └── event_payloads.py   # 20개 이벤트 TypedDict 정의 (SPEC-CONVERSATION-LOG-001 + tool_call — SPEC-AGENT-V2-REACT)
+│   ├── langfuse.py          # @observe (no-op fallback) + current_langfuse_trace_id()
+│   ├── conversation_log.py  # emit() fire-and-forget → ai.log_conversation_event (SPEC-CONVERSATION-LOG-001)
+│   └── event_payloads.py    # 20개 이벤트 TypedDict (user_text/photo, tool_call, card_sent, ...)
+├── domain/search.py         # SearchResult, Candidate (도메인 타입)
+├── core/
+│   ├── config.py            # Pydantic Settings — 플래그 제거 후 남은 env (AGENT_LLM_MODEL 등)
+│   ├── auth.py              # verify_internal_token dependency
+│   ├── di.py                # DI 컨테이너 (provide_db_pool / provide_settings / provide_embed_provider)
+│   └── types.py             # 공유 타입 (ProductRow 등)
 └── models/
-    ├── request.py          # RecommendRequest (alias 패턴 + image_url SSRF 가드)
-    └── response.py         # RecommendResponse (serialization_alias)
+    ├── request.py           # RecommendRequest (image_url SSRF 가드)
+    └── response.py          # RecommendResponse (serialization_alias)
 ```
 
-## 검색 책임 경계
-
-| 레이어 | 책임 |
-|--------|------|
-| Postgres (`search_products_v5` RPC) | dense (HNSW) + sparse (pgroonga BM25) + RRF → top-K 후보 반환 |
-| Python (`services/diversify_service.py`, thin shim `pipeline/diversify.py`) | 다양성 캡 (브랜드 max 2 / 플랫폼 max 3), tolerance 적용, 최종 정렬 |
-
-**근거**: DB는 인덱스를 잘 활용하는 것 (벡터/풀텍스트), Python은 비즈니스 로직 (변경 빈도 높은 다양성/리랭크/A/B).
+---
 
 ## 관측성
 
 | 도구 | 위치 | 비고 |
 |------|------|------|
-| Langfuse self-host | EC2 옆 컨테이너 + 별도 Postgres | trace SSOT |
+| Langfuse self-host | dev-ai EC2 옆 컨테이너 + 별도 Postgres | trace SSOT |
 | LiteLLM callback | `success_callback: ["langfuse"]` | 모든 LLM/embed 호출 자동 trace |
-| AI 서버 코드 | `@observe(name=...)` 데코레이터 | step 단위 trace |
+| `@observe(name=...)` | `pipeline/`, `services/` 레이어 | step 단위 span |
+| `emit()` 이벤트 로그 | `observability/conversation_log.py` | `ai.log_conversation_event` append-only, 20 이벤트 타입, fire-and-forget |
+
+**구조화 로그 이모지 범례:**
+
+| 이모지 | 의미 |
+|--------|------|
+| 📥 | webhook intake |
+| 🤖 / ▶️ / ✅ / ⏭️ | topology 배너 / node enter / done / skip |
+| 🔄 | ReAct agent iteration |
+| 🔧 | tool dispatch |
+| 🏁 | agent 종료 (respond) |
+| 🧠 | Gap1 memory injection |
+| 🔬 | Gap2 reflexion |
+| 💡 | Gap3 proactive |
+| 🚫 | Gap4 dislike discount |
+| 🐱 | bot 발화 (respond/adapter) |
+
+---
 
 ## 폴백 전략
 
 | 시나리오 | 동작 |
 |---------|------|
-| AI 서버 5xx / timeout | Next.js가 v4 (`/api/search-products`) 호출로 폴백 |
-| Modal /embed 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 (sparse-only 모드는 추후 고려) |
-| PostgREST RPC 실패 | AI 서버가 502 반환 → Next.js 폴백 트리거 |
+| AI 서버 5xx / timeout | `kikoai/app`이 v4 폴백 (`/api/search-products`) 호출 |
+| Modal /embed 실패 | AI 서버 502 반환 → Next.js 폴백 트리거 |
+| PostgREST RPC 실패 | `RpcContractError` → fail-open 빈 결과 반환 + 구조화 ERROR 로그 |
+| sendMediaGroup 실패 (broken photo) | `send_hybrid_batch` → per-card fallback loop (`send_results._candidate_to_card` 재사용) |
+| Gap2 Reflexion timeout | `asyncio.wait_for` 취소 → fail-open (score=1.0, LLM 자율 판단 스킵) |
+| LLM 호출 실패 (agent loop) | `_fallback_respond` 오류 안내 발송 후 루프 종료 |
 
-## LangGraph (SPEC-AGENT-001 — 도입됨)
-
-Telegram webhook 흐름은 `app/graphs/fashion_bot.py` 의 `StateGraph` 로 구현.
-`webhook → graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler(...)]})` 단일 호출 (REQ-AGENT-008).
-
-`build_graph()` 가 `AGENT_V2_REACT_ENABLED` + `AGENT_LLM_MODEL` 로 토폴로지를 분기:
-
-**V1 토폴로지 (기본, AGENT_V2_REACT_ENABLED=false)**:
-- `search → evaluator → send_results` Reflexion 루프 (SPEC-AGENTIC-CRITIQUE-001) — 빈 결과 시 필터 drop fast-path / LLM 평가 점수 < threshold 시 `CritiqueDelta` 생성 후 search 재진입 (max 2회 + 4 안전 가드: iteration cap / stagnation / score regression / 30s wall-clock)
-- `ask_clarify → apply_clarify` 결정형 카드 (SPEC-CLARIFY-CARDS-001) — weak-vision 시 6 axes 인라인 키보드, callback 수신 시 `session.boost_keywords` 누적 (self-critique fast-path 통과)
-- **`STALE_CRITIQUE` flow**: `respond` 노드에 추가. `crit:*` 콜백이 만료된 카드에 대해 들어올 때 `critique_apply` 가 delta 없이 반환 → `respond` 가 STALE_CRITIQUE flow 로 분류해 "오래된 카드" 안내 메시지 발송. 단, `crit:click:` 콜백은 예외 — END 로 직접 라우팅 (SPEC-IMPLICIT-FB-001).
-
-**V2 토폴로지 (flag-gated, AGENT_V2_REACT_ENABLED=true + AGENT_LLM_MODEL 설정 시, 운영 default off)**:
-- 온보딩 6 노드(`onboard_intro/mood/color/fit/pinterest` + `pinterest_ingest`) 보존 — 동일 분기 로직.
-- 신규 `intro` 노드: `ONBOARDING_CARDS_ENABLED=false` + `onboarded_at IS NULL` 시 1회성 서비스 안내 발송 → `onboarded_at` 기록 → 턴 종료. 2번째 메시지부터 `agent` 정상 진입.
-- Post-onboarding 텍스트/사진/콜백은 모두 `agent` 단일 노드 → `run_react_loop` (SPEC-AGENT-V2-REACT, `app/agents/`). **ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`) via LiteLLM** (`drop_params: true` 적용, `tool_choice` 필드 제거로 Bedrock 호환).
-- ReAct loop: LLM이 7개 도구(`analyze_image` / `search_products` / `refine_search` / `update_taste` / `ask_user_clarification` / `get_recent_history` / `respond`) 중 순차 선택 → `respond` 호출 시 루프 종료. 안전 가드: iteration cap (`AGENT_MAX_ITERATIONS`) / 3-consecutive 동일 호출 무한루프 가드 / token budget (`AGENT_TURN_TOKEN_BUDGET`) / per-LLM timeout + transient retry (`AGENT_LLM_MAX_RETRIES`) / per-tool timeout (`AGENT_TOOL_TIMEOUT_S`) + transient retry (`AGENT_TOOL_MAX_RETRIES`) / terminal respond 전용 타임아웃 (`AGENT_RESPOND_TIMEOUT_S`, 재시도 없음).
-- Deprecated (V2에서 미등록, V1 rollback용 보존): `critique_apply`, `evaluator`, `respond`(graph node), `taste_update`, `send_results`, `channels/router.py`.
-- `ingest` 노드: V2 활성 시 `clarify:*` 콜백을 inline 처리 → `session.boost_keywords` 누적 후 `agent` 로 라우팅.
-
-**V3 강화 (flag-gated, SPEC-AGENT-V3-REACT — 그래프 토폴로지 무변경, `agent` 노드 내부 in-loop 확장만)**:
-- 마스터 `AGENT_V2_REACT_ENABLED=true` + 4개 sub-flag 으로 독립 활성. **4 all-off = V2 byte-identical.**
-- Gap1 (`AGENT_V3_MEMORY_INJECTION_ENABLED`): `_memory_context.py` — TasteProfile(`boost_brands/keywords`) + 최근 5턴(`get_recent_history` 래핑) 요약을 매 루프 system 컨텍스트에 자동 주입. char-cap `AGENT_V3_MEMORY_MAX_TOKENS`*4, 최신 우선 truncation. `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 격리.
-- Gap2 (`AGENT_V3_REFLEXION_ENABLED`): `_reflexion.py` — search/refine dispatch 직후 `evaluator._call_llm` 래핑 in-loop 평가 → quality delta를 ToolMessage `_quality` 로 첨부 → LLM 자율 refine 결정. 잔여-budget `asyncio.wait_for(timeout=remaining)` 강제 취소 (SPEC-AGENT-V2-REACT OQ-7 resolution).
-- Gap3 (`AGENT_V3_PROACTIVE_ENABLED`): `tools/suggest_next_step.py` — 8번째 tool, 어댑터 `send_text_with_buttons` 재사용. `_PROACTIVE_DIRECTIVE` system prompt 추가 (약결과 선제 제안 / 모호 선제 clarify).
-- Gap4 (`AGENT_V3_DISLIKE_MEMORY_ENABLED`): `infrastructure/memory/taste_profile.py` additive ts dict + `recency_weighted_excludes` — 이후 search/refine dispatch 시 자동 디스카운트. Alembic **migration 0005** 선행 필수 (`ai.user_taste_profile` +2 JSONB 컬럼).
-
-**공통 분기**:
-- **온보딩 카드 분기** (SPEC-ONBOARD-CARDS-001): `/start` + `sess.onboarded_at IS NULL` → `onboard_intro → onboard_mood → onboard_color → onboard_fit → (PINTEREST_BOOTSTRAP_ENABLED) → onboard_pinterest → pinterest_ingest` 3+1 stage 카드 온보딩. 완료 시 `seed_from_onboarding()` 로 TasteProfile 시드 → `onboarded_at` 기록. Pinterest stage 에서 Apify 스크래핑 + Vision batch → `TasteProfile.reinforce_liked_*` 머지.
-- **KO/EN sticky 언어**: `ingest` 노드가 `app/channels/lang.remember_lang()` 으로 `Session.lang` 갱신 → 이후 버튼 탭도 동일 언어 유지.
-- **이벤트 소싱 (SPEC-CONVERSATION-LOG-001)**: 모든 노드 + webhook intake 에서 `emit(event_type, payload)` 호출 → fire-and-forget `asyncio.create_task` → `ai.log_conversation_event` 테이블 INSERT. `MEMORY_BACKEND_IS_POSTGRES=False` 시 silent skip. PG outage 시 stderr JSON fallback (tag: `CONV_LOG_FALLBACK`). V2에서 `tool_call` 이벤트(20번째 타입) 추가 — react_loop 내 매 tool dispatch마다 emit.
-- **sentence-split 발화 (noscroll benchmark)**: `RESPONSE_SPLIT_ENABLED=true` 시 V1 `respond` 노드가 LLM 출력을 문장 단위로 분할. V2에서는 `agents/tools/respond.py` 가 동일 역할.
-
-파이프라인(`/recommend`)은 여전히 plain async + state → state 형태 유지 — 마이그레이션 없음.
+---
 
 ## 보안
 
 | 항목 | 정책 |
 |------|------|
-| 인증 | `X-Internal-Token` (Next.js → AI 서버 shared secret). `/recommend`, `/health/ready` 보호 |
-| Telegram webhook 인증 | `X-Telegram-Bot-Api-Secret-Token` 헤더 일치 확인. 불일치 시 401. 파싱 오류 시 200 (Telegram 재시도 방지) |
-| `/health` (liveness) | 무인증, 부울만 노출 |
-| SSRF | `RecommendRequest.image_url` 이 `ALLOWED_IMAGE_HOSTS` 화이트리스트 검증 (Pydantic) |
-| CORS | `allow_origins=["*"]`, `allow_credentials=False` (stateless) |
-| 에러 응답 | 내부 예외 메시지 노출 X — 고정 detail (`pipeline_failed`), 원인은 로그/Langfuse |
+| `/recommend` 인증 | `X-Internal-Token` (Next.js → AI 서버 shared secret) |
+| Telegram webhook 인증 | `X-Telegram-Bot-Api-Secret-Token` 헤더 일치 확인. 불일치 시 401. 파싱 오류 시 200 (재시도 방지) |
+| SSRF | `RecommendRequest.image_url` + `pinterest_url.py` — `ALLOWED_IMAGE_HOSTS` 화이트리스트 검증 |
+| Prompt injection 방어 | `persona.py` — 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 |
+| 에러 노출 | 고정 detail (`pipeline_failed`) 반환, 내부 오류는 Langfuse/로그에만 |
+
+---
 
 ## 관련 문서
 
 | 문서 | 내용 |
 |------|------|
-| [`PATTERNS.md`](PATTERNS.md) | 코드 컨벤션 (async, Pydantic alias, Provider 싱글톤, @observe, 인증) |
-| [`features/pipeline.md`](features/pipeline.md) | state machine 상세 (각 step 입출력) |
+| [`PATTERNS.md`](PATTERNS.md) | 코드 컨벤션 (async, Pydantic alias, Provider 싱글톤, @observe) |
+| [`features/pipeline.md`](features/pipeline.md) | 파이프라인 step 입출력 상세 |
 | [`features/search-engine.md`](features/search-engine.md) | v5 RPC + RRF + 다양성 캡 |
-| [`features/observability.md`](features/observability.md) | Langfuse 통합 + LiteLLM callback |
+| [`features/observability.md`](features/observability.md) | Langfuse 통합 + 이벤트 로그 |
 | [`infra/env.md`](infra/env.md) | 환경변수 매트릭스 |
-| [`infra/search-rpc-contract.md`](infra/search-rpc-contract.md) | `search_products_v5` RPC 입출력 계약 + 드리프트 동작 (SPEC-ARCH-AI-001 REQ-AI-006) |
+| [`infra/search-rpc-contract.md`](infra/search-rpc-contract.md) | `search_products_v5` RPC 계약 + drift 동작 |
 | [`infra/deployment.md`](infra/deployment.md) | EC2 docker-compose + Modal 배포 |
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
-| `docs/plans/archive/` | 과거 Qdrant 기반 설계 (참고만) |
-| `aws-infra/kiko-ai-servers/portal-ai/` | EC2 docker-compose 본체 |
-| `kikoai/app/supabase/migrations/030_search_products_v5.sql` | v5 RPC 마이그레이션 (디렉토리명 유지 — Supabase CLI 시절 잔재, dev-app Postgres 에 적용됨) |
+
+---
 
 ## 변경 이력
 
-| 날짜 | 사건 |
-|------|------|
-| 2026-04-26 | **v0.1.0 — 모놀리스 분리 + v5 파이프라인 + CI/CD** (Phase A Qdrant 폐기, Modal/Langfuse/Supabase RPC 시절, GHA + ECR 배포) |
-| 2026-05-10 | **SPEC-INFRA-MIGRATE-001 컷오버 완료** — Supabase + Vercel pause. dev-app EC2 단독 운영 (Postgres 16 + pgvector + pgroonga + PostgREST nginx shim). kikoai/ai 코드 변경 0줄 (env 논리명 유지) |
-| 2026-05-04 | **v0.2.0 — SPEC-MSG-001 Telegram messenger channel 추가** (app/channels/, POST /webhooks/telegram, 시나리오 state machine, Pinterest link resolver, lifespan 메신저 워밍업, /health/ready messenger 상태 노출) |
-| 2026-05-05 | **refactor/channels-decoupling** — `RecommendationPort` Protocol 도입으로 채널-파이프라인 결합도 분리 (scenario → RecommendationPort → PipelineRecommendationPort → runner). `SessionStore` Protocol + 주입 지점 분리. scenario explicit SM 재정리 (Trigger enum + TRANSITIONS dict). |
-| 2026-05-05 | **v0.3.0 — SPEC-AGENT-001 LangGraph 마이그레이션** (`app/channels/scenario.py` 제거 → `app/graphs/` 10-노드 StateGraph. `respond`/`ask_clarify` 신규 노드 + `langchain-openai` 의존성. `build_callback_handler` Langfuse 통합 — langfuse v2+langchain 비호환으로 현재 None 폴백, 후속 SPEC-OBSV-V3-001 에서 복구 예정.) |
-| 2026-05-10 | **v0.5.0 — KO/EN sticky-lang + kiko persona + STALE_CRITIQUE** (`app/channels/lang.py` 신규. `Session.lang` sticky 필드. `ingest` 노드 매 텍스트 턴 언어 갱신. `respond`/`send_results`/`pick_item`/`ask_clarify`/`critique_apply` KO/EN 분기. `respond` "kiko" 페르소나 system prompt + prompt injection 방어. `_Flow.STALE_CRITIQUE` 신규 flow. 구조화 로그 이모지 범례 도입. webhook privacy: user_id 해시, from_username 미로깅, 텍스트 80자 캡.) |
-| 2026-05-15 | **v0.6.0 — SPEC-CONVERSATION-LOG-001 + SPEC-ONBOARD-CARDS-001 + noscroll sentence-split** (이벤트 소싱: `ai.log_conversation_event` append-only 테이블 (migration 0003), 19 이벤트 TypedDict, `emit()` fire-and-forget, PG failsoft stderr fallback. 온보딩 카드: 6 신규 노드 (onboard_intro/mood/color/fit/pinterest + pinterest_ingest), `app/providers/apify.py` (Apify httpx wrapper, ApifyTimeoutError), `app/channels/onboarding_cards/values/pinterest_url.py` + `_jsonable.py`, migration 0004 (`user_session` + `onboarded_at` 컬럼). noscroll P0: `RESPONSE_SPLIT_ENABLED` 문장 분할 발화. 그래프 노드 수 12 → 18.) |
-| 2026-05-07 | **v0.4.0 — SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001** (Vision v2 풍부 스키마 — `kikoai/app` `analyze.ts` 동치 (styleNode/sensitivityTags/mood/palette/style/items[].subcategory/fit/colorFamily/searchQuery). `evaluator` 노드 + Reflexion 루프 (빈 결과 fast-path / LLM critique 재시도 max 2회 + 4 안전 가드). `ask_clarify` 텍스트 → 결정형 카드 (6 axes, no LLM) + `apply_clarify` 노드 — clarify-derived keywords 가 `session.boost_keywords` 로 sticky 누적. flags: `VISION_SCHEMA_V2` / `SELF_CRITIQUE_ENABLED` / `CLARIFY_CARDS_ENABLED` (모두 default true). 263 tests pass.) |
-| 2026-05-17 | **v0.8.0 — SPEC-ARCH-AI-001 서비스/인프라 레이어 추출** (`app/services/` 4개 서비스, `app/infrastructure/repositories/` SearchRepository + RPC 계약 검증, `app/infrastructure/memory/` 세션/취향 프로파일 이전, `app/core/di.py` DI 컨테이너, `app/domain/` 도메인 타입. `app/pipeline/` thin shim 으로 리팩토링. 외부 행동 byte-identical (REQ-AI-007), characterization net 46+5=51 통과. `RpcContractError` 신규 — 드리프트 시 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006). `docs/infra/search-rpc-contract.md` 신규.) |
-| 2026-05-15 | **v0.7.0 — SPEC-AGENT-V2-REACT ReAct 에이전트 루프 (flag-gated, default off)** (`app/agents/` 신규 패키지: `react_loop.py` / `tool_registry.py` / `llm_client.py` / `tools/` 7개 래퍼. `app/graphs/nodes/agent.py` 신규. `WorkingState` +3 필드 (`agent_iterations`, `tool_call_history`, `agent_status`). `fashion_bot.py` — `AGENT_V2_REACT_ENABLED` + `AGENT_LLM_MODEL` 양쪽 설정 시 V2 토폴로지 선택. 6 신규 env vars (`AGENT_V2_REACT_ENABLED` / `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_MODEL` / `AGENT_LLM_TIMEOUT_S`). 20번째 이벤트 타입 `tool_call` 추가. `/health/ready` +2 필드 (`agent_v2_react_enabled` / `agent_llm_model_configured`). 5 deprecated 모듈 (rollback 보존): `critique_apply` / `evaluator` / `respond` / `taste_update` graph nodes + `channels/router.py`.) |
-| 2026-05-17 | **v0.8.0 — SPEC-AGENT-V3-REACT V2 증분 강화 4-Gap (flag-gated, all default off)** (그래프 토폴로지 무변경 — in-loop/registry/store 변경만. `app/agents/_memory_context.py` (Gap1 신규): TasteProfile + 최근 5턴 요약 system context 자동 주입, char-cap+truncation. `app/agents/_reflexion.py` (Gap2 신규): evaluator 헬퍼 래핑, in-loop search 품질 평가, quality delta → ToolMessage 첨부, LLM 자율 refine, 잔여-budget asyncio.wait_for 강제 취소. `app/agents/tools/suggest_next_step.py` (Gap3 신규): 8번째 tool, 어댑터 재사용. `tool_registry.py` + `react_loop.py` + `update_taste.py` + `search_products.py` + `refine_search.py` + `taste_profile.py` + `taste_profile_pg.py` + `config.py` 수정. Alembic 0005 (`ai.user_taste_profile` +2 JSONB 컬럼). 5 신규 env (`AGENT_V3_*`). tests/test_agent_v3/ 신규 디렉토리 (14개 파일). all-off = V2 byte-identical 기계 검증. 810 passed / 9 pre-existing failed / 117 skipped.) |
+| 날짜 | 버전 | 사건 |
+|------|------|------|
+| 2026-04-26 | v0.1.0 | 모놀리스 분리 + v5 파이프라인 + CI/CD (Modal/Langfuse/Supabase RPC, GHA + ECR) |
+| 2026-05-04 | v0.2.0 | SPEC-MSG-001 Telegram 채널 추가 (app/channels/, /webhooks/telegram) |
+| 2026-05-05 | — | RecommendationPort Protocol 도입, SessionStore 분리 |
+| 2026-05-05 | v0.3.0 | SPEC-AGENT-001 LangGraph 마이그레이션 (10-노드 StateGraph) |
+| 2026-05-07 | v0.4.0 | SPEC-VISION-UNIFY-001 + SPEC-AGENTIC-CRITIQUE-001 + SPEC-CLARIFY-CARDS-001 |
+| 2026-05-10 | — | SPEC-INFRA-MIGRATE-001 컷오버 완료 (Supabase + Vercel → dev-app EC2 단독) |
+| 2026-05-10 | v0.5.0 | KO/EN sticky-lang + kiko persona + STALE_CRITIQUE |
+| 2026-05-15 | v0.6.0 | SPEC-CONVERSATION-LOG-001 + SPEC-ONBOARD-CARDS-001 + noscroll sentence-split |
+| 2026-05-15 | v0.7.0 | SPEC-AGENT-V2-REACT ReAct 에이전트 루프 (flag-gated) |
+| 2026-05-17 | v0.8.0 | SPEC-ARCH-AI-001 서비스/인프라 레이어 추출 |
+| 2026-05-17 | v0.9.0 | SPEC-AGENT-V3-REACT V3 4-Gap 증분 강화 (flag-gated) |
+| 2026-05-18 | **v1.0.0** | **SPEC-AGENT-V2-CLEANUP-001 — V3 ReAct 영구 단일 토폴로지 (V1 18-노드 + 모든 feature flag 제거). 하이브리드 카드 결과 전송 (send_hybrid_batch). ARCHITECTURE.md 전면 재작성.** |
+| 2026-05-18 | **v1.1.0** | **bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등. Telegram 봇이 Vision도 독자 처리함을 명시 (app과 DB만 공유).** |

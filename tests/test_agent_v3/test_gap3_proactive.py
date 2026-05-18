@@ -14,7 +14,6 @@ import pytest
 from app.agents import react_loop as rl
 from app.agents import tool_registry as tr
 from app.channels.schemas import ChannelMessage
-from app.core.config import settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import Session, SessionState
 
@@ -59,16 +58,15 @@ def _adapter(monkeypatch):
 
 
 @pytest.fixture
-def _proactive_on(monkeypatch):
-    monkeypatch.setattr(settings, "AGENT_V3_PROACTIVE_ENABLED", True, raising=False)
-    tr._rebuild_registry_for_flag(True)
+def _proactive_on():
+    """SPEC-AGENT-V2-CLEANUP-001 — proactive (8th tool + directive) is now
+    unconditional; this fixture is a no-op kept for test readability."""
     yield
-    tr._rebuild_registry_for_flag(False)
 
 
 def test_ac_3_1_registry_eight_tool(_proactive_on):
-    """AC-3.1 — flag ON: TOOL_NAMES length 8, suggest_next_step present,
-    validate_args works."""
+    """SPEC-AGENT-V2-CLEANUP-001 — TOOL_NAMES length 8, suggest_next_step
+    present, validate_args works (unconditional)."""
     assert len(tr.TOOL_NAMES) == 8
     assert "suggest_next_step" in tr.TOOL_NAMES
     ok, err = tr.validate_args("suggest_next_step", {"kind": "similar", "options": ["a"], "prompt": "p"})
@@ -117,12 +115,9 @@ async def test_ac_3_2_directive_in_system_prompt(_proactive_on, _adapter, monkey
     assert "You are kiko" in sys_msg
 
 
-@pytest.mark.asyncio
-async def test_ac_3_3_flag_off_seven_tool_and_prompt_byte_identical(monkeypatch, _adapter):
-    """AC-3.3 — flag OFF: exactly the V2 7-tool, system msg byte-identical."""
-    monkeypatch.setattr(settings, "AGENT_V3_PROACTIVE_ENABLED", False, raising=False)
-    tr._rebuild_registry_for_flag(False)
-
+def test_registry_is_unconditionally_eight_tool():
+    """SPEC-AGENT-V2-CLEANUP-001 — the 8-tool registry is permanent;
+    suggest_next_step is always the 8th tool."""
     assert tr.TOOL_NAMES == (
         "analyze_image",
         "search_products",
@@ -131,13 +126,9 @@ async def test_ac_3_3_flag_off_seven_tool_and_prompt_byte_identical(monkeypatch,
         "ask_user_clarification",
         "get_recent_history",
         "respond",
+        "suggest_next_step",
     )
-
-    llm = _CapturingLLM([_FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "1"}])])
-    monkeypatch.setattr(rl, "get_llm", lambda: llm)
-    await rl.run_react_loop(_state(), _sess())
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
-    assert sys_msg == rl._SYSTEM_PROMPT  # byte-identical V2
+    assert not hasattr(tr, "_rebuild_registry_for_flag")
 
 
 # ── BLOCKING-2 — suggest_next_step.dispatch error-path coverage ────────────

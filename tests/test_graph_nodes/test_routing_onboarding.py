@@ -17,7 +17,6 @@ from app.channels.schemas import ChannelMessage
 from app.graphs.routing import (
     _is_restart_keyword,
     _resolve_onboard_stage_target,
-    _route_after_ingest,
     is_continuous_pinterest,
     onboarding_required,
 )
@@ -226,35 +225,9 @@ def test_resolve_onboard_stage_target_defaults_to_intro(_store):
     assert _resolve_onboard_stage_target(sess, state) == "onboard_intro"
 
 
-# ── _route_after_ingest gate priorities ──────────────────────────────────────
-
-
-def test_route_after_ingest_onboarding_wins_over_text_routing(_store):
-    _store.get_or_create(7)  # ensure session exists; gate predicate looks it up
-    # Fresh user — should land in onboard_intro, NOT respond / router_text.
-    state = _state(message=_msg(text="hello"))
-    assert _route_after_ingest(state) == "onboard_intro"
-
-
-def test_route_after_ingest_continuous_pinterest_for_onboarded(_store, monkeypatch):
-    # PINTEREST_CONTINUOUS_ENABLED=True 일 때만 pinterest_ingest 로 라우팅.
-    monkeypatch.setattr("app.graphs.routing.settings.PINTEREST_CONTINUOUS_ENABLED", True, raising=False)
-    sess = _store.get_or_create(7)
-    sess.onboarded_at = datetime.now(tz=UTC) - timedelta(days=1)
-    sess.onboard_stage = None
-    state = _state(message=_msg(text="https://www.pinterest.com/pin/777/"))
-    assert _route_after_ingest(state) == "pinterest_ingest"
-
-
-def test_route_after_ingest_normal_flow_still_works_when_onboarded(_store):
-    """DDD PRESERVE — onboarded user with photo → resolve_image (no onboarding)."""
-    sess = _store.get_or_create(7)
-    sess.onboarded_at = datetime.now(tz=UTC)
-    state = _state(message=_msg(photo_file_id="fid"))
-    assert _route_after_ingest(state) == "resolve_image"
-
-
-def test_route_after_ingest_onboard_callback_resumes_mid_flow(_store):
-    _store.get_or_create(7)
-    state = _state(message=_msg(callback_data="onboard:color:toggle:beige", callback_query_id="q"))
-    assert _route_after_ingest(state) == "onboard_color"
+# SPEC-AGENT-V2-CLEANUP-001 — the `_route_after_ingest` gate-priority tests
+# were removed: the V1 `_route_after_ingest` function was deleted. The same
+# onboarding-gate priority is replicated in the inline `_route_after_ingest_v2`
+# closure in fashion_bot.py, and the underlying predicates
+# (`onboarding_required`, `is_continuous_pinterest`,
+# `_resolve_onboard_stage_target`) are independently covered above.

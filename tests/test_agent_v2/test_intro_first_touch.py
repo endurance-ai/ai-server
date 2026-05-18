@@ -45,7 +45,6 @@ def _v2_graph(monkeypatch):
     """Build a V2 graph with onboarding cards OFF and agent/intro adapter stubbed."""
     from app.core import config as cfg
 
-    monkeypatch.setattr(cfg.settings, "AGENT_V2_REACT_ENABLED", True, raising=False)
     monkeypatch.setattr(cfg.settings, "AGENT_LLM_MODEL", "nova-lite", raising=False)
     monkeypatch.setattr(cfg.settings, "ONBOARDING_CARDS_ENABLED", False, raising=False)
     monkeypatch.setattr(cfg.settings, "DEMO_MODE", False, raising=False)
@@ -186,7 +185,6 @@ async def test_flag_on_does_not_use_intro_node(monkeypatch):
     new user routes to onboard_intro (cards), never the new `intro` node."""
     from app.core import config as cfg
 
-    monkeypatch.setattr(cfg.settings, "AGENT_V2_REACT_ENABLED", True, raising=False)
     monkeypatch.setattr(cfg.settings, "AGENT_LLM_MODEL", "nova-lite", raising=False)
     monkeypatch.setattr(cfg.settings, "ONBOARDING_CARDS_ENABLED", True, raising=False)
     monkeypatch.setattr(cfg.settings, "DEMO_MODE", False, raising=False)

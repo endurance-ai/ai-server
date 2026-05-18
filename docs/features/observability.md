@@ -91,7 +91,7 @@ curl -X POST http://<EIP>:8000/recommend \
 | 1–19 | `user_text`, `user_photo`, `user_callback`, `intent_routed`, `vision_done`, `search_done`, `diversify_done`, `card_sent`, `card_clicked`, `bot_text`, `taste_update`, `node_error` 등 | 그래프 노드 + webhook intake | SPEC-CONVERSATION-LOG-001 |
 | 20 | `tool_call` | `app/agents/react_loop.py` | SPEC-AGENT-V2-REACT REQ-AGENT-OBS-001. ReAct loop 내 매 tool dispatch(성공/실패) 후 emit. payload: `tool_name`, `iteration_no`, `latency_ms`, `error`, `args_summary`, `result_summary`. Langfuse span tag: `tool.<tool_name>` |
 
-`tool_call` 이벤트는 `AGENT_V2_REACT_ENABLED=true` 시에만 발생. V1 토폴로지에서는 emit 없음.
+`tool_call` 이벤트는 매 turn 항상 발생 (ReAct 에이전트 영구 단일 토폴로지).
 
 ## PII / 마스킹 (백로그)
 

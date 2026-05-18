@@ -14,11 +14,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.channels.recommendation import ChannelRecommendationResult
 from app.channels.schemas import ChannelMessage
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState, WorkingState
-from app.infrastructure.memory.session import InMemorySessionStore, SessionState, set_store
+from app.infrastructure.memory.session import InMemorySessionStore, set_store
 from app.infrastructure.memory.taste_profile import InMemoryTasteProfileStore, set_taste_store
 from tests.conftest_graph import FakeAdapter, FakeCandidate
 
@@ -162,70 +161,11 @@ async def test_log_t14_pick_item_carousel_emits(adapter_ctx):
     assert result.get("turn_no") == 4
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T16 — search → search_done parallel array invariant (turn_no=6)
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t16_search_parallel_array_invariant(monkeypatch):
-    from app.channels.recommendation import set_port
-    from app.graphs.nodes.search import search_node
-    from app.infrastructure.memory.session import get_store
-
-    sess = get_store().get_or_create(42)
-    sess.image_url = "https://example.com/img.jpg"
-    sess.vision_item = "tee"
-    sess.vision_keywords = ["white", "casual"]
-    get_store().update(sess)
-
-    candidates = [FakeCandidate(id="p-1"), FakeCandidate(id="p-2"), FakeCandidate(id="p-3")]
-
-    class _Port:
-        async def recommend(self, _req):
-            return ChannelRecommendationResult(candidates=candidates, counts={"dense": 30, "sparse": 20})
-
-    set_port(_Port())
-    monkeypatch.setattr("app.graphs.nodes.search.settings.DEMO_MODE", False)
-
-    s = _state(_msg())
-    with patch("app.graphs.nodes.search.emit") as m:
-        await search_node(s)
-
-    sd = [c for c in m.call_args_list if c.kwargs.get("event_type") == "search_done"]
-    assert len(sd) == 1
-    payload = sd[0].kwargs["payload"]
-    assert len(payload["top_k_product_ids"]) == len(payload["rrf_scores"])
-    assert payload["top_k_product_ids"] == ["p-1", "p-2", "p-3"]
-    assert sd[0].kwargs["turn_no"] == 6
-
-
-@pytest.mark.asyncio
-async def test_log_t16_search_empty_emits_empty_arrays(monkeypatch):
-    from app.channels.recommendation import set_port
-    from app.graphs.nodes.search import search_node
-    from app.infrastructure.memory.session import get_store
-
-    sess = get_store().get_or_create(42)
-    sess.image_url = "https://example.com/img.jpg"
-    get_store().update(sess)
-
-    class _Port:
-        async def recommend(self, _req):
-            return ChannelRecommendationResult(candidates=[], counts={})
-
-    set_port(_Port())
-    monkeypatch.setattr("app.graphs.nodes.search.settings.DEMO_MODE", False)
-
-    s = _state(_msg())
-    with patch("app.graphs.nodes.search.emit") as m:
-        await search_node(s)
-
-    sd = [c for c in m.call_args_list if c.kwargs.get("event_type") == "search_done"]
-    assert len(sd) == 1
-    payload = sd[0].kwargs["payload"]
-    assert payload["top_k_product_ids"] == []
-    assert payload["rrf_scores"] == []
+# SPEC-AGENT-V2-CLEANUP-001 — the LOG-T16 search_node emit tests were removed
+# (the V1 `search_node` was deleted). Search now runs via the agent's
+# `search_products` tool which emits `tool_call` events from the ReAct loop;
+# that coverage lives in tests/test_agent_v2/ + tests/test_conversation_log
+# tool_call coverage.
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -298,116 +238,7 @@ async def test_log_t17_implicit_fb_coexistence(adapter_ctx, monkeypatch):
     assert impression_calls == [(42, 3)]
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T19 — respond → bot_text per chunk (turn_no=10)
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t19_respond_per_chunk_emit(adapter_ctx, monkeypatch):
-    from app.graphs.nodes import respond as respond_mod
-
-    class _StubLLM:
-        async def ainvoke(self, _msgs):
-            class _R:
-                content = "First sentence. Second sentence!"
-
-            return _R()
-
-    monkeypatch.setattr(respond_mod, "_llm", _StubLLM())
-    monkeypatch.setattr(respond_mod.settings, "RESPONSE_SPLIT_ENABLED", True)
-    monkeypatch.setattr(respond_mod.settings, "RESPONSE_SPLIT_MIN_CHARS", 1)
-    monkeypatch.setattr(respond_mod.settings, "RESPONSE_SPLIT_DELAY_MS", 0)
-
-    s = _state(_msg(text="hello"))
-    with patch.object(respond_mod, "emit") as m:
-        await respond_mod.respond(s)
-
-    bot_text_calls = [c for c in m.call_args_list if c.kwargs.get("event_type") == "bot_text"]
-    assert len(bot_text_calls) >= 1
-    # Each call carries chunk_index / total_chunks / flow.
-    for c in bot_text_calls:
-        payload = c.kwargs["payload"]
-        assert "chunk_index" in payload
-        assert "total_chunks" in payload
-        assert "flow" in payload
-        assert c.kwargs["turn_no"] == 10
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T20 — taste_update → taste_update(source="free_text")
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t20_taste_update_free_text_emit():
-    from app.channels.router import (
-        RoutedDecision,
-        RoutedIntent,
-    )
-    from app.channels.router import (
-        TasteUpdate as RouterTasteUpdate,
-    )
-    from app.graphs.nodes.taste_update import taste_update
-
-    decision = RoutedDecision(
-        intent=RoutedIntent.TASTE_UPDATE,
-        taste_update=RouterTasteUpdate(liked_brands=["acme"], liked_keywords=["minimal"]),
-    )
-    s = _state(_msg(text="i like minimalist"), decision=decision)
-
-    with patch("app.graphs.nodes.taste_update.emit") as m:
-        await taste_update(s)
-
-    calls = [c for c in m.call_args_list if c.kwargs.get("event_type") == "taste_update"]
-    assert len(calls) == 1
-    assert calls[0].kwargs["payload"]["source"] == "free_text"
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T21 — critique_apply dual emit (card_clicked + taste_update)
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t21_critique_apply_click_dual_emit(adapter_ctx):
-    from app.graphs.nodes.critique_apply import critique_apply
-    from app.infrastructure.memory.session import get_store
-
-    sess = get_store().get_or_create(42)
-    cand = FakeCandidate(id="p-99", brand="acme")
-    sess.last_results = [cand]
-    sess.state = SessionState.RESULTS_SENT
-    get_store().update(sess)
-
-    s = _state(_msg(callback_data="crit:click:p-99"))
-    with patch("app.graphs.nodes.critique_apply.emit") as m:
-        await critique_apply(s)
-
-    events = [c.kwargs.get("event_type") for c in m.call_args_list]
-    assert "card_clicked" in events
-    # Dual: also a taste_update with source="click".
-    taste_calls = [c for c in m.call_args_list if c.kwargs.get("event_type") == "taste_update"]
-    assert any(c.kwargs["payload"].get("source") == "click" for c in taste_calls)
-
-
-@pytest.mark.asyncio
-async def test_log_t21_critique_apply_more_emits_taste_update_critique(adapter_ctx):
-    from app.graphs.nodes.critique_apply import critique_apply
-    from app.infrastructure.memory.session import get_store
-
-    sess = get_store().get_or_create(42)
-    cand = FakeCandidate(id="p-77", brand="bcorp")
-    sess.last_results = [cand]
-    sess.state = SessionState.RESULTS_SENT
-    get_store().update(sess)
-
-    s = _state(_msg(callback_data="crit:more:0"))
-    with patch("app.graphs.nodes.critique_apply.emit") as m:
-        await critique_apply(s)
-
-    taste_calls = [c for c in m.call_args_list if c.kwargs.get("event_type") == "taste_update"]
-    # Exactly one taste_update with source="critique" (no card_clicked for more/less/cheap).
-    assert len(taste_calls) == 1
-    assert taste_calls[0].kwargs["payload"]["source"] == "critique"
-    assert all(c.kwargs.get("event_type") != "card_clicked" for c in m.call_args_list)
+# SPEC-AGENT-V2-CLEANUP-001 — the LOG-T19 (respond), LOG-T20 (taste_update)
+# and LOG-T21 (critique_apply) per-node emit tests were removed: those V1
+# nodes were deleted with the V1 topology. The agent path emits bot_text /
+# taste_update / tool_call via the ReAct loop (tests/test_agent_v2/).

@@ -46,6 +46,24 @@ class MessengerAdapter(ABC):
         await self.send_text(chat_id, text)
         return None
 
+    async def send_media_group(self, chat_id: int, media: list[dict]) -> bool:
+        """Send 2..10 photos as a SINGLE grouped message (one bubble).
+
+        `media` is a list of dicts, each `{"image_url": str, "caption": str|None,
+        "parse_mode": str|None}`. Media groups do NOT support per-photo inline
+        keyboards (Telegram API limitation) — the caller pairs this with a
+        follow-up summary message that carries the keyboard.
+
+        The operation is ATOMIC on Telegram: one bad photo URL fails the whole
+        group. Returns True only when the platform reports success; callers
+        MUST fall back to per-card `send_card` on a False return so a search
+        never yields zero cards.
+
+        Default implementation returns False so backends that have not
+        implemented grouped sends transparently degrade to the per-card path.
+        """
+        return False
+
     async def download_attachment(self, file_id: str) -> bytes:
         raise NotImplementedError("download_attachment is backend-specific")
 

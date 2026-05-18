@@ -167,6 +167,54 @@ class TelegramAdapter(MessengerAdapter):
         )
         return message_id
 
+    async def send_media_group(self, chat_id: int, media: list[dict]) -> bool:
+        """`sendMediaGroup` — 2..10 photos as ONE grouped message (one bubble).
+
+        Telegram media groups do NOT support per-photo inline keyboards; the
+        caller sends a follow-up summary message with the keyboard. The call is
+        ATOMIC server-side: a single unreachable photo URL fails the whole
+        group, so the caller MUST fall back to the per-card `send_card` loop on
+        a False return (no silent zero-card outcome).
+
+        Returns True iff Telegram reports ok. Telegram requires 2..10 items;
+        a single-item group is rejected, so we hard-guard the bounds here and
+        return False (→ caller fallback) for out-of-range inputs.
+        """
+        n = len(media)
+        if n < 2 or n > 10:
+            logger.debug(
+                "🐱 [telegram] ⏭️  send_media_group skipped (n=%d out of 2..10) chat=%s",
+                n,
+                _hash_chat_id(chat_id),
+            )
+            return False
+        t0 = time.perf_counter()
+        input_media: list[dict] = []
+        for m in media:
+            entry: dict = {"type": "photo", "media": str(m.get("image_url") or "")}
+            caption = m.get("caption")
+            if caption:
+                entry["caption"] = str(caption)
+                parse_mode = m.get("parse_mode")
+                if parse_mode:
+                    entry["parse_mode"] = parse_mode
+            input_media.append(entry)
+        payload = {"chat_id": chat_id, "media": input_media}
+        # sendMediaGroup fetches every photo URL server-side; reuse the longer
+        # multi-photo budget (single sendPhoto is 4s — a 5-photo group needs
+        # proportionally more) rather than the 5s default _post timeout.
+        result = await self._post("sendMediaGroup", payload, timeout=15.0)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        ok = bool(result and result.get("ok"))
+        logger.info(
+            "🐱 [telegram] 🖼️  send_media_group chat=%s elapsed_ms=%d ok=%s n=%d",
+            _hash_chat_id(chat_id),
+            elapsed,
+            ok,
+            n,
+        )
+        return ok
+
     async def send_chat_action(self, chat_id: int, action: str) -> None:
         await self._post("sendChatAction", {"chat_id": chat_id, "action": action})
 
@@ -206,19 +254,29 @@ class TelegramAdapter(MessengerAdapter):
         chat_id: int,
         text: str,
         keyboard: list[list[tuple[str, str]]],
+        parse_mode: str | None = None,
+        disable_web_page_preview: bool = False,
     ) -> int | None:
         """Multi-row inline-keyboard variant of `send_text_with_buttons`.
+
+        `parse_mode` / `disable_web_page_preview` default to the prior behavior
+        (plain text, preview enabled) so existing onboarding-card callers are
+        unaffected; the hybrid result summary opts into HTML + no link preview.
 
         Returns the platform message_id on success (used for `editMessageReplyMarkup`
         re-render on toggle), or None on failure.
         """
         t0 = time.perf_counter()
         rows = [[{"text": label, "callback_data": data} for label, data in row] for row in keyboard]
-        payload = {
+        payload: dict = {
             "chat_id": chat_id,
             "text": text,
             "reply_markup": {"inline_keyboard": rows},
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if disable_web_page_preview:
+            payload["disable_web_page_preview"] = True
         result = await self._post("sendMessage", payload)
         elapsed = int((time.perf_counter() - t0) * 1000)
         ok = bool(result and result.get("ok"))

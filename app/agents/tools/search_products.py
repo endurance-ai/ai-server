@@ -26,7 +26,6 @@ import time
 from typing import Any
 
 from app.agents.tool_registry import SearchProductsResult
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,20 +136,16 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
 def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     """SPEC-AGENT-V3-REACT Gap4 — flag-gated cross-thread dislike discount.
 
-    flag OFF → returns `cands` unchanged (V2 byte-identical; no store read).
-    flag ON → reads the user's TasteProfile recency-weighted dislike excludes
-    and drops candidates whose brand/title matches — REUSING the EXACT same
-    client-side title/brand filter pattern `refine_search` already applies for
+    SPEC-AGENT-V2-CLEANUP-001 — cross-thread dislike discount is now
+    UNCONDITIONAL (the AGENT_V3_DISLIKE_MEMORY_ENABLED flag was removed).
+    Reads the user's TasteProfile recency-weighted dislike excludes and drops
+    candidates whose brand/title matches — REUSING the EXACT same client-side
+    title/brand filter pattern `refine_search` already applies for
     `exclude_keywords`. No new ranking, no new search algorithm.
 
     @MX:NOTE: [AUTO] additive — reuses the existing exclude filter pattern,
-      flag-gated, no new ranking.
-    @MX:SPEC: SPEC-AGENT-V3-REACT
+      no new ranking.
     """
-    if not settings.AGENT_V3_DISLIKE_MEMORY_ENABLED:
-        if cands:
-            logger.info("🚫 [v3:dislike] skip · flag off")
-        return cands
     if not cands:
         return cands
     user_key = ctx.get("user_key")

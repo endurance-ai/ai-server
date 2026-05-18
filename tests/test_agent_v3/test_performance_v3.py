@@ -62,7 +62,6 @@ async def test_ac_p_2_memory_assembly_under_50ms(monkeypatch):
 async def test_ac_p_2_slow_evaluator_does_not_inflate_turn(monkeypatch):
     """AC-P.2 — a 20s evaluator stub is residual-cancelled so the turn does
     NOT inflate toward EVALUATOR_TIMEOUT_S; turn stays within a tight bound."""
-    monkeypatch.setattr(settings, "AGENT_V3_REFLEXION_ENABLED", True, raising=False)
     monkeypatch.setattr(settings, "AGENT_MAX_ITERATIONS", 1, raising=False)
     monkeypatch.setattr(settings, "AGENT_LLM_TIMEOUT_S", 0.15, raising=False)
     monkeypatch.setattr(settings, "AGENT_TOOL_TIMEOUT_S", 0.15, raising=False)

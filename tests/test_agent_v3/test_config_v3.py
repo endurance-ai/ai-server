@@ -1,8 +1,9 @@
-"""SPEC-AGENT-V3-REACT / T1 — 5 new env vars.
+"""SPEC-AGENT-V2-CLEANUP-001 — config after the flag removal.
 
-REQ-AGENT-V3-MEM-CAP-001 (env) + the 4 sub-flag FLAG REQ preconditions.
-Regression: with nothing set, all 4 sub-flags default false and the
-char-cap defaults to 1500 (byte-identical-off precondition).
+The AGENT_V2_REACT_ENABLED / AGENT_V3_*_ENABLED feature flags were deleted
+(the ReAct agent + the four V3 enhancements are now unconditional). The
+remaining V3 tunable is AGENT_V3_MEMORY_MAX_TOKENS, and the model defaults
+moved to nova-lite so the system works with no env override.
 """
 
 from __future__ import annotations
@@ -10,32 +11,23 @@ from __future__ import annotations
 from app.core.config import Settings
 
 
-def test_v3_subflags_default_false():
-    """All 4 V3 sub-flags default false (REQ-AGENT-V3-COMPAT-ALLOFF-001 precondition)."""
+def test_v3_flags_removed():
+    """The 5 removed feature flags must no longer exist on Settings."""
     s = Settings(_env_file=None)
-    assert s.AGENT_V3_MEMORY_INJECTION_ENABLED is False
-    assert s.AGENT_V3_REFLEXION_ENABLED is False
-    assert s.AGENT_V3_PROACTIVE_ENABLED is False
-    assert s.AGENT_V3_DISLIKE_MEMORY_ENABLED is False
+    for removed in (
+        "AGENT_V2_REACT_ENABLED",
+        "AGENT_V3_MEMORY_INJECTION_ENABLED",
+        "AGENT_V3_REFLEXION_ENABLED",
+        "AGENT_V3_PROACTIVE_ENABLED",
+        "AGENT_V3_DISLIKE_MEMORY_ENABLED",
+    ):
+        assert not hasattr(s, removed), f"{removed} should have been removed"
 
 
 def test_v3_memory_max_tokens_default():
-    """REQ-AGENT-V3-MEM-CAP-001 — default char-approx token cap is 1500."""
+    """The char-approx token cap default is 1500."""
     s = Settings(_env_file=None)
     assert s.AGENT_V3_MEMORY_MAX_TOKENS == 1500
-
-
-def test_v3_subflags_independently_togglable():
-    """Each sub-flag flips independently — no coupling."""
-    s = Settings(
-        _env_file=None,
-        AGENT_V3_MEMORY_INJECTION_ENABLED=True,
-        AGENT_V3_DISLIKE_MEMORY_ENABLED=True,
-    )
-    assert s.AGENT_V3_MEMORY_INJECTION_ENABLED is True
-    assert s.AGENT_V3_REFLEXION_ENABLED is False
-    assert s.AGENT_V3_PROACTIVE_ENABLED is False
-    assert s.AGENT_V3_DISLIKE_MEMORY_ENABLED is True
 
 
 def test_v3_memory_max_tokens_override():
@@ -43,8 +35,8 @@ def test_v3_memory_max_tokens_override():
     assert s.AGENT_V3_MEMORY_MAX_TOKENS == 200
 
 
-def test_v3_master_gate_default_unchanged():
-    """V3 envs are additive — the V2 master gate keeps its prior default."""
+def test_model_defaults_are_nova_lite():
+    """SPEC-AGENT-V2-CLEANUP-001 — defaults work with no env override."""
     s = Settings(_env_file=None)
-    assert s.AGENT_V2_REACT_ENABLED is False
-    assert s.AGENT_LLM_MODEL == ""
+    assert s.AGENT_LLM_MODEL == "nova-lite"
+    assert s.EVALUATOR_MODEL == "nova-lite"

@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     SELF_CRITIQUE_THRESHOLD: float = 0.6
     SELF_CRITIQUE_TIMEOUT_S: float = 30.0
     SELF_CRITIQUE_FASTPATH_DROP_FILTERS: str = "min_price,max_price,exclude_keywords"
-    EVALUATOR_MODEL: str = "gpt-4o-mini"
+    EVALUATOR_MODEL: str = "nova-lite"
     EVALUATOR_MAX_TOKENS: int = 400
     EVALUATOR_TEMPERATURE: float = 0.2
     EVALUATOR_TIMEOUT_S: float = 8.0
@@ -189,18 +189,22 @@ class Settings(BaseSettings):
     # backends. Recommended range (0, 1].
     ONBOARDING_SEED_MAX_WEIGHT: float = 0.7
 
-    # SPEC-AGENT-V2-REACT — ReAct agent loop ──────────────────────────────
-    # Binary feature flag (REQ-AGENT-COMPAT-FLAG-001). Default false in prod;
-    # dev env should set true after Task 0 amendment merges.
-    AGENT_V2_REACT_ENABLED: bool = False
+    # SPEC-AGENT-V2-CLEANUP-001 — ReAct agent loop is now the PERMANENT, ONLY
+    # topology. The V1 (18-node legacy) graph and the AGENT_V2_REACT_ENABLED /
+    # AGENT_V3_* feature flags were removed; the ReAct ("V3") behavior is
+    # unconditional. AGENT_LLM_MODEL is the model ID (not a feature flag) and
+    # keeps a fail-closed empty-string safety net in llm_client, now
+    # unreachable via the default below.
     # Max iterations per turn (REQ-AGENT-LOOP-ITERATION-001).
     AGENT_MAX_ITERATIONS: int = 6
     # Per-turn cumulative LLM token budget (REQ-AGENT-PERF-TURN-BUDGET-001).
     AGENT_TURN_TOKEN_BUDGET: int = 32000
     # Per-tool dispatch timeout in seconds (REQ-AGENT-FAILURE-TOOL-001).
     AGENT_TOOL_TIMEOUT_S: float = 5.0
-    # LLM model — empty string = fail-closed (effective flag false).
-    AGENT_LLM_MODEL: str = ""
+    # LLM model ID for the ReAct agent. Defaults to the production model so the
+    # system works with no env override. Empty string is still honored as a
+    # fail-closed safety net in llm_client (unreachable via this default).
+    AGENT_LLM_MODEL: str = "nova-lite"
     # Per-LLM-call timeout in seconds.
     AGENT_LLM_TIMEOUT_S: float = 5.0
     # Transient-error retry knobs (SPEC-AGENT-V2-REACT runtime hardening).
@@ -216,19 +220,11 @@ class Settings(BaseSettings):
     # truncating a legit card batch (SPEC-AGENT-V2-REACT double-send fix).
     AGENT_RESPOND_TIMEOUT_S: float = 30.0
 
-    # SPEC-AGENT-V3-REACT — incremental enhancements (4 independent sub-flags) ─
-    # @MX:SPEC: SPEC-AGENT-V3-REACT
-    # Each gates exactly one gap; all default false → byte-identical V2 when
-    # the master gate (AGENT_V2_REACT_ENABLED + AGENT_LLM_MODEL) is active.
-    # Gap1 — auto memory injection (REQ-AGENT-V3-MEM-FLAG-001).
-    AGENT_V3_MEMORY_INJECTION_ENABLED: bool = False
-    # Gap2 — Reflexion loop (REQ-AGENT-V3-REFLEX-FLAG-001).
-    AGENT_V3_REFLEXION_ENABLED: bool = False
-    # Gap3 — proactive suggestion + suggest_next_step tool (REQ-AGENT-V3-PROACT-FLAG-001).
-    AGENT_V3_PROACTIVE_ENABLED: bool = False
-    # Gap4 — cross-thread dislike memory (REQ-AGENT-V3-DISLIKE-FLAG-001).
-    AGENT_V3_DISLIKE_MEMORY_ENABLED: bool = False
-    # Gap1 memory-injection payload token cap (char-approx ×4) (REQ-AGENT-V3-MEM-CAP-001).
+    # SPEC-AGENT-V2-CLEANUP-001 — the four V3 enhancements (memory injection,
+    # Reflexion loop, proactive suggestion, cross-thread dislike memory) are now
+    # UNCONDITIONAL. The AGENT_V3_*_ENABLED flags were removed; only the
+    # memory-injection payload token cap remains as a tunable.
+    # Memory-injection payload token cap (char-approx ×4).
     AGENT_V3_MEMORY_MAX_TOKENS: int = 1500
 
     @field_validator("APIFY_PINTEREST_MAX_ITEMS")

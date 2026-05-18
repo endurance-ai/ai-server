@@ -93,7 +93,7 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `SELF_CRITIQUE_THRESHOLD` | `0.6` | 통과 점수 (0~1) |
 | `SELF_CRITIQUE_TIMEOUT_S` | `30` | 전체 루프 wall-clock 가드 |
 | `SELF_CRITIQUE_FASTPATH_DROP_FILTERS` | `min_price,max_price,exclude_keywords` | 빈 결과 시 drop 대상 필터 (콤마 구분) |
-| `EVALUATOR_MODEL` | `gpt-4o-mini` | LLM-evaluator 모델 (LiteLLM 경유) |
+| `EVALUATOR_MODEL` | `nova-lite` | LLM-evaluator 모델 (LiteLLM 경유) |
 | `EVALUATOR_MAX_TOKENS` | `400` | 평가 응답 cap |
 | `EVALUATOR_TEMPERATURE` | `0.2` | 평가 sampling |
 | `EVALUATOR_TIMEOUT_S` | `8` | 단일 평가 호출 timeout |
@@ -140,37 +140,25 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 
 cutover 절차: `docs/infra/deployment.md` Scenario (e) 참조.
 
-## ReAct 에이전트 루프 (SPEC-AGENT-V2-REACT, flag-gated, 운영 default off)
+## ReAct 에이전트 루프 (SPEC-AGENT-V2-CLEANUP-001 — 영구 단일 토폴로지)
 
-`app/agents/react_loop.py` + `app/agents/llm_client.py` — `AGENT_V2_REACT_ENABLED=true` + `AGENT_LLM_MODEL` 설정 시 V2 토폴로지 활성. 두 조건 모두 충족해야 V2 그래프 로딩 (`fashion_bot.build_graph()` 내부 이중 가드).
+`app/agents/react_loop.py` + `app/agents/llm_client.py` — ReAct 에이전트가 유일한 토폴로지. V3 4-Gap 강화(Gap1 memory / Gap2 Reflexion / Gap3 proactive / Gap4 dislike discount)는 모두 unconditional. 개별 ON/OFF 플래그(`AGENT_V2_REACT_ENABLED`, `AGENT_V3_*_ENABLED`)는 제거됨.
 
 | 키 | 기본 | 용도 |
 |----|-----|-----|
-| `AGENT_V2_REACT_ENABLED` | `false` | V2 ReAct 토폴로지 ON/OFF. **운영 기본 off — dev 환경에서만 true 설정.** |
-| `AGENT_LLM_MODEL` | `""` | ReAct LLM 모델 명칭 (LiteLLM 경유). **미설정 시 fail-closed — `AGENT_V2_REACT_ENABLED=true` 여도 V2 비활성.** |
+| `AGENT_LLM_MODEL` | `nova-lite` | ReAct LLM 모델 명칭 (LiteLLM 경유). 미설정(빈 문자열) 시 fail-closed |
 | `AGENT_MAX_ITERATIONS` | `6` | 턴당 최대 tool call 반복 횟수 (REQ-AGENT-LOOP-ITERATION-001) |
 | `AGENT_TURN_TOKEN_BUDGET` | `32000` | 턴당 누적 LLM token 상한. 초과 시 fallback respond (REQ-AGENT-PERF-TURN-BUDGET-001) |
 | `AGENT_TOOL_TIMEOUT_S` | `5.0` | 단일 tool dispatch timeout (초, REQ-AGENT-FAILURE-TOOL-001) |
 | `AGENT_LLM_TIMEOUT_S` | `5.0` | 단일 LLM ainvoke timeout (초) |
-| `AGENT_LLM_MAX_RETRIES` | `2` | LLM transient 오류(5xx/throttle/timeout) 재시도 횟수. 재시도는 별도 iteration 소모 없음 |
-| `AGENT_TOOL_MAX_RETRIES` | `1` | tool dispatch transient 오류 재시도 횟수. terminal `respond` 는 재시도 0 고정 (멱등성 없음) |
-| `AGENT_RESPOND_TIMEOUT_S` | `30.0` | terminal `respond` 툴 전용 wall-clock timeout (초). 카드 최대 12장 순차 전송(~1-1.7s/장) → 구조적으로 `AGENT_TOOL_TIMEOUT_S` 초과 가능, 전용 상한 필요 |
+| `AGENT_LLM_MAX_RETRIES` | `2` | LLM transient 오류(5xx/throttle/timeout) 재시도 횟수 |
+| `AGENT_TOOL_MAX_RETRIES` | `1` | tool dispatch transient 오류 재시도 횟수. terminal `respond` 는 재시도 0 고정 |
+| `AGENT_RESPOND_TIMEOUT_S` | `30.0` | terminal `respond` 툴 전용 wall-clock timeout (초). `sendMediaGroup` + summary 전송 시간 반영 |
+| `AGENT_V3_MEMORY_MAX_TOKENS` | `1500` | Gap1 메모리 주입 페이로드 token cap (char 근사 ×4). 유일하게 남은 V3 튜닝값 |
 
 안전 가드 (env 무관 FROZEN): 3-consecutive identical tool call 무한루프 가드, JSON malform 1x retry → exhaustion, args validation (TypedDict).
 
 > `AGENT_LLM_MODEL` 은 로그에 모델명만 노출 — API key 는 `LITELLM_MASTER_KEY` 경유, 직접 노출 없음.
-
-## ReAct V3 증분 강화 (SPEC-AGENT-V3-REACT, 마스터 `AGENT_V2_REACT_ENABLED=true` 시에만 유효)
-
-4개 sub-flag 모두 **운영 기본 `false`**. 4 all-off = V2 byte-identical (단일 회귀 가드). 단계적 롤아웃: Gap1 → Gap4 → Gap3 → Gap2 순 (위험 낮은 순). **Gap4 활성화 전 Alembic migration 0005 선행 필수**.
-
-| 키 | 기본 | 용도 |
-|----|-----|-----|
-| `AGENT_V3_MEMORY_INJECTION_ENABLED` | `false` | Gap1: TasteProfile + 최근 5턴 요약을 system context에 자동 주입 (메모리 자동 주입) |
-| `AGENT_V3_REFLEXION_ENABLED` | `false` | Gap2: search/refine 결과를 evaluator 헬퍼로 평가 → quality delta → LLM 자율 refine (SPEC-AGENT-V2-REACT OQ-7 resolution). 잔여-budget `asyncio.wait_for` 강제 취소 |
-| `AGENT_V3_PROACTIVE_ENABLED` | `false` | Gap3: 8번째 tool `suggest_next_step` 등록 + system prompt 능동성 지침 |
-| `AGENT_V3_DISLIKE_MEMORY_ENABLED` | `false` | Gap4: TasteProfile dislike timestamp additive 필드 + 이후 search 자동 디스카운트. **migration 0005 선행 필수** |
-| `AGENT_V3_MEMORY_MAX_TOKENS` | `1500` | Gap1 메모리 주입 페이로드 token cap (char 근사 ×4) |
 
 Gap2 Reflexion은 기존 SPEC-AGENTIC-CRITIQUE-001 env를 재사용 (live dependency로 보존 필요):
 - `SELF_CRITIQUE_MAX_ITERATIONS` — Reflexion 호출 횟수 상한

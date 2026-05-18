@@ -316,60 +316,27 @@ REGISTRY: dict[str, ToolMetadata] = {
     },
 }
 
-# SPEC-AGENT-V3-REACT Gap3 — flag-aware 8th tool registration. Module-load
-# time branch (OQ-V3-6 resolved): settings are lifespan-fixed so there is no
-# race, and the byte-identical-OFF guard is unambiguous (REGISTRY is exactly
-# the V2 7-tool when AGENT_V3_PROACTIVE_ENABLED is false).
-# @MX:NOTE: [AUTO] flag-aware 8th tool — byte-identical 7-tool when flag OFF
-# @MX:SPEC: SPEC-AGENT-V3-REACT
-from app.core.config import settings as _settings  # noqa: E402
-
-if _settings.AGENT_V3_PROACTIVE_ENABLED:
-    REGISTRY["suggest_next_step"] = {
-        "name": "suggest_next_step",
-        "description": (
-            "Proactively send the user a follow-up options card (similar items, "
-            "fit change, different mood, broaden). Use when results are weak "
-            "(candidates_count < 3) or to offer next steps. Does NOT terminate "
-            "the loop — follow with `respond` once the user has options."
-        ),
-        "args_typeddict": SuggestNextStepArgs,
-        "result_typeddict": SuggestNextStepResult,
-        "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
-        "langfuse_span_tag": "tool.suggest_next_step",
-        "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
-        "terminates_loop": False,
-    }
+# SPEC-AGENT-V2-CLEANUP-001 — the 8th tool (`suggest_next_step`) is now
+# ALWAYS registered (the AGENT_V3_PROACTIVE_ENABLED flag was removed). The
+# ReAct agent is the permanent, only topology.
+# @MX:NOTE: [AUTO] 8-tool registry — suggest_next_step is unconditional
+REGISTRY["suggest_next_step"] = {
+    "name": "suggest_next_step",
+    "description": (
+        "Proactively send the user a follow-up options card (similar items, "
+        "fit change, different mood, broaden). Use when results are weak "
+        "(candidates_count < 3) or to offer next steps. Does NOT terminate "
+        "the loop — follow with `respond` once the user has options."
+    ),
+    "args_typeddict": SuggestNextStepArgs,
+    "result_typeddict": SuggestNextStepResult,
+    "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
+    "langfuse_span_tag": "tool.suggest_next_step",
+    "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
+    "terminates_loop": False,
+}
 
 TOOL_NAMES: tuple[str, ...] = tuple(REGISTRY.keys())
-
-
-def _rebuild_registry_for_flag(enabled: bool) -> None:
-    """Test-only — re-evaluate the Gap3 8th-tool registration.
-
-    Production registers once at module load (OQ-V3-6). Tests that flip
-    `AGENT_V3_PROACTIVE_ENABLED` after import call this to mirror what a
-    fresh interpreter / lifespan boot would produce, then restore.
-    """
-    global TOOL_NAMES
-    REGISTRY.pop("suggest_next_step", None)
-    if enabled:
-        REGISTRY["suggest_next_step"] = {
-            "name": "suggest_next_step",
-            "description": (
-                "Proactively send the user a follow-up options card (similar items, "
-                "fit change, different mood, broaden). Use when results are weak "
-                "(candidates_count < 3) or to offer next steps. Does NOT terminate "
-                "the loop — follow with `respond` once the user has options."
-            ),
-            "args_typeddict": SuggestNextStepArgs,
-            "result_typeddict": SuggestNextStepResult,
-            "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
-            "langfuse_span_tag": "tool.suggest_next_step",
-            "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
-            "terminates_loop": False,
-        }
-    TOOL_NAMES = tuple(REGISTRY.keys())
 
 
 # ── Args validation (REQ-AGENT-TOOL-DISPATCH-001) ─────────────────────────

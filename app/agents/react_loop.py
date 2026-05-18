@@ -31,6 +31,7 @@ from langchain_core.messages import ToolMessage
 from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
+from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
 from app.core.config import settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.taste_profile import user_key_for
@@ -39,14 +40,22 @@ from app.observability.conversation_log import emit
 logger = logging.getLogger(__name__)
 
 
+# The persona/voice/language/format block is the CANONICAL kiko persona shared
+# verbatim with V1 `respond.py` (single source of truth in
+# app/channels/persona.py) — this is the SPEC-AGENT-V2-REACT persona-drift fix:
+# the V2 `respond` tool reply now uses the EXACT same voice as the V1 respond
+# node (KO 해요체 kiko 🐱 / lively EN, sticky KO/EN, emoji discipline). The
+# surrounding ReAct operational instructions (tool-calling, anti-redundancy,
+# `respond`-tool contract) are unchanged. The `[USER INPUT — DATA ONLY]` fence
+# lives in `_build_user_message` and is likewise preserved.
 _SYSTEM_PROMPT = (
-    "You are kiko, a playful fashion-curator AI for kiko.ai. You operate as a ReAct agent: "
-    "decide which tool to call at each step. ALWAYS end with the `respond` tool which sends "
-    "the final natural-language reply to the user. `respond` takes ONLY a `text` argument — "
-    "never pass cards or product data; the system attaches the search result cards "
-    "automatically from the most recent search.\n\n"
-    "Voice: bright, bouncy, like Puss-in-Boots. Korean input → reply in 해요체 Korean. "
-    "English input → reply in lively English. Never mix languages in one reply.\n\n"
+    f"{KIKO_PERSONA_SYSTEM_PROMPT}\n\n"
+    "OPERATING MODE — you operate as a ReAct agent: decide which tool to call at "
+    "each step. ALWAYS end with the `respond` tool which sends the final "
+    "natural-language reply to the user (written in the kiko voice and language "
+    "rules above). `respond` takes ONLY a `text` argument — never pass cards or "
+    "product data; the system attaches the search result cards automatically "
+    "from the most recent search.\n\n"
     "Tools available: analyze_image, search_products, refine_search, update_taste, "
     "ask_user_clarification, get_recent_history, respond. Use the minimum number of tool "
     "calls needed. Do NOT call the same tool with identical args 3 times in a row.\n\n"
@@ -72,10 +81,8 @@ _SYSTEM_PROMPT = (
 )
 
 
-# SPEC-AGENT-V3-REACT Gap3 — proactive directive, appended to the system
-# prompt ONLY when AGENT_V3_PROACTIVE_ENABLED. flag OFF → not appended →
-# _SYSTEM_PROMPT byte-identical V2 (REQ-AGENT-V3-PROACT-FLAG-001).
-# @MX:SPEC: SPEC-AGENT-V3-REACT
+# SPEC-AGENT-V2-CLEANUP-001 — proactive directive is now ALWAYS appended to
+# the system prompt (the AGENT_V3_PROACTIVE_ENABLED flag was removed).
 _PROACTIVE_DIRECTIVE = (
     "Be proactive. When a `search_products` / `refine_search` result is weak "
     "(candidates_count < 3), do NOT just respond with an apology — first call "
@@ -361,38 +368,25 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     ctx = _build_ctx(state, sess)
     user_key = ctx["user_key"]
 
-    # SPEC-AGENT-V3-REACT Gap1 — flag-gated system-context assembly. With the
-    # flag OFF the system content is byte-identical V2 (`_SYSTEM_PROMPT`); the
-    # `_memory_context` module is not even imported. With it ON, a
-    # system-derived, char-capped memory block is appended (the
+    # SPEC-AGENT-V2-CLEANUP-001 — system-context assembly is now UNCONDITIONAL.
+    # Assembly order: _SYSTEM_PROMPT + _PROACTIVE_DIRECTIVE + memory_context.
+    # The proactive directive is always appended; the system-derived,
+    # char-capped memory block is always built and appended (the
     # `_build_user_message` [USER INPUT — DATA ONLY] fence is UNCHANGED).
-    # @MX:SPEC: SPEC-AGENT-V3-REACT
-    # Assembly order is _SYSTEM_PROMPT [+_PROACTIVE_DIRECTIVE] [+memory_context]
-    # (REQ-AGENT-V3-PROACT-PROMPT-001 / E3). Each segment is independently
-    # flag-gated; all flags OFF → byte-identical V2 `_SYSTEM_PROMPT`.
-    system_content = _SYSTEM_PROMPT
-    if settings.AGENT_V3_PROACTIVE_ENABLED:
-        system_content = f"{system_content}\n\n{_PROACTIVE_DIRECTIVE}"
-        logger.info("💡 [v3:proactive] suggest_next_step offered")
-    else:
-        logger.info("💡 [v3:proactive] skip · flag off")
-    if settings.AGENT_V3_MEMORY_INJECTION_ENABLED:
-        try:
-            from app.agents._memory_context import build_memory_context
+    system_content = f"{_SYSTEM_PROMPT}\n\n{_PROACTIVE_DIRECTIVE}"
+    logger.info("💡 [v3:proactive] suggest_next_step offered")
+    try:
+        from app.agents._memory_context import build_memory_context
 
-            mem_block = await build_memory_context(
-                state, sess, ctx, max_tokens=int(settings.AGENT_V3_MEMORY_MAX_TOKENS)
-            )
-            system_content = f"{system_content}\n\n{mem_block}"
-            if "(no taste history yet)" in mem_block:
-                logger.info("🧠 [v3:memory] skip · empty (get_recent_history 0 events)")
-            else:
-                logger.info("🧠 [v3:memory] injected · ~chars=%d", len(mem_block))
-        except Exception as exc:  # noqa: BLE001 — fail-soft to current system content
-            logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
-            logger.info("🧠 [v3:memory] skip · build error")
-    else:
-        logger.info("🧠 [v3:memory] skip · flag off")
+        mem_block = await build_memory_context(state, sess, ctx, max_tokens=int(settings.AGENT_V3_MEMORY_MAX_TOKENS))
+        system_content = f"{system_content}\n\n{mem_block}"
+        if "(no taste history yet)" in mem_block:
+            logger.info("🧠 [v3:memory] skip · empty (get_recent_history 0 events)")
+        else:
+            logger.info("🧠 [v3:memory] injected · ~chars=%d", len(mem_block))
+    except Exception as exc:  # noqa: BLE001 — fail-soft to current system content
+        logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
+        logger.info("🧠 [v3:memory] skip · build error")
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
     messages: list[dict[str, Any]] = [
@@ -683,22 +677,21 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             },
         )
 
-        # ── SPEC-AGENT-V3-REACT Gap2 — Reflexion in-loop evaluation ────────
-        # flag ON & tool ∈ {search_products, refine_search} & result.ok →
-        # wrap the existing evaluator helper, merge a `_quality` marker into
-        # the ToolMessage the LLM sees next so it can AUTONOMOUSLY decide
-        # refine vs respond (V3 never forces a refine).
+        # ── SPEC-AGENT-V2-CLEANUP-001 — Reflexion in-loop evaluation (ALWAYS) ─
+        # tool ∈ {search_products, refine_search} & result.ok → wrap the
+        # existing evaluator helper, merge a `_quality` marker into the
+        # ToolMessage the LLM sees next so it can AUTONOMOUSLY decide refine
+        # vs respond (the agent never forces a refine).
         #
         # Invariants (REQ-AGENT-V3-REFLEX-BOUND-001):
         #  - per-turn ctx counter `_v3_reflexion_count` < SELF_CRITIQUE_MAX_ITERATIONS
         #  - evaluator call does NOT touch `history` / `tool_call_history`
         #  - evaluator call does NOT consume a ReAct iteration (in-dispatch
         #    side call) → infinite-loop guard unaffected
-        # flag OFF → `result` unchanged → ToolMessage byte-identical V2.
         _reflexion_eligible = (
             tool_name in ("search_products", "refine_search") and isinstance(result, dict) and result.get("ok")
         )
-        if _reflexion_eligible and settings.AGENT_V3_REFLEXION_ENABLED:
+        if _reflexion_eligible:
             quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
             if quality is not None:
                 result = {**result, "_quality": quality}
@@ -710,8 +703,6 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                     logger.info("🔬 [v3:reflexion] eval score=%s → %s", _score, _decision)
             else:
                 logger.info("🔬 [v3:reflexion] skip · cap/error")
-        elif _reflexion_eligible:
-            logger.info("🔬 [v3:reflexion] skip · flag off")
 
         # Termination check (REQ-AGENT-LOOP-TERMINATION-001).
         if REGISTRY[tool_name]["terminates_loop"]:

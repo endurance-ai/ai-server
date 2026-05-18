@@ -20,23 +20,85 @@ already-sent text and already-sent cards — the user never sees a duplicate.
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import Any
 
 from app.agents.tool_registry import RespondResult
+from app.observability.conversation_log import emit
+
+
+def _esc(s: Any) -> str:
+    """HTML-escape (including quotes) for parse_mode=HTML messages.
+
+    Local (stdlib) — deliberately NOT importing the private
+    `send_results._html_escape`; that cross-module private coupling would
+    break with a silent ImportError if send_results is ever renamed.
+    `quote=True` matters for the `<a href="...">` attribute.
+    """
+    return html.escape(str(s), quote=True)
+
+
+def _safe_http_url(url: str) -> str | None:
+    """Return the url only if it is an http(s) scheme, else None — prevents a
+    catalog-sourced `javascript:` / `data:` URL becoming a tappable link in a
+    Telegram HTML-mode message."""
+    return url if url.startswith(("https://", "http://")) else None
+
 
 logger = logging.getLogger(__name__)
 
-# Cap auto-attached cards. Matches the diversify/text-only default envelope
-# (top_k=15) trimmed to a sane chat length; V1 send_results capped at 5 but
-# the agent path renders the diversified top set directly.
-_MAX_CARDS = 12
+# Hybrid delivery: ONE album of up to this many photos (single Telegram
+# sendMediaGroup bubble) + ONE summary text message. Telegram caps a media
+# group at 10; 5 keeps the album scannable and matches the V1 send_results cap.
+_ALBUM_SIZE = 5
+
+# `card_sent` conversation-log event ordinal (event_payloads.py catalog #13).
+# The ReAct agent path has no V1-style per-node turn ordering, so this is a
+# fixed sentinel for the card-delivery step rather than a derived turn index.
+_CARD_SENT_TURN_NO = 9
 
 # Per-turn idempotency keys in the shared ctx dict (built once per turn and
 # passed by reference, so they survive a defensive second dispatch).
 _DONE_KEY = "_respond_dispatched"
 _TEXT_SENT_KEY = "_respond_text_sent"
 _SENT_CARD_IDS_KEY = "_respond_sent_card_ids"
+# Per-turn flag — the album+summary was already dispatched this turn, so a
+# defensive second entry (or react_loop retry) must not resend it.
+_ALBUM_SENT_KEY = "_respond_album_sent"
+
+# In-memory "더보기 / More" pager cursor, keyed by chat_id. Module-global so it
+# survives across webhook calls within the process (the original search turn
+# sets it; a later `cards:more` tap reads + advances it). NOT persisted: a
+# process restart simply restarts the pager from the first batch, which is
+# harmless (last_results may not survive an in-memory store restart either).
+# Avoiding a Session field keeps this change free of an Alembic migration
+# (the PG session store uses an explicit column list, not field reflection).
+_CARD_BATCH_CURSOR: dict[int, int] = {}
+
+
+def reset_card_batch_cursor_for_tests() -> None:
+    """Clear the pager cursor (test hook only)."""
+    _CARD_BATCH_CURSOR.clear()
+
+
+def _has_plausible_image(c: Any) -> bool:
+    """A candidate is album-eligible only with a usable http(s) image URL AND
+    a product URL (the exact validity gate `_candidate_to_card` enforces).
+
+    sendMediaGroup is ATOMIC — one bad photo URL fails the whole group — so we
+    pre-filter rather than let Telegram reject the batch.
+    """
+    img = getattr(c, "image_url", None)
+    if img is None and isinstance(c, dict):
+        img = c.get("image_url")
+    purl = getattr(c, "product_url", None)
+    if purl is None and isinstance(c, dict):
+        purl = c.get("product_url")
+    if not purl:
+        return False
+    s = str(img or "").strip()
+    return s.startswith(("http://", "https://"))
 
 
 def _candidate_identity(c: Any) -> Any:
@@ -117,7 +179,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
     from app.agents.tools.search_products import CARDS_READY_KEY
 
     if ctx.get(CARDS_READY_KEY):
-        cards_sent = await _send_last_results_cards(adapter, ctx, chat_id)
+        cards_sent = await send_hybrid_batch(adapter, chat_id, ctx=ctx, offset=0)
 
     if not text_sent and cards_sent == 0:
         # Nothing sent THIS entry. If a prior (interrupted) entry already
@@ -133,35 +195,112 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
     return RespondResult(ok=True, error=None, text_sent=text_sent, cards_sent=cards_sent)
 
 
-async def _send_last_results_cards(adapter: Any, ctx: dict[str, Any], chat_id: int) -> int:
-    """Render + send this turn's search candidates via the V1 card path.
+def _candidate_field(c: Any, key: str, default: Any = "") -> Any:
+    v = getattr(c, key, None)
+    if v is None and isinstance(c, dict):
+        v = c.get(key)
+    return default if v is None else v
 
-    Reuses `send_results._candidate_to_card` (the working V1 renderer with
-    critique buttons) and `adapter.send_card` — no new card rendering. Returns
-    the number of cards successfully sent (0 on no candidates / no adapter
-    support / all-skipped).
+
+def _format_price(price: Any) -> str | None:
+    """Mirror `send_results._format_price` (₩-grouped, drops non-positive)."""
+    if price is None:
+        return None
+    try:
+        n = int(price)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    return f"₩{n:,}"
+
+
+def _build_summary(batch: list[Any], lang: str) -> str:
+    """KO/EN header + numbered list. The item NAME is an HTML <a> link to the
+    product URL (parse_mode HTML) so the buy path survives without per-card
+    Shop buttons (Telegram media groups forbid per-photo keyboards).
     """
+    n = len(batch)
+    if lang == "ko":
+        header = f"✨ 마음에 들 만한 {n}개 추려봤어요"
+    else:
+        header = f"✨ Here are {n} picks I think you'll like"
+    lines: list[str] = [header, ""]
+    for i, c in enumerate(batch, start=1):
+        brand = str(_candidate_field(c, "brand", "")).strip()
+        name = str(_candidate_field(c, "name", "")).strip() or ("추천 아이템" if lang == "ko" else "item")
+        purl = str(_candidate_field(c, "product_url", "")).strip()
+        price_str = _format_price(_candidate_field(c, "price", None))
+        name_html = _esc(name)
+        safe_url = _safe_http_url(purl) if purl else None
+        if safe_url:
+            name_html = f'<a href="{_esc(safe_url)}">{name_html}</a>'
+        bits = [f"{i}."]
+        if brand:
+            bits.append(f"<b>{_esc(brand)}</b>")
+        bits.append(name_html)
+        line = " ".join(bits)
+        if price_str:
+            line += f" · {_esc(price_str)}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+# Number emoji for the per-item like buttons (1..5).
+_NUM_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+# Telegram callback_data 64-byte budget minus the "card:like:" prefix (10).
+_LIKE_SUFFIX_BUDGET = 53
+
+
+def _like_callback_for(c: Any, idx: int) -> str:
+    """`card:like:{product_id_or_idx}` — product id truncated to the last
+    _LIKE_SUFFIX_BUDGET chars (same scheme as implicit_feedback.click_callback_for
+    so `resolve_click_target` suffix-matching keeps working). Falls back to the
+    batch index when the candidate has no id."""
+    pid = str(_candidate_field(c, "id", "") or "").strip()
+    if not pid:
+        return f"card:like:{idx}"
+    if len(pid) > _LIKE_SUFFIX_BUDGET:
+        pid = pid[-_LIKE_SUFFIX_BUDGET:]
+    return f"card:like:{pid}"
+
+
+def _build_keyboard(batch: list[Any], lang: str, has_more: bool = True) -> list[list[tuple[str, str]]]:
+    """Row 1: number like-buttons 1️⃣..5️⃣ (card:like). Row 2: footer —
+    [더보기/More] (cards:more) ONLY when another batch exists, plus
+    [다르게 찾기/Refine] (cards:refine) always."""
+    like_row: list[tuple[str, str]] = []
+    for i, c in enumerate(batch):
+        emoji = _NUM_EMOJI[i] if i < len(_NUM_EMOJI) else str(i + 1)
+        like_row.append((emoji, _like_callback_for(c, i)))
+    footer: list[tuple[str, str]] = []
+    if lang == "ko":
+        if has_more:
+            footer.append(("➕ 더보기", "cards:more"))
+        footer.append(("🔄 다르게 찾기", "cards:refine"))
+    else:
+        if has_more:
+            footer.append(("➕ More", "cards:more"))
+        footer.append(("🔄 Refine", "cards:refine"))
+    return [like_row, footer]
+
+
+async def _fallback_send_cards(
+    adapter: Any,
+    chat_id: int,
+    batch: list[Any],
+    sent_ids: set,
+    lang: str,
+) -> int:
+    """Per-card `send_card` loop — the V1 path, used as the safety net when
+    `send_media_group` is unavailable or fails atomically (so a search NEVER
+    yields zero cards). Reuses `send_results._candidate_to_card` verbatim."""
     if not hasattr(adapter, "send_card"):
         return 0
-    try:
-        from app.channels.lang import session_lang
-        from app.graphs.nodes.send_results import _candidate_to_card
-        from app.infrastructure.memory.session import get_store
+    from app.graphs.nodes.send_results import _candidate_to_card
 
-        sess = get_store().get_or_create(int(chat_id))
-        candidates = list(getattr(sess, "last_results", None) or [])
-        if not candidates:
-            return 0
-        lang = session_lang(sess)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("[tool.respond] last_results lookup failed: %r", exc)
-        return 0
-
-    sent_ids: set = ctx.setdefault(_SENT_CARD_IDS_KEY, set())
     sent = 0
-    for c in candidates[:_MAX_CARDS]:
-        # Skip a candidate already sent in a prior (interrupted) entry — each
-        # card is delivered at most once even on a defensive second dispatch.
+    for c in batch:
         ident = _candidate_identity(c)
         if ident is not None and ident in sent_ids:
             continue
@@ -171,7 +310,7 @@ async def _send_last_results_cards(adapter: Any, ctx: dict[str, Any], chat_id: i
         try:
             mid = await adapter.send_card(chat_id, card)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[tool.respond] send_card failed: %r", exc)
+            logger.debug("[tool.respond] fallback send_card failed: %r", exc)
             continue
         if mid is None:
             continue
@@ -179,3 +318,149 @@ async def _send_last_results_cards(adapter: Any, ctx: dict[str, Any], chat_id: i
             sent_ids.add(ident)
         sent += 1
     return sent
+
+
+def _emit_card_sent(chat_id: int, sess: Any, batch: list[Any]) -> None:
+    """Emit one `card_sent` (catalog #13) per delivered item — preserves the
+    V1 send_results per-item emission so observability stays equivalent."""
+    try:
+        from app.infrastructure.memory.taste_profile import user_key_for
+
+        user_key = user_key_for(getattr(sess, "from_user_id", None), chat_id)
+        for pos, c in enumerate(batch):
+            emit(
+                event_type="card_sent",
+                user_key=user_key,
+                chat_id=chat_id,
+                thread_id=None,
+                turn_no=_CARD_SENT_TURN_NO,
+                payload={
+                    "product_id": str(_candidate_field(c, "id", "") or ""),
+                    "position": pos,
+                    "send_ok": True,
+                },
+            )
+    except Exception:  # noqa: BLE001 — emit must never break delivery
+        logger.debug("[tool.respond] card_sent emit best-effort")
+
+
+# @MX:ANCHOR: [AUTO] hybrid result delivery — fan_in from respond tool +
+#   ingest cards:more handler; the single album/summary renderer.
+# @MX:REASON: both the post-search reply path and the "더보기" pager funnel
+#   through here, so its album/summary/idempotency contract is load-bearing.
+async def send_hybrid_batch(
+    adapter: Any,
+    chat_id: int,
+    *,
+    ctx: dict[str, Any] | None = None,
+    offset: int | None = None,
+) -> int:
+    """Send ONE album (sendMediaGroup, ≤5 photos, one bubble) + ONE summary
+    text message (numbered HTML-linked list + inline keyboard) for the slice
+    of `sess.last_results` starting at `offset`.
+
+    `offset=None` (the "더보기" path) reads the in-memory pager cursor for this
+    chat. The post-search reply passes `offset=0` and a per-turn `ctx` so the
+    album+summary is idempotent across a defensive react_loop re-entry.
+
+    Robustness: pre-filters to candidates with a plausible image URL, caps the
+    album at 5, and FALLS BACK to the per-card `send_card` loop when
+    `send_media_group` is unavailable or fails atomically — a search never
+    yields zero cards. Returns the number of cards delivered (0 on no
+    candidates / nothing left / total failure handled by the fallback).
+    """
+    try:
+        from app.channels.lang import session_lang
+        from app.infrastructure.memory.session import get_store
+
+        store = get_store()
+        sess = store.get_or_create(int(chat_id))
+        all_candidates = list(getattr(sess, "last_results", None) or [])
+        if not all_candidates:
+            return 0
+        lang = session_lang(sess)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[tool.respond] last_results lookup failed: %r", exc)
+        return 0
+
+    # Idempotency: a defensive second entry within the SAME turn must not
+    # resend the album+summary (the slow path the no-retry fix targets).
+    if ctx is not None and ctx.get(_ALBUM_SENT_KEY):
+        logger.debug("[tool.respond] album already sent this turn — skipping resend")
+        return 0
+
+    start = _CARD_BATCH_CURSOR.get(int(chat_id), 0) if offset is None else int(offset)
+    if start < 0:
+        start = 0
+    # Pre-filter to album-eligible candidates from `start` onward, take ≤5.
+    # Track each item's ABSOLUTE index in `all_candidates` so the "더보기"
+    # cursor advances past the real consumed slice — advancing by the eligible
+    # count would skip/repeat items when broken-image candidates are
+    # interspersed (P1-2).
+    eligible_pos = [(start + i, c) for i, c in enumerate(all_candidates[start:]) if _has_plausible_image(c)]
+    batch_pos = eligible_pos[:_ALBUM_SIZE]
+    batch = [c for _, c in batch_pos]
+    if not batch:
+        logger.debug("[tool.respond] no album-eligible candidates from offset=%d", start)
+        return 0
+
+    sent_ids: set = ctx.setdefault(_SENT_CARD_IDS_KEY, set()) if ctx is not None else set()
+
+    delivered = 0
+    used_fallback = False
+    media = [{"image_url": str(_candidate_field(c, "image_url", "")), "caption": None} for c in batch]
+    # Telegram media groups require 2..10 items; a single eligible candidate
+    # cannot form a group → go straight to the per-card path for that one.
+    can_group = len(media) >= 2 and hasattr(adapter, "send_media_group")
+    group_ok = False
+    if can_group:
+        try:
+            group_ok = await adapter.send_media_group(chat_id, media)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] send_media_group raised: %r", exc)
+            group_ok = False
+
+    if group_ok:
+        delivered = len(batch)
+        for c in batch:
+            ident = _candidate_identity(c)
+            if ident is not None:
+                sent_ids.add(ident)
+        # Summary text + inline keyboard (carries the buy links + actions the
+        # media group cannot). HTML so the item names are tappable links.
+        summary = _build_summary(batch, lang)
+        keyboard = _build_keyboard(batch, lang, has_more=len(eligible_pos) > len(batch_pos))
+        try:
+            if hasattr(adapter, "send_text_with_keyboard"):
+                await adapter.send_text_with_keyboard(
+                    chat_id,
+                    summary,
+                    keyboard,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+            else:
+                await adapter.send_text(chat_id, summary)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] summary send failed: %r", exc)
+    else:
+        # Album unavailable or atomic-fail → per-card fallback for THIS batch.
+        used_fallback = True
+        delivered = await _fallback_send_cards(adapter, chat_id, batch, sent_ids, lang)
+
+    if delivered > 0:
+        _emit_card_sent(chat_id, sess, batch[:delivered])
+        # Advance the pager cursor to just past the LAST consumed absolute
+        # position in `all_candidates` (not by eligible count) so a "더보기"
+        # tap neither repeats nor skips items when broken-image candidates are
+        # interspersed (P1-2).
+        _CARD_BATCH_CURSOR[int(chat_id)] = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
+        if ctx is not None:
+            ctx[_ALBUM_SENT_KEY] = True
+        logger.info(
+            "🐱 [respond] hybrid batch delivered n=%d offset=%d fallback=%s",
+            delivered,
+            start,
+            used_fallback,
+        )
+    return delivered

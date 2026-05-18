@@ -53,8 +53,9 @@ def test_get_llm_does_not_force_tool_choice(monkeypatch, _reset_singleton):
     tool_choice = bind_args.kwargs.get("tool_choice", None)
     assert tool_choice is None
     # Tools schema is still passed (first positional arg, non-empty list).
+    # SPEC-AGENT-V2-CLEANUP-001 — 8 tools (suggest_next_step unconditional).
     tools_schema = bind_args.args[0]
-    assert isinstance(tools_schema, list) and len(tools_schema) == 7
+    assert isinstance(tools_schema, list) and len(tools_schema) == 8
 
 
 def test_get_llm_fail_closed_when_model_empty(monkeypatch, _reset_singleton):

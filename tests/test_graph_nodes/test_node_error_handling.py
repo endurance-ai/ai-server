@@ -15,7 +15,6 @@ from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import (
     InMemorySessionStore,
-    SessionState,
     set_store,
     shutdown_store,
 )
@@ -63,30 +62,10 @@ def _state(message=None, **kw) -> WorkingState:
     return WorkingState(message=msg, chat_id=msg.chat_id, **kw)
 
 
-# ── ingest ─────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_ingest_router_exception_does_not_propagate(store, monkeypatch):
-    """REQ-AGENT-007 — `route_text` raises → empty delta + log breadcrumb."""
-    sess = store.get_or_create(42)
-    sess.state = SessionState.RESULTS_SENT
-    store.update(sess)
-
-    async def _boom(*a, **k):
-        raise RuntimeError("kaboom")
-
-    # V1-path characterization: pin V2 flag off so ingest invokes route_text
-    # (SPEC-AGENT-V2-REACT §Task 15 — V2 skips route_text by design).
-    monkeypatch.setattr("app.graphs.nodes.ingest.settings.AGENT_V2_REACT_ENABLED", False)
-    monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", True)
-    monkeypatch.setattr("app.graphs.nodes.ingest.route_text", _boom)
-
-    from app.graphs.nodes.ingest import ingest
-
-    delta = await ingest(_state(make_msg(text="hi")))
-    assert "log_events" in delta
-    assert any("ingest_error" in s for s in delta["log_events"])
+# SPEC-AGENT-V2-CLEANUP-001 — `test_ingest_router_exception_does_not_propagate`
+# was removed: `route_text` is no longer invoked by ingest (the V1 LLM router
+# path was deleted; ingest returns early). The V2 ingest never-raises contract
+# is covered by tests/test_agent_v2/test_ingest_route_text_gate.py.
 
 
 # ── resolve_image ──────────────────────────────────────────────────────────
@@ -123,26 +102,10 @@ async def test_vision_node_extract_exception_yields_no_items(monkeypatch):
     assert any("vision_node_error" in s for s in delta["log_events"])
 
 
-# ── search_node ────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_search_node_port_exception_yields_empty_candidates(store, taste_store, monkeypatch):
-    sess = store.get_or_create(42)
-    sess.image_url = "https://i.pinimg.com/x.jpg"
-    sess.vision_item = "tee"
-    store.update(sess)
-
-    class _BoomPort:
-        async def recommend(self, _req):
-            raise RuntimeError("supabase down")
-
-    set_port(_BoomPort())
-    from app.graphs.nodes.search import search_node
-
-    delta = await search_node(_state(make_msg()))
-    assert delta["candidates"] == []
-    assert any("search_node_error" in s for s in delta["log_events"])
+# SPEC-AGENT-V2-CLEANUP-001 — `test_search_node_port_exception_*` was removed:
+# the V1 `search_node` was deleted with the V1 topology. Search now runs via
+# the agent's `search_products` tool; its fail-open behavior is covered by
+# tests/test_agent_v2/test_search_text_only.py.
 
 
 # ── pick_item carousel send failure ────────────────────────────────────────

@@ -27,7 +27,6 @@ def _v2_graph(monkeypatch):
     """Build a V2 graph whose post-ingest terminal nodes are recording stubs."""
     from app.core import config as cfg
 
-    monkeypatch.setattr(cfg.settings, "AGENT_V2_REACT_ENABLED", True, raising=False)
     monkeypatch.setattr(cfg.settings, "AGENT_LLM_MODEL", "nova-lite", raising=False)
 
     visited: list[str] = []
@@ -124,7 +123,6 @@ async def test_pick_happy_path_tap_routes_to_agent(monkeypatch):
     """
     from app.core import config as cfg
 
-    monkeypatch.setattr(cfg.settings, "AGENT_V2_REACT_ENABLED", True, raising=False)
     monkeypatch.setattr(cfg.settings, "AGENT_LLM_MODEL", "nova-lite", raising=False)
 
     visited: list[str] = []

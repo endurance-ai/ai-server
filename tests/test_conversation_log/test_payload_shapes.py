@@ -118,20 +118,22 @@ def _collect_all_taste_sources() -> set[str]:
     return found
 
 
-# Currently-emittable sources (7/7) — SPEC-ONBOARD-CARDS-001 landed Phase 4
-# (ONB-T22), wiring `taste_update.source="onboard"` in `_onboard_helpers.py`
-# and `source="pinterest"` in `_pinterest_helpers.py`. The xfail bookmark for
-# unimplemented sources is retired.
+# SPEC-AGENT-V2-CLEANUP-001 — the V1 nodes that emitted taste_update with
+# source ∈ {click, critique, free_text} (critique_apply.py / taste_update.py)
+# were deleted with the V1 topology. Under the ReAct agent topology taste
+# changes flow through the `update_taste` TOOL (which does not emit a
+# conversation-log `taste_update` event — the ReAct loop emits `tool_call`
+# instead). So those three sources are no longer emitted from any in-scope
+# graph-node / implicit_feedback file. The TasteSource Literal still defines
+# all 7 values (still valid event types), so they move to UNIMPLEMENTED to
+# keep the meta-check's type↔matrix union intact.
 _IMPLEMENTED_SOURCES = {
-    "click",
-    "critique",
-    "free_text",
     "no_click",
     "onboard",
     "pinterest",
     "re_query",
 }
-_UNIMPLEMENTED_SOURCES: set[str] = set()
+_UNIMPLEMENTED_SOURCES: set[str] = {"click", "critique", "free_text"}
 
 
 @pytest.mark.parametrize("source", sorted(_IMPLEMENTED_SOURCES))

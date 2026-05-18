@@ -12,8 +12,9 @@ import pytest
 from app.agents.tool_registry import REGISTRY, TOOL_NAMES, validate_args
 
 
-def test_registry_has_7_tools():
-    assert len(REGISTRY) == 7
+def test_registry_has_8_tools():
+    # SPEC-AGENT-V2-CLEANUP-001 — suggest_next_step is now unconditional.
+    assert len(REGISTRY) == 8
     expected = {
         "analyze_image",
         "search_products",
@@ -22,6 +23,7 @@ def test_registry_has_7_tools():
         "ask_user_clarification",
         "get_recent_history",
         "respond",
+        "suggest_next_step",
     }
     assert set(TOOL_NAMES) == expected
 

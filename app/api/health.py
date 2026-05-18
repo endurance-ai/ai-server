@@ -48,10 +48,11 @@ async def health_ready() -> ORJSONResponse:
     # SPEC-MEMORY-001 REQ-MEMORY-HEALTH-001 — surface active memory backend
     memory_backend = "postgres" if isinstance(get_store(), PostgresSessionStore) else "in_memory"
 
-    # SPEC-AGENT-V2-REACT / REQ-AGENT-COMPAT-FLAG-001 — surface agent v2 flag
-    # and whether AGENT_LLM_MODEL is configured (effective gate).
+    # SPEC-AGENT-V2-CLEANUP-001 — the ReAct agent is the permanent topology.
+    # The only remaining effective gate is whether AGENT_LLM_MODEL is set
+    # (fail-closed in llm_client when empty).
     agent_llm_model_configured = bool(settings.AGENT_LLM_MODEL.strip())
-    agent_v2_react_effective = bool(settings.AGENT_V2_REACT_ENABLED and agent_llm_model_configured)
+    agent_v2_react_effective = agent_llm_model_configured
 
     return ORJSONResponse(
         status_code=status_code,

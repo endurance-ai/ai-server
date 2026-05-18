@@ -14,8 +14,6 @@ Covers:
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from app.channels import vision as vision_module
@@ -252,18 +250,15 @@ class TestWeakVisionV2:
 
         assert _is_weak_vision_v2(_make_strong_item()) is False
 
-    def test_rule_1_non_apparel_routes_to_respond(self):
-        from app.graphs.routing import _route_after_vision
-        from app.graphs.state import WorkingState
+    def test_rule_1_non_apparel_item_is_weak(self):
+        # SPEC-AGENT-V2-CLEANUP-001 — the V1 `_route_after_vision` orchestration
+        # was removed (non-apparel now routes to the `agent` node via the
+        # inline `_route_after_vision_v2` closure in fashion_bot.py). The
+        # preserved, independently-testable contract is the weak-vision
+        # predicate: a non-apparel / empty item is weak.
+        from app.graphs.routing import _is_weak_vision_v2
 
-        state = SimpleNamespace(
-            vision_result=VisionResult(isApparel=False, items=[]),
-            detected_items=[],
-        )
-        # _route_after_vision reads attributes, so SimpleNamespace works.
-        assert _route_after_vision(state) == "respond"
-        # Sanity check: WorkingState compatibility (skip — needs a full message)
-        _ = WorkingState
+        assert _is_weak_vision_v2(None) is True
 
     def test_rule_2_empty_subcategory_fires(self):
         from app.graphs.routing import _is_weak_vision_v2
