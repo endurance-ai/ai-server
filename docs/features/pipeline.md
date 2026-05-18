@@ -1,8 +1,8 @@
 # 추천 파이프라인
 
-> `POST /recommend` 의 단일 진입점. Phase A(Qdrant) 폐기 후 v5 (Modal embed + Supabase RPC) 로 재구현.
+> `POST /recommend` 의 단일 진입점. Phase A(Qdrant) 폐기 후 v6 (Modal embed + dev-app Postgres RPC) 로 운영 중 (SPEC-SEARCH-V6-001).
 >
-> **SPEC-MSG-001 + SPEC-AGENT-001 (+ SPEC-AGENTIC-CRITIQUE-001)**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. 채널 경로는 `webhook → app/graphs/ (LangGraph StateGraph 12 nodes) → search_node → RecommendationPort → PipelineRecommendationPort → runner → evaluator_node → (재시도 시 search_node로 회귀 / 통과 시 send_results)` 순 — graph 의 `search_node` 는 `RecommendationPort` Protocol만 참조하며 `pipeline.runner` 직접 import 없음. `POST /recommend` 는 Next.js 전용 진입점이며 evaluator 루프를 거치지 않음.
+> **SPEC-MSG-001 + SPEC-AGENT-001**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. `POST /recommend` 는 현재 운영 미사용 (kikoai/app이 자체 v6 경로로 이전) — 코드·파이프라인은 그대로 존재하며 동일 `search_products_v6` RPC 를 사용.
 
 ## 데이터 흐름
 
@@ -19,7 +19,7 @@ flowchart TD
     EMBED --> SEARCH
     ENHANCE --> SEARCH
 
-    SEARCH["search_step<br/>Supabase RPC search_products_v5<br/>(query_text = enhanced_ko if status=ok else raw)"]
+    SEARCH["search_step<br/>v6 RPC search_products_v6<br/>(embedding-first; no query_text param)"]
     SEARCH --> DIVERSIFY
 
     DIVERSIFY["diversify_step<br/>brand cap + platform cap + tolerance"]
@@ -80,7 +80,9 @@ state.embedding = await EmbedProvider.embed_image_url(state.request.image_url)
 
 ### 1.5 `enhance_query_step` — `app/pipeline/enhance_query.py` (SPEC-PIPELINE-001)
 
-LLM(LiteLLM 프록시 경유 gpt-4o-mini)으로 raw `search_query` / `search_query_ko` 를 pgroonga BM25 친화적인 정제 쿼리로 변환한다. `embed_step` 과 `asyncio.gather` 로 병렬 실행 (PIPELINE_PARALLEL_ENABLED=true 기본).
+LLM(LiteLLM 프록시 경유 gpt-4o-mini)으로 raw `search_query` / `search_query_ko` 를 정제 쿼리로 변환한다. `embed_step` 과 `asyncio.gather` 로 병렬 실행 (PIPELINE_PARALLEL_ENABLED=true 기본).
+
+> **SPEC-SEARCH-V6-001**: v6 는 embedding-first — `search_products_v6` 에 text 파라미터가 없으므로 enhance_query_step 의 출력은 RPC 로 전달되지 않는다. 모듈은 휴면 상태로 보존 (flag=off 기본 그대로).
 
 | 항목 | 값 |
 |------|---|
@@ -93,27 +95,26 @@ LLM(LiteLLM 프록시 경유 gpt-4o-mini)으로 raw `search_query` / `search_que
 
 ### 2. `search_step` — `app/pipeline/search.py` (thin shim → `app/services/search_service.py` + `app/infrastructure/repositories/search_repository.py`)
 
-> **SPEC-ARCH-AI-001**: RPC 이름(`"search_products_v5"`)과 파라미터 빌드는 `SearchRepository`에 단일 소스. 응답 행은 `SearchRpcRowContract`로 검증 — 드리프트 시 `RpcContractError` + 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006). 외부 행동 byte-identical.
+> **SPEC-ARCH-AI-001 + SPEC-SEARCH-V6-001**: RPC 이름(`"search_products_v6"`)과 파라미터 빌드는 `SearchRepository`에 단일 소스. 응답 행은 `SearchRpcRowContract`로 검증 — 드리프트 시 `RpcContractError` + 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006).
 
 ```python
-rows = await SupabaseProvider.rpc("search_products_v5", {
-    "query_embedding": _embedding_to_pgvector(state.embedding),
-    "query_text": state.enhanced_query_ko if state.enhance_query_status == "ok" else (req.item.search_query_ko or req.item.search_query),
-    "brand_filter": req.brand_filter,
-    "gender_filter": [req.gender] if req.gender else None,
-    "subcategory_filter": req.item.subcategory,
-    "price_min": ...,
-    "price_max": ...,
-    "k": 50, "rrf_k": 60,
+rows = await SupabaseProvider.rpc("search_products_v6", {
+    "query_embedding": embedding_to_pgvector(state.embedding),
+    "p_style_node_id": None,
+    "p_category": to_canonical_family(req.item.category),  # 20-token canonical family
+    "p_subcategory": None,   # products.subcategory 100% NULL
+    "p_brand_names": req.brand_filter,
+    "p_limit": 50,
 })
 ```
 
 | 항목 | 값 |
 |------|---|
-| RPC | `search_products_v5` (`kikoai/app/supabase/migrations/030_search_products_v5.sql`) |
-| 알고리즘 | dense (HNSW pgvector) + sparse (pgroonga BM25) + RRF |
-| top-K | 50 |
-| 응답 | `dense_rank`, `sparse_rank`, `dense_score`, `sparse_score`, `score` (RRF) |
+| RPC | `search_products_v6` |
+| 알고리즘 | embedding-first cosine distance ASC (pgroonga/RRF 제거됨) |
+| top-K | 50 (`SEARCH_DEFAULT_K`) |
+| 응답 | `distance` (cosine, ASC=better), `degraded` (bool). `score`/`dense_rank`/`sparse_rank` REMOVED |
+| text path | `EmbedProvider.embed_text(text_query)` → Modal `POST /embed/text` (zero-dense stopgap 제거됨) |
 
 상세: [`search-engine.md`](search-engine.md).
 

@@ -1,16 +1,21 @@
-"""SPEC-AGENT-V2-REACT — search_products / refine_search text-vs-image routing.
+"""SPEC-AGENT-V2-REACT — search_products / refine_search text-vs-image routing
+(v6-migrated by SPEC-SEARCH-V6-001).
 
 Regression guard for the "always 0 results" root bug: the tool used to
 HARD-REQUIRE an image_url, so the LLM fabricated placeholder URLs that Modal
-embedded → vector search missed the whole 78k catalog. The fix:
+embedded → vector search missed the whole catalog. The fix:
 
 - LLM can no longer supply image_url (removed from SearchProductsArgs).
-- Text-only path routes to search_step + diversify_step with a zero dense
-  vector (no Modal call, sentinel URL never reaches Modal).
+- Text-only path routes to search_step + diversify_step with a REAL text
+  embedding from EmbedProvider.embed_text (v6 embedding-first; the old
+  zero-dense + pgroonga sparse trick is gone — pgroonga/v5 were dropped).
+  embed_step (image path) is still bypassed; the sentinel URL never reaches
+  Modal.
 - Photo path uses the real ctx image via run_pipeline.
 - No text + no image → clean ``no_query`` error.
 
-Pipeline internals are monkeypatched so these run offline in CI.
+Pipeline internals are monkeypatched so these run offline in CI. embed_text
+is monkeypatched the same way embed_image_url is (seam parity).
 """
 
 from __future__ import annotations
@@ -19,6 +24,25 @@ import pytest
 
 import app.agents.tools.search_products as sp
 from app.agents.tool_registry import SearchProductsArgs, validate_args
+
+# Fixed text embedding dim for the v6 text-only path (mirrors embed_image_url
+# mock parity; the real Modal /embed/text returns 768).
+_TEXT_EMBED_DIM = 768
+
+
+@pytest.fixture(autouse=True)
+def _mock_embed_text(monkeypatch):
+    """v6 text-only path calls EmbedProvider.embed_text before search_step.
+    Patch it (via the app.pipeline.embed re-export seam, same as
+    embed_image_url) to a fixed non-zero 768-vec so no Modal call happens.
+    """
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "app.pipeline.embed.EmbedProvider.embed_text",
+        AsyncMock(return_value=[0.1] * _TEXT_EMBED_DIM),
+    )
+
 
 # ── LLM schema no longer exposes image_url ─────────────────────────────────
 
@@ -84,20 +108,22 @@ async def test_text_only_uses_search_step_not_run_pipeline(monkeypatch):
     assert res["ok"] is True
     assert res["candidates_count"] == 1
     assert res["top_candidates"][0]["title"] == "Leather Loafer"  # name → title fallback
-    # Zero dense vector injected; sentinel set; never the LLM/placeholder.
-    assert calls["embedding_len"] == sp._EMBED_DIM
+    # Real text embedding injected (v6); sentinel set; never LLM/placeholder.
+    assert calls["embedding_len"] == _TEXT_EMBED_DIM
     assert calls["search_query"] == "leather loafers"
     assert calls["image_url"] == sp._TEXT_ONLY_SENTINEL
 
 
 @pytest.mark.asyncio
 async def test_sentinel_never_sent_to_modal(monkeypatch):
-    """embed_step is bypassed — the sentinel URL must never hit Modal."""
+    """embed_step (image path) is bypassed — the sentinel URL must never hit
+    Modal's image embed. The v6 text path uses embed_text (text only), so
+    embed_image_url is never invoked."""
     embed_calls: list[str] = []
 
     async def spy_embed(image_url: str):
         embed_calls.append(image_url)
-        return [0.1] * sp._EMBED_DIM
+        return [0.1] * _TEXT_EMBED_DIM
 
     async def fake_search_step(state):
         state.raw_candidates = [{"id": "p1", "name": "X", "brand": "B"}]
@@ -113,7 +139,7 @@ async def test_sentinel_never_sent_to_modal(monkeypatch):
 
     res = await sp.dispatch({"text_query": "denim jeans"}, {"chat_id": 1, "image_url": ""})
     assert res["ok"] is True
-    assert embed_calls == []  # Modal embed never invoked on text-only path
+    assert embed_calls == []  # Modal IMAGE embed never invoked on text-only path
 
 
 # ── Photo-pick path: real ctx image → run_pipeline with the REAL url ───────
@@ -176,66 +202,39 @@ async def test_text_query_alone_is_sufficient(monkeypatch):
 # ── refine_search: was image-mandatory (sent "" to Modal) — now text-only ──
 
 
-# ── STOPGAP: zero-dense noise suppression on the zero-sentinel text path ───
+# ── v6: text path uses a REAL embedding — NO zero-dense suppression ────────
 #
-# Live-log root cause: a constant zero-dense item (dense_rank set, no sparse
-# match) ranked #1 for EVERY unrelated text query. RRF gives the zero vector's
-# deterministic pgvector ranking a real fusion score, so it pollutes the top
-# instead of sinking. Stopgap: drop pure-dense rows before diversify on the
-# zero-sentinel path ONLY. The image path (run_pipeline) is unaffected.
+# SPEC-SEARCH-V6-001 retired the zero-dense stopgap (_is_zero_dense_noise /
+# _suppress_zero_dense_noise / the zero-vector injection). Its sole
+# precondition was a zero query vector (the old v5+pgroonga text trick). v6 is
+# embedding-first: the text path sends a REAL embed_text() vector, so v6 rows
+# (distance ASC, degraded) flow through unfiltered — the RPC ordering already
+# places relevant rows on top. These tests pin the NEW v6 behavior (same
+# safety intent: text-path rows are not dropped / not zero-vector-polluted).
 
-# Mixed RPC rows for a "black shorts" style query. Only p1 is the genuine
-# pgroonga hit (sparse_rank set); p2 is dense+sparse (both → keep); p3/p4 are
-# pure zero-dense pollution (dense_rank set, sparse_rank None → drop).
+# v6 RPC rows for a "black shorts" style query — distance ASC (min=best),
+# degraded flag, no score/dense_rank/sparse_rank. All flow through unfiltered.
 _BLACK_SHORTS_ROWS = [
-    {
-        "id": "e640f7d4",
-        "name": "Auralee Herringbone Shirt",
-        "brand": "Auralee",
-        "score": 0.0164,
-        "dense_rank": 1,
-        "sparse_rank": None,
-    },  # zero-noise #1 in prod
-    {
-        "id": "p1",
-        "name": "Black Cotton Shorts",
-        "brand": "Uniqlo",
-        "score": 0.0150,
-        "dense_rank": None,
-        "sparse_rank": 1,
-    },  # real sparse hit
-    {
-        "id": "p2",
-        "name": "Black Cargo Shorts",
-        "brand": "Stussy",
-        "score": 0.0140,
-        "dense_rank": 7,
-        "sparse_rank": 3,
-    },  # both → keep
-    {
-        "id": "p3",
-        "name": "Beige Linen Coat",
-        "brand": "Lemaire",
-        "score": 0.0130,
-        "dense_rank": 2,
-        "sparse_rank": None,
-    },  # zero-noise
+    {"id": 1, "name": "Black Cotton Shorts", "brand": "Uniqlo", "distance": 0.10, "degraded": False},
+    {"id": 2, "name": "Black Cargo Shorts", "brand": "Stussy", "distance": 0.14, "degraded": False},
+    {"id": 3, "name": "Black Linen Shorts", "brand": "Lemaire", "distance": 0.19, "degraded": True},
 ]
 
 
 @pytest.mark.asyncio
-async def test_zero_sentinel_text_path_drops_dense_only_keeps_sparse(monkeypatch):
-    """(a) Zero-sentinel text path drops dense_rank!=None & sparse_rank==None
-    rows and keeps sparse-only + both."""
+async def test_v6_text_path_uses_real_embedding_no_suppression(monkeypatch):
+    """v6 text path injects a REAL (non-zero) embed_text() vector and does NOT
+    drop any rows — every v6 row flows through to diversify in RPC order."""
     seen: dict[str, object] = {}
 
     async def fake_search_step(state):
+        # Real embedding (the autouse _mock_embed_text returns [0.1]*768).
         seen["embedding_all_zero"] = not any(state.embedding or [1])
+        seen["embedding_len"] = len(state.embedding or [])
         state.raw_candidates = [dict(r) for r in _BLACK_SHORTS_ROWS]
         return state
 
     async def fake_diversify_step(state):
-        # diversify reads raw_candidates; we surface what survived the filter.
         state.final_candidates = list(state.raw_candidates)
         return state
 
@@ -245,31 +244,29 @@ async def test_zero_sentinel_text_path_drops_dense_only_keeps_sparse(monkeypatch
     res = await sp.dispatch({"text_query": "black shorts"}, {"chat_id": 1, "image_url": ""})
 
     assert res["ok"] is True
-    assert seen["embedding_all_zero"] is True  # zero sentinel confirmed
-    # 4 rows in → 2 zero-noise dropped (Auralee shirt, Lemaire coat) → 2 kept.
-    assert res["candidates_count"] == 2
-    kept_ids = {c["product_id"] for c in res["top_candidates"]}
-    assert kept_ids == {"p1", "p2"}  # sparse-only + both survive
-    assert "e640f7d4" not in kept_ids  # the prod #1 zero-noise is gone
+    assert seen["embedding_all_zero"] is False  # REAL embedding, not zero
+    assert seen["embedding_len"] == _TEXT_EMBED_DIM
+    # All 3 v6 rows survive (no suppression) in RPC distance-ASC order.
+    assert res["candidates_count"] == 3
+    kept_ids = [c["product_id"] for c in res["top_candidates"]]
+    assert kept_ids == [1, 2, 3]
 
 
-def test_is_zero_dense_noise_predicate():
-    assert sp._is_zero_dense_noise({"dense_rank": 1, "sparse_rank": None}) is True
-    assert sp._is_zero_dense_noise({"dense_rank": None, "sparse_rank": 2}) is False  # sparse-only
-    assert sp._is_zero_dense_noise({"dense_rank": 3, "sparse_rank": 4}) is False  # both
-    assert sp._is_zero_dense_noise({"dense_rank": None, "sparse_rank": None}) is False
-    assert sp._is_zero_dense_noise("not-a-dict") is False
+def test_zero_dense_stopgap_removed():
+    """The zero-dense stopgap helpers are deleted under v6 (their precondition
+    — a zero query vector — no longer exists; v6 is embedding-first)."""
+    assert not hasattr(sp, "_is_zero_dense_noise")
+    assert not hasattr(sp, "_suppress_zero_dense_noise")
+    assert not hasattr(sp, "_EMBED_DIM")
 
 
 @pytest.mark.asyncio
-async def test_image_path_real_embedding_is_unaffected_by_suppression(monkeypatch):
-    """(b) A real (non-zero) embedding path is UNAFFECTED — run_pipeline owns
-    ranking; the dense-only suppression must NOT trigger there."""
+async def test_image_path_unaffected_by_v6_text_path(monkeypatch):
+    """The image path still routes to run_pipeline (v6 image embedding) and is
+    entirely separate from the text path — search_step is never entered."""
     captured: dict[str, object] = {}
 
     class FakeResp:
-        # Same shape that would be zero-noise on the text path: dense-only.
-        # On the IMAGE path dense is meaningful → these MUST all be kept.
         results = [
             type("C", (), {"id": "img1", "name": "Wool Coat", "brand": "A", "price": 200})(),
             type("C", (), {"id": "img2", "name": "Wool Scarf", "brand": "A", "price": 50})(),
@@ -290,7 +287,6 @@ async def test_image_path_real_embedding_is_unaffected_by_suppression(monkeypatc
 
     assert res["ok"] is True
     assert captured["image_url"] == real
-    # BOTH results survive — suppression never runs on the image path.
     assert res["candidates_count"] == 2
 
 

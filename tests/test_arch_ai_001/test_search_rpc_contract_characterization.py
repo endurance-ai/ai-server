@@ -1,9 +1,31 @@
-"""Net (3) -- SupabaseProvider.rpc("search_products_v5", ...) param mapping.
+"""Net (3) -- SupabaseProvider.rpc("search_products_v6", ...) param mapping
+(re-pointed by SPEC-SEARCH-V6-001).
 
-Locks the FULL params dict that app.pipeline.search.search_step passes to the
+Locks the FULL params dict app.pipeline.search.search_step passes to the v6
 RPC, byte-for-byte, including the `:.7f` pgvector string. This is the anchor
-for SPEC-ARCH-AI-001 REQ-AI-002 (the hardcoded RPC name + param mapping moves
-into SearchRepository; this net proves the move is byte-identical).
+for REQ-AI-002 (the hardcoded RPC name + param mapping lives in
+SearchRepository).
+
+The v5 byte-identity subject is legitimately retired (v5 + pgroonga +
+product_search_text dropped — SPEC-SEARCH-V6-001). The SAME safety intent — a
+locked param snapshot guarding against silent param drift — is preserved
+against the NEW v6 6-key shape (mirrors how kikoai/app retired its own v5
+byte-identity net while keeping the equivalent v6 guard).
+
+v6 is embedding-first: query_embedding is the sole ranking signal, plus
+NULL style-node, the CANONICAL FAMILY `p_category` (SPEC-SEARCH-V6-001
+re-point), NULL subcategory, an optional brand-name list, and the limit.
+There is no query_text / price / gender / subcategory / tags / rrf_k param
+(those were dropped with v5).
+
+SPEC-SEARCH-V6-001 family-gate re-point: `p_category` is no longer the v5/v6
+literal `None`. The v6 FILTER 2 canonical family gate now receives
+`to_canonical_family(item.category)`. The `_req()` item is `category="top"`,
+which the single-source Vision-alias map normalizes to the canonical token
+`"tops"`. The snapshot is re-pointed from `None` → `"tops"` accordingly (the
+SAME locked-snapshot safety intent, now anchored to the v6 family-gate
+value). `p_subcategory` stays `None` (products.subcategory is 100% NULL
+repo-wide — narrowing is a guaranteed no-op).
 """
 
 from __future__ import annotations
@@ -45,67 +67,62 @@ async def _capture_params(req: RecommendRequest, fixed_embed, rpc_capture) -> tu
     return rpc_capture.calls[0]
 
 
-# ── (a) raw query path (enhance disabled) — search_query_ko wins ───────────
-async def test_characterize_rpc_raw_query_full_params(fixed_embed, rpc_capture):
+# ── (a) v6 6-key param snapshot — embedding-first, no text/price/gender ─────
+async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
     fn_name, params = await _capture_params(_req(), fixed_embed, rpc_capture)
-    assert fn_name == "search_products_v5"
+    assert fn_name == "search_products_v6"
     assert params == {
         "query_embedding": EXPECTED_QUERY_EMBEDDING,
-        "query_text": "베이지 니트 스웨터",
-        "brand_filter": None,
-        "gender_filter": None,
-        "subcategory_filter": None,
-        "price_min": None,
-        "price_max": None,
-        "tags_filter": None,
-        "k": 50,
-        "rrf_k": 60,
+        "p_style_node_id": None,
+        # SPEC-SEARCH-V6-001 re-point: item.category="top" → canonical "tops"
+        # (was None pre-family-gate). v6 FILTER 2 family gate engages.
+        "p_category": "tops",
+        "p_subcategory": None,
+        "p_brand_names": None,
+        "p_limit": 50,
     }
 
 
-# ── (b) price_filter set — price_min / price_max mapping ───────────────────
-async def test_characterize_rpc_price_filter(fixed_embed, rpc_capture):
+# ── (b) price_filter set — DROPPED under v6 (no price param at all) ─────────
+async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture):
     pf = PriceFilter(minPrice=10000, maxPrice=50000)
     fn_name, params = await _capture_params(_req(price_filter=pf), fixed_embed, rpc_capture)
-    assert fn_name == "search_products_v5"
-    assert params["price_min"] == 10000
-    assert params["price_max"] == 50000
-    assert params["query_text"] == "베이지 니트 스웨터"
-    assert params["brand_filter"] is None
-    assert params["k"] == 50 and params["rrf_k"] == 60
+    assert fn_name == "search_products_v6"
+    # v6 has NO price param — price_filter must not leak into the RPC dict.
+    assert "price_min" not in params
+    assert "price_max" not in params
+    assert set(params.keys()) == {
+        "query_embedding",
+        "p_style_node_id",
+        "p_category",
+        "p_subcategory",
+        "p_brand_names",
+        "p_limit",
+    }
 
 
-# ── (c) brand_filter set — passed through verbatim ─────────────────────────
-async def test_characterize_rpc_brand_filter(fixed_embed, rpc_capture):
+# ── (c) brand_filter set — mapped verbatim to p_brand_names ────────────────
+async def test_characterize_rpc_v6_brand_filter(fixed_embed, rpc_capture):
     fn_name, params = await _capture_params(_req(brand_filter=["uniqlo", "cos"]), fixed_embed, rpc_capture)
-    assert params["brand_filter"] == ["uniqlo", "cos"]
-    assert params["gender_filter"] is None
-    assert params["subcategory_filter"] is None
-    assert params["tags_filter"] is None
+    assert params["p_brand_names"] == ["uniqlo", "cos"]
+    assert params["p_style_node_id"] is None
+    # SPEC-SEARCH-V6-001 re-point: item.category="top" → canonical "tops".
+    assert params["p_category"] == "tops"
+    assert params["p_subcategory"] is None
 
 
-# ── (d) query_text 3-tier fallback: ko present vs only en ─────────────────
-async def test_characterize_rpc_query_text_ko_present(fixed_embed, rpc_capture):
+# ── (d) query_text DROPPED — neither ko nor en query reaches the RPC ───────
+async def test_characterize_rpc_v6_no_query_text_param(fixed_embed, rpc_capture):
     _, params = await _capture_params(
         _req(search_query="english only", search_query_ko="한국어 우선"),
         fixed_embed,
         rpc_capture,
     )
-    # search_query_ko wins over search_query when present.
-    assert params["query_text"] == "한국어 우선"
+    # v6 is embedding-first: no text param regardless of the request query.
+    assert "query_text" not in params
 
 
-async def test_characterize_rpc_query_text_en_only(fixed_embed, rpc_capture):
-    _, params = await _capture_params(
-        _req(search_query="english only", search_query_ko=None),
-        fixed_embed,
-        rpc_capture,
-    )
-    # search_query_ko is None -> falls back to search_query.
-    assert params["query_text"] == "english only"
-
-
-async def test_characterize_rpc_query_embedding_exact_format(fixed_embed, rpc_capture):
+async def test_characterize_rpc_v6_query_embedding_exact_format(fixed_embed, rpc_capture):
     """Lock the :.7f pgvector serialization explicitly (arithmetic drift net)."""
     _, params = await _capture_params(_req(), fixed_embed, rpc_capture)
     qe = params["query_embedding"]

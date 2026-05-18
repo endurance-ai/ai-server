@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# A raw RPC row as returned by search_products_v5 (pre-domain-mapping).
+# A raw RPC row as returned by search_products_v6 (pre-domain-mapping).
 RpcRow = dict[str, Any]
 
 # Stage -> count / latency-ms measurement maps (mirrors PipelineState).

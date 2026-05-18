@@ -48,6 +48,24 @@ class EmbedProvider:
         return embedding
 
     @classmethod
+    async def embed_text(cls, text: str) -> list[float]:
+        """단일 텍스트 쿼리 → 768-dim 임베딩 (SPEC-SEARCH-V6-001).
+
+        Modal /embed/text 엔드포인트는 동일한 FashionSigLIP L2 공간을 노출하므로
+        이미지 임베딩과 cross-modal cosine 비교가 유효하다 (v6 embedding-first).
+        Modal 측 응답 스키마: {"embedding": [float, ...], "dim": 768}
+        (embed_image_url 과 동일한 검증/에러 스타일 + 동일 auth header path).
+        """
+        client = cls.get_client()
+        resp = await client.post("/embed/text", json={"text": text})
+        resp.raise_for_status()
+        data = resp.json()
+        embedding = data.get("embedding")
+        if not isinstance(embedding, list) or not embedding:
+            raise ValueError(f"Modal /embed/text unexpected response keys={list(data.keys())}")
+        return embedding
+
+    @classmethod
     async def embed_image_urls(cls, image_urls: list[str]) -> list[list[float]]:
         """여러 이미지 URL → 임베딩 리스트 (배치)."""
         client = cls.get_client()

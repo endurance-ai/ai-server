@@ -1,11 +1,11 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-18 (v1.1.0 — bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등).
+> 마지막 업데이트: 2026-05-18 (v1.2.0 — SPEC-SEARCH-V6-001 v5→v6 마이그레이션 + canonical category family gate).
 
 ## 한 줄 요약
 
-**Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면** — webhook → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v5` RPC (dense HNSW + sparse pgroonga + RRF) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
+**Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면** — webhook → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v6` RPC (embedding-first, cosine distance ASC) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
 
 `kikoai/app`(Next.js)은 현재 web UI + Postgres DB 역할로 축소되어 있다. 과거 IG 이미지 검색용으로 설계된 `POST /recommend` 경로는 코드상 존재하지만 **현재 운영에서 거의 호출되지 않는다.**
 
@@ -16,7 +16,7 @@
 | **Telegram 봇 채널** | Telegram Bot API | 메시지 수신·발신 transport (이 서버에서 블랙박스) |
 | **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
-| 벡터 DB | dev-app Postgres 16 + pgvector + pgroonga | `search_products_v5` RPC, HNSW + BM25 + RRF. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
+| 벡터 DB | dev-app Postgres 16 + pgvector | `search_products_v6` RPC, embedding-first (cosine distance ASC). pgroonga/product_search_text DROPPED. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
 | LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
 | web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
 
@@ -48,7 +48,7 @@ flowchart TB
 
     subgraph Ext["External"]
         MODAL["Modal /embed\nFashionSigLIP T4"]
-        PG[("dev-app Postgres\npgvector + pgroonga\nPostgREST nginx shim\n※ app과 DB만 공유")]
+        PG[("dev-app Postgres\npgvector (v6 embedding-first)\nPostgREST nginx shim\n※ app과 DB만 공유")]
         CONVLOG[("ai.log_conversation_event\n(append-only)")]
         APIFY["Apify Pinterest scraper"]
     end
@@ -66,7 +66,7 @@ flowchart TB
     GRAPH --> PIPE
     PIPE -->|sendMediaGroup / sendMessage| TG_API
     PIPE -->|embed| MODAL
-    PIPE -->|search_products_v5 RPC| PG
+    PIPE -->|search_products_v6 RPC| PG
     PIPE -.LLM.-> LITELLM
     PIPE -.trace.-> LFW
 
@@ -188,9 +188,9 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    INPUT["이미지 URL\n또는 텍스트 쿼리"] --> EMBED["embed_service\nModal /embed\nFashionSigLIP → 512-dim 벡터\n텍스트 입력 시 zero-dense 벡터 ⚠"]
+    INPUT["이미지 URL\n또는 텍스트 쿼리"] --> EMBED["embed_service\nModal /embed (image)\n또는 /embed/text (text query)\nFashionSigLIP → 768-dim 벡터\n(SPEC-SEARCH-V6-001)"]
 
-    EMBED --> SEARCH["search_service\nSearchRepository\nsearch_products_v5 RPC\nPostgREST nginx shim\ndense HNSW + sparse pgroonga + RRF → top-50"]
+    EMBED --> SEARCH["search_service\nSearchRepository\nsearch_products_v6 RPC\nPostgREST nginx shim\nembedding-first, cosine distance ASC → top-50\n+ canonical family gate (p_category)"]
 
     SEARCH --> DIV["diversify_service\n브랜드 max 2 / 플랫폼 max 3\ntolerance 적용 → top-15"]
 
@@ -211,13 +211,11 @@ flowchart LR
     class ALBUM,SUMMARY,FALLBACK result
 ```
 
-> **알려진 제약**: 텍스트 쿼리 시 zero-dense 벡터가 주입되어 pgroonga sparse에만 의존함. zero-dense 행은 억제 로직으로 처리되지만 검색 품질 제한이 있음 (추적 중, 이 문서 범위 밖).
-
-**검색 책임 경계:**
+**검색 책임 경계 (v6 — SPEC-SEARCH-V6-001):**
 
 | 레이어 | 책임 |
 |--------|------|
-| Postgres (`search_products_v5` RPC) | dense (HNSW) + sparse (pgroonga BM25) + RRF → top-K 후보 반환 |
+| Postgres (`search_products_v6` RPC) | embedding-first cosine distance ASC → top-K 후보 반환. FILTER2 canonical family gate (`p_category`). `degraded` flag (style-node filter drop → category-only fallback). pgroonga/RRF DROPPED |
 | Python (`diversify_service.py`) | 브랜드/플랫폼 다양성 캡, tolerance 산술 (banker's rounding), 최종 정렬 |
 
 ### (d) 온보딩 서브그래프 (6 노드)
@@ -256,8 +254,8 @@ flowchart LR
 `app/api/recommend.py`가 제공하는 REST 엔드포인트. `kikoai/app`의 IG 이미지 검색 기능(`/api/find/search`)이 `X-Internal-Token` 헤더를 붙여 AI 서버에 직접 POST하는 경로로 설계되었으나, 현재 `kikoai/app`은 web + DB 역할로 축소되어 **이 경로는 현재 운영에서 거의 호출되지 않는다.** 코드·엔드포인트·파이프라인은 그대로 존재하며, 호출되면 Telegram 봇 플로우와 동일한 `pipeline runner`(embed → search → diversify)를 실행하고 `RecommendResponse`를 JSON으로 반환한다.
 
 ```
-kikoai/app → POST /recommend → pipeline runner → search_products_v5 RPC → RecommendResponse (JSON)
-(현재 운영 미사용)
+kikoai/app → POST /recommend → pipeline runner → search_products_v6 RPC → RecommendResponse (JSON)
+(현재 운영 미사용 — kikoai/app이 자체 v6 경로로 이전)
 ```
 
 ---
@@ -339,13 +337,14 @@ app/
 │       └── ... (노드 역할 표 참고)
 ├── services/                # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001)
 │   ├── embed_service.py     # Modal /embed 래핑
-│   ├── search_service.py    # 검색 오케스트레이션 + query_text 3-tier 선택 + RpcContractError 핸들링
+│   ├── search_service.py    # 검색 오케스트레이션 (v6 embedding-first; query_text RPC 경로 retired) + RpcContractError 핸들링
 │   ├── diversify_service.py # 브랜드/플랫폼 캡 + tolerance (banker's rounding)
 │   └── database_service.py  # SupabaseProvider pass-through
 ├── infrastructure/          # 인프라 레이어
 │   ├── repositories/
-│   │   ├── search_repository.py   # SearchRepository (_RPC_NAME 단일 소스, build_params, search)
-│   │   └── search_rpc_contract.py # SearchRpcRowContract + RpcContractError + validate_rpc_rows
+│   │   ├── category_family.py     # CANONICAL_FAMILIES (20 tokens) + to_canonical_family() — v6 family gate 단일 소스 (SPEC-SEARCH-V6-001)
+│   │   ├── search_repository.py   # SearchRepository (_RPC_NAME="search_products_v6" 단일 소스, build_params 6-key, search)
+│   │   └── search_rpc_contract.py # SearchRpcRowContract (v6: distance+degraded) + RpcContractError + validate_rpc_rows
 │   └── memory/
 │       ├── session.py           # SessionStore Protocol + InMemorySessionStore
 │       ├── session_pg.py        # Postgres 기반 세션 저장소
@@ -437,7 +436,7 @@ app/
 | [`features/search-engine.md`](features/search-engine.md) | v5 RPC + RRF + 다양성 캡 |
 | [`features/observability.md`](features/observability.md) | Langfuse 통합 + 이벤트 로그 |
 | [`infra/env.md`](infra/env.md) | 환경변수 매트릭스 |
-| [`infra/search-rpc-contract.md`](infra/search-rpc-contract.md) | `search_products_v5` RPC 계약 + drift 동작 |
+| [`infra/search-rpc-contract.md`](infra/search-rpc-contract.md) | `search_products_v6` RPC 계약 + drift 동작 (SPEC-SEARCH-V6-001) |
 | [`infra/deployment.md`](infra/deployment.md) | EC2 docker-compose + Modal 배포 |
 | [`infra/cicd.md`](infra/cicd.md) | GitHub Actions + ECR + SSH 파이프라인 |
 
@@ -460,3 +459,4 @@ app/
 | 2026-05-17 | v0.9.0 | SPEC-AGENT-V3-REACT V3 4-Gap 증분 강화 (flag-gated) |
 | 2026-05-18 | **v1.0.0** | **SPEC-AGENT-V2-CLEANUP-001 — V3 ReAct 영구 단일 토폴로지 (V1 18-노드 + 모든 feature flag 제거). 하이브리드 카드 결과 전송 (send_hybrid_batch). ARCHITECTURE.md 전면 재작성.** |
 | 2026-05-18 | **v1.1.0** | **bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등. Telegram 봇이 Vision도 독자 처리함을 명시 (app과 DB만 공유).** |
+| 2026-05-18 | **v1.2.0** | **SPEC-SEARCH-V6-001 — search_products_v5+pgroonga+product_search_text DROPPED → search_products_v6 (embedding-first, distance ASC, p_category canonical family gate). EmbedProvider.embed_text() 신규 (text query → Modal /embed/text). zero-dense stopgap 제거. product_ai_analysis 테이블 dead path 제거. category_family.py 신규 (20-token CANONICAL_FAMILIES + to_canonical_family). react_loop._build_ctx 가 vision_category 노출.** |

@@ -177,6 +177,37 @@ def _is_identical(a: dict[str, Any], b: dict[str, Any]) -> bool:
         return False
 
 
+def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
+    """The selected Vision item's garment `category` (the SPEC-VISION-UNIFY-001
+    7-enum value: Outer/Top/Bottom/Shoes/Bag/Dress/Accessories).
+
+    This is the REAL Vision garment category — distinct from
+    `vision_outfit_style_node_primary` (a brand STYLE-NODE letter A–Z, NOT a
+    garment category). Resolution mirrors `_build_user_message`'s pick logic:
+      1. picked multi-item → `_detected_items()[selected_item_index]["category"]`
+         (the dict carries `category` per vision.py:413 → derive_legacy_dict);
+      2. single Vision item → `state.vision_selected_item.category` (the
+         Vision v2 item; falls back to the legacy detected_items[0] dict).
+    Returns None when no Vision item is in play (text-only path) → downstream
+    `to_canonical_family(None)` → `other` → family gate skipped (correct
+    graceful behavior; never fabricate a category).
+    """
+    items = _detected_items(state, sess)
+    idx = state.selected_item_index
+    if idx is not None and isinstance(idx, int) and 0 <= idx < len(items):
+        cat = items[idx].get("category")
+        return str(cat).strip() if cat else None
+    vsi = state.vision_selected_item
+    if vsi is not None:
+        cat = getattr(vsi, "category", None)
+        if cat:
+            return str(cat).strip()
+    if items:
+        cat = items[0].get("category")
+        return str(cat).strip() if cat else None
+    return None
+
+
 def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Tool dispatch context — passed alongside args to every tool."""
     return {
@@ -188,6 +219,10 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         "lang": session_lang(sess),
         "text_query": (state.message.text or "") if state.message else "",
         "style_node_primary": state.vision_outfit_style_node_primary,
+        # SPEC-SEARCH-V6-001 family gate: the REAL Vision garment category
+        # (NOT the style-node letter). `search_products` passes THIS as the
+        # search `category` arg → normalized to a canonical 20-token.
+        "vision_category": _selected_vision_category(state, sess),
     }
 
 

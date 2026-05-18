@@ -1,7 +1,7 @@
 """Demo-mode fixture candidates for POC video shoot.
 
 Activated by `settings.DEMO_MODE=true`. Bypasses Modal/DB and returns these
-hardcoded items as if they came from `search_products_v5`. Same Candidate
+hardcoded items as if they came from `search_products_v6`. Same Candidate
 schema, same downstream send_results rendering — only the data source differs.
 
 Triggered fixture: "약간 핏한 크롭 반팔 티셔츠" (Notion source).

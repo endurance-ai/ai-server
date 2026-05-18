@@ -1,8 +1,12 @@
-"""Integration tests for pipeline with enhance_query (SPEC-PIPELINE-001).
+"""Integration tests for pipeline with enhance_query (SPEC-PIPELINE-001;
+v6-migrated by SPEC-SEARCH-V6-001).
 
 embed_step (Modal) 과 search_step (Supabase RPC) 을 mock 으로 대체해
-runner.run_pipeline 전 경로를 검증한다. search_step 호출 시 query_text 인자를
-capture 해서 enhanced vs raw 사용을 명시 검증한다.
+runner.run_pipeline 전 경로를 검증한다. v6 는 embedding-first 라 RPC 에
+query_text 파라미터가 없다 — enhance_query_step 은 여전히 파이프라인에서
+실행되지만 그 출력은 RPC 로 전달되지 않는다 (모듈은 휴면 상태로 보존).
+따라서 enhanced-vs-raw 분기 검증은 RPC param 이 아니라 enhance_query_step
+호출 횟수 / 응답 정상성으로 확인한다 (v6 param dict 는 6-key 고정).
 """
 
 from __future__ import annotations
@@ -58,17 +62,17 @@ class _RPCCapture:
 
     async def __call__(self, fn_name: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         self.calls.append((fn_name, params))
-        # 다양성 캡 통과 후 1개 정도가 응답에 포함되도록 최소 결과 반환
+        # v6 row shape: distance (cosine, ASC=better) + degraded; no
+        # score/dense_rank/sparse_rank. id is bigint (int).
         return [
             {
-                "id": "p-1",
+                "id": 1,
                 "brand": "uniqlo",
                 "name": "Knit",
-                "score": 0.8,
+                "distance": 0.2,
                 "platform": "shop",
                 "subcategory": "knit",
-                "dense_rank": 1,
-                "sparse_rank": 1,
+                "degraded": False,
             }
         ]
 
@@ -85,29 +89,45 @@ def patch_pipeline(monkeypatch):
     return rpc
 
 
-async def test_pipeline_enhance_ok_uses_refined_query(patch_pipeline, monkeypatch, capsys):
-    """flag=on + LLM 정상 → search_step 이 refined query 로 호출됨."""
+# Expected v6 RPC param dict (the 6 keys). query_embedding is the formatted
+# pgvector string of the mocked image embedding ([0.1]*1024 → ":.7f" each).
+# SPEC-SEARCH-V6-001 family-gate re-point: the request item is category="top",
+# which to_canonical_family normalizes to the canonical token "tops" — so
+# p_category is "tops" (was None pre-family-gate). p_subcategory stays None
+# (products.subcategory is 100% NULL repo-wide → narrowing is a no-op).
+def _expected_v6_params() -> dict[str, Any]:
+    return {
+        "query_embedding": "[" + ",".join(["0.1000000"] * 1024) + "]",
+        "p_style_node_id": None,
+        "p_category": "tops",
+        "p_subcategory": None,
+        "p_brand_names": None,
+        "p_limit": 50,
+    }
+
+
+async def test_pipeline_enhance_ok_v6_params(patch_pipeline, monkeypatch, capsys):
+    """flag=on + LLM 정상 → v6 RPC 가 6-key param dict 로 호출됨 (query_text
+    파라미터 없음; enhance 출력은 RPC 로 전달되지 않음)."""
     from app.core.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "ENHANCE_QUERY_ENABLED", True)
-    monkeypatch.setattr(
-        "app.pipeline.enhance_query.LLMProvider.chat",
-        AsyncMock(return_value=_ok_chat_response()),
-    )
+    chat_mock = AsyncMock(return_value=_ok_chat_response())
+    monkeypatch.setattr("app.pipeline.enhance_query.LLMProvider.chat", chat_mock)
 
     resp = await run_pipeline(_build_request())
 
-    # search_step 이 refined_ko 를 받았어야 함
     assert len(patch_pipeline.calls) == 1
     fn_name, params = patch_pipeline.calls[0]
-    assert fn_name == "search_products_v5"
-    assert params["query_text"] == "베이지 오버사이즈 니트 스웨터"
-    # 응답 정상
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()
+    assert "query_text" not in params  # v6 has no text param
     assert resp.item_id == "item-1"
 
 
-async def test_pipeline_enhance_fallback_uses_raw_query(patch_pipeline, monkeypatch):
-    """flag=on + LLM 타임아웃 → search_step 이 raw search_query_ko 로 호출됨."""
+async def test_pipeline_enhance_fallback_still_v6_params(patch_pipeline, monkeypatch):
+    """flag=on + LLM 타임아웃 → enhance fallback 되어도 v6 param dict 동일
+    (enhance 출력이 RPC 에 영향을 주지 않음)."""
     from app.core.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "ENHANCE_QUERY_ENABLED", True)
@@ -119,12 +139,13 @@ async def test_pipeline_enhance_fallback_uses_raw_query(patch_pipeline, monkeypa
     resp = await run_pipeline(_build_request())
 
     fn_name, params = patch_pipeline.calls[0]
-    assert params["query_text"] == "베이지색 오버사이즈 니트 스웨터 가을 데일리룩"
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()
     assert resp.item_id == "item-1"
 
 
-async def test_pipeline_enhance_disabled_uses_raw_query(patch_pipeline, monkeypatch):
-    """flag=off → LLM 호출 0회, search_step 이 raw 사용."""
+async def test_pipeline_enhance_disabled_no_llm_call(patch_pipeline, monkeypatch):
+    """flag=off → LLM 호출 0회, v6 param dict 동일."""
     from app.core.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "ENHANCE_QUERY_ENABLED", False)
@@ -135,7 +156,8 @@ async def test_pipeline_enhance_disabled_uses_raw_query(patch_pipeline, monkeypa
 
     assert chat_mock.await_count == 0
     fn_name, params = patch_pipeline.calls[0]
-    assert params["query_text"] == "베이지색 오버사이즈 니트 스웨터 가을 데일리룩"
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()
 
 
 async def test_pipeline_parallel_enhance_exception_isolated(patch_pipeline, monkeypatch):
@@ -154,10 +176,11 @@ async def test_pipeline_parallel_enhance_exception_isolated(patch_pipeline, monk
 
     resp = await run_pipeline(_build_request())
 
-    # raw 쿼리로 fallback 되어 search 호출됨
+    # enhance 측 예외가 격리되어도 v6 search 정상 호출 + 200 OK
     assert resp.item_id == "item-1"
     fn_name, params = patch_pipeline.calls[0]
-    assert params["query_text"] == "베이지색 오버사이즈 니트 스웨터 가을 데일리룩"
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()
 
 
 async def test_pipeline_sequential_mode(patch_pipeline, monkeypatch):
@@ -174,12 +197,14 @@ async def test_pipeline_sequential_mode(patch_pipeline, monkeypatch):
     resp = await run_pipeline(_build_request())
 
     fn_name, params = patch_pipeline.calls[0]
-    assert params["query_text"] == "베이지 오버사이즈 니트 스웨터"
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()
     assert resp.item_id == "item-1"
 
 
 async def test_pipeline_skipped_empty_query(patch_pipeline, monkeypatch):
-    """search_query 양쪽 모두 빈 문자열 → status=skipped, raw(빈) 쿼리로 search 호출."""
+    """search_query 양쪽 모두 빈 문자열 → enhance skip (LLM 0회), v6 param 동일
+    (v6 는 query_text 가 없으므로 빈 쿼리도 RPC param 에 영향 없음)."""
     from app.core.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "ENHANCE_QUERY_ENABLED", True)
@@ -191,5 +216,5 @@ async def test_pipeline_skipped_empty_query(patch_pipeline, monkeypatch):
 
     assert chat_mock.await_count == 0
     fn_name, params = patch_pipeline.calls[0]
-    # raw search_query_ko ("") or search_query ("") → 빈 문자열
-    assert params["query_text"] == ""
+    assert fn_name == "search_products_v6"
+    assert params == _expected_v6_params()

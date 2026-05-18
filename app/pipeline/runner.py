@@ -66,6 +66,9 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
         state.latency_ms,
     )
 
+    # v6 rows carry `distance` (cosine, ASC=better) instead of score/ranks.
+    # score = 1.0 - distance preserves the downstream "higher=better, RPC
+    # order" semantics; absent distance → 1.0 → score 0.0 (SPEC-SEARCH-V6-001).
     results = [
         Candidate(
             id=str(c["id"]),
@@ -76,9 +79,9 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
             product_url=c.get("product_url"),
             platform=c.get("platform"),
             subcategory=c.get("subcategory"),
-            score=float(c.get("score", 0.0)),
-            dense_rank=c.get("dense_rank"),
-            sparse_rank=c.get("sparse_rank"),
+            score=float(1.0 - c.get("distance", 1.0)),
+            dense_rank=None,
+            sparse_rank=None,
         )
         for c in state.final_candidates
     ]

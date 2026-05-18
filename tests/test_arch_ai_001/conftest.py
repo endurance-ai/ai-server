@@ -1,12 +1,15 @@
-"""Shared characterization fixtures for SPEC-ARCH-AI-001 PRESERVE net.
+"""Shared characterization fixtures for SPEC-ARCH-AI-001 PRESERVE net
+(v6-migrated by SPEC-SEARCH-V6-001).
 
 Reuses the proven monkeypatch seams from tests/test_pipeline_with_enhance.py:
 - app.pipeline.embed.EmbedProvider.embed_image_url  (AsyncMock fixed vector)
+- app.pipeline.embed.EmbedProvider.embed_text       (AsyncMock fixed vector —
+  v6 text-only path; same seam parity as embed_image_url)
 - app.pipeline.search.SupabaseProvider.rpc          (capture/stub callable)
 
 The embedding vector is intentionally [0.1234567] * 768 so that the pgvector
-`:.7f` formatting in app.pipeline.search._embedding_to_pgvector is exercised
-(0.1234567 -> "0.1234567" with no rounding/padding drift).
+`:.7f` formatting in embedding_to_pgvector is exercised (0.1234567 ->
+"0.1234567" with no rounding/padding drift).
 """
 
 from __future__ import annotations
@@ -40,9 +43,14 @@ class RPCCapture:
 
 @pytest.fixture
 def fixed_embed(monkeypatch):
-    """Patch EmbedProvider.embed_image_url -> fixed 768-dim vector."""
+    """Patch EmbedProvider.embed_image_url AND embed_text -> fixed 768-dim
+    vector (v6 text-only path uses embed_text; same seam parity)."""
     monkeypatch.setattr(
         "app.pipeline.embed.EmbedProvider.embed_image_url",
+        AsyncMock(return_value=list(FIXED_EMBEDDING)),
+    )
+    monkeypatch.setattr(
+        "app.pipeline.embed.EmbedProvider.embed_text",
         AsyncMock(return_value=list(FIXED_EMBEDDING)),
     )
     return list(FIXED_EMBEDDING)

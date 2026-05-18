@@ -48,7 +48,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     min_price = None if args.get("drop_min_price") else args.get("min_price")
 
     try:
-        category = ctx.get("style_node_primary")
+        # SPEC-SEARCH-V6-001 family-gate plumbing fix (mirrors search_products):
+        # the search `category` is the REAL Vision garment category from ctx
+        # (`vision_category`), NOT the brand style-node letter. Sharing the
+        # same run_image_search/run_text_only_search, the same fix applies so
+        # refine turns also engage the canonical family gate.
+        category = ctx.get("vision_category")
         fit = ctx.get("fit")
         color_family = args.get("color") or ctx.get("color_family")
         if has_image:

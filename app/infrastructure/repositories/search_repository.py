@@ -1,22 +1,25 @@
-"""Search repository (SPEC-ARCH-AI-001 PR2, REQ-AI-002).
+"""Search repository (SPEC-ARCH-AI-001 PR2, REQ-AI-002 + SPEC-SEARCH-V6-001).
 
-Encapsulates the `search_products_v5` RPC call. The hardcoded RPC name and
-the full parameter-dict mapping now live HERE in exactly one place
-(previously inline in app/pipeline/search.py:54, then app/services/
-search_service.py). Business code (search_service) no longer references the
-RPC name or constructs the param dict.
+Encapsulates the `search_products_v6` RPC call (migrated from the dropped
+`search_products_v5` — see SPEC-SEARCH-V6-001). The hardcoded RPC name and
+the full parameter-dict mapping live HERE in exactly one place. Business code
+(search_service) no longer references the RPC name or constructs the param
+dict.
 
-[HARD] Behavior byte-identical (REQ-AI-007): the param dict this builds and
-the fn_name it passes are identical to the pre-extraction values; the
-characterization Net(3) param snapshot is unchanged.
+v6 is embedding-first: `query_embedding` is the sole ranking signal (the RPC
+already returns rows ordered by `distance` ASC). There is no text/sparse
+param, no price param, no gender/subcategory param — those were dropped with
+v5 + pgroonga + product_search_text. The characterization Net(3) param
+snapshot is re-pointed to the NEW v6 6-key shape (the v5 byte-identity net
+subject is legitimately retired with SPEC basis; the SAME safety intent — a
+locked param snapshot — is preserved against v6).
 
 Patch-seam preservation: the RPC is dispatched through DatabaseService
-(SPEC-ARCH-AI-001 PR1 DI seam, now wired -- review P1-b). DatabaseService
-resolves the `SupabaseProvider` CLASS attribute at call time; the existing
-monkeypatch seam (`app.pipeline.search.SupabaseProvider.rpc`) mutates that
-same shared class object, so the characterization net and
-tests/test_pipeline_with_enhance.py keep intercepting byte-identically.
-PR3 (REQ-AI-003) introduces full DI; relocating the seam is out of scope.
+(SPEC-ARCH-AI-001 PR1 DI seam). DatabaseService resolves the
+`SupabaseProvider` CLASS attribute at call time; the existing monkeypatch
+seam (`app.pipeline.search.SupabaseProvider.rpc`) mutates that same shared
+class object, so the characterization net and
+tests/test_pipeline_with_enhance.py keep intercepting.
 """
 
 from __future__ import annotations
@@ -25,13 +28,14 @@ import logging
 from typing import Any
 
 from app.core.config import settings
+from app.infrastructure.repositories.category_family import to_canonical_family
 from app.infrastructure.repositories.search_rpc_contract import validate_rpc_rows
 
 logger = logging.getLogger(__name__)
 
 # The single source of truth for the search RPC name (REQ-AI-002). v6 swaps
-# the repository, not scattered string literals.
-_RPC_NAME = "search_products_v5"
+# the repository, not scattered string literals (SPEC-SEARCH-V6-001).
+_RPC_NAME = "search_products_v6"
 
 
 def embedding_to_pgvector(values: list[float]) -> str:
@@ -40,40 +44,62 @@ def embedding_to_pgvector(values: list[float]) -> str:
 
 
 class SearchRepository:
-    """Wraps the `search_products_v5` RPC. Sole owner of the RPC name +
-    param mapping (REQ-AI-002)."""
+    """Wraps the `search_products_v6` RPC. Sole owner of the RPC name +
+    param mapping (REQ-AI-002, SPEC-SEARCH-V6-001)."""
 
     @staticmethod
     def build_params(
         *,
         embedding: list[float],
-        query_text: str,
         brand_filter: list[str] | None,
-        price_min: int | None,
-        price_max: int | None,
+        category: str | None = None,
     ) -> dict[str, Any]:
-        """Construct the `search_products_v5` RPC param dict. This mapping
-        exists ONLY here (byte-identical to the pre-PR2 inline dict)."""
+        """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
+
+        Rationale for the exact key set:
+          - v6 is embedding-first: `query_embedding` is the SOLE ranking
+            signal (the RPC returns rows already ordered by `distance` ASC).
+            No text/sparse param exists (v5 + pgroonga + product_search_text
+            were dropped) → query_text retired.
+          - `p_category` is the v6 FILTER 2 canonical FAMILY gate. The raw
+            `category` (Vision value / app value / None) is normalized via
+            `to_canonical_family` to exactly one of the 20 canonical lowercase
+            tokens — `other` when there is no apparel match. This always
+            satisfies the v6 contract ("`p_category` must be exactly one
+            lowercase token") AND the intentional gate-skip behavior (`other`
+            → family gate skipped → graceful cosine-only degrade). The
+            normalization map is the single source in
+            app/infrastructure/repositories/category_family.py (vision_prompt.py
+            is the SPEC-VISION-UNIFY-001 frozen mirror — NOT edited).
+          - `p_subcategory` is ALWAYS None: products.subcategory is 100% NULL
+            repo-wide, so any subcategory narrowing is a guaranteed no-op
+            (req #3). Never attempt subcategory narrowing.
+          - There is no v6 RPC price param and no client-side price filter
+            (user-confirmed) → price_min/price_max retired.
+          - `style_node` concept does not exist in this repo → p_style_node_id
+            is always NULL → v6 takes its `degraded` category-only fallback
+            (acceptable; observability-only flag on the rows).
+          - Brand narrowing is the only legit optional filter preserved →
+            p_brand_names.
+        This mapping exists ONLY here (single source — REQ-AI-002).
+        """
         return {
             "query_embedding": embedding_to_pgvector(embedding),
-            "query_text": query_text,
-            "brand_filter": brand_filter,
-            # DIAG (임시): gender 매핑 깨짐 ('male' vs DB 'men') + subcategory 100% NULL
-            # → 두 hard filter 가 dense 후보 풀을 0으로 만들어 임베딩 검증 불가
-            # 진단 끝나면 원복: "gender_filter": [req.gender] if req.gender else None
-            #                  "subcategory_filter": req.item.subcategory
-            "gender_filter": None,
-            "subcategory_filter": None,
-            "price_min": price_min,
-            "price_max": price_max,
-            "tags_filter": None,
-            "k": settings.SEARCH_DEFAULT_K,
-            "rrf_k": 60,
+            "p_style_node_id": None,
+            # v6 family gate: always exactly one of the 20 canonical lowercase
+            # tokens (`other` when no apparel match → gate intentionally
+            # skipped). Single-source map: category_family.to_canonical_family.
+            "p_category": to_canonical_family(category),
+            # products.subcategory is 100% NULL repo-wide → narrowing is a
+            # no-op; ALWAYS None (req #3).
+            "p_subcategory": None,
+            "p_brand_names": brand_filter,
+            "p_limit": settings.SEARCH_DEFAULT_K,
         }
 
     @staticmethod
     async def search(params: dict[str, Any]) -> list[dict[str, Any]]:
-        """Invoke the `search_products_v5` RPC with the supplied params.
+        """Invoke the `search_products_v6` RPC with the supplied params.
 
         Dispatched through the SPEC-mandated DatabaseService DI seam
         (review P1-b: previously DatabaseService was exported but never

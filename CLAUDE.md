@@ -2,7 +2,7 @@
 
 kiko.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + Telegram 채널.
 
-`kikoai/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v5` RPC (PostgREST nginx shim 경유) → 다양성 캡 → product_id[] 반환**.
+`kikoai/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v6` RPC (PostgREST nginx shim 경유) → 다양성 캡 → product_id[] 반환**.
 
 Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinterest 링크를 DM하면 → webhook → **LangGraph StateGraph** (`app/graphs/`) → 동일 파이프라인 → 채널 카드 응답.
 
@@ -21,7 +21,7 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 | Apify | Pinterest 핀 스크래퍼 (`epctex/pinterest-scraper`) — SPEC-ONBOARD-CARDS-001 Pinterest bootstrap |
 | Telegram Bot API | 채널 transport (메시지 수신/발신). 이 서버에서 블랙박스로 취급 |
 | Modal | FashionSigLIP 임베딩 (단건 + 배치) |
-| dev-app Postgres + nginx PostgREST shim | pgvector + pgroonga, `search_products_v5` RPC. SPEC-INFRA-MIGRATE-001 P6 이후 자체호스팅 (이전: Supabase) |
+| dev-app Postgres + nginx PostgREST shim | pgvector, `search_products_v6` RPC (embedding-first, distance ASC). SPEC-INFRA-MIGRATE-001 P6 이후 자체호스팅 (이전: Supabase). pgroonga/product_search_text DROPPED (SPEC-SEARCH-V6-001) |
 
 > **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. env 변수는 `DB_URL`/`DB_TOKEN` 으로 리네임 완료 (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), nginx PostgREST shim (`http://172.31.59.31:3001`) 으로 라우팅.
 
@@ -61,8 +61,8 @@ app/
 | 프레임워크 | FastAPI + uvicorn |
 | 에이전트 오케스트레이션 | **LangGraph** `>=1.1.10` (SPEC-AGENT-001) |
 | LLM | LiteLLM proxy 경유. **ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`, 기본 `nova-lite`) via LiteLLM** — `drop_params: true` 로 `tool_choice` 제거 (Bedrock 호환). `langchain-openai` (`ask_clarify` 노드 한정) |
-| 임베딩 | Modal HTTP endpoint (FashionSigLIP) |
-| 벡터 DB | **dev-app Postgres 16 + pgvector + pgroonga** (PostgREST nginx shim, Qdrant 미사용) |
+| 임베딩 | Modal HTTP endpoint (FashionSigLIP). `POST /embed` (image) + **`POST /embed/text`** (text query — SPEC-SEARCH-V6-001) |
+| 벡터 DB | **dev-app Postgres 16 + pgvector** (PostgREST nginx shim, Qdrant 미사용). pgroonga/product_search_text DROPPED with v5 — v6 is embedding-first |
 | Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
 | 스키마 | Pydantic v2 |
 | HTTP | httpx (async) |
@@ -85,7 +85,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - **Sticky language (KO/EN)**: `app/channels/lang.py` (`detect_lang` / `remember_lang` / `session_lang`) 가 Hangul 유무로 언어를 판별. `ingest` 노드가 매 텍스트 턴마다 `Session.lang` 을 갱신 — 이후 버튼 탭(텍스트 없음)에도 이전 언어로 응답. `pick_item` / `ask_clarify` 노드 및 `respond` tool이 `session_lang(sess)` 를 참조해 KO/EN 메시지를 분기.
 - **Bot persona**: `app/channels/persona.py` 가 "kiko" 페르소나 system prompt 단일 소스 — Puss-in-Boots 느낌, 친근한 해요체(KO) / lively English(EN). `react_loop.py` 와 `ask_clarify` 노드가 이를 import. 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 (prompt injection 방어).
 - **하이브리드 카드 전달**: `respond` tool 이 `send_hybrid_batch` 를 호출 — 상위 5개 사진을 `sendMediaGroup` 단일 버블 + HTML 요약 텍스트 + 인라인 키보드(❤️ 숫자, 더보기, 다르게 찾기)로 전달. `cards:more`/`card:like:` 콜백은 `ingest` 노드 인라인 처리. `cards:refine` 은 `agent` 로 라우팅.
-- **구조화 로그 이모지 범례**: 📥 webhook, 👁 vision, 🔍 search, 🧹 zero-dense suppress, 🤔 evaluator(Gap2 내부), 🎨 pipeline, 🐱 bot 발화 (respond tool/adapter). **트레이싱**: 🤖 topology 배너(startup), ▶️/✅/⏭️ graph node enter/done/skip, 🔄 ReAct agent-iter, 🔧 tool dispatch, 🏁 agent 종료(respond), 🧠 v3:memory(Gap1), 🔬 v3:reflexion(Gap2), 💡 v3:proactive(Gap3), 🚫 v3:dislike(Gap4).
+- **구조화 로그 이모지 범례**: 📥 webhook, 👁 vision, 🔍 search, 🤔 evaluator(Gap2 내부), 🎨 pipeline, 🐱 bot 발화 (respond tool/adapter). (🧹 zero-dense suppress 삭제 — v6 text path는 real embed_text() 사용, zero-dense stopgap 제거됨) **트레이싱**: 🤖 topology 배너(startup), ▶️/✅/⏭️ graph node enter/done/skip, 🔄 ReAct agent-iter, 🔧 tool dispatch, 🏁 agent 종료(respond), 🧠 v3:memory(Gap1), 🔬 v3:reflexion(Gap2), 💡 v3:proactive(Gap3), 🚫 v3:dislike(Gap4).
 - **Port 패턴**: 채널 레이어와 파이프라인 간 결합도는 `Protocol` 기반 Port로 분리 (`app/channels/recommendation.py`). 그래프 노드는 `RecommendationPort`만 참조 — 파이프라인 구현은 lazy import
 - Pydantic v2 모델로 request/response 정의
 - LLM 호출은 LiteLLM 프록시 경유 (`LITELLM_BASE_URL`)
@@ -104,7 +104,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001) |
+| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001) |
 | `app/agents/tool_registry.py` | 8-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). `suggest_next_step` 항상 등록 |
 | `app/agents/llm_client.py` | ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유). `AGENT_LLM_MODEL` 미설정 시 fail-closed (기본 `nova-lite`) |
 | `app/agents/_memory_context.py` | Gap1: `build_memory_context(state, sess, ctx) -> str` — TasteProfile + 최근 N턴(기본 5) 요약 자동 주입, char-cap(`AGENT_V3_MEMORY_MAX_TOKENS`*4), `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 |
@@ -148,12 +148,13 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/pipeline/search.py` | thin @observe shim — 실제 로직은 `app/services/search_service.py` + `app/infrastructure/repositories/search_repository.py`에 위치. 테스트 monkeypatch seam(`SupabaseProvider.rpc`) 재노출 (SPEC-ARCH-AI-001) |
 | `app/pipeline/diversify.py` | thin @observe shim — 실제 로직은 `app/services/diversify_service.py`에 위치 (SPEC-ARCH-AI-001) |
 | `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
-| `app/services/search_service.py` | 검색 오케스트레이션 + 3-tier query_text 선택. `RpcContractError` 캐치 → 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006, SPEC-ARCH-AI-001) |
+| `app/services/search_service.py` | 검색 오케스트레이션. v6 embedding-first — query_text/enhance_query RPC 경로 retired (모듈 보존, 휴면). `RpcContractError` 캐치 → 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006, SPEC-ARCH-AI-001) |
 | `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + tolerance 산술. banker's rounding 포함 (`int(round(10 + t*10))`) (SPEC-ARCH-AI-001) |
 | `app/services/embed_service.py` | Modal /embed 래핑 (SPEC-ARCH-AI-001) |
 | `app/services/database_service.py` | `SupabaseProvider` pass-through 래퍼 (SPEC-ARCH-AI-001) |
-| `app/infrastructure/repositories/search_repository.py` | `SearchRepository` — `_RPC_NAME = "search_products_v5"` (단일 소스) + `build_params` + `search`. `embedding_to_pgvector` 공동 위치 (SPEC-ARCH-AI-001 REQ-AI-002) |
-| `app/infrastructure/repositories/search_rpc_contract.py` | `SearchRpcRowContract` Pydantic 모델 + `RpcContractError` + `validate_rpc_rows`. 드리프트 시 구조화 에러 (REQ-AI-006). 허용: id absent → 에러, score/brand absent → 허용, extra 컬럼 허용 |
+| `app/infrastructure/repositories/category_family.py` | **NEW (SPEC-SEARCH-V6-001)** — `CANONICAL_FAMILIES` (20 lowercase tokens) + `_VISION_ALIAS` + pure `to_canonical_family()`. v6 FILTER2 canonical family gate 단일 소스. `SearchRepository.build_params`가 `p_category`를 이 함수로 정규화 |
+| `app/infrastructure/repositories/search_repository.py` | `SearchRepository` — `_RPC_NAME = "search_products_v6"` (단일 소스) + `build_params` (6-key: query_embedding, p_style_node_id, p_category, p_subcategory, p_brand_names, p_limit) + `search`. `embedding_to_pgvector` 공동 위치 (SPEC-ARCH-AI-001 REQ-AI-002, SPEC-SEARCH-V6-001) |
+| `app/infrastructure/repositories/search_rpc_contract.py` | `SearchRpcRowContract` Pydantic 모델 (v6: `distance`+`degraded`, no score/dense_rank/sparse_rank) + `RpcContractError` + `validate_rpc_rows`. 드리프트 시 구조화 에러 (REQ-AI-006). 허용: id absent → 에러, distance/brand absent → 허용, extra 컬럼 허용 |
 | `app/infrastructure/memory/session.py` | (구 `app/channels/session.py`) `SessionStore` Protocol + `InMemorySessionStore` (SPEC-ARCH-AI-001) |
 | `app/infrastructure/memory/session_pg.py` | (구 `app/channels/session_pg.py`) Postgres 기반 세션 저장소 (SPEC-ARCH-AI-001) |
 | `app/infrastructure/memory/taste_profile.py` | (구 `app/channels/taste_profile.py`) TasteProfile 도메인 모델 (SPEC-ARCH-AI-001) |
@@ -162,7 +163,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/core/types.py` | 공유 타입 — `ProductRow` 등 (SPEC-ARCH-AI-001) |
 | `app/domain/search.py` | 도메인 타입 — `SearchResult`, `Candidate` (app/models/ DTO 와 분리) (SPEC-ARCH-AI-001) |
 | `app/providers/database.py` | SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업) |
-| `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증 |
+| `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증. `embed_image_url` (image → 768-dim) + **`embed_text`** (text query → 768-dim, same FashionSigLIP L2 space, SPEC-SEARCH-V6-001) |
 | `app/providers/llm.py` | LiteLLM HTTP |
 | `app/providers/apify.py` | Apify Pinterest 스크래퍼 — `run_pinterest_scrape(url, mode, max_items, timeout_s)`. `ApifyTimeoutError` 전용 예외. board/profile/pin 3-mode 지원. httpx 직접 사용 (SDK 미사용, SPEC-ONBOARD-CARDS-001) |
 | `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 + `current_langfuse_trace_id()` export |
@@ -174,7 +175,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## 검색 책임 경계 (B 옵션)
 
 ```
-[Postgres RPC] dense(HNSW) + sparse(pgroonga) + RRF → top-50
+[Postgres RPC] embedding-first (cosine, distance ASC) → top-50  (v6 — SPEC-SEARCH-V6-001)
        ↓
 [Python] 다양성 캡(브랜드/플랫폼) + tolerance + 최종 정렬 → top-15
 ```
