@@ -46,6 +46,77 @@ def _emit_intent_routed(state: WorkingState) -> None:
         logger.debug("[ingest] intent_routed emit best-effort")
 
 
+async def _handle_card_like(state: WorkingState, sess, cb_data: str, breadcrumbs: list[str]) -> None:
+    """`card:like:{product_id_or_idx}` → positive taste signal.
+
+    Resolves the tapped product against `sess.last_results` (the same field
+    the per-card crit:click path consumes), then routes through the EXISTING
+    `implicit_feedback.record_click` — the canonical taste-reinforcement entry
+    point (reinforces liked_brand + liked_keywords and marks the impression
+    clicked). Same downstream effect as the per-card crit:click button. Also
+    emits the `card_clicked` conversation-log event (catalog #14).
+    """
+    from app.channels._candidate_attr import attr as _attr
+    from app.channels.implicit_feedback import (
+        _brand_of,
+        _keywords_for_product,
+        record_click,
+        resolve_click_target,
+    )
+
+    suffix = cb_data[len("card:like:") :]
+    last_results = list(getattr(sess, "last_results", None) or [])
+    target = resolve_click_target(suffix, last_results)
+    if target is None and suffix.isdigit():
+        idx = int(suffix)
+        if 0 <= idx < len(last_results):
+            target = last_results[idx]
+    if target is None:
+        breadcrumbs.append("ingest: card:like unresolved")
+        return
+
+    product_id = str(_attr(target, "id", "") or "")
+    brand = _brand_of(target)
+    keywords = _keywords_for_product(target)
+    await record_click(state.chat_id, sess.from_user_id, product_id, brand, keywords)
+    breadcrumbs.append("ingest: card:like → record_click")
+
+    try:
+        position: int | None = None
+        for i, c in enumerate(last_results):
+            if str(_attr(c, "id", "") or "") == product_id and product_id:
+                position = i
+                break
+        emit(
+            event_type="card_clicked",
+            user_key=user_key_for(state.from_user_id, state.chat_id),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+            turn_no=1,
+            payload={"product_id": product_id, "position": position, "dwell_ms": None},
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[ingest] card_clicked emit best-effort")
+
+
+async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) -> None:
+    """`cards:more` → deliver the NEXT album+summary batch from
+    `sess.last_results`, reusing the exact hybrid sender the post-search reply
+    uses (`respond.send_hybrid_batch`). The in-memory pager cursor advances
+    automatically. No `ctx` is passed (fresh webhook → no per-turn idempotency
+    needed; the cursor itself prevents re-sending the same slice)."""
+    try:
+        from app.agents.tools.respond import send_hybrid_batch
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] cards:more adapter/import failed: %r", exc)
+        return
+    delivered = await send_hybrid_batch(adapter, state.chat_id, ctx=None, offset=None)
+    breadcrumbs.append(f"ingest: cards:more delivered={delivered}")
+
+
 @observe(name="node.ingest", as_type="span")
 async def ingest(state: WorkingState) -> dict:
     node_enter("ingest")
@@ -81,7 +152,7 @@ async def ingest(state: WorkingState) -> dict:
         await _ifb.attribute_expired_impressions(state.chat_id, sess.from_user_id)
         inbound_is_fresh_query = bool((msg.text and not msg.callback_data) or msg.photo_file_id or msg.urls) and not (
             msg.callback_data or ""
-        ).startswith(("crit:", "clarify:"))
+        ).startswith(("crit:", "clarify:", "card:", "cards:"))
         await _ifb.detect_and_apply_re_query(sess, inbound_is_fresh_query)
     except Exception as exc:  # noqa: BLE001 — never block webhook
         logger.warning("[ingest] implicit feedback steps failed: %r", exc)
@@ -124,6 +195,25 @@ async def ingest(state: WorkingState) -> dict:
                 breadcrumbs.append("ingest_v2: clarify boost_keywords accumulated")
     except Exception as exc:  # noqa: BLE001
         logger.debug("[ingest] v2 clarify inline handling failed: %r", exc)
+
+    # Hybrid result-card callbacks (album+summary delivery UX). Handled here
+    # in the same callback section as clarify:* so they are NOT treated as a
+    # fresh text query (already excluded from `inbound_is_fresh_query` above).
+    #   - card:like:{pid|idx} → positive taste signal for that product. Reuses
+    #     the EXISTING click plumbing (`record_click`) so the downstream effect
+    #     is identical to the per-card crit:click path; emits `card_clicked`.
+    #   - cards:more → send the NEXT album+summary batch from sess.last_results.
+    #   - cards:refine → no side effect here; flows to the agent (which already
+    #     exposes refine_search / suggest_next_step) — no new search invented.
+    # crit:* / clarify:* behavior is untouched.
+    try:
+        cb_data = msg.callback_data or ""
+        if cb_data.startswith("card:like:"):
+            await _handle_card_like(state, sess, cb_data, breadcrumbs)
+        elif cb_data == "cards:more":
+            await _handle_cards_more(state, sess, breadcrumbs)
+    except Exception as exc:  # noqa: BLE001 — never block webhook
+        logger.debug("[ingest] hybrid card callback handling failed: %r", exc)
 
     # SPEC-AGENT-V2-CLEANUP-001 — the ReAct agent topology is the only
     # topology, so ingest NEVER invokes the legacy LLM 4-way `route_text`

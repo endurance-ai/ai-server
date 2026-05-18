@@ -114,6 +114,13 @@ def build_graph() -> Any:
         # Picker callback → pick_item (still deterministic).
         if cb.startswith("item:"):
             return "pick_item"
+        # Hybrid result-card callbacks. `card:like:` and `cards:more` are fully
+        # serviced by ingest (taste signal / next album batch) — terminal, no
+        # agent (routing to `agent` would re-spawn the loop and re-spam). Only
+        # `cards:refine` flows to the agent, which already exposes
+        # refine_search / suggest_next_step (reuse, not a new search).
+        if cb.startswith("card:like:") or cb == "cards:more":
+            return "__end__"
         # Photo / URL → vision pre-step.
         if msg.photo_file_id or msg.urls:
             return "resolve_image"
