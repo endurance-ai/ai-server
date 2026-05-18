@@ -246,11 +246,11 @@ flowchart LR
 
     classDef onboard fill:#2e7d32,color:#fff
     classDef gate fill:#1565c0,color:#fff
-    classDef end fill:#ef6c00,color:#fff
+    classDef terminal fill:#ef6c00,color:#fff
 
     class INTRO,MOOD,COLOR,FIT,PIN,INGEST_PIN onboard
     class START gate
-    class AGENT end
+    class AGENT terminal
 ```
 
 재시작 키워드(`/reset`, "온보딩 다시" 등) 수신 시 언제든 `onboard_intro`로 강제 복귀.
