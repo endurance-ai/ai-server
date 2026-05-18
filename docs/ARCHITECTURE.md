@@ -72,15 +72,14 @@ flowchart TB
 
     FIND -. "현재 미사용" .-> REC
     FIND -. "v4 fallback" .-> V4
-    V4 -. "" .-> PG
-    REC -. "" .-> PIPE
+    V4 -.-> PG
+    REC -.-> PIPE
 
     classDef primary fill:#ef6c00,color:#fff
     classDef ai fill:#0277bd,color:#fff
     classDef ext fill:#6a1b9a,color:#fff
     classDef data fill:#2e7d32,color:#fff
     classDef muted fill:#757575,color:#fff
-    classDef chat fill:#ef6c00,color:#fff
 
     class TG_USER,TG_API primary
     class WH,GRAPH,PIPE,LITELLM,LFW ai
@@ -88,9 +87,6 @@ flowchart TB
     class MODAL,APIFY ext
     class PG,CONVLOG data
     class FIND,V4 muted
-    class MODAL,APIFY ext
-    class PG,CONVLOG data
-    class TG_USER,TG_API chat
 ```
 
 ---
