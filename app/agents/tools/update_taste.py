@@ -64,8 +64,6 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> UpdateTasteResu
                 len(brand_dislikes),
                 len(keyword_dislikes),
             )
-        elif brand_dislikes or keyword_dislikes:
-            logger.info("🚫 [v3:dislike] skip · flag off")
 
         store.update(profile)
     except Exception as exc:  # noqa: BLE001

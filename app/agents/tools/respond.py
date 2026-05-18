@@ -20,11 +20,31 @@ already-sent text and already-sent cards — the user never sees a duplicate.
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import Any
 
 from app.agents.tool_registry import RespondResult
 from app.observability.conversation_log import emit
+
+
+def _esc(s: Any) -> str:
+    """HTML-escape (including quotes) for parse_mode=HTML messages.
+
+    Local (stdlib) — deliberately NOT importing the private
+    `send_results._html_escape`; that cross-module private coupling would
+    break with a silent ImportError if send_results is ever renamed.
+    `quote=True` matters for the `<a href="...">` attribute.
+    """
+    return html.escape(str(s), quote=True)
+
+
+def _safe_http_url(url: str) -> str | None:
+    """Return the url only if it is an http(s) scheme, else None — prevents a
+    catalog-sourced `javascript:` / `data:` URL becoming a tappable link in a
+    Telegram HTML-mode message."""
+    return url if url.startswith(("https://", "http://")) else None
+
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +52,11 @@ logger = logging.getLogger(__name__)
 # sendMediaGroup bubble) + ONE summary text message. Telegram caps a media
 # group at 10; 5 keeps the album scannable and matches the V1 send_results cap.
 _ALBUM_SIZE = 5
+
+# `card_sent` conversation-log event ordinal (event_payloads.py catalog #13).
+# The ReAct agent path has no V1-style per-node turn ordering, so this is a
+# fixed sentinel for the card-delivery step rather than a derived turn index.
+_CARD_SENT_TURN_NO = 9
 
 # Per-turn idempotency keys in the shared ctx dict (built once per turn and
 # passed by reference, so they survive a defensive second dispatch).
@@ -195,8 +220,6 @@ def _build_summary(batch: list[Any], lang: str) -> str:
     product URL (parse_mode HTML) so the buy path survives without per-card
     Shop buttons (Telegram media groups forbid per-photo keyboards).
     """
-    from app.graphs.nodes.send_results import _html_escape
-
     n = len(batch)
     if lang == "ko":
         header = f"✨ 마음에 들 만한 {n}개 추려봤어요"
@@ -208,16 +231,17 @@ def _build_summary(batch: list[Any], lang: str) -> str:
         name = str(_candidate_field(c, "name", "")).strip() or ("추천 아이템" if lang == "ko" else "item")
         purl = str(_candidate_field(c, "product_url", "")).strip()
         price_str = _format_price(_candidate_field(c, "price", None))
-        name_html = _html_escape(name)
-        if purl:
-            name_html = f'<a href="{_html_escape(purl)}">{name_html}</a>'
+        name_html = _esc(name)
+        safe_url = _safe_http_url(purl) if purl else None
+        if safe_url:
+            name_html = f'<a href="{_esc(safe_url)}">{name_html}</a>'
         bits = [f"{i}."]
         if brand:
-            bits.append(f"<b>{_html_escape(brand)}</b>")
+            bits.append(f"<b>{_esc(brand)}</b>")
         bits.append(name_html)
         line = " ".join(bits)
         if price_str:
-            line += f" · {_html_escape(price_str)}"
+            line += f" · {_esc(price_str)}"
         lines.append(line)
     return "\n".join(lines)
 
@@ -309,7 +333,7 @@ def _emit_card_sent(chat_id: int, sess: Any, batch: list[Any]) -> None:
                 user_key=user_key,
                 chat_id=chat_id,
                 thread_id=None,
-                turn_no=9,
+                turn_no=_CARD_SENT_TURN_NO,
                 payload={
                     "product_id": str(_candidate_field(c, "id", "") or ""),
                     "position": pos,
@@ -369,8 +393,13 @@ async def send_hybrid_batch(
     if start < 0:
         start = 0
     # Pre-filter to album-eligible candidates from `start` onward, take ≤5.
-    eligible = [c for c in all_candidates[start:] if _has_plausible_image(c)]
-    batch = eligible[:_ALBUM_SIZE]
+    # Track each item's ABSOLUTE index in `all_candidates` so the "더보기"
+    # cursor advances past the real consumed slice — advancing by the eligible
+    # count would skip/repeat items when broken-image candidates are
+    # interspersed (P1-2).
+    eligible_pos = [(start + i, c) for i, c in enumerate(all_candidates[start:]) if _has_plausible_image(c)]
+    batch_pos = eligible_pos[:_ALBUM_SIZE]
+    batch = [c for _, c in batch_pos]
     if not batch:
         logger.debug("[tool.respond] no album-eligible candidates from offset=%d", start)
         return 0
@@ -400,7 +429,7 @@ async def send_hybrid_batch(
         # Summary text + inline keyboard (carries the buy links + actions the
         # media group cannot). HTML so the item names are tappable links.
         summary = _build_summary(batch, lang)
-        keyboard = _build_keyboard(batch, lang, has_more=len(eligible) > len(batch))
+        keyboard = _build_keyboard(batch, lang, has_more=len(eligible_pos) > len(batch_pos))
         try:
             if hasattr(adapter, "send_text_with_keyboard"):
                 await adapter.send_text_with_keyboard(
@@ -421,11 +450,11 @@ async def send_hybrid_batch(
 
     if delivered > 0:
         _emit_card_sent(chat_id, sess, batch[:delivered])
-        # Advance the pager cursor past this batch's source slice. The slice
-        # consumed is `all_candidates[start : start + len(batch_source)]`; we
-        # advance by the batch size (eligible items are contiguous enough for
-        # a "더보기" pager — a skipped non-eligible item just won't reappear).
-        _CARD_BATCH_CURSOR[int(chat_id)] = start + len(batch)
+        # Advance the pager cursor to just past the LAST consumed absolute
+        # position in `all_candidates` (not by eligible count) so a "더보기"
+        # tap neither repeats nor skips items when broken-image candidates are
+        # interspersed (P1-2).
+        _CARD_BATCH_CURSOR[int(chat_id)] = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
         if ctx is not None:
             ctx[_ALBUM_SENT_KEY] = True
         logger.info(
