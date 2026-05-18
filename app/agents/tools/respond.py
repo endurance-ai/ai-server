@@ -397,7 +397,13 @@ async def send_hybrid_batch(
         keyboard = _build_keyboard(batch, lang)
         try:
             if hasattr(adapter, "send_text_with_keyboard"):
-                await adapter.send_text_with_keyboard(chat_id, summary, keyboard)
+                await adapter.send_text_with_keyboard(
+                    chat_id,
+                    summary,
+                    keyboard,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
             else:
                 await adapter.send_text(chat_id, summary)
         except Exception as exc:  # noqa: BLE001

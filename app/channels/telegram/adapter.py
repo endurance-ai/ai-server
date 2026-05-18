@@ -254,19 +254,29 @@ class TelegramAdapter(MessengerAdapter):
         chat_id: int,
         text: str,
         keyboard: list[list[tuple[str, str]]],
+        parse_mode: str | None = None,
+        disable_web_page_preview: bool = False,
     ) -> int | None:
         """Multi-row inline-keyboard variant of `send_text_with_buttons`.
+
+        `parse_mode` / `disable_web_page_preview` default to the prior behavior
+        (plain text, preview enabled) so existing onboarding-card callers are
+        unaffected; the hybrid result summary opts into HTML + no link preview.
 
         Returns the platform message_id on success (used for `editMessageReplyMarkup`
         re-render on toggle), or None on failure.
         """
         t0 = time.perf_counter()
         rows = [[{"text": label, "callback_data": data} for label, data in row] for row in keyboard]
-        payload = {
+        payload: dict = {
             "chat_id": chat_id,
             "text": text,
             "reply_markup": {"inline_keyboard": rows},
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        if disable_web_page_preview:
+            payload["disable_web_page_preview"] = True
         result = await self._post("sendMessage", payload)
         elapsed = int((time.perf_counter() - t0) * 1000)
         ok = bool(result and result.get("ok"))
