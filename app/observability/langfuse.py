@@ -162,6 +162,80 @@ def current_langfuse_trace_id() -> str | None:
     return None
 
 
+# P0 user-feedback scores — signal → (score name, value) table. re_query emits
+# TWO scores so it is filterable as a distinct boolean-ish signal while still
+# contributing a 0.0 user_feedback like a negative.
+_FEEDBACK_SCORES: dict[str, tuple[tuple[str, float], ...]] = {
+    "click": (("user_feedback", 1.0),),
+    "no_click": (("user_feedback", 0.0),),
+    "re_query": (("user_feedback", 0.0), ("re_query", 1.0)),
+}
+
+
+# @MX:ANCHOR: [AUTO] P0 user-feedback score sink — fan_in from implicit_feedback
+#   record_click / attribute_expired_impressions / detect_and_apply_re_query
+# @MX:REASON: single source for retro-scoring; a raise here would break the
+#   feedback path and the webhook, so it MUST stay fail-open / never-raise.
+def emit_feedback_score(
+    trace_id: str | None,
+    *,
+    signal: str,
+    product_id: str | None = None,
+    brand: str | None = None,
+    attribution_window_s: int | None = None,
+) -> None:
+    """Retro-attach implicit-feedback score(s) to the ORIGINAL recommendation
+    trace (the one active when the cards were sent), by trace id.
+
+    Fail-open / never raises. Silent no-op when Langfuse is disabled, the
+    kill-switch (`LANGFUSE_FEEDBACK_SCORES`) is off, `trace_id` is missing, or
+    `signal` is unknown. Scoring failures are logged at WARNING and swallowed —
+    they must NEVER propagate into the feedback path or the webhook.
+
+    `signal` ∈ {"click", "no_click", "re_query"}. `create_score()` is the v3
+    SDK API (`langfuse.create_score(trace_id=..., name=..., value=...,
+    data_type="NUMERIC")`); it is queued on the SDK background thread (non-
+    blocking), so it is safe to call directly from async code — consistent
+    with how the rest of this module calls the v3 client synchronously.
+    """
+    if _lf_get_client is None:
+        return
+    if not getattr(settings, "LANGFUSE_FEEDBACK_SCORES", True):
+        return
+    if not trace_id:
+        return
+    if len(trace_id) > 128:
+        return
+    scores = _FEEDBACK_SCORES.get(signal)
+    if not scores:
+        return
+    comment_parts = [f"source=implicit_feedback.{signal}"]
+    if product_id:
+        comment_parts.append(f"product_id={product_id}")
+    if brand:
+        comment_parts.append(f"brand={brand}")
+    if attribution_window_s is not None:
+        comment_parts.append(f"attribution_window_s={attribution_window_s}")
+    comment = " ".join(comment_parts)
+    try:
+        client = _lf_get_client()
+        for name, value in scores:
+            client.create_score(
+                trace_id=trace_id,
+                name=name,
+                value=float(value),
+                data_type="NUMERIC",
+                comment=comment,
+            )
+    except Exception:  # noqa: BLE001 — scoring is best-effort; never break feedback/webhook
+        logger.warning(
+            "🐱 [langfuse] feedback score emit failed (signal=%s trace=%s) — swallowed",
+            signal,
+            trace_id,
+            exc_info=True,
+        )
+
+
 def flush() -> None:
     """Drain the SDK background queue. Call on lifespan shutdown."""
     if _lf_get_client is None:

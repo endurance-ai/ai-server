@@ -93,6 +93,26 @@ curl -X POST http://<EIP>:8000/recommend \
 
 `tool_call` 이벤트는 매 turn 항상 발생 (ReAct 에이전트 영구 단일 토폴로지).
 
+## User feedback scores (P0)
+
+암묵 피드백 신호를 Langfuse v3 **numeric score** 로 변환해 **원본 추천 trace**(카드를 보낸 그 turn 의 trace)에 retro-attach 한다. 단일 소스: `app/observability/langfuse.py` 의 `emit_feedback_score(...)` (v3 `client.create_score(trace_id=, name=, value=, data_type="NUMERIC", comment=)`). 호출처는 `app/channels/implicit_feedback.py` 3곳.
+
+| 신호 | 발생 함수 | 점수 |
+|------|----------|------|
+| ❤️ 번호 버튼 탭 (positive) | `record_click` | `user_feedback=1.0` |
+| no-click 만료 (negative) | `attribute_expired_impressions` | `user_feedback=0.0` |
+| 빠른 re-query (strong negative) | `detect_and_apply_re_query` | `user_feedback=0.0` **+** `re_query=1.0` (별도 필터 가능 신호) |
+
+`comment` 에 `source=implicit_feedback.<signal> product_id=<hashed> brand=… attribution_window_s=…` 부착 (product_id 는 PII 규약상 `hash_id()` 적용).
+
+**원본 trace 귀속 메커니즘**: click/no_click/re_query 는 *나중 webhook = 다른 trace* 에서 도착하므로 click 시점의 `current_langfuse_trace_id()` 를 쓰면 잘못된 trace 에 붙는다. `log_impressions` 가 임프레션을 INSERT 할 때 그 webhook 컨텍스트의 trace id 를 `ai.card_impression.langfuse_trace` 컬럼에 바인딩(migration `0006`). `record_click` 은 `UPDATE … RETURNING langfuse_trace`, `attribute_expired_impressions` 는 CTE `RETURNING … langfuse_trace`, re_query 는 재조회 product_id 들의 임프레션 행에서 distinct trace 를 역조회한다.
+
+**Fail-open**: 스코어 emit 실패는 피드백 경로/webhook 을 절대 깨지 않는다 — `conversation_log.py` 와 동일한 never-raise 규율(try/except → WARNING 로그, swallow). Langfuse 비활성(키 없음)·kill-switch off·trace id 부재 시 silent no-op.
+
+**Kill-switch**: `LANGFUSE_FEEDBACK_SCORES` (기본 `true`). false 로 두면 `create_score()` 호출만 침묵, 피드백/taste 경로는 그대로.
+
+배포 전 필수: dev-app Postgres 에 migration `0006` 적용(`langfuse_trace` 컬럼 추가, nullable·idempotent). 미적용 시 기존 코드 INSERT 가 컬럼 부재로 실패 → 임프레션 로깅 자체가 WARN no-op.
+
 ## PII / 마스킹 (백로그)
 
 `@observe` 가 함수 인자를 자동 캡처 — `RecommendRequest.image_url`, `searchQuery` 등 사용자 행동 데이터 포함. 운영 단계 진입 시점에 다음 중 택 1:
@@ -102,6 +122,7 @@ curl -X POST http://<EIP>:8000/recommend \
 
 ## 향후
 
+- ~~사용자 암묵 피드백 → trace score~~ **구현됨** (P0, 위 "User feedback scores" 절 참조)
 - LLM 호출 비용 트래킹 (Langfuse 가 token usage 자동 집계)
 - 검색 품질 점수와 trace 연결 (`search_quality_logs` 테이블 조인)
 - A/B 실험 (v5a vs v5b) trace 분리 — `langfuse_context.update_current_trace(metadata={"variant": "v5a"})`
