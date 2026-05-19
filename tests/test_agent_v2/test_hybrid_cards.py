@@ -410,3 +410,146 @@ def test_routing_card_callbacks_terminal_vs_agent():
     src = inspect.getsource(fashion_bot.build_graph)
     assert 'cb.startswith("card:like:") or cb == "cards:more"' in src
     assert 'return "__end__"' in src
+
+
+# ── SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 ────────────────────────────
+# Impression logging on the LIVE hybrid delivery path (the only path on the
+# permanent ReAct topology — send_results is NOT registered in the graph).
+
+
+@pytest.mark.asyncio
+async def test_hybrid_delivery_logs_impressions_for_delivered_candidates(monkeypatch):
+    """When send_hybrid_batch delivers a batch, log_impressions is called once
+    with EXACTLY the delivered candidates + the session's from_user_id."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    set_store(_FakeStore(_session_with_results(8)))  # from_user_id=99
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+        log_imp = AsyncMock(return_value=5)
+        # Patch at the SOURCE module: _log_delivered_impressions lazily imports
+        # `log_impressions` from app.channels.implicit_feedback at call time
+        # (the lazy import avoids a circular import — do NOT hoist it), so the
+        # source-module attr is what the call resolves.
+        monkeypatch.setattr("app.channels.implicit_feedback.log_impressions", log_imp)
+
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
+        res = await respond_tool.dispatch({"text": "found"}, ctx)
+
+        assert res["cards_sent"] == 5
+        log_imp.assert_awaited_once()
+        (chat_id_arg, from_user_arg, products_arg), _ = log_imp.await_args
+        assert chat_id_arg == 42
+        assert from_user_arg == 99  # sourced from sess.from_user_id like send_results
+        # EXACTLY the 5 delivered candidates (album cap), in order.
+        assert [c.id for c in products_arg] == ["p0", "p1", "p2", "p3", "p4"]
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_cards_more_logs_only_new_batch_no_double_log(monkeypatch):
+    """`cards:more` impression-logs the NEXT batch's candidates; the same
+    product_id is never logged twice across batches (no ON CONFLICT in 0002)."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+    from app.graphs.nodes import ingest as ingest_mod
+
+    set_store(_FakeStore(_session_with_results(12)))
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+        logged_pids: list[list[str]] = []
+
+        async def _capture(chat_id, from_user_id, products):
+            logged_pids.append([c.id for c in products])
+            return len(products)
+
+        monkeypatch.setattr("app.channels.implicit_feedback.log_impressions", AsyncMock(side_effect=_capture))
+        monkeypatch.setattr("app.channels.implicit_feedback.detect_and_apply_re_query", AsyncMock(return_value=False))
+        monkeypatch.setattr("app.channels.implicit_feedback.attribute_expired_impressions", AsyncMock(return_value=0))
+
+        # Turn 1: post-search reply → batch [p0..p4].
+        await respond_tool.dispatch({"text": "here"}, {"chat_id": 42, CARDS_READY_KEY: True})
+        # Turn 2: cards:more → next batch [p5..p9].
+        await ingest_mod.ingest(_cb_state("cards:more"))
+
+        assert logged_pids[0] == ["p0", "p1", "p2", "p3", "p4"]
+        assert logged_pids[1] == ["p5", "p6", "p7", "p8", "p9"]
+        # No product_id appears in more than one logged batch.
+        flat = [pid for batch in logged_pids for pid in batch]
+        assert len(flat) == len(set(flat))
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_new_search_relogs_product_shown_in_previous_search(monkeypatch):
+    """A product shown in search #1 and AGAIN in a SUBSEQUENT new search
+    (offset==0 again) must be impression-logged the second time too — a fresh
+    row bound to the NEW trace, NOT suppressed by the prior search's dedupe set.
+    Otherwise a click on the re-recommended product would attribute the wrong
+    (stale) trace, defeating the feature (critical review finding #1)."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    try:
+        logged_pids: list[list[str]] = []
+
+        async def _capture(chat_id, from_user_id, products):
+            logged_pids.append([c.id for c in products])
+            return len(products)
+
+        monkeypatch.setattr("app.channels.implicit_feedback.log_impressions", AsyncMock(side_effect=_capture))
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        # Search #1 → results [p0..p4] (3 results, all delivered).
+        set_store(_FakeStore(_session_with_results(3)))
+        await respond_tool.dispatch({"text": "first"}, {"chat_id": 42, CARDS_READY_KEY: True})
+
+        # Search #2 (NEW search, fresh offset==0) → overlapping results that
+        # include p0, p1, p2 again. A real new search resets the pager cursor;
+        # the dedupe set MUST also be cleared (by is_fresh_search) so p0..p2
+        # re-log against the NEW trace.
+        from app.agents.tools.respond import _CARD_BATCH_CURSOR
+
+        _CARD_BATCH_CURSOR.pop(42, None)
+        set_store(_FakeStore(_session_with_results(3)))
+        await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
+
+        assert logged_pids[0] == ["p0", "p1", "p2"]
+        # The KEY assertion: the SECOND search re-logs the same products
+        # (new impression rows bound to the new trace), not an empty list.
+        assert logged_pids[1] == ["p0", "p1", "p2"]
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_impression_logging_failure_does_not_break_delivery(monkeypatch):
+    """A raising log_impressions MUST NOT undo or fail the card delivery."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    set_store(_FakeStore(_session_with_results(6)))
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+        monkeypatch.setattr(
+            "app.channels.implicit_feedback.log_impressions",
+            AsyncMock(side_effect=RuntimeError("db down")),
+        )
+
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
+        res = await respond_tool.dispatch({"text": "found"}, ctx)
+
+        # Delivery still fully succeeded despite the impression-logging blowup.
+        assert res["ok"] is True
+        assert res["cards_sent"] == 5
+        adapter.send_media_group.assert_awaited_once()
+        adapter.send_text_with_keyboard.assert_awaited_once()
+    finally:
+        set_store(None)
