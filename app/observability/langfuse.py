@@ -129,10 +129,9 @@ def update_current_trace(metadata: dict[str, Any] | None = None, **kwargs: Any) 
 def current_langfuse_trace_id() -> str | None:
     """Return current Langfuse v3 trace_id, or None. **Never raises.**
 
-    REQ-LOG-LANGFUSE-XREF-001 — fallback cascade:
-      1. v3 client `get_current_observation().trace_id`
-      2. `langfuse.langfuse_context.get_current_trace_id()`
-      3. None
+    REQ-LOG-LANGFUSE-XREF-001 — resolves the active trace via the v3 SDK's
+    `client.get_current_trace_id()` (OTEL-context-local; returns `str | None`).
+    Returns None when Langfuse is disabled or no trace is active.
 
     Called from `emit(...)` in *caller* context (BEFORE asyncio.create_task)
     so the contextvar resolution happens on the active task's stack
@@ -140,24 +139,12 @@ def current_langfuse_trace_id() -> str | None:
     """
     if _lf_get_client is None:
         return None
-    # Cascade 1 — v3 client current observation.
     try:
         client = _lf_get_client()
-        obs = client.get_current_observation()
-        if obs is not None:
-            tid = getattr(obs, "trace_id", None)
-            if tid:
-                return str(tid)
-    except Exception:  # noqa: BLE001 — best-effort, never raise
-        pass
-    # Cascade 2 — `langfuse_context` accessor (older / contextvar-only path).
-    try:
-        from langfuse import langfuse_context  # type: ignore[attr-defined]
-
-        tid = langfuse_context.get_current_trace_id()
+        tid = client.get_current_trace_id()
         if tid:
             return str(tid)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — best-effort, never raise
         pass
     return None
 
