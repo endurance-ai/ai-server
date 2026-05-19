@@ -15,8 +15,11 @@ def test_node_inventory_matches_v2_topology():
     _reflexion.py; send_results._candidate_to_card is reused by tools/respond).
 
     Excludes private modules (`_adapter_ctx`, `_evaluator_models`,
-    `_onboard_helpers`, `_onboard_stage`, `_pinterest_helpers`, `_trace`,
-    `_evaluator_prompt`) and __init__.
+    `_first_touch`, `_trace`, `_evaluator_prompt`) and __init__.
+
+    SPEC-ONBOARD-LITE-001 — the onboarding card node modules
+    (onboard_intro/mood/color/fit/pinterest, pinterest_ingest) were deleted
+    with the card subgraph; only the lightweight `intro` node remains.
     """
     public = []
     for _, name, _ in pkgutil.iter_modules(nodes_pkg.__path__):
@@ -34,16 +37,10 @@ def test_node_inventory_matches_v2_topology():
             "apply_clarify",
             "send_results",
             "evaluator",
-            # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — Phase 4.
-            "onboard_intro",
-            "onboard_mood",
-            "onboard_color",
-            "onboard_fit",
-            "onboard_pinterest",
-            "pinterest_ingest",
             # SPEC-AGENT-V2-REACT — ReAct agent node.
             "agent",
-            # SPEC-AGENT-V2-REACT — first-touch intro node (onboarding→intro policy).
+            # SPEC-ONBOARD-LITE-001 — lightweight first-touch intro node
+            # (onboarding card subgraph removed).
             "intro",
         ]
     )

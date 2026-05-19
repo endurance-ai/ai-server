@@ -39,7 +39,8 @@ NODE_FILES = [
     "evaluator.py",
     "send_results.py",
     "intro.py",
-    "pinterest_ingest.py",
+    # SPEC-ONBOARD-LITE-001 — pinterest_ingest.py / onboard_*.py deleted with
+    # the onboarding card subgraph; removed from the emit-floor invariant.
 ]
 
 

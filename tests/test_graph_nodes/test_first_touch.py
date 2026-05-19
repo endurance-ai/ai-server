@@ -43,7 +43,9 @@ async def test_new_user_actionable_photo_greets_and_marks():
     state = _State(_Msg(photo_file_id="abc"))
     deleted = []
     await maybe_first_touch(
-        state, sess, adapter,
+        state,
+        sess,
+        adapter,
         taste_delete=lambda uk: deleted.append(uk),
         breadcrumbs=[],
     )
@@ -58,8 +60,8 @@ async def test_new_user_start_only_no_greeting_no_mark():
     sess = _Sess(onboarded_at=None)
     state = _State(_Msg(text="/start"))
     await maybe_first_touch(state, sess, adapter, taste_delete=lambda uk: None, breadcrumbs=[])
-    assert adapter.sent == []          # intro 노드가 처리 — ingest는 침묵
-    assert sess.onboarded_at is None    # intro 노드가 마킹
+    assert adapter.sent == []  # intro 노드가 처리 — ingest는 침묵
+    assert sess.onboarded_at is None  # intro 노드가 마킹
 
 
 @pytest.mark.asyncio
@@ -88,4 +90,4 @@ async def test_returning_user_start_only_acks():
     sess = _Sess(onboarded_at=datetime.now())
     state = _State(_Msg(text="/start"))
     await maybe_first_touch(state, sess, adapter, taste_delete=lambda uk: None, breadcrumbs=[])
-    assert len(adapter.sent) == 1       # 가벼운 ready ack
+    assert len(adapter.sent) == 1  # 가벼운 ready ack
