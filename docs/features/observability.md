@@ -115,6 +115,8 @@ curl -X POST http://<EIP>:8000/recommend \
 
 배포 전 필수: dev-app Postgres 에 migration `0006` 적용(`langfuse_trace` 컬럼 추가, nullable·idempotent). 미적용 시 기존 코드 INSERT 가 컬럼 부재로 실패 → 임프레션 로깅 자체가 WARN no-op.
 
+> **`current_langfuse_trace_id()` v3 API 정정**: v2→v3 SDK 마이그레이션 때 이 헬퍼가 v3 에 없는 v2 API(`get_current_observation()` / `langfuse_context`)를 호출 → 광범위 except 에 삼켜져 **항상 None 반환**하던 결함이 있었다. 그 결과 `ai.card_impression.langfuse_trace` 뿐 아니라 `ai.log_conversation_event.langfuse_trace` 교차참조(SPEC-CONVERSATION-LOG-001)도 v3 이후 전부 NULL 이었음. v3 `client.get_current_trace_id()` 단일 경로로 정정 → 두 서브시스템 동시 복구. 회귀 방지: 실 SDK `@observe` span 안에서 non-None 단언하는 특성 테스트(`tests/test_observability/test_trace_id_v3_api.py`).
+
 ## PII / 마스킹 (백로그)
 
 `@observe` 가 함수 인자를 자동 캡처 — `RecommendRequest.image_url`, `searchQuery` 등 사용자 행동 데이터 포함. 운영 단계 진입 시점에 다음 중 택 1:
