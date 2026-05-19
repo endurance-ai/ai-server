@@ -21,18 +21,10 @@ from langgraph.graph import END, START, StateGraph
 from app.graphs.nodes.apply_clarify import apply_clarify
 from app.graphs.nodes.ask_clarify import ask_clarify
 from app.graphs.nodes.ingest import ingest
-from app.graphs.nodes.onboard_color import onboard_color
-from app.graphs.nodes.onboard_fit import onboard_fit
-
-# SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — 6 onboarding nodes.
-from app.graphs.nodes.onboard_intro import onboard_intro
-from app.graphs.nodes.onboard_mood import onboard_mood
-from app.graphs.nodes.onboard_pinterest import onboard_pinterest
 from app.graphs.nodes.pick_item import pick_item
-from app.graphs.nodes.pinterest_ingest import pinterest_ingest
 from app.graphs.nodes.resolve_image import resolve_image
 from app.graphs.nodes.vision import vision_node
-from app.graphs.routing import _route_after_onboard_fit, _route_after_resolve
+from app.graphs.routing import _route_after_resolve
 from app.graphs.state import WorkingState
 
 logger = logging.getLogger(__name__)
@@ -50,18 +42,11 @@ def _log_topology_banner() -> None:
         pass
 
 
-# SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-GRAPH-001 — fit branches on Pinterest flag.
-_ONBOARD_FIT_BRANCHES: dict[str, str] = {
-    "onboard_pinterest": "onboard_pinterest",
-    "__end__": END,
-}
-
-
 def build_graph() -> Any:
-    """SPEC-AGENT-V2-CLEANUP-001 — ReAct agent topology (the only topology).
-
-    Onboarding subgraph (6 nodes) is preserved. Post-onboarding text/photo/
-    callback funnels through the `agent` node which runs the ReAct loop.
+    """SPEC-ONBOARD-LITE-001 — ReAct agent topology, onboarding card subgraph
+    retired. Brand-new users no longer hit a card funnel: an actionable first
+    message is greeted inline by `ingest` and proceeds to recommendation the
+    same turn; a bare `/start` routes to the lightweight `intro` node.
     """
     from app.graphs.nodes.agent import agent as agent_node
     from app.graphs.nodes.intro import intro as intro_node
@@ -76,84 +61,62 @@ def build_graph() -> Any:
     builder.add_node("ask_clarify", ask_clarify)
     builder.add_node("apply_clarify", apply_clarify)
     builder.add_node("agent", agent_node)
-    # Onboarding subgraph — preserved.
-    builder.add_node("onboard_intro", onboard_intro)
-    builder.add_node("onboard_mood", onboard_mood)
-    builder.add_node("onboard_color", onboard_color)
-    builder.add_node("onboard_fit", onboard_fit)
-    builder.add_node("onboard_pinterest", onboard_pinterest)
-    builder.add_node("pinterest_ingest", pinterest_ingest)
 
     def _route_after_ingest_v2(state: WorkingState) -> str:
-        # Onboarding gate FIRST (preserved).
-        from app.graphs.routing import (
-            _resolve_onboard_stage_target,
-            first_touch_intro_required,
-            is_continuous_pinterest,
-            onboarding_required,
-        )
+        # SPEC-ONBOARD-LITE-001 — onboarding card gate removed. ingest already
+        # ran the inline first-touch greeting / /reset clear / ready ack
+        # (maybe_first_touch); this closure is pure routing only.
+        from app.channels.reset_keywords import is_reset_keyword
         from app.infrastructure.memory.session import SessionState, get_store
-
-        sess = get_store().get_or_create(state.chat_id)
-        if onboarding_required(state, sess):
-            return _resolve_onboard_stage_target(sess, state)
-        if is_continuous_pinterest(state, sess):
-            return "pinterest_ingest"
-        # SPEC-AGENT-V2-REACT — onboarding-cards OFF: a brand-new user's FIRST
-        # message gets the one-shot service intro instead of the agent. Gated
-        # strictly on `onboarded_at IS NULL`; intro marks it set so the 2nd
-        # message (re-sent link/text) flows normally. Placed after the
-        # onboarding gate (unchanged when flag ON) and continuous-pinterest,
-        # before item:/clarify:/photo/url/pick and the contentless `__end__`
-        # guard (the predicate itself requires user signal).
-        if first_touch_intro_required(state, sess):
-            return "intro"
 
         msg = state.message
         cb = msg.callback_data or ""
-        # Picker callback → pick_item (still deterministic).
+        text = (msg.text or "").strip()
+
+        # /reset — ingest already cleared taste + acked; terminate silently.
+        if is_reset_keyword(msg.text):
+            return "__end__"
+
+        # SPEC-AGENT-V2-REACT §15 Decision 2 — contentless Update silent END.
+        # Checked before first-touch so a spurious blank Update never triggers
+        # the intro.
+        if not text and not msg.callback_data and not msg.urls and not msg.photo_file_id:
+            return "__end__"
+
+        sess = get_store().get_or_create(state.chat_id)
+        is_new = getattr(sess, "onboarded_at", None) is None
+
+        # New user + /start-only (no actionable content) → service intro.
+        if is_new and text.lower() == "/start" and not msg.photo_file_id and not msg.urls and not cb:
+            return "intro"
+
+        # Picker callback → pick_item (deterministic).
         if cb.startswith("item:"):
             return "pick_item"
-        # Hybrid result-card callbacks. `card:like:` and `cards:more` are fully
-        # serviced by ingest (taste signal / next album batch) — terminal, no
-        # agent (routing to `agent` would re-spawn the loop and re-spam). Only
-        # `cards:refine` flows to the agent, which already exposes
-        # refine_search / suggest_next_step (reuse, not a new search).
+        # Hybrid result-card callbacks fully serviced by ingest — terminal.
         if cb.startswith("card:like:") or cb == "cards:more":
             return "__end__"
         # Photo / URL → vision pre-step.
         if msg.photo_file_id or msg.urls:
             return "resolve_image"
-        # AWAITING_ITEM_PICK with digit-pick text — keep deterministic fallback.
+        # AWAITING_ITEM_PICK digit-pick fallback.
         if msg.text and sess.state == SessionState.AWAITING_ITEM_PICK:
             return "pick_item"
-        # SPEC-AGENT-V2-REACT §15 Decision 2 — empty/contentless input guard.
-        # Telegram spuriously delivers contentless Updates (service messages,
-        # stickers, blank-text echoes). These are NOT user turns: route to END
-        # SILENTLY (no message sent) rather than spawning the agent on an empty
-        # context (which hallucinates "Oops I can't recall"). All four must be
-        # true: blank text AND no callback AND no urls AND no photo. Callbacks
-        # (clarify:/crit:/onboard:) carry non-empty callback_data and were
-        # routed by the positive branches above, so they never reach here.
-        if not (msg.text or "").strip() and not msg.callback_data and not msg.urls and not msg.photo_file_id:
-            return "__end__"
-        # Everything else (text, clarify:* / crit:* callbacks for onboarded users)
-        # goes to the agent. ingest.Step C inline-handled boost_keywords for
-        # clarify:* before we arrive here.
+        # Everything else (text incl. greetings, clarify:/crit:* callbacks) →
+        # agent. ingest inline-handled greeting/ack already.
         return "agent"
+
+    # Test seam — expose the routing closure at module scope so unit tests can
+    # exercise it directly. Rebound on every build_graph(); the import-time
+    # GRAPH = build_graph() call performs the binding.
+    globals()["_route_after_ingest_v2"] = _route_after_ingest_v2
 
     ingest_branches_v2: dict[str, str] = {
         "pick_item": "pick_item",
         "resolve_image": "resolve_image",
         "agent": "agent",
-        "intro": "intro",  # SPEC-AGENT-V2-REACT first-touch service intro (cards OFF)
-        "__end__": END,  # SPEC-AGENT-V2-REACT §15 Decision 2 — silent END for contentless Update
-        "pinterest_ingest": "pinterest_ingest",
-        "onboard_intro": "onboard_intro",
-        "onboard_mood": "onboard_mood",
-        "onboard_color": "onboard_color",
-        "onboard_fit": "onboard_fit",
-        "onboard_pinterest": "onboard_pinterest",
+        "intro": "intro",  # SPEC-ONBOARD-LITE-001 — new-user /start-only intro
+        "__end__": END,  # contentless Update / /reset — silent END
     }
 
     def _route_after_pick_v2(state: WorkingState) -> str:
@@ -180,17 +143,9 @@ def build_graph() -> Any:
     builder.add_edge("apply_clarify", "agent")
     builder.add_edge("ask_clarify", END)
     builder.add_edge("agent", END)
-    # SPEC-AGENT-V2-REACT — first-touch intro is per-turn terminal: the user's
-    # 2nd message is a fresh webhook (new graph run) and onboarded_at is now
-    # set, so the ingest gate routes it normally (agent / resolve_image).
+    # SPEC-ONBOARD-LITE-001 — intro is per-turn terminal: the user's 2nd
+    # message is a fresh webhook (onboarded_at now set) and routes normally.
     builder.add_edge("intro", END)
-    # Onboarding edges — preserved.
-    builder.add_edge("onboard_intro", END)
-    builder.add_edge("onboard_mood", END)
-    builder.add_edge("onboard_color", END)
-    builder.add_conditional_edges("onboard_fit", _route_after_onboard_fit, _ONBOARD_FIT_BRANCHES)
-    builder.add_edge("onboard_pinterest", END)
-    builder.add_edge("pinterest_ingest", END)
 
     _log_topology_banner()
     return builder.compile()
