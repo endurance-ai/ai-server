@@ -48,6 +48,8 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `LANGFUSE_HOST` | Langfuse 서버 base URL (Docker network: `http://langfuse-web:3000`) | docker-compose 시작 시 |
 | `LANGFUSE_PUBLIC_KEY` | `pk-lf-...` | Langfuse UI 첫 로그인 후 발급 |
 | `LANGFUSE_SECRET_KEY` | `sk-lf-...` | 동일 |
+| `LANGFUSE_SELECTIVE_MODE` | `false` | 비-LLM 노드 `@observe` 제거 비상 롤백 — `true` 시 4 LLM 노드만 trace |
+| `LANGFUSE_FEEDBACK_SCORES` | `true` | 암묵 피드백(click/no_click/re_query) → 원본 추천 trace score retro-attach kill-switch. `false` 시 `create_score()` 만 침묵, 피드백/taste 경로는 그대로 |
 
 상세: [`features/observability.md`](../features/observability.md).
 

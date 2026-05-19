@@ -69,6 +69,7 @@ flowchart TB
     PIPE -->|search_products_v6 RPC| PG
     PIPE -.LLM.-> LITELLM
     PIPE -.trace.-> LFW
+    PIPE -.score.-> LFW
 
     FIND -. "현재 미사용" .-> REC
     FIND -. "v4 fallback" .-> V4
@@ -384,6 +385,7 @@ app/
 | LiteLLM callback | `success_callback: ["langfuse"]` | 모든 LLM/embed 호출 자동 trace |
 | `@observe(name=...)` | `pipeline/`, `services/` 레이어 | step 단위 span |
 | `emit()` 이벤트 로그 | `observability/conversation_log.py` | `ai.log_conversation_event` append-only, 20 이벤트 타입, fire-and-forget |
+| `emit_feedback_score()` | `observability/langfuse.py` | 암묵 피드백(click/no_click/re_query) → 원본 추천 trace에 Langfuse v3 numeric score retro-attach. kill-switch: `LANGFUSE_FEEDBACK_SCORES` |
 
 **구조화 로그 이모지 범례:**
 
@@ -460,3 +462,4 @@ app/
 | 2026-05-18 | **v1.0.0** | **SPEC-AGENT-V2-CLEANUP-001 — V3 ReAct 영구 단일 토폴로지 (V1 18-노드 + 모든 feature flag 제거). 하이브리드 카드 결과 전송 (send_hybrid_batch). ARCHITECTURE.md 전면 재작성.** |
 | 2026-05-18 | **v1.1.0** | **bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등. Telegram 봇이 Vision도 독자 처리함을 명시 (app과 DB만 공유).** |
 | 2026-05-18 | **v1.2.0** | **SPEC-SEARCH-V6-001 — search_products_v5+pgroonga+product_search_text DROPPED → search_products_v6 (embedding-first, distance ASC, p_category canonical family gate). EmbedProvider.embed_text() 신규 (text query → Modal /embed/text). zero-dense stopgap 제거. product_ai_analysis 테이블 dead path 제거. category_family.py 신규 (20-token CANONICAL_FAMILIES + to_canonical_family). react_loop._build_ctx 가 vision_category 노출.** |
+| 2026-05-19 | **v1.3.0** | **P0 암묵 피드백 → Langfuse v3 score retro-attach. `emit_feedback_score()` 신규 (observability/langfuse.py). `ai.card_impression.langfuse_trace` 컬럼 추가 (migration 0006). 호출처: implicit_feedback.py 3곳 (click/no_click/re_query). kill-switch: `LANGFUSE_FEEDBACK_SCORES`.** |

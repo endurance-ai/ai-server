@@ -173,6 +173,7 @@ Cutover order (plan §1.3):
    # 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
    # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
    # 0005_add_taste_dislike_ts           — ai.user_taste_profile +2 JSONB 컬럼 (SPEC-AGENT-V3-REACT Gap4 — SPEC-AGENT-V2-CLEANUP-001 이후 unconditional, 미적용 시 dislike_ts 쓰기 실패)
+   # 0006_add_card_impression_langfuse_trace — ai.card_impression.langfuse_trace nullable TEXT (P0 user-feedback scores; 미적용 시 impression INSERT 실패 → WARN no-op)
    ```
 2. Deploy this codebase with `PINTEREST_BOOTSTRAP_ENABLED=true` and
    `ONBOARDING_CARDS_ENABLED=true`.

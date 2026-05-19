@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     # decoration exceeds the < 5ms p99 latency budget. Default off — restore
     # full coverage by leaving false.
     LANGFUSE_SELECTIVE_MODE: bool = False
+    # P0 user-feedback scores — kill-switch for retro-scoring the original
+    # recommendation trace from implicit feedback (click / no_click / re_query).
+    # Default on; set false to silence all create_score() calls without
+    # touching the feedback / webhook paths.
+    LANGFUSE_FEEDBACK_SCORES: bool = True
 
     # 검색 파라미터 기본값
     SEARCH_DEFAULT_K: int = 50  # RPC top-k

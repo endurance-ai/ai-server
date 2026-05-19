@@ -63,7 +63,7 @@ app/
 | LLM | LiteLLM proxy 경유. **ReAct agent LLM: Bedrock nova-lite (`AGENT_LLM_MODEL`, 기본 `nova-lite`) via LiteLLM** — `drop_params: true` 로 `tool_choice` 제거 (Bedrock 호환). `langchain-openai` (`ask_clarify` 노드 한정) |
 | 임베딩 | Modal HTTP endpoint (FashionSigLIP). `POST /embed` (image) + **`POST /embed/text`** (text query — SPEC-SEARCH-V6-001) |
 | 벡터 DB | **dev-app Postgres 16 + pgvector** (PostgREST nginx shim, Qdrant 미사용). pgroonga/product_search_text DROPPED with v5 — v6 is embedding-first |
-| Observability | **Langfuse self-host** (`build_callback_handler` — langfuse v2+langchain 비호환으로 현재 None 폴백) |
+| Observability | **Langfuse self-host v3** (`langfuse>=3,<4`, single-path v3 wiring — SPEC-OBSERVABILITY-002). `build_callback_handler` 는 키 존재 시 진짜 v3 `CallbackHandler` 반환 (LangGraph→nested LLM 브리지), 미설정 시 no-op 폴백. dev-ai 풀스택 self-host (web+worker+ClickHouse+Redis+MinIO+PG) |
 | 스키마 | Pydantic v2 |
 | HTTP | httpx (async) |
 | 패키지 | uv |
@@ -166,7 +166,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증. `embed_image_url` (image → 768-dim) + **`embed_text`** (text query → 768-dim, same FashionSigLIP L2 space, SPEC-SEARCH-V6-001) |
 | `app/providers/llm.py` | LiteLLM HTTP |
 | `app/providers/apify.py` | Apify Pinterest 스크래퍼 — `run_pinterest_scrape(url, mode, max_items, timeout_s)`. `ApifyTimeoutError` 전용 예외. board/profile/pin 3-mode 지원. httpx 직접 사용 (SDK 미사용, SPEC-ONBOARD-CARDS-001) |
-| `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 + `current_langfuse_trace_id()` export |
+| `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 + `current_langfuse_trace_id()` export + `emit_feedback_score()` (P0 암묵 피드백 → 원본 trace score retro-attach, fail-open) |
 | `app/observability/conversation_log.py` | 대화 이벤트 로거 — `log_event()` (async, never raises) + `emit()` (fire-and-forget asyncio.create_task) + `_truncate()` payload cap. `MEMORY_BACKEND_IS_POSTGRES` 가드. 모든 graph 노드 + webhook intake 에서 호출 (SPEC-CONVERSATION-LOG-001) |
 | `app/observability/event_payloads.py` | 20개 이벤트 타입 TypedDict 정의 (`user_text`, `user_photo`, `intent_routed`, `vision_done`, `search_done`, `diversify_done`, `card_sent`, `card_clicked`, `bot_text`, `taste_update`, `node_error`, `tool_call` 등 — SPEC-CONVERSATION-LOG-001 + SPEC-AGENT-V2-REACT) |
 | `app/models/request.py` | RecommendRequest (alias + image_url SSRF 가드) |
@@ -190,6 +190,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `CLARIFY_CARDS_ENABLED` (기본 `true`) + `CLARIFY_MAX_BUTTONS` (SPEC-CLARIFY-CARDS-001)
 - `RESPONSE_SPLIT_ENABLED` (기본 `true`) + `RESPONSE_SPLIT_DELAY_MS` / `RESPONSE_SPLIT_MIN_CHARS` — 문장 단위 분할 발화 (noscroll benchmark P0)
 - `ONBOARDING_CARDS_ENABLED` (기본 `true`) + `PINTEREST_BOOTSTRAP_ENABLED` (기본 `true`) + `APIFY_TOKEN` / `APIFY_PINTEREST_ACTOR` / `APIFY_PINTEREST_MAX_ITEMS` / `APIFY_PINTEREST_CONCURRENCY` / `ONBOARDING_SEED_MAX_WEIGHT` (SPEC-ONBOARD-CARDS-001)
+- `LANGFUSE_FEEDBACK_SCORES` (기본 `true`) — P0 암묵 피드백 → 원본 추천 trace Langfuse score kill-switch (click/no_click/re_query). off 시 `create_score()` 만 침묵, 피드백 경로는 그대로
 - **ReAct 에이전트 루프 (영구 단일 토폴로지, SPEC-AGENT-V2-CLEANUP-001)**: `AGENT_LLM_MODEL` (기본 `nova-lite` via LiteLLM, 미설정 시 fail-closed) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S`. V3 4-Gap(memory/Reflexion/proactive/dislike) 모두 unconditional — 개별 플래그 제거됨
   - `AGENT_V3_MEMORY_MAX_TOKENS` (기본 `1500`) — Gap1 메모리 주입 페이로드 token cap (char 근사: *4, 유일하게 남은 V3 튜닝값)
 

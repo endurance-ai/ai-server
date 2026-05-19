@@ -30,7 +30,12 @@ from app.infrastructure.memory.taste_profile import (
     user_key_for,
 )
 from app.observability.conversation_log import emit as _conv_emit
-from app.observability.langfuse import observe, update_current_span
+from app.observability.langfuse import (
+    current_langfuse_trace_id,
+    emit_feedback_score,
+    observe,
+    update_current_span,
+)
 from app.observability.pii import hash_id
 
 logger = logging.getLogger(__name__)
@@ -140,6 +145,16 @@ async def log_impressions(chat_id: int, from_user_id: int | None, products: list
 
     rows: list[tuple] = []
     window_s = max(0, int(settings.IMPLICIT_FB_ATTRIBUTION_WINDOW_S))
+    # @MX:NOTE: P0 user-feedback scores — capture the trace id HERE, in the
+    # webhook context that produced the cards. click / no_click arrive on a
+    # LATER webhook = a DIFFERENT trace, so the original trace must be bound
+    # to the impression row now and read back at attribution time.
+    try:
+        impression_trace = current_langfuse_trace_id()
+    except Exception:  # noqa: BLE001 — trace capture is best-effort
+        impression_trace = None
+    if impression_trace is None:
+        logger.debug("[IMPLICIT_FB][impression] no active langfuse trace; batch unscored")
     for c in products:
         pid = _product_id_of(c)
         if not pid:
@@ -147,7 +162,7 @@ async def log_impressions(chat_id: int, from_user_id: int | None, products: list
             continue
         brand = _brand_of(c)
         keywords = _keywords_for_product(c)
-        rows.append((chat_id, from_user_id, pid, brand, Jsonb(keywords), window_s))
+        rows.append((chat_id, from_user_id, pid, brand, Jsonb(keywords), window_s, impression_trace))
 
     if not rows:
         update_current_span(
@@ -168,8 +183,9 @@ async def log_impressions(chat_id: int, from_user_id: int | None, products: list
                 await cur.executemany(
                     """
                     INSERT INTO ai.card_impression
-                        (chat_id, from_user_id, product_id, brand, keywords, attribution_window_s)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                        (chat_id, from_user_id, product_id, brand, keywords,
+                         attribution_window_s, langfuse_trace)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
                     rows,
                 )
@@ -233,28 +249,47 @@ async def record_click(
         return 0
 
     rows_affected = 0
+    original_trace: str | None = None
     if _BACKEND_IS_POSTGRES:
         try:
             from app.providers.db_pool import get_pool, run_in_pool_loop
 
-            async def _update() -> int:
+            # @MX:NOTE: P0 user-feedback scores — RETURNING langfuse_trace
+            # recovers the ORIGINAL recommendation trace bound at impression
+            # time (this click webhook is a different trace). rows_affected
+            # uses len(fetched): cur.rowcount is unreliable after fetchall()
+            # on psycopg3 (can be -1/0).
+            async def _update() -> tuple[int, str | None]:
                 async with get_pool().connection() as conn, conn.cursor() as cur:
                     await cur.execute(
                         """
                         UPDATE ai.card_impression
                            SET click_status = 'clicked', click_at = now()
                          WHERE chat_id = %s AND product_id = %s AND click_status IS NULL
+                        RETURNING langfuse_trace
                         """,
                         (chat_id, product_id),
                     )
-                    n = cur.rowcount or 0
+                    fetched = await cur.fetchall()
                     await conn.commit()
-                return int(n)
+                trace = fetched[0][0] if fetched else None
+                return len(fetched), trace
 
-            rows_affected = run_in_pool_loop(_update())
+            rows_affected, original_trace = run_in_pool_loop(_update())
         except Exception as exc:  # noqa: BLE001
-            _warn_once(chat_id, "click", f"[IMPLICIT_FB][click] update failed: {exc!r}")
+            _warn_once(chat_id, "click", f"[IMPLICIT_FB][click] update failed: {type(exc).__name__}")
             rows_affected = 0
+            original_trace = None
+
+    # Score the ORIGINAL trace OUTSIDE the DB try/except — a scoring failure
+    # must never set rows_affected=0 or skip taste reinforcement.
+    if original_trace:
+        emit_feedback_score(
+            original_trace,
+            signal="click",
+            product_id=hash_id(product_id),
+            brand=brand,
+        )
 
     # Reinforce taste profile regardless of DB state
     if settings.TASTE_PROFILE_ENABLED:
@@ -306,7 +341,9 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
     try:
         from app.providers.db_pool import get_pool, run_in_pool_loop
 
-        async def _attribute() -> list[tuple[str, list[str]]]:
+        # @MX:NOTE: P0 user-feedback scores — RETURNING langfuse_trace gives
+        # the ORIGINAL recommendation trace per expired (no-click) impression.
+        async def _attribute() -> list[tuple[str, list[str], str | None]]:
             async with get_pool().connection() as conn, conn.cursor() as cur:
                 await cur.execute(
                     """
@@ -319,17 +356,17 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
                     UPDATE ai.card_impression
                        SET click_status = 'attributed_no_click'
                      WHERE id IN (SELECT id FROM expired)
-                    RETURNING brand, keywords
+                    RETURNING brand, keywords, langfuse_trace
                     """,
                     (chat_id,),
                 )
                 rows = await cur.fetchall()
                 await conn.commit()
-            return [(r[0], list(r[1] or [])) for r in rows]
+            return [(r[0], list(r[1] or []), r[2]) for r in rows]
 
         attributed = run_in_pool_loop(_attribute())
     except Exception as exc:  # noqa: BLE001
-        _warn_once(chat_id, "no_click", f"[IMPLICIT_FB][no_click] attribute failed: {exc!r}")
+        _warn_once(chat_id, "no_click", f"[IMPLICIT_FB][no_click] attribute failed: {type(exc).__name__}")
         update_current_span(
             metadata={
                 "chat_id_hash": hash_id(chat_id),
@@ -341,11 +378,17 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
         )
         return 0
 
+    # Score each expired (no-click) impression's ORIGINAL trace OUTSIDE the
+    # DB try/except — a scoring failure must never skip taste reinforcement.
+    for _brand, _kw, _trace in attributed:
+        if _trace:
+            emit_feedback_score(_trace, signal="no_click", brand=_brand or None)
+
     if attributed and settings.TASTE_PROFILE_ENABLED:
         try:
             taste_store = get_taste_store()
             profile = taste_store.get_or_create(user_key_for(from_user_id, chat_id))
-            for brand, keywords in attributed:
+            for brand, keywords, _ in attributed:
                 if brand:
                     profile.reinforce_disliked_brand(brand, weight=weight)
                 if keywords:
@@ -364,7 +407,7 @@ async def attribute_expired_impressions(chat_id: int, from_user_id: int | None) 
 
             agg_brands: list[str] = []
             agg_keywords: list[str] = []
-            for brand, keywords in attributed:
+            for brand, keywords, _ in attributed:
                 if brand:
                     agg_brands.append(brand)
                 if keywords:
@@ -423,6 +466,40 @@ async def _fetch_clicked_product_ids(chat_id: int) -> set[str]:
         return set()
 
 
+async def _fetch_original_traces(chat_id: int, product_ids: list[str]) -> set[str]:
+    """Return the distinct ORIGINAL recommendation trace ids bound at
+    impression time for the given products in this chat.
+
+    Used by the re-query path (a session-level signal with no impression-row
+    link) to recover the trace(s) that produced the re-queried cards.
+    Best-effort: returns empty set on any failure / in_memory backend.
+    """
+    if not _BACKEND_IS_POSTGRES or not product_ids:
+        return set()
+    try:
+        from app.providers.db_pool import get_pool
+
+        async with get_pool().connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT DISTINCT langfuse_trace FROM ai.card_impression "
+                "WHERE chat_id = %s AND product_id = ANY(%s) "
+                "AND langfuse_trace IS NOT NULL LIMIT 1000",
+                (chat_id, list(product_ids)),
+            )
+            rows = await cur.fetchall()
+        return {row[0] for row in rows if row and row[0]}
+    except Exception as exc:  # noqa: BLE001
+        # warn-once so a missing langfuse_trace column (pre-migration deploy)
+        # is visible instead of silently swallowed. Still fail-open.
+        _warn_once(
+            chat_id,
+            "rq_trace_fetch",
+            f"[IMPLICIT_FB][re-query] original trace fetch failed ({type(exc).__name__}) — "
+            f"check migration 0003 applied (best-effort, returning empty)",
+        )
+        return set()
+
+
 @observe(name="implicit_feedback.re_query", as_type="span")
 async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) -> bool:
     """If session matches re-query predicate, soft-negatively reinforce
@@ -472,6 +549,18 @@ async def detect_and_apply_re_query(session: Any, inbound_is_fresh_query: bool) 
     # subsequent re-query in the same session).
     filtered_products = [c for c in products if (_product_id_of(c) or "") not in clicked_pids]
     excluded_n = len(products) - len(filtered_products)
+
+    # @MX:NOTE: P0 user-feedback scores — re_query is a SESSION-level signal
+    # with no impression-row link, so the ORIGINAL recommendation trace is
+    # recovered by looking up the impression rows for the re-queried products.
+    # One distinct trace → one (user_feedback=0.0 + re_query=1.0) pair.
+    _rq_pids = [pid for c in filtered_products if (pid := _product_id_of(c))]
+    for _rq_trace in await _fetch_original_traces(chat_id_int, _rq_pids):
+        emit_feedback_score(
+            _rq_trace,
+            signal="re_query",
+            attribution_window_s=window_s,
+        )
 
     re_query_brands: list[str] = []
     re_query_keywords: list[str] = []
