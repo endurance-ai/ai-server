@@ -77,9 +77,90 @@ _ALBUM_SENT_KEY = "_respond_album_sent"
 _CARD_BATCH_CURSOR: dict[int, int] = {}
 
 
+# SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 — per-chat set of product_ids
+# already impression-logged this process lifetime. `ai.card_impression` has NO
+# unique constraint / ON CONFLICT (migration 0002 — only a NON-unique
+# (chat_id, product_id) index), so the same item re-shown via `cards:more`
+# (offset paging) or a defensive re-entry would INSERT a duplicate row,
+# inflating no-click attribution. Dedupe HERE, at the single delivery seam.
+# Module-global, same lifecycle/rationale as `_CARD_BATCH_CURSOR`: not
+# persisted, a process restart simply re-allows logging (harmless — at worst
+# one extra impression row per item after a restart, bounded by the search cap).
+# Memory bound: the inner set is CLEARED at the start of every new search
+# (offset==0 fresh-recommendation delivery), so each set stays ≤ the search cap
+# (tiny). The outer dict grows by distinct chat_id only — accepted, identical
+# structure/precedent to the pre-existing `_CARD_BATCH_CURSOR`; deliberately NO
+# LRU/cap (would be over-engineering for the same bound the codebase already
+# tolerates).
+_LOGGED_IMPRESSION_IDS: dict[int, set[str]] = {}
+
+
 def reset_card_batch_cursor_for_tests() -> None:
-    """Clear the pager cursor (test hook only)."""
+    """Clear the pager cursor + impression-dedup set (test hook only)."""
     _CARD_BATCH_CURSOR.clear()
+    _LOGGED_IMPRESSION_IDS.clear()
+
+
+# @MX:ANCHOR: [AUTO] live-path impression logging — the ONLY invocation of
+#   log_impressions on the permanent ReAct topology (send_results is unregistered).
+# @MX:REASON: P0 implicit-feedback → Langfuse score depends entirely on this
+#   call binding the recommendation trace at delivery time; a regression here
+#   silently disables all click / no_click / re_query scoring.
+# @MX:SPEC: SPEC-IMPLICIT-FB-001
+async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], *, is_fresh_search: bool) -> None:
+    """Impression-log the candidates actually delivered in THIS batch.
+
+    Called from `send_hybrid_batch`'s success seam so it runs inside the
+    active Langfuse trace (post-search reply → `node.agent` @observe;
+    `cards:more` → `node.ingest` @observe) — `log_impressions` captures that
+    trace id and binds it to each row for later click/no-click scoring.
+
+    `is_fresh_search` (the post-search reply, offset==0) CLEARS this chat's
+    dedupe set BEFORE logging so a new search re-logs even products that were
+    shown in a PREVIOUS search — each gets a fresh impression row bound to the
+    NEW trace (otherwise a click on a re-recommended product would attribute to
+    the stale prior trace, defeating the feature). A `cards:more` page
+    (offset is None → is_fresh_search=False) does NOT clear, so within-search
+    paging still dedupes (no double-log of the same result set).
+
+    Offset/batch aware: only `batch` (the slice just sent) is logged. Dedupes
+    by (chat_id, product_id) against this search's already-logged set so a
+    re-shown item from a later `cards:more` page (or defensive re-entry) is
+    not double-inserted (the table has no ON CONFLICT — see migration 0002).
+
+    Strictly fail-open: any failure is swallowed; card delivery already
+    succeeded and MUST NOT be undone or delayed by feedback bookkeeping.
+    `log_impressions` is itself async + never-raises per its own contract;
+    this wrapper is belt-and-suspenders for the dedup/extraction path.
+    """
+    try:
+        from app.channels.implicit_feedback import _product_id_of, log_impressions
+
+        if is_fresh_search:
+            # New search → drop the prior search's dedupe set so its products
+            # are re-logged against the NEW recommendation trace.
+            _LOGGED_IMPRESSION_IDS.pop(int(chat_id), None)
+        seen = _LOGGED_IMPRESSION_IDS.setdefault(int(chat_id), set())
+        fresh: list[Any] = []
+        for c in batch:
+            pid = _product_id_of(c)
+            if pid is None:
+                # Keep id-less candidates (log_impressions skips them itself);
+                # they cannot be deduped but also cannot be re-correlated.
+                fresh.append(c)
+                continue
+            if pid in seen:
+                continue
+            seen.add(pid)
+            fresh.append(c)
+        if not fresh:
+            return
+        from_user_id = getattr(sess, "from_user_id", None)
+        await log_impressions(int(chat_id), from_user_id, fresh)
+    except Exception as exc:  # noqa: BLE001 — never break/delay card delivery
+        # type name only — exc repr can surface raw chat_id via psycopg
+        # exception args (app/observability/pii.py log-line policy).
+        logger.debug("[tool.respond] impression logging best-effort skip: %s", type(exc).__name__)
 
 
 def _has_plausible_image(c: Any) -> bool:
@@ -389,6 +470,12 @@ async def send_hybrid_batch(
         logger.debug("[tool.respond] album already sent this turn — skipping resend")
         return 0
 
+    # offset==0 is the post-search reply (fresh recommendation) — see
+    # respond.dispatch. offset is None is the `cards:more` pager (subsequent
+    # page of the SAME search). This distinguishes a new search (re-log all,
+    # bind the new trace) from a within-search page (dedupe so paging doesn't
+    # double-log the same result set).
+    is_fresh_search = offset == 0
     start = _CARD_BATCH_CURSOR.get(int(chat_id), 0) if offset is None else int(offset)
     if start < 0:
         start = 0
@@ -450,6 +537,13 @@ async def send_hybrid_batch(
 
     if delivered > 0:
         _emit_card_sent(chat_id, sess, batch[:delivered])
+        # SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 — log impressions for
+        # the candidates ACTUALLY delivered in this batch, AFTER the successful
+        # send and BEFORE returning. This is the single live-path seam: both
+        # the post-search reply (respond tool, inside node.agent @observe) and
+        # the `cards:more` pager (ingest, inside node.ingest @observe) funnel
+        # through here, so the active Langfuse trace is captured and bound.
+        await _log_delivered_impressions(chat_id, sess, batch[:delivered], is_fresh_search=is_fresh_search)
         # Advance the pager cursor to just past the LAST consumed absolute
         # position in `all_candidates` (not by eligible count) so a "더보기"
         # tap neither repeats nor skips items when broken-image candidates are

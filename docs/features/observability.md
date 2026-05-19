@@ -107,6 +107,8 @@ curl -X POST http://<EIP>:8000/recommend \
 
 **원본 trace 귀속 메커니즘**: click/no_click/re_query 는 *나중 webhook = 다른 trace* 에서 도착하므로 click 시점의 `current_langfuse_trace_id()` 를 쓰면 잘못된 trace 에 붙는다. `log_impressions` 가 임프레션을 INSERT 할 때 그 webhook 컨텍스트의 trace id 를 `ai.card_impression.langfuse_trace` 컬럼에 바인딩(migration `0006`). `record_click` 은 `UPDATE … RETURNING langfuse_trace`, `attribute_expired_impressions` 는 CTE `RETURNING … langfuse_trace`, re_query 는 재조회 product_id 들의 임프레션 행에서 distinct trace 를 역조회한다.
 
+**임프레션 로깅 지점 (영구 토폴로지)**: `log_impressions` 는 라이브 카드 전달 단일 funnel 인 `respond` tool 의 `send_hybrid_batch` 성공 직후에서 호출된다(과거엔 그래프 미등록 `send_results` 노드에서만 호출돼 ReAct 경로에서 임프레션이 전혀 안 남던 갭이 있었음 — 수정됨). 새 검색(`offset==0`)이면 chat 별 dedupe 셋을 비워 같은 상품이 새 turn 에 다시 추천되면 새 trace 로 새 임프레션 행을 남기고, `cards:more` 페이지(`offset is None`)는 비우지 않아 동일 결과셋 내 중복 INSERT 를 막는다.
+
 **Fail-open**: 스코어 emit 실패는 피드백 경로/webhook 을 절대 깨지 않는다 — `conversation_log.py` 와 동일한 never-raise 규율(try/except → WARNING 로그, swallow). Langfuse 비활성(키 없음)·kill-switch off·trace id 부재 시 silent no-op.
 
 **Kill-switch**: `LANGFUSE_FEEDBACK_SCORES` (기본 `true`). false 로 두면 `create_score()` 호출만 침묵, 피드백/taste 경로는 그대로.
