@@ -1,6 +1,5 @@
 from functools import lru_cache
 
-from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -170,30 +169,6 @@ class Settings(BaseSettings):
     # Soft-negative weight applied on rapid re-query. REQ-FB-REQUERY-001.
     IMPLICIT_FB_REQUERY_WEIGHT: float = 0.5
 
-    # SPEC-ONBOARD-CARDS-001 — Onboarding cards + Pinterest bootstrap ────
-    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
-    APIFY_TOKEN: str = ""
-    APIFY_PINTEREST_ACTOR: str = "epctex/pinterest-scraper"
-    APIFY_PINTEREST_MAX_ITEMS: int = 80
-    APIFY_PINTEREST_CONCURRENCY: int = 5
-    PINTEREST_BOOTSTRAP_ENABLED: bool = True
-    # 24h TTL — REQ-ONBOARD-PINTEREST-007 cache.
-    PINTEREST_INGEST_CACHE_TTL_S: int = 86400
-    # REQ-ONBOARD-PINTEREST-002 — cap on extracted pin URLs per turn.
-    PINTEREST_MAX_PINS_PER_TURN: int = 20
-    # REQ-ONBOARD-PINTEREST-003 — continuous bootstrap rate-limit window.
-    PINTEREST_CONTINUOUS_RATELIMIT_S: int = 300
-    # continuous Pinterest bootstrap (post-onboarding 핀 URL → 취향만 업데이트)
-    # 활성화. 기본 false — 온보딩 끝난 유저가 핀 던지면 일반 검색 흐름
-    # (resolve_image → vision → search → cards) 으로 가는 게 직관에 맞아서.
-    # 명시적으로 "취향에만 추가" 시나리오 필요할 때 true 로 전환. 사용자 피드백.
-    PINTEREST_CONTINUOUS_ENABLED: bool = False
-    ONBOARDING_CARDS_ENABLED: bool = True
-    # REQ-ONBOARD-SEED-002 — per-keyword seed weight cap. Applied by
-    # `TasteProfileStore.seed_from_onboarding` for both InMemory + Postgres
-    # backends. Recommended range (0, 1].
-    ONBOARDING_SEED_MAX_WEIGHT: float = 0.7
-
     # SPEC-AGENT-V2-CLEANUP-001 — ReAct agent loop is now the PERMANENT, ONLY
     # topology. The V1 (18-node legacy) graph and the AGENT_V2_REACT_ENABLED /
     # AGENT_V3_* feature flags were removed; the ReAct ("V3") behavior is
@@ -231,48 +206,6 @@ class Settings(BaseSettings):
     # memory-injection payload token cap remains as a tunable.
     # Memory-injection payload token cap (char-approx ×4).
     AGENT_V3_MEMORY_MAX_TOKENS: int = 1500
-
-    @field_validator("APIFY_PINTEREST_MAX_ITEMS")
-    @classmethod
-    def _validate_apify_max_items(cls, v: int) -> int:
-        if not (1 <= int(v) <= 100):
-            raise ValueError("APIFY_PINTEREST_MAX_ITEMS must be in [1, 100]")
-        return int(v)
-
-    @field_validator("APIFY_PINTEREST_CONCURRENCY")
-    @classmethod
-    def _validate_apify_concurrency(cls, v: int) -> int:
-        if not (1 <= int(v) <= 20):
-            raise ValueError("APIFY_PINTEREST_CONCURRENCY must be in [1, 20]")
-        return int(v)
-
-    @field_validator("ONBOARDING_SEED_MAX_WEIGHT")
-    @classmethod
-    def _validate_seed_max_weight(cls, v: float) -> float:
-        if not (0.0 < float(v) <= 1.0):
-            raise ValueError("ONBOARDING_SEED_MAX_WEIGHT must be in (0, 1]")
-        return float(v)
-
-    @field_validator("PINTEREST_MAX_PINS_PER_TURN")
-    @classmethod
-    def _validate_max_pins_per_turn(cls, v: int) -> int:
-        if not (1 <= int(v) <= 50):
-            raise ValueError("PINTEREST_MAX_PINS_PER_TURN must be in [1, 50]")
-        return int(v)
-
-    @field_validator("PINTEREST_INGEST_CACHE_TTL_S")
-    @classmethod
-    def _validate_cache_ttl(cls, v: int) -> int:
-        if int(v) < 0:
-            raise ValueError("PINTEREST_INGEST_CACHE_TTL_S must be non-negative")
-        return int(v)
-
-    @field_validator("PINTEREST_CONTINUOUS_RATELIMIT_S")
-    @classmethod
-    def _validate_rate_limit(cls, v: int) -> int:
-        if int(v) < 0:
-            raise ValueError("PINTEREST_CONTINUOUS_RATELIMIT_S must be non-negative")
-        return int(v)
 
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
