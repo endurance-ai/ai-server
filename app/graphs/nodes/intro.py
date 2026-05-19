@@ -1,15 +1,16 @@
-"""SPEC-AGENT-V2-REACT — first-touch service intro (onboarding-cards OFF).
+"""SPEC-ONBOARD-LITE-001 — lightweight first-touch service intro.
 
-When `ONBOARDING_CARDS_ENABLED=false` the mood/color/fit/pinterest card flow
-is skipped (routing.onboarding_required → False). A brand-new user
-(`sess.onboarded_at IS NULL`) would otherwise fall straight into the V2 agent
-with no introduction. This node sends ONE deterministic, detailed, friendly
-intro message, marks the user as introduced (`sess.onboarded_at = now()`,
-persisted via the session store — mirrors `_onboard_helpers.complete_onboarding`
-step 4), and terminates the turn (the first message is NOT processed by the
-agent). From the user's 2nd message onward the normal V2 agent flow runs.
+Reached only when a brand-new user (`sess.onboarded_at IS NULL`) sends a
+`/start`-only first message (the `_route_after_ingest_v2` gate in
+`fashion_bot.py`). The onboarding card subgraph was removed; an actionable
+first message (photo / link / style text) is greeted inline by `ingest`
+(`maybe_first_touch`) and proceeds to a recommendation the same turn — it
+never reaches this node. This node sends ONE deterministic, friendly intro
+message, marks the user as introduced (`sess.onboarded_at = now()`,
+persisted via the session store), and terminates the turn. The user's 2nd
+message onward runs the normal agent flow.
 
-@MX:SPEC: SPEC-AGENT-V2-REACT
+@MX:SPEC: SPEC-ONBOARD-LITE-001
 """
 
 from __future__ import annotations
