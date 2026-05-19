@@ -267,10 +267,29 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
         # delivered the text or some cards, this is a benign idempotent
         # re-entry — report ok, not an empty response.
         if ctx.get(_TEXT_SENT_KEY) or ctx.get(_SENT_CARD_IDS_KEY):
+            # A prior (interrupted) entry already delivered text/cards but did
+            # not reach the genuine-completion branch — this terminal re-entry
+            # is the one that completes the turn. Set trace I/O here too so an
+            # interrupted-then-retried turn is NOT left with null trace I/O.
+            # `_set_trace_io` is per-turn idempotent (_TRACE_IO_SET_KEY), so a
+            # turn that already set it on a prior entry will not double-set.
+            # cards_sent==0 in THIS entry — the delivered set is still sourced
+            # from sess.last_results inside `_set_trace_io` via _TEXT_SENT/CARD
+            # markers signalling a prior delivery; pass the marker-derived flag.
+            _set_trace_io(ctx, text, 1 if ctx.get(_SENT_CARD_IDS_KEY) else 0)
             ctx[_DONE_KEY] = True
             return RespondResult(ok=True, error=None, text_sent=False, cards_sent=0)
         # Nothing sent at all (no text, no cards) → empty response.
         return RespondResult(ok=False, error="empty_response", text_sent=False, cards_sent=0)
+
+    # Recommendation turn finalized + delivered. Attach the judge-readable
+    # request/result to the root `webhook.telegram` trace so the Langfuse
+    # LLM-as-judge has non-null input/output to score. Pure observability,
+    # fail-open. Per-turn idempotent (_TRACE_IO_SET_KEY inside _set_trace_io):
+    # this is the genuine-completion path, but the partial-delivery re-entry
+    # branch above may have already set it — guarded so it fires exactly once
+    # per turn on whichever entry completes the turn.
+    _set_trace_io(ctx, text, cards_sent)
 
     ctx[_DONE_KEY] = True
     return RespondResult(ok=True, error=None, text_sent=text_sent, cards_sent=cards_sent)
@@ -281,6 +300,113 @@ def _candidate_field(c: Any, key: str, default: Any = "") -> Any:
     if v is None and isinstance(c, dict):
         v = c.get(key)
     return default if v is None else v
+
+
+# Trace-output product cap. The judge scores the recommendation RESULT SET the
+# system produced (the diversified candidates), not just the first album page;
+# 15 keeps the trace payload compact while covering the full result set.
+_TRACE_OUTPUT_MAX = 15
+# Bot reply text is the model's OWN generation (not user PII); trimmed so the
+# trace `output` stays compact for the judge.
+_TRACE_REPLY_MAX = 500
+# Vision-attribute cap — bound each string field in the trace `input`.
+_TRACE_VISION_MAX = 100
+# Per-turn ctx flag: trace I/O was already set this turn. Set inside
+# `_set_trace_io`, checked at BOTH call sites so trace I/O fires at most once
+# per turn regardless of which entry (interrupted-then-retried) delivered.
+_TRACE_IO_SET_KEY = "_respond_trace_io_set"
+
+
+def _trace_input(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Build the judge-readable trace `input` from the request semantics in
+    `ctx` — the user's text query and the Vision-derived attributes the
+    pipeline actually searched on.
+
+    PII: ctx ALSO carries raw `chat_id` / `from_user_id`; those are
+    DELIBERATELY excluded (app/observability/pii.py policy — raw identifiers
+    must never enter a trace). The user's own query text is request content,
+    consistent with how vision/query already flow through traces; no
+    identifiers are added.
+    """
+    query = str(ctx.get("text_query") or "").strip()
+    vision: dict[str, Any] = {}
+    cat = ctx.get("vision_category")
+    if cat:
+        vision["category"] = str(cat)[:_TRACE_VISION_MAX]
+    sn = ctx.get("style_node_primary")
+    if sn:
+        vision["style_node"] = str(sn)[:_TRACE_VISION_MAX]
+    payload: dict[str, Any] = {}
+    if query:
+        payload["query"] = query[:500]
+    if vision:
+        payload["vision"] = vision
+    payload["lang"] = str(ctx.get("lang") or "")
+    return payload
+
+
+def _delivered_products(chat_id: Any) -> list[dict[str, str]]:
+    """Top-N {product_id, brand, title} from the recommendation RESULT SET —
+    `sess.last_results`, the full diversified result set the system produced
+    this turn (the judge should score that, not just the first delivered
+    album page of 5). N=`_TRACE_OUTPUT_MAX` (15). Same source
+    `send_hybrid_batch` paginates from. Best-effort: returns [] on any
+    failure (never raises)."""
+    try:
+        from app.infrastructure.memory.session import get_store
+
+        store = get_store()
+        sess = store.get_or_create(int(chat_id))
+        cands = list(getattr(sess, "last_results", None) or [])[:_TRACE_OUTPUT_MAX]
+        out: list[dict[str, str]] = []
+        for c in cands:
+            out.append(
+                {
+                    "product_id": str(_candidate_field(c, "id", "") or ""),
+                    "brand": str(_candidate_field(c, "brand", "") or ""),
+                    "title": str(_candidate_field(c, "name", "") or ""),
+                }
+            )
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
+# @MX:NOTE: [AUTO] Pure observability — sets the webhook root trace's
+#   judge-readable input/output once per recommendation turn. Fail-open:
+#   any failure (incl. Langfuse disabled) is swallowed; delivery already
+#   happened and MUST NOT be undone or delayed.
+def _set_trace_io(ctx: dict[str, Any], text: str, cards_sent: int) -> None:
+    """Attach the recommendation turn's `input` (user request) and `output`
+    (delivered product set + reply) to the active `webhook.telegram` root
+    trace, so the Langfuse LLM-as-judge can score it.
+
+    Idempotent per turn: guarded by `_TRACE_IO_SET_KEY` in the shared `ctx`
+    so it fires at most once even if called from both the genuine-completion
+    branch AND the partial-delivery re-entry terminal branch (an interrupted-
+    then-retried turn must still get trace I/O exactly once, never double).
+
+    Behavior-invariant: no effect on results, ordering, delivery, or latency.
+    `update_current_trace` is a no-op when Langfuse is disabled and queues on
+    the SDK background thread otherwise (non-blocking). Strictly never raises.
+    """
+    try:
+        if ctx.get(_TRACE_IO_SET_KEY):
+            return
+        ctx[_TRACE_IO_SET_KEY] = True
+
+        from app.observability import langfuse as _lf
+
+        trace_input = _trace_input(ctx)
+        products = _delivered_products(ctx.get("chat_id")) if cards_sent > 0 else []
+        trace_output = {
+            "products": products,
+            "count": len(products),
+            "reply": (text or "").strip()[:_TRACE_REPLY_MAX],
+        }
+        _lf.update_current_trace(input=trace_input, output=trace_output)
+    except Exception as exc:  # noqa: BLE001 — pure observability; never break delivery
+        logger.debug("[tool.respond] trace I/O set best-effort skip: %s", type(exc).__name__)
 
 
 def _format_price(price: Any) -> str | None:
