@@ -109,6 +109,8 @@ curl -X POST http://<EIP>:8000/recommend \
 
 **임프레션 로깅 지점 (영구 토폴로지)**: `log_impressions` 는 라이브 카드 전달 단일 funnel 인 `respond` tool 의 `send_hybrid_batch` 성공 직후에서 호출된다(과거엔 그래프 미등록 `send_results` 노드에서만 호출돼 ReAct 경로에서 임프레션이 전혀 안 남던 갭이 있었음 — 수정됨). 새 검색(`offset==0`)이면 chat 별 dedupe 셋을 비워 같은 상품이 새 turn 에 다시 추천되면 새 trace 로 새 임프레션 행을 남기고, `cards:more` 페이지(`offset is None`)는 비우지 않아 동일 결과셋 내 중복 INSERT 를 막는다.
 
+**추천 trace input/output (LLM-as-judge 입력)**: Langfuse LLM-as-judge 는 trace 의 `input`/`output` 을 읽어 채점하는데, `@observe` 는 span 만 만들고 trace I/O 는 비어 있었다(실측 `input=null output=null`). `respond` tool 의 turn 종료 지점에서 `update_current_trace(input=<유저 요청: query/vision/lang>, output=<추천 결과셋 top 15: product_id/brand/title + reply>)` 를 호출해 채점 가능한 형태로 채운다. 한 turn 당 정확히 1회(`_TRACE_IO_SET_KEY` ctx 가드 — genuine-completion + partial-delivery 재진입 양쪽), PII 제외(raw chat_id/from_user_id 미포함), fail-open(실패해도 전달 안 막음). `/recommend` API 경로는 별도 plumbing 필요 — 미적용.
+
 **Fail-open**: 스코어 emit 실패는 피드백 경로/webhook 을 절대 깨지 않는다 — `conversation_log.py` 와 동일한 never-raise 규율(try/except → WARNING 로그, swallow). Langfuse 비활성(키 없음)·kill-switch off·trace id 부재 시 silent no-op.
 
 **Kill-switch**: `LANGFUSE_FEEDBACK_SCORES` (기본 `true`). false 로 두면 `create_score()` 호출만 침묵, 피드백/taste 경로는 그대로.
