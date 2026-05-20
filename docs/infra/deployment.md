@@ -148,34 +148,25 @@ scale-to-zero 시 cold start ~10~17초. 트래픽 패턴 보면서 조절.
 - `aws-infra/kiko-ai-servers/portal-ai/CICD.md` — 인프라 측 셋업 가이드 (SSM/IAM/ECR)
 - `aws-infra/kiko-ai-servers/portal-ai/modal/README.md` — Modal 배포
 
-## SPEC-ONBOARD-CARDS-001 — Manual Smoke (Scenario e)
+## SPEC-ONBOARD-LITE-001 — Manual Smoke (Cutover)
 
-DoD §11.4 scenario (e) requires a **real Apify board URL scrape** which cannot
-be reproduced in CI (Apify creds + live network). Verify during cutover:
+> **SPEC-ONBOARD-CARDS-001 retired 2026-05-19.** Apify 보드/프로필 스크랩, `ONBOARDING_CARDS_ENABLED`, `PINTEREST_BOOTSTRAP_ENABLED`, `APIFY_TOKEN` 환경변수는 모두 제거됨. 핀 링크 → 추천(`link_resolver`) 경로는 영향 없음.
 
-1. Set `APIFY_TOKEN` in dev `.env` (token from Apify console, redact in logs).
-2. Confirm startup log line `🎨 [APIFY] provider armed actor=epctex/pinterest-scraper token_len=…`.
-3. In Telegram dev bot, complete onboarding stages 1–3.
-4. At Stage 4 (Pinterest card), tap `[URL 보낼게요]` then paste a real board URL
-   e.g. `https://www.pinterest.com/user/board-name/`.
-5. Observe:
-   - Webhook log: `📥 [webhook] 🎟 command=` absent (text message path).
-   - Apify outbound request completes within 30s (`ApifyTimeoutError` not raised).
-   - Bot replies with completion message + non-zero pin count in stage span metadata.
-6. Issue `/recommend` with a fashion photo and confirm boost weight applied
-   (search results favor mood + color from Stage 1–2 plus Pinterest brand cues).
+이전 Alembic 마이그레이션 현황 (이미 적용된 경우 skip):
 
-Cutover order (plan §1.3):
+```bash
+uv run alembic upgrade head
+# 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
+# 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
+# 0005_add_taste_dislike_ts           — ai.user_taste_profile +2 JSONB (Gap4 dislike)
+# 0006_add_card_impression_langfuse_trace — ai.card_impression.langfuse_trace (P0)
+# ※ onboard_stage 등 DB 컬럼은 물리적으로 존치 (파괴적 migration 없음, 코드에서 미사용)
+```
 
-1. Apply Alembic migrations to dev-app Postgres:
-   ```bash
-   uv run alembic upgrade head
-   # 0003_create_log_conversation_event  — ai.log_conversation_event + 4 indexes
-   # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
-   # 0005_add_taste_dislike_ts           — ai.user_taste_profile +2 JSONB 컬럼 (SPEC-AGENT-V3-REACT Gap4 — SPEC-AGENT-V2-CLEANUP-001 이후 unconditional, 미적용 시 dislike_ts 쓰기 실패)
-   # 0006_add_card_impression_langfuse_trace — ai.card_impression.langfuse_trace nullable TEXT (P0 user-feedback scores; 미적용 시 impression INSERT 실패 → WARN no-op)
-   ```
-2. Deploy this codebase with `PINTEREST_BOOTSTRAP_ENABLED=true` and
-   `ONBOARDING_CARDS_ENABLED=true`.
-3. Run smoke 1–6 above.
-4. Roll forward to production once smoke passes.
+First-touch smoke (신규 봇 계정으로):
+
+1. 신규 유저로 봇에 패션 사진을 전송.
+2. `ingest` 로그: `[first_touch] greeting sent, onboarded_at marked` 확인.
+3. 같은 턴에 상품 카드 응답 수신 확인 (카드 퍼널로 막히지 않음).
+4. `/start` 만 전송 → `intro` 노드 1회성 소개 메시지 수신, 턴 종료.
+5. `/reset` 전송 → TasteProfile 초기화 ack 수신, 턴 종료.

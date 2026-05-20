@@ -1,7 +1,7 @@
 ---
 id: SPEC-ONBOARD-LITE-001
 version: 1.0.0
-status: draft
+status: implemented
 created: 2026-05-19
 updated: 2026-05-19
 author: hchsa77@gmail.com
