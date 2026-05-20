@@ -73,7 +73,13 @@ def build_graph() -> Any:
         cb = msg.callback_data or ""
         text = (msg.text or "").strip()
 
-        # /reset — ingest already cleared taste + acked; terminate silently.
+        # /reset — CONTRACT: `ingest.maybe_first_touch` MUST run before this
+        # router and is responsible for the TasteProfile clear + ack
+        # send (`_first_touch.py`). The router only terminates the turn here;
+        # if the helper call is ever removed/reordered, /reset will silently
+        # `__end__` without any user-visible effect (regression guard:
+        # `tests/test_graph_nodes/test_first_touch.py::
+        # test_reset_keyword_clears_taste_and_acks`).
         if is_reset_keyword(msg.text):
             return "__end__"
 
