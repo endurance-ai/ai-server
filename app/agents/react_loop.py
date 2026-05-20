@@ -524,17 +524,44 @@ async def _maybe_reflexion(
         return None
 
 
-async def _fallback_respond(state: WorkingState, sess: Any, reason: str) -> dict[str, Any]:
-    """REQ-AGENT-LOOP-EXHAUSTION-001 — graceful fallback."""
+async def _fallback_respond(
+    state: WorkingState,
+    sess: Any,
+    reason: str,
+    ctx: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """REQ-AGENT-LOOP-EXHAUSTION-001 — graceful fallback.
+
+    SALVAGE PATH (2026-05-20): caller 가 loop ctx 를 넘기면, 이번 turn 에서
+    search_products / refine_search 가 성공해 후보가 ctx[CARDS_READY_KEY] 로
+    표시돼있는지 확인. 있으면 폴백 멘트("다시 말해줄래") 대신 긍정 멘트 + 마지막
+    검색 카드를 송출 (respond_dispatch 는 같은 ctx 의 CARDS_READY_KEY 로 카드를
+    소싱). 없으면 기존 폴백 그대로.
+    """
     lang = session_lang(sess)
+    from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    has_salvage = ctx is not None and bool(ctx.get(CARDS_READY_KEY))
+    if has_salvage:
+        if lang == "ko":
+            text = "이런 거 찾아봤어! 🐱 마음에 들면 더 보여줄게, 아니면 어떤 느낌이 좋을지 말해줘"
+        else:
+            text = "Here's what I found! 🐱 Let me know if any catch your eye, or describe what you'd prefer."
+        try:
+            await respond_dispatch({"text": text}, ctx)
+            logger.info("[agent_v2] exhausted=%s SALVAGED last results", reason)
+            return {"response_text": text, "exhausted_reason": reason, "salvaged": True}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[agent_v2] salvage respond failed, falling back: %r", exc)
+            # fall through to standard fallback
+
     if lang == "ko":
         text = "잠깐만, 생각이 좀 꼬였어 🙈 다시 한 번 말해줄래?"
     else:
         text = "Sorry, I got a little tangled up 🙈 Could you try that again?"
     try:
-        from app.agents.tools.respond import dispatch as respond_dispatch
-
-        await respond_dispatch({"text": text}, _build_ctx(state, sess))
+        await respond_dispatch({"text": text}, ctx if ctx is not None else _build_ctx(state, sess))
     except Exception as exc:  # noqa: BLE001
         logger.warning("[agent_v2] fallback respond failed: %r", exc)
     logger.info("[agent_v2] exhausted: %s", reason)
@@ -674,7 +701,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
 
         # Token budget guard (REQ-AGENT-PERF-TURN-BUDGET-001).
         if token_budget and cumulative_tokens >= token_budget:
-            fb = await _fallback_respond(state, sess, "token_budget_exceeded")
+            fb = await _fallback_respond(state, sess, "token_budget_exceeded", ctx=ctx)
             return {
                 "agent_iterations": iterations,
                 "agent_status": "exhausted",
@@ -724,7 +751,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
 
         if ai_msg is None:
             logger.warning("[agent_v2] LLM raised (retries exhausted): %r", last_exc)
-            fb = await _fallback_respond(state, sess, last_reason)
+            fb = await _fallback_respond(state, sess, last_reason, ctx=ctx)
             return {
                 "agent_iterations": iterations,
                 "agent_status": "exhausted",
@@ -750,7 +777,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 json_malform_streak,
             )
             if json_malform_streak >= 2:
-                fb = await _fallback_respond(state, sess, "json_malform_repeated")
+                fb = await _fallback_respond(state, sess, "json_malform_repeated", ctx=ctx)
                 return {
                     "agent_iterations": iterations,
                     "agent_status": "exhausted",
@@ -791,7 +818,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 json_malform_streak,
             )
             if json_malform_streak >= 2:
-                fb = await _fallback_respond(state, sess, "json_malform_repeated")
+                fb = await _fallback_respond(state, sess, "json_malform_repeated", ctx=ctx)
                 return {
                     "agent_iterations": iterations,
                     "agent_status": "exhausted",
@@ -862,7 +889,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             if all(h.get("tool_name") == tool_name for h in last2) and all(
                 _is_identical(h.get("args_full", {}), raw_args) for h in last2
             ):
-                fb = await _fallback_respond(state, sess, "infinite_loop_guard")
+                fb = await _fallback_respond(state, sess, "infinite_loop_guard", ctx=ctx)
                 # Strip args_full before persisting history (keep small).
                 for h in history:
                     h.pop("args_full", None)
@@ -1015,8 +1042,17 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         #  - evaluator call does NOT touch `history` / `tool_call_history`
         #  - evaluator call does NOT consume a ReAct iteration (in-dispatch
         #    side call) → infinite-loop guard unaffected
+        # NARROW SCOPE (2026-05-20): Reflexion 이 매 성공 검색에 발동해 false-positive
+        # refine 사이클을 양산하던 문제 (사용자가 ma-1 카키 검색 → 유효한 MA-1 결과
+        # 받았는데 evaluator LLM 이 색이 sage/olive 라 score=0.0 → 헛 refine →
+        # iter cap 도달 → exhaust). 진짜 가치 있는 케이스는 "0건 반환" 같은 명백한
+        # 실패뿐이므로 그때만 발동시킨다. evaluator 자체에 empty-result fastpath
+        # 가 이미 있어 LLM 호출도 안 함 → 비용/지연 무료.
         _reflexion_eligible = (
-            tool_name in ("search_products", "refine_search") and isinstance(result, dict) and result.get("ok")
+            tool_name in ("search_products", "refine_search")
+            and isinstance(result, dict)
+            and result.get("ok")
+            and int(result.get("candidates_count") or 0) == 0
         )
         if _reflexion_eligible:
             quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
@@ -1045,7 +1081,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
 
     else:
         # for-else: loop completed without break (no respond) → exhaustion.
-        fb = await _fallback_respond(state, sess, "iteration_cap_reached")
+        fb = await _fallback_respond(state, sess, "iteration_cap_reached", ctx=ctx)
         # Strip args_full before persisting history (keep small).
         for h in history:
             h.pop("args_full", None)

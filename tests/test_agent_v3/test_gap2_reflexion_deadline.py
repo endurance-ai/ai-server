@@ -76,7 +76,7 @@ async def test_ac_2_5_slow_evaluator_cancelled_at_residual_boundary(monkeypatch,
 
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
-        AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": []}),
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
     )
 
     cancelled = {"flag": False}
@@ -139,7 +139,7 @@ async def test_ac_2_6_fast_evaluator_positive_control(monkeypatch, _adapter):
     """AC-2.6(b) — fast evaluator, ample budget → normal _quality attached."""
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
-        AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": []}),
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
     )
     monkeypatch.setattr(
         "app.agents._reflexion.evaluate_search_quality",

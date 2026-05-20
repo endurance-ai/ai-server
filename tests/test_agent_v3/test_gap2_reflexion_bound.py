@@ -64,15 +64,20 @@ def _fast_backoff(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ac_2_1_quality_merged_then_autonomous_refine(monkeypatch, _adapter):
-    """AC-2.1 — low score merged into ToolMessage; LLM autonomously refines."""
+    """AC-2.1 — low score merged into ToolMessage; LLM autonomously refines.
+
+    Scope-narrow update (2026-05-20): Reflexion now only fires on empty results
+    (candidates_count == 0). search → 0 results triggers eval → low score → LLM
+    autonomously refines → refine returns 0 again → eval fires again.
+    """
 
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
-        AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": []}),
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
     )
     monkeypatch.setattr(
         "app.agents.tools.refine_search.dispatch",
-        AsyncMock(return_value={"ok": True, "candidates_count": 8, "top_candidates": []}),
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
     )
     monkeypatch.setattr(
         "app.agents._reflexion.evaluate_search_quality",
@@ -129,9 +134,10 @@ async def test_ac_2_3_evaluator_call_capped(monkeypatch, _adapter):
     monkeypatch.setattr(settings, "AGENT_MAX_ITERATIONS", 8, raising=False)
 
     # Distinct args each call so the infinite-loop guard does NOT fire here.
+    # candidates_count=0 to trigger Reflexion under new scope (empty-results only).
     monkeypatch.setattr(
         "app.agents.tools.search_products.dispatch",
-        AsyncMock(return_value={"ok": True, "candidates_count": 3, "top_candidates": []}),
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
     )
     eval_spy = AsyncMock(return_value={"score": 0.5, "retry_suggested": True, "reason": "x"})
     monkeypatch.setattr("app.agents._reflexion.evaluate_search_quality", eval_spy)
@@ -171,11 +177,13 @@ async def test_ac_2_3_infinite_loop_guard_and_history_untouched(monkeypatch, _ad
 
 
 @pytest.mark.asyncio
-async def test_reflexion_is_unconditional_quality_merged(monkeypatch, _adapter):
-    """SPEC-AGENT-V2-CLEANUP-001 — Reflexion is now ALWAYS on: a search result
-    gets the `_quality` marker merged and the evaluator path IS invoked.
+async def test_reflexion_fires_on_empty_results_quality_merged(monkeypatch, _adapter):
+    """SCOPE-NARROWED (2026-05-20) — Reflexion fires ONLY on empty results
+    (candidates_count == 0). Empty search result gets the `_quality` marker
+    merged and the evaluator path IS invoked. Non-empty searches skip
+    reflexion entirely (covered by test_reflexion_skipped_on_nonempty_results).
     """
-    result = {"ok": True, "candidates_count": 5, "top_candidates": [{"brand": "ami"}]}
+    result = {"ok": True, "candidates_count": 0, "top_candidates": []}
     monkeypatch.setattr("app.agents.tools.search_products.dispatch", AsyncMock(return_value=result))
     eval_spy = AsyncMock(return_value={"score": 0.1, "retry_suggested": False})
     monkeypatch.setattr("app.agents._reflexion.evaluate_search_quality", eval_spy)
@@ -194,3 +202,30 @@ async def test_reflexion_is_unconditional_quality_merged(monkeypatch, _adapter):
 
     tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
     assert "_quality" in tool_msgs[-1].content
+
+
+@pytest.mark.asyncio
+async def test_reflexion_skipped_on_nonempty_results(monkeypatch, _adapter):
+    """SCOPE-NARROWED (2026-05-20) — Reflexion does NOT fire when search returns
+    >0 candidates. evaluator stub MUST NOT be awaited; _quality MUST NOT appear
+    in the ToolMessage (LLM proceeds straight to respond).
+    """
+    result = {"ok": True, "candidates_count": 15, "top_candidates": [{"brand": "ami"}]}
+    monkeypatch.setattr("app.agents.tools.search_products.dispatch", AsyncMock(return_value=result))
+    eval_spy = AsyncMock(return_value={"score": 0.1, "retry_suggested": True})
+    monkeypatch.setattr("app.agents._reflexion.evaluate_search_quality", eval_spy)
+
+    llm = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "bag"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "2"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    await rl.run_react_loop(_state(), _sess())
+    eval_spy.assert_not_awaited()
+    from langchain_core.messages import ToolMessage
+
+    tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
+    assert "_quality" not in tool_msgs[-1].content
