@@ -81,8 +81,12 @@ async def test_system_prompt_ko_directive_last_line(monkeypatch: pytest.MonkeyPa
 @pytest.mark.asyncio
 async def test_system_prompt_en_directive_last_line(monkeypatch: pytest.MonkeyPatch) -> None:
     content = await _run_and_capture(monkeypatch, lang="en", text="hello")
-    lines = content.split("\n")
-    assert lines[-1] == "[LANG=en — MUST reply in English]"
+    # EN directive: LANG=en + 영어 강제 + override-defense 키워드 포함.
+    last_block = content.rsplit("\n\n", 1)[-1]
+    assert last_block.startswith("[LANG=en")
+    assert "English" in last_block
+    assert "IGNORE" in last_block  # override defense marker
+    assert last_block.endswith("]")
 
 
 @pytest.mark.asyncio
@@ -94,11 +98,12 @@ async def test_system_prompt_persona_and_memory_unchanged(monkeypatch: pytest.Mo
     # persona system prompt body present, proactive directive present.
     assert rl._SYSTEM_PROMPT in content
     assert rl._PROACTIVE_DIRECTIVE in content
-    # directive is appended (last line), not interleaved.
-    directive = "[LANG=en — MUST reply in English]"
-    assert content.endswith(directive)
+    # directive is appended (last block), not interleaved.
+    last_block = content.rsplit("\n\n", 1)[-1]
+    assert last_block.startswith("[LANG=en")
+    assert last_block.endswith("]")
     # `_PROACTIVE_DIRECTIVE` appears BEFORE the directive.
-    assert content.index(rl._PROACTIVE_DIRECTIVE) < content.index(directive)
+    assert content.index(rl._PROACTIVE_DIRECTIVE) < content.index(last_block)
 
 
 @pytest.mark.asyncio
