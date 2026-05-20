@@ -96,7 +96,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 | 파일 | 설명 |
 |------|------|
-| `app/main.py` | FastAPI 엔트리포인트 + lifespan (DB 클라이언트 워밍업 + messenger adapter + setWebhook) |
+| `app/main.py` | FastAPI 엔트리포인트 + lifespan (DB 클라이언트 워밍업 + messenger adapter + setWebhook + **chat_state redis pool warm/close**, SPEC-CHAT-STATE-REDIS-001) |
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
 | `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + messenger 상태) |
 | `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
@@ -140,6 +140,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + tolerance 산술. banker's rounding 포함 (`int(round(10 + t*10))`) (SPEC-ARCH-AI-001). `seen_ids: set[str]` product_id 레벨 dedup 가드 (falsy-id bypass) + `drops_dup` 카운터 — `[STEP 4.8]` 로그에 포함 (SPEC-AGENT-UX-P0-001 REQ-UX-001) |
 | `app/services/embed_service.py` | Modal /embed 래핑 (SPEC-ARCH-AI-001) |
 | `app/services/database_service.py` | `SupabaseProvider` pass-through 래퍼 (SPEC-ARCH-AI-001) |
+| `app/infrastructure/cache/chat_state.py` | **NEW (SPEC-CHAT-STATE-REDIS-001)** — Redis-backed chat-state 단일 소스. 5 fail-open 헬퍼(`get_cursor`/`set_cursor`/`is_logged`/`mark_logged`/`clear_logged`) + `warm_pool`/`close_pool` lifespan hooks. Keys `kiko:cursor:{chat_id}` (TTL 24h) + `kiko:imp:{chat_id}` (SET, TTL 7d). `respond.py` 의 in-process pager-cursor dict + impression-dedupe dict 를 대체 — 멀티-워커 시 cursor 일관성 + impression 중복 INSERT 차단 보장. Redis 다운 시 추천 발사는 그대로 진행(fail-open: cursor=0, is_logged=False, write/del=no-op + DEBUG log). 단일 env `REDIS_URL` 로 로컬(docker-compose redis:7-alpine)/테스트(fakeredis)/prod(dev-ai redis DB 1) 분기 |
 | `app/infrastructure/repositories/category_family.py` | **NEW (SPEC-SEARCH-V6-001)** — `CANONICAL_FAMILIES` (20 lowercase tokens) + `_VISION_ALIAS` + pure `to_canonical_family()`. v6 FILTER2 canonical family gate 단일 소스. `SearchRepository.build_params`가 `p_category`를 이 함수로 정규화 |
 | `app/infrastructure/repositories/search_repository.py` | `SearchRepository` — `_RPC_NAME = "search_products_v6"` (단일 소스) + `build_params` (6-key: query_embedding, p_style_node_id, p_category, p_subcategory, p_brand_names, p_limit) + `search`. `embedding_to_pgvector` 공동 위치 (SPEC-ARCH-AI-001 REQ-AI-002, SPEC-SEARCH-V6-001) |
 | `app/infrastructure/repositories/search_rpc_contract.py` | `SearchRpcRowContract` Pydantic 모델 (v6: `distance`+`degraded`, no score/dense_rank/sparse_rank) + `RpcContractError` + `validate_rpc_rows`. 드리프트 시 구조화 에러 (REQ-AI-006). 허용: id absent → 에러, distance/brand absent → 허용, extra 컬럼 허용 |
@@ -177,6 +178,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `CLARIFY_CARDS_ENABLED` (기본 `true`) + `CLARIFY_MAX_BUTTONS` (SPEC-CLARIFY-CARDS-001)
 - `RESPONSE_SPLIT_ENABLED` (기본 `true`) + `RESPONSE_SPLIT_DELAY_MS` / `RESPONSE_SPLIT_MIN_CHARS` — 문장 단위 분할 발화 (noscroll benchmark P0)
 - `LANGFUSE_FEEDBACK_SCORES` (기본 `true`) — P0 암묵 피드백 → 원본 추천 trace Langfuse score kill-switch (click/no_click/re_query). off 시 `create_score()` 만 침묵, 피드백 경로는 그대로
+- `REDIS_URL` (기본 `redis://localhost:6379/1`) — SPEC-CHAT-STATE-REDIS-001 chat-state(pager cursor + impression dedupe) 외부화. 로컬 docker-compose `redis:7-alpine` / 테스트 fakeredis / prod dev-ai Langfuse redis 컨테이너 DB 1(`redis://:${REDIS_AUTH}@redis:6379/1`, Langfuse 는 DB 0). 키 prefix `kiko:*`. fail-open — Redis 다운이 추천을 막지 않음
 - **ReAct 에이전트 루프 (영구 단일 토폴로지, SPEC-AGENT-V2-CLEANUP-001)**: `AGENT_LLM_MODEL` (기본 `nova-lite` via LiteLLM, 미설정 시 fail-closed) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S`. V3 4-Gap(memory/Reflexion/proactive/dislike) 모두 unconditional — 개별 플래그 제거됨
   - `AGENT_V3_MEMORY_MAX_TOKENS` (기본 `1500`) — Gap1 메모리 주입 페이로드 token cap (char 근사: *4, 유일하게 남은 V3 튜닝값)
 

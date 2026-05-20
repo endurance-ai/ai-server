@@ -224,6 +224,12 @@ class Settings(BaseSettings):
     # and recent user phrasing without exhausting the budget after 2-3 turns.
     AGENT_V3_MEMORY_MAX_TOKENS: int = 3000
 
+    # SPEC-CHAT-STATE-REDIS-001 / REQ-CHAT-STATE-004 — single gate for 3환경
+    # (local docker-compose / fakeredis pytest / dev-ai prod DB 1). Default
+    # points at the local docker-compose redis. Prod overrides via env
+    # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
+    REDIS_URL: str = "redis://localhost:6379/1"
+
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
         return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]

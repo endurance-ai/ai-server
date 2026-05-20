@@ -13,6 +13,7 @@ from app.channels.factory import get_adapter, reset_adapter
 from app.channels.telegram.adapter import TelegramAdapter
 from app.channels.telegram.webhook import setup_webhook
 from app.core.config import settings
+from app.infrastructure.cache import chat_state
 from app.infrastructure.memory.session import (
     InMemorySessionStore,
     init_store,
@@ -60,6 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await init_store()
     if settings.TASTE_PROFILE_ENABLED:
         await init_taste_store()
+
+    # SPEC-CHAT-STATE-REDIS-001 — warm the chat-state redis pool. Fail-open:
+    # any failure logs INFO and returns False; helpers fall back to safe
+    # defaults so card delivery is never blocked by redis unavailability.
+    await chat_state.warm_pool()
+
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()
@@ -81,6 +88,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await SupabaseProvider.close()
     await EmbedProvider.close()
     await LLMProvider.close()
+    # SPEC-CHAT-STATE-REDIS-001 — close the chat-state redis pool. Fail-open.
+    await chat_state.close_pool()
     # SPEC-OBSERVABILITY-002 / REQ-OBS-COST-001 — drain Langfuse background queue.
     langfuse_flush()
 

@@ -2,6 +2,21 @@
 # 운영 EC2 스택(LiteLLM + Langfuse 포함)은 aws-infra/kiko-ai-servers/kiko-ai-server/ 참조.
 
 services:
+  # SPEC-CHAT-STATE-REDIS-001 — chat-state(pager cursor + impression dedupe)
+  # 외부화 대상. 로컬은 single-node redis, prod 는 dev-ai 의 Langfuse 컨테이너
+  # DB 1 재사용. 키 prefix `kiko:*` 로 Langfuse(DB 0)와 분리.
+  redis:
+    image: redis:7-alpine
+    container_name: kiko-ai-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
   ai-server:
     build: .
     ports:
@@ -11,6 +26,11 @@ services:
     environment:
       # 로컬 개발에선 호스트 머신의 LiteLLM(있다면) 또는 외부 prod LiteLLM 사용
       - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://host.docker.internal:4000}
+      # SPEC-CHAT-STATE-REDIS-001 / REQ-CHAT-STATE-004 — chat-state cache.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/1}
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:

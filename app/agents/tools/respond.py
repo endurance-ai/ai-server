@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from app.agents.tool_registry import RespondResult
+from app.infrastructure.cache import chat_state
 from app.observability.conversation_log import emit
 
 
@@ -67,38 +68,14 @@ _SENT_CARD_IDS_KEY = "_respond_sent_card_ids"
 # defensive second entry (or react_loop retry) must not resend it.
 _ALBUM_SENT_KEY = "_respond_album_sent"
 
-# In-memory "더보기 / More" pager cursor, keyed by chat_id. Module-global so it
-# survives across webhook calls within the process (the original search turn
-# sets it; a later `cards:more` tap reads + advances it). NOT persisted: a
-# process restart simply restarts the pager from the first batch, which is
-# harmless (last_results may not survive an in-memory store restart either).
-# Avoiding a Session field keeps this change free of an Alembic migration
-# (the PG session store uses an explicit column list, not field reflection).
-_CARD_BATCH_CURSOR: dict[int, int] = {}
-
-
-# SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 — per-chat set of product_ids
-# already impression-logged this process lifetime. `ai.card_impression` has NO
-# unique constraint / ON CONFLICT (migration 0002 — only a NON-unique
-# (chat_id, product_id) index), so the same item re-shown via `cards:more`
-# (offset paging) or a defensive re-entry would INSERT a duplicate row,
-# inflating no-click attribution. Dedupe HERE, at the single delivery seam.
-# Module-global, same lifecycle/rationale as `_CARD_BATCH_CURSOR`: not
-# persisted, a process restart simply re-allows logging (harmless — at worst
-# one extra impression row per item after a restart, bounded by the search cap).
-# Memory bound: the inner set is CLEARED at the start of every new search
-# (offset==0 fresh-recommendation delivery), so each set stays ≤ the search cap
-# (tiny). The outer dict grows by distinct chat_id only — accepted, identical
-# structure/precedent to the pre-existing `_CARD_BATCH_CURSOR`; deliberately NO
-# LRU/cap (would be over-engineering for the same bound the codebase already
-# tolerates).
-_LOGGED_IMPRESSION_IDS: dict[int, set[str]] = {}
-
-
-def reset_card_batch_cursor_for_tests() -> None:
-    """Clear the pager cursor + impression-dedup set (test hook only)."""
-    _CARD_BATCH_CURSOR.clear()
-    _LOGGED_IMPRESSION_IDS.clear()
+# SPEC-CHAT-STATE-REDIS-001 — the "더보기 / More" pager cursor + per-chat
+# impression-dedupe set are now externalized to Redis via
+# `app.infrastructure.cache.chat_state` (keys `kiko:cursor:{chat_id}` TTL 24h
+# and `kiko:imp:{chat_id}` TTL 7d). The prior in-process module-global dicts
+# leaked memory and would split across uvicorn workers once multi-worker
+# scaling lands. All access in this file goes through the 5 fail-open helpers
+# (`get_cursor`/`set_cursor`/`is_logged`/`mark_logged`/`clear_logged`). Redis
+# unavailability NEVER blocks card delivery — helpers swallow + DEBUG log.
 
 
 # @MX:ANCHOR: [AUTO] live-path impression logging — the ONLY invocation of
@@ -136,11 +113,11 @@ async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], 
     try:
         from app.channels.implicit_feedback import _product_id_of, log_impressions
 
+        cid = int(chat_id)
         if is_fresh_search:
             # New search → drop the prior search's dedupe set so its products
             # are re-logged against the NEW recommendation trace.
-            _LOGGED_IMPRESSION_IDS.pop(int(chat_id), None)
-        seen = _LOGGED_IMPRESSION_IDS.setdefault(int(chat_id), set())
+            await chat_state.clear_logged(cid)
         fresh: list[Any] = []
         for c in batch:
             pid = _product_id_of(c)
@@ -149,14 +126,15 @@ async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], 
                 # they cannot be deduped but also cannot be re-correlated.
                 fresh.append(c)
                 continue
-            if pid in seen:
+            pid_s = str(pid)
+            if await chat_state.is_logged(cid, pid_s):
                 continue
-            seen.add(pid)
+            await chat_state.mark_logged(cid, pid_s)
             fresh.append(c)
         if not fresh:
             return
         from_user_id = getattr(sess, "from_user_id", None)
-        await log_impressions(int(chat_id), from_user_id, fresh)
+        await log_impressions(cid, from_user_id, fresh)
     except Exception as exc:  # noqa: BLE001 — never break/delay card delivery
         # type name only — exc repr can surface raw chat_id via psycopg
         # exception args (app/observability/pii.py log-line policy).
@@ -663,7 +641,7 @@ async def send_hybrid_batch(
     # bind the new trace) from a within-search page (dedupe so paging doesn't
     # double-log the same result set).
     is_fresh_search = offset == 0
-    start = _CARD_BATCH_CURSOR.get(int(chat_id), 0) if offset is None else int(offset)
+    start = (await chat_state.get_cursor(int(chat_id))) if offset is None else int(offset)
     if start < 0:
         start = 0
     # Pre-filter to album-eligible candidates from `start` onward, take ≤5.
@@ -735,7 +713,8 @@ async def send_hybrid_batch(
         # position in `all_candidates` (not by eligible count) so a "더보기"
         # tap neither repeats nor skips items when broken-image candidates are
         # interspersed (P1-2).
-        _CARD_BATCH_CURSOR[int(chat_id)] = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
+        next_cursor = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
+        await chat_state.set_cursor(int(chat_id), next_cursor)
         if ctx is not None:
             ctx[_ALBUM_SENT_KEY] = True
         logger.info(
