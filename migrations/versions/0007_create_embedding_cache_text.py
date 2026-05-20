@@ -33,9 +33,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # pgvector 활성화는 마이그레이션 BEFORE-step 에서 별도 autocommit 으로 처리
-    # (CI testcontainers race 회피 — tests/test_memory_pg/conftest.py 참고).
-    # dev-app 은 이미 extension 설치돼있어 별도 step 불필요.
+    # pgvector 활성화 — IF NOT EXISTS 라 dev-app(이미 설치) 에선 no-op,
+    # CI testcontainers 에선 새로 활성화. fully-qualified `public.vector` 로
+    # 같은 transaction 내 catalog snapshot 갱신 race 회피
+    # (CI 에서 unqualified `vector` 가 catalog 갱신 race 로 not-found 발생).
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS ai.embedding_cache_text (
@@ -43,7 +45,7 @@ def upgrade() -> None:
             normalize_ver   text       NOT NULL,
             query_hash      bytea      NOT NULL,
             query_text      text       NOT NULL,
-            embedding       vector(768) NOT NULL,
+            embedding       public.vector(768) NOT NULL,
             hit_count       integer    NOT NULL DEFAULT 0,
             created_at      timestamptz NOT NULL DEFAULT now(),
             last_used_at    timestamptz NOT NULL DEFAULT now(),

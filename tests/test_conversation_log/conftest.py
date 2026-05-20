@@ -63,17 +63,11 @@ def _bootstrap_ai_schema(dsn: str) -> None:
 
 
 def _alembic_upgrade(dsn: str) -> None:
-    # 0006 → CREATE EXTENSION (별도 autocommit) → head 분리.
-    # CI testcontainers race 회피, 자세한 사유는 test_memory_pg/conftest.py 참고.
-    import psycopg
     from alembic import command
     from alembic.config import Config
 
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", dsn.replace("postgresql://", "postgresql+psycopg://", 1))
-    command.upgrade(cfg, "0006")
-    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
     command.upgrade(cfg, "head")
 
 
