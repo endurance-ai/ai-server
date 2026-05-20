@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_CARDS = 5
 CARD_RENDER_FAIL_EN = "Found some matches but couldn't render the cards — here are the links:"
-CARD_RENDER_FAIL_KO = "괜찮은 후보들을 찾았는데 카드로 못 보여줘서 링크로 드릴게요:"
+CARD_RENDER_FAIL_KO = "괜찮은 후보들 찾았는데 카드로 못 보여줘서 링크로 줄게:"
 # Back-compat alias
 CARD_RENDER_FAIL = CARD_RENDER_FAIL_EN
 CRIT_MORE_EN = "♥ More like this"

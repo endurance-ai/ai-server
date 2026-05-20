@@ -17,7 +17,10 @@ import logging
 from langchain_core.messages import SystemMessage
 
 from app.channels import vision as vision_module
+from app.channels.lang import session_lang
+from app.channels.pre_messages import fire_pre_message
 from app.channels.vision import VisionResult, derive_legacy_dict, derive_legacy_keywords, derive_legacy_label
+from app.graphs.nodes._adapter_ctx import _adapter_var
 from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
@@ -123,6 +126,22 @@ async def vision_node(state: WorkingState) -> dict:
         _emit_vision_done(state, None, error="no_image_url")
         node_skip("vision_node", "no image_url")
         return {"log_events": ["vision_node: no image_url; skipping"], "turn_no": 3}
+
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — 사전 안내 멘트 ("사진 잘 봤어요…").
+    # 본 Vision LLM 호출 직전 1회, fail-open. 노드용 marker store 는 module-level
+    # (`thread_id` 기준) — WorkingState 가 extra="forbid" 라 직접 필드 추가 불가.
+    try:
+        sess_for_lang = get_store().get_or_create(state.chat_id)
+        await fire_pre_message(
+            _adapter_var.get(),
+            None,
+            key="vision",
+            lang=session_lang(sess_for_lang),
+            chat_id=state.chat_id,
+            thread_id=state.thread_id,
+        )
+    except Exception:  # noqa: BLE001 — never block Vision pipeline
+        logger.debug("👁 [vision] pre-message skipped")
 
     # DEMO_MODE — skip Vision LLM, return fixture after a short wait so the
     # UX still feels like "analyzing the image".

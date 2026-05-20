@@ -199,7 +199,7 @@ async def test_respond_hybrid_summary_ko(monkeypatch):
 
         assert res["cards_sent"] == 5
         (_, summary, keyboard), kwargs = adapter.send_text_with_keyboard.await_args
-        assert "추려봤어요" in summary
+        assert "추려봤어" in summary
         assert summary.splitlines()[2].startswith("1.")  # numbered "1." format
         assert kwargs.get("parse_mode") == "HTML"
         assert "더보기" in keyboard[-1][0][0]

@@ -37,12 +37,12 @@ class ClarifyOption:
 
 # axis 별 본문 프롬프트(REQ-CLARIFY-CARD-001, 60자 이하 한국어).
 AXIS_PROMPTS_KO: dict[str, str] = {
-    "category_pick": "어떤 종류 옷을 찾으시나요?",
-    "formality": "이 옷, 어디서 입을 거예요?",
-    "fit": "어떤 핏을 원하시나요?",
-    "occasion": "어떤 자리에 어울리면 좋을까요?",
-    "subcategory_disambiguation": "조금 더 좁혀볼게요. 어느 쪽인가요?",
-    "generic_fallback": "어떤 종류 옷을 찾으시나요?",
+    "category_pick": "어떤 종류 옷 찾고 있어?",
+    "formality": "이 옷, 어디서 입을 거야?",
+    "fit": "어떤 핏 원해?",
+    "occasion": "어떤 자리에 어울리면 좋을까?",
+    "subcategory_disambiguation": "조금 더 좁혀볼게. 어느 쪽이야?",
+    "generic_fallback": "어떤 종류 옷 찾고 있어?",
 }
 
 

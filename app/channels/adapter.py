@@ -24,8 +24,11 @@ class MessengerAdapter(ABC):
         """
         ...
 
-    @abstractmethod
-    async def send_chat_action(self, chat_id: int, action: str) -> None: ...
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-003 — optional typing indicator.
+    # Default no-op so non-Telegram adapter implementations 자동 skip. 구현체는
+    # 성공 시 True, 실패/미구현 시 False 를 반환한다 (fail-open contract).
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
+        return False
 
     # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — multi-row inline keyboard for cards
     # with more than 4 buttons (e.g. 8-option mood card in 4 rows of 2 + footer).

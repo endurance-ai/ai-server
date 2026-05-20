@@ -100,10 +100,10 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
 | `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + messenger 상태) |
 | `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
-| `app/channels/adapter.py` | `MessengerAdapter` ABC |
+| `app/channels/adapter.py` | `MessengerAdapter` ABC. `send_chat_action(chat_id, action='typing') -> bool` 은 default no-op (`return False`) — 미구현 채널 어댑터 자동 skip (SPEC-AGENT-UX-P0-001 REQ-UX-003) |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001) |
+| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001). 시스템 프롬프트 마지막 라인에 `[LANG=<ko\|en> — MUST reply in <Korean\|English>]` sticky directive 강제 주입 (SPEC-AGENT-UX-P0-001 REQ-UX-002). `search_products`/`refine_search`/`respond` dispatch 직전 `_fire_typing` (fire-and-forget, fail-open) 으로 Telegram typing indicator 1회 발사 (REQ-UX-003) |
 | `app/agents/tool_registry.py` | 8-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). `suggest_next_step` 항상 등록 |
 | `app/agents/llm_client.py` | ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유). `AGENT_LLM_MODEL` 미설정 시 fail-closed (기본 `nova-lite`) |
 | `app/agents/_memory_context.py` | Gap1: `build_memory_context(state, sess, ctx) -> str` — TasteProfile + 최근 N턴(기본 5) 요약 자동 주입, char-cap(`AGENT_V3_MEMORY_MAX_TOKENS`*4), `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 |
@@ -117,6 +117,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/nodes/ask_clarify.py` | weak-vision 시 인라인 키보드 카드 생성 (SPEC-CLARIFY-CARDS-001, 6 axes, LLM 호출 없음) |
 | `app/graphs/nodes/apply_clarify.py` | `clarify:*` callback 소비 → `session.boost_keywords` 누적 (SPEC-CLARIFY-CARDS-001) |
 | `app/graphs/nodes/evaluator.py` | **graph 노드 아님** — Gap2 헬퍼 보존 전용. `_call_llm`/`_build_fastpath_delta` 만 `_reflexion.py` 가 래핑해 사용. `SELF_CRITIQUE_*`/`EVALUATOR_*` env 의존 |
+| `app/channels/pre_messages.py` | **NEW (SPEC-AGENT-UX-P0-001 REQ-UX-004)** — 사전 안내 멘트 단일 소스 `PRE_MESSAGES` (4 키: vision/search/pinterest/analyze_image × KO/EN) + `fire_pre_message` helper (idempotent per-turn, fail-open). 4개 firing site: `app/graphs/nodes/vision.py` (key=vision, thread_id 마커), `app/agents/tools/search_products.py` & `refine_search.py` (key=search, ctx 마커 공유), `app/agents/tools/analyze_image.py` (key=analyze_image, ctx 마커). pinterest 키는 SPEC contract 로 보존 — pinterest_ingest 노드 부재 (SPEC-ONBOARD-LITE-001 §4) 라 런타임 firing 없음 |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
 | `app/channels/lang.py` | 언어 감지 헬퍼 — `detect_lang` / `remember_lang` / `session_lang`. Hangul 유무 기준 KO/EN 판별, `Session.lang` sticky 갱신 |
 | `app/infrastructure/memory/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함. `Session.lang: str = "en"` (sticky 언어 필드). 구 경로: `app/channels/session.py` (SPEC-ARCH-AI-001 이전) |
@@ -126,7 +127,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/clarify_values.py` | clarify 카드 axis별 옵션 값 + 한글 라벨 매핑 |
 | `app/channels/_jsonable.py` | 5-step JSON-serializable cascade 헬퍼 (session_pg / taste_profile_pg / conversation_log 공용 — SPEC-MEMORY-001 패턴 추출) |
 | `app/channels/persona.py` | kiko 페르소나 system prompt 단일 소스 (`KIKO_PERSONA_SYSTEM_PROMPT`) — `react_loop.py` + `ask_clarify` 노드 공유 |
-| `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / sendMediaGroup / InlineKeyboard / edit_inline_keyboard) |
+| `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / sendMediaGroup / InlineKeyboard / edit_inline_keyboard / **sendChatAction — fail-open, bool 반환, SPEC-AGENT-UX-P0-001 REQ-UX-003**) |
 | `app/channels/telegram/webhook.py` | Telegram Update 파싱 |
 | `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
 | `app/pipeline/state.py` | PipelineState 정의 |
@@ -136,7 +137,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/pipeline/diversify.py` | thin @observe shim — 실제 로직은 `app/services/diversify_service.py`에 위치 (SPEC-ARCH-AI-001) |
 | `app/pipeline/runner.py` | 파이프라인 조립 + `@observe` |
 | `app/services/search_service.py` | 검색 오케스트레이션. v6 embedding-first — query_text/enhance_query RPC 경로 retired (모듈 보존, 휴면). `RpcContractError` 캐치 → 구조화 ERROR 로그 + fail-open 빈 결과 (REQ-AI-006, SPEC-ARCH-AI-001) |
-| `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + tolerance 산술. banker's rounding 포함 (`int(round(10 + t*10))`) (SPEC-ARCH-AI-001) |
+| `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + tolerance 산술. banker's rounding 포함 (`int(round(10 + t*10))`) (SPEC-ARCH-AI-001). `seen_ids: set[str]` product_id 레벨 dedup 가드 (falsy-id bypass) + `drops_dup` 카운터 — `[STEP 4.8]` 로그에 포함 (SPEC-AGENT-UX-P0-001 REQ-UX-001) |
 | `app/services/embed_service.py` | Modal /embed 래핑 (SPEC-ARCH-AI-001) |
 | `app/services/database_service.py` | `SupabaseProvider` pass-through 래퍼 (SPEC-ARCH-AI-001) |
 | `app/infrastructure/repositories/category_family.py` | **NEW (SPEC-SEARCH-V6-001)** — `CANONICAL_FAMILIES` (20 lowercase tokens) + `_VISION_ALIAS` + pure `to_canonical_family()`. v6 FILTER2 canonical family gate 단일 소스. `SearchRepository.build_params`가 `p_category`를 이 함수로 정규화 |

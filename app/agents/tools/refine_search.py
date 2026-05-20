@@ -20,6 +20,7 @@ from app.agents.tools.search_products import (
     _candidate_to_dict,
     _is_real_image_url,
     apply_dislike_discount,
+    apply_price_filter,
     persist_last_results,
     run_image_search,
     run_text_only_search,
@@ -29,6 +30,23 @@ logger = logging.getLogger(__name__)
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — refine 도 같은 "search" 멘트
+    # ("잠시만요, …찾아볼게요"). search_products 와 동일 ctx marker 키
+    # (`_pre_msg_sent:search`) 라서 같은 턴에서 두 번 호출돼도 idempotent.
+    try:
+        from app.channels.pre_messages import fire_pre_message
+        from app.graphs.nodes._adapter_ctx import _adapter_var
+
+        await fire_pre_message(
+            _adapter_var.get(),
+            ctx,
+            key="search",
+            lang=ctx.get("lang") or "en",
+            chat_id=ctx.get("chat_id"),
+        )
+    except Exception:  # noqa: BLE001 — never block refine pipeline
+        logger.debug("[tool.refine_search] pre-message skipped")
+
     action = args.get("action") or "broaden"
     # image_url is sourced from ctx ONLY (never an LLM arg). When no real
     # resolved image is present we route to the text/sparse-only search —
@@ -88,10 +106,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # unchanged → V2 byte-identical). Reuses the search_products helper.
     cands = apply_dislike_discount(ctx, cands)
 
+    # Price bounds — reuse the shared helper from search_products so both
+    # entry points apply identical semantics (KRW integer 원, missing-price
+    # rows dropped when ANY bound is set). 2026-05-20: previously discarded
+    # ("informational only in α") — now wired through to actual filtering.
+    cands = apply_price_filter(cands, min_price, max_price)
+    _ = action  # action is informational metadata, not used for filtering
+
     # Persist FULL refined candidates so `respond` renders real cards
     # internally (parity with search_products; LLM never serializes cards).
     persist_last_results(ctx, cands)
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
-    _ = action, max_price, min_price  # informational only in α
     return RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)

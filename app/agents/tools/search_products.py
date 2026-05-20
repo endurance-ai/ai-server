@@ -133,6 +133,60 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
         return 0
 
 
+def apply_price_filter(
+    cands: list[Any],
+    min_price: float | None,
+    max_price: float | None,
+) -> list[Any]:
+    """Client-side price bound filter (SPEC-SEARCH-V6-001 + 2026-05-20 user
+    requirement).
+
+    pgvector + HNSW does not push-down range predicates cleanly — the
+    canonical pattern is "fetch wider, filter in app" so vector recall stays
+    intact. The RPC therefore stays price-agnostic and we trim here.
+
+    Policy:
+      - When neither bound is set, returns `cands` unchanged.
+      - When at least one bound is set, candidates without a usable numeric
+        `price` field are DROPPED (treat absent price as out-of-bounds — the
+        user's price constraint is explicit, so silently keeping un-priced
+        rows would violate intent).
+      - Bounds are inclusive. KRW assumed throughout the repo (Candidate
+        prices, summary formatting, and LLM-supplied args all denominate in
+        KRW integer 원).
+    """
+    if min_price is None and max_price is None:
+        return cands
+    lo = float(min_price) if min_price is not None else None
+    hi = float(max_price) if max_price is not None else None
+    kept: list[Any] = []
+    for c in cands:
+        raw = getattr(c, "price", None)
+        if raw is None and isinstance(c, dict):
+            raw = c.get("price")
+        try:
+            p = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            p = None
+        if p is None:
+            continue
+        if lo is not None and p < lo:
+            continue
+        if hi is not None and p > hi:
+            continue
+        kept.append(c)
+    dropped = len(cands) - len(kept)
+    if dropped > 0:
+        logger.info(
+            "💰 [price_filter] kept=%d dropped=%d min=%s max=%s",
+            len(kept),
+            dropped,
+            min_price,
+            max_price,
+        )
+    return kept
+
+
 def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     """SPEC-AGENT-V3-REACT Gap4 — flag-gated cross-thread dislike discount.
 
@@ -398,6 +452,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting
     # (flag-gated; OFF → cands unchanged → V2 byte-identical).
     cands = apply_dislike_discount(ctx, cands)
+
+    # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
+    # ranking + dislike discount so cosine ordering is preserved.
+    cands = apply_price_filter(cands, args.get("min_price"), args.get("max_price"))
 
     # Persist FULL candidates for the turn so `respond` can render real cards
     # internally (the LLM never hand-serializes cards). LLM context still gets

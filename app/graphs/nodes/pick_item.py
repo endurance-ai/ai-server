@@ -37,8 +37,8 @@ PICK_INVALID_EN = "Tap one of the buttons above to choose an item 👆"
 # KO scaffold — kiko persona, friendly 해요체.
 # (KO label format is inlined in `_send_picker` since description is dropped
 # in KO mode to avoid mixing languages on one line.)
-PICKER_HEADER_KO = "사진에서 {n}개 아이템을 발견했어요 👀\n\n{lines}\n\n어떤 게 마음에 들어요? 아래에서 골라봐요 👇"
-PICK_INVALID_KO = "위 버튼 중 하나를 골라주세요 👆"
+PICKER_HEADER_KO = "사진에서 {n}개 아이템 발견했어 👀\n\n{lines}\n\n어떤 게 마음에 들어? 아래에서 골라봐 👇"
+PICK_INVALID_KO = "위 버튼 중 하나 골라줘 👆"
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
 
@@ -131,7 +131,7 @@ async def pick_item(state: WorkingState) -> dict:
             try:
                 adapter = get_adapter()
                 if msg.callback_query_id and hasattr(adapter, "answer_callback_query"):
-                    invalid_msg = "잘못된 선택이에요" if session_lang(sess) == "ko" else "Invalid choice"
+                    invalid_msg = "잘못된 선택이야" if session_lang(sess) == "ko" else "Invalid choice"
                     await adapter.answer_callback_query(msg.callback_query_id, invalid_msg)
             except Exception as exc:  # REQ-AGENT-007
                 logger.exception("[pick_item] answer_callback_query failed")
