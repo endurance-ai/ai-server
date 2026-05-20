@@ -21,8 +21,12 @@ logger = logging.getLogger(__name__)
 # Per-event-type whitelist — OQ-8 §8.
 def _summarize_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
     p = payload or {}
+    # Text caps widened 200→500 (2026-05-20) so the agent has enough recent
+    # phrasing to reason about user corrections like "girl 말고 남자" without
+    # losing nuance to truncation. Still bounded by AGENT_V3_MEMORY_MAX_TOKENS
+    # at the system-prompt assembly site.
     if event_type == "user_text":
-        return {"text": (p.get("text") or "")[:200]}
+        return {"text": (p.get("text") or "")[:500]}
     if event_type == "user_photo":
         url = p.get("image_url") or ""
         hashed = hashlib.sha256(url.encode("utf-8", errors="ignore")).hexdigest()[:16] if url else None
@@ -38,9 +42,19 @@ def _summarize_payload(event_type: str, payload: dict[str, Any]) -> dict[str, An
             "items_count": len(p.get("items") or []),
         }
     if event_type == "search_done":
+        # 2026-05-20: expose filters (category/subcategory/brand_names) and the
+        # refine signal so the agent can detect "what did we already try" and
+        # avoid repeating identical constraints across turns.
         q = p.get("query") or {}
+        filters = p.get("filters") or {}
+        if not isinstance(filters, dict):
+            filters = {}
         return {
-            "text_query": (q.get("text_query") or "")[:100] if isinstance(q, dict) else "",
+            "text_query": (q.get("text_query") or "")[:200] if isinstance(q, dict) else "",
+            "category": filters.get("category") or filters.get("p_category"),
+            "subcategory": filters.get("subcategory") or filters.get("p_subcategory"),
+            "brand_names": list(filters.get("brand_names") or filters.get("p_brand_names") or [])[:5],
+            "is_refine": bool(p.get("is_refine")),
             "top_k_product_ids": list(p.get("top_k_product_ids") or [])[:5],
             "raw_count": p.get("dense_count"),
         }
@@ -51,18 +65,22 @@ def _summarize_payload(event_type: str, payload: dict[str, Any]) -> dict[str, An
     if event_type == "card_clicked":
         return {"product_id": p.get("product_id"), "position": p.get("position")}
     if event_type == "bot_text":
-        return {"text": (p.get("chunk_text") or "")[:200]}
+        return {"text": (p.get("chunk_text") or "")[:500]}
     if event_type == "taste_update":
         return {"applied": True}
     if event_type == "tool_call":
+        # 2026-05-20: surface args_summary so the agent can see what filters
+        # were applied in prior tool calls (e.g., search_products text_query +
+        # category), enabling smarter refine decisions across turns.
         return {
             "tool_name": p.get("tool_name"),
             "iteration_no": p.get("iteration_no"),
             "latency_ms": p.get("latency_ms"),
             "error": p.get("error"),
+            "args_summary": p.get("args_summary"),
         }
     if event_type == "ask_clarify_sent":
-        return {"axis": p.get("axis")}
+        return {"axis": p.get("axis"), "options": list(p.get("options") or [])[:6]}
     if event_type == "node_error":
         return {
             "node_name": p.get("node_name"),

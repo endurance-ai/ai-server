@@ -77,7 +77,28 @@ _SYSTEM_PROMPT = (
     "(the photo was already analyzed before this loop). Only call `analyze_image` when the "
     "user sent a NEW image this turn AND no such vision context is present.\n"
     "- Prefer the fewest tool calls. Once you have enough to answer, call `respond`. Never "
-    "repeat a tool with identical args."
+    "repeat a tool with identical args.\n\n"
+    "Conversation memory: a digest of recent turns (user/bot text, prior search filters and "
+    "results, taste profile) is auto-injected at the bottom of this system prompt inside a "
+    "system-derived memory block. When the user references something earlier "
+    '("방금 그거 말고", "다시 보여줘", "아까처럼") and the injected digest does not show '
+    "enough detail to act on, call `get_recent_history` to pull more events from the "
+    "conversation log before searching. Do NOT call it when the digest already answers "
+    "the question.\n\n"
+    "Referring to past context in your REPLY — STRICT RULES (most violated rule, read carefully):\n"
+    "- Only WEAVE prior turns / taste profile / past results into your text reply WHEN the user "
+    'EXPLICITLY invokes them. Triggers (KO): "아까", "방금", "그거", "다시", "비슷한", '
+    '"~말고", "또"; (EN): "again", "similar", "that one", "before", "not that". '
+    "Without one of these, treat the turn as a FRESH request.\n"
+    "- Greetings ('안녕', '/start', 'hi', 'hello'), new topics ('코트 찾아줘', 'find me a dress'), "
+    "and unrelated questions: do NOT volunteer past context. NEVER open with "
+    "'아까 그거 좋아했지?' / 'I remember you liked X' / '너 ~좋아하잖아'. "
+    "Just greet → acknowledge → ask what they want now.\n"
+    "- The memory block lists facts only. Items the user merely SAW (search results / "
+    "impressions / shown_product_ids) are NOT the same as items the user LIKED. "
+    "ABSOLUTELY NEVER upgrade '봤음' / 'shown' into '좋아함' / 'liked' / '진짜 좋아하는 거'. "
+    "Strong preference ONLY exists when `liked_keywords` / `liked_brands` is non-empty AND a "
+    "specific value is present — otherwise treat preference as UNKNOWN."
 )
 
 
@@ -91,6 +112,14 @@ _PROACTIVE_DIRECTIVE = (
     "ambiguous, prefer calling `ask_user_clarification` BEFORE searching rather "
     "than guessing. Always end the turn with `respond`."
 )
+
+
+# SPEC-AGENT-UX-P0-001 / REQ-UX-002 — sticky LANG directive.
+# `session_lang(sess)` 가 결정한 KO/EN 을 시스템 프롬프트의 LAST line 으로 강제
+# 주입해 LLM 의 자유 텍스트 응답이 영어로 드리프트하는 현상을 차단. directive
+# 문구는 SPEC 에 lock — 변경 시 SPEC version bump 필요.
+# @MX:NOTE: [AUTO] SPEC-AGENT-UX-P0-001 REQ-UX-002 — LANG directive 문구 lock.
+LANG_NAME: dict[str, str] = {"ko": "Korean", "en": "English"}
 
 
 # Transient-error backoff schedules (seconds). Indexed by attempt number
@@ -151,6 +180,30 @@ def _resolve_dispatcher(tool_name: str):
     module_path, fn_name = meta["dispatch_fn_path"].split(":", 1)
     module = import_module(module_path)
     return getattr(module, fn_name)
+
+
+# SPEC-AGENT-UX-P0-001 / REQ-UX-003 — typing indicator allow-list.
+# 명시적으로 이 3개 tool 진입 직전에만 1회 호출. 다른 tool 추가는 SPEC 변경 필요.
+# @MX:NOTE: [AUTO] SPEC-AGENT-UX-P0-001 REQ-UX-003 — typing-hook allow-list.
+_TYPING_HOOK_TOOLS: frozenset[str] = frozenset({"search_products", "refine_search", "respond"})
+
+
+def _fire_typing(ctx: dict[str, Any]) -> None:
+    """Fire-and-forget typing indicator. Never raises (REQ-UX-003 fail-open).
+
+    `_dispatch_tool` 분기에서 호출. `asyncio.create_task` 로 dispatch 본문을
+    block 하지 않는다. adapter / chat_id 누락 시 silently skip.
+    """
+    try:
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+        chat_id = ctx.get("chat_id")
+        if adapter is None or chat_id is None:
+            return
+        asyncio.create_task(adapter.send_chat_action(int(chat_id), "typing"))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("typing indicator skipped: %r", exc)
 
 
 def _args_summary(args: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +336,19 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
     # placed OUTSIDE the [USER INPUT] fence. SPEC-AGENT-V2-REACT root-bug fix:
     # without this the LLM gets only `callback: item:0` and hallucinates a
     # "can't recall the conversation" fallback.
+    #
+    # STALE-LEAK FIX (2026-05-20): previously `_detected_items()` fell back to
+    # `sess.detected_items` whenever `state.detected_items` was empty, so the
+    # PRIOR turn's Vision result leaked into EVERY subsequent turn — a pure
+    # "안녕" greeting was sent to the LLM with `detected_items: Baseball Cap...`
+    # + `previously_picked_item: Baseball Cap`, causing the bot to volunteer
+    # navy-cap context on every reply. Fix: only surface Vision context when
+    # THIS turn is image-related — either the user just resolved an item
+    # (selected_item_index set) OR a fresh image arrived this turn
+    # (state.image_url or state.detected_items populated by THIS turn's
+    # vision_node). Pure text turns no longer carry stale Vision attributes;
+    # the agent can still call `get_recent_history` if it genuinely needs to
+    # recall prior items.
     items = _detected_items(state, sess)
     idx = state.selected_item_index
     callback_resolved = False
@@ -291,16 +357,16 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
         parts.append(f"user_selected_item: {label}{_attr_tail(subcat, fit, color)}")
         parts.append(f'suggested_query: "{query[:120]}"')
         callback_resolved = True
-    elif items:
-        # Vision ran (single item, or multi-item not yet picked) — give the
-        # agent a brief summary so it knows a photo was already analyzed.
+    elif items and (state.image_url or state.detected_items):
+        # Vision ran THIS turn (state-level signal present). Stale session-only
+        # items are intentionally NOT surfaced here.
         summary = []
         for it in items[:4]:
             lbl, sc, ft, cl, _ = _item_attrs(it, lang)
             summary.append(f"{lbl}{_attr_tail(sc, ft, cl)}")
         parts.append(f"detected_items: {'; '.join(summary)}")
         # `sess.vision_item` is the legacy single-pick label (set by pick_item
-        # on selection); surface it when present even without an index.
+        # on selection); surface it ONLY together with a fresh-turn signal.
         v_item = getattr(sess, "vision_item", None)
         if v_item:
             parts.append(f"previously_picked_item: {str(v_item)[:120]}")
@@ -361,7 +427,7 @@ async def _fallback_respond(state: WorkingState, sess: Any, reason: str) -> dict
     """REQ-AGENT-LOOP-EXHAUSTION-001 — graceful fallback."""
     lang = session_lang(sess)
     if lang == "ko":
-        text = "잠깐만요, 생각이 좀 꼬였어요 🙈 다시 한 번 말씀해 주실래요?"
+        text = "잠깐만, 생각이 좀 꼬였어 🙈 다시 한 번 말해줄래?"
     else:
         text = "Sorry, I got a little tangled up 🙈 Could you try that again?"
     try:
@@ -372,6 +438,57 @@ async def _fallback_respond(state: WorkingState, sess: Any, reason: str) -> dict
         logger.warning("[agent_v2] fallback respond failed: %r", exc)
     logger.info("[agent_v2] exhausted: %s", reason)
     return {"response_text": text, "exhausted_reason": reason}
+
+
+def _append_skipped_parallel_tool_results(messages: list[Any], tool_calls: list[Any]) -> int:
+    """Append synthetic ToolMessage for every tool_call beyond the first.
+
+    Bedrock Claude (via LiteLLM) requires every assistant `toolUse` block to be
+    paired with a matching `toolResult` block in the next message — otherwise
+    the next ainvoke 400s with "Expected toolResult blocks at messages.N.content
+    for the following Ids: ...".
+
+    The ReAct loop intentionally honors only `tool_calls[0]` per iteration
+    (sequential ReAct policy). When the LLM emits parallel tool_calls (Haiku
+    4.5 does this freely), tc[1:] would otherwise leave orphan toolUse ids in
+    the assistant turn. This helper appends a `skipped_parallel_call`
+    tool_result for each extra id so the transcript is well-formed.
+
+    Returns the number of synthetic results appended.
+    """
+    extras = tool_calls[1:] if len(tool_calls) > 1 else []
+    if not extras:
+        return 0
+    appended = 0
+    for tc in extras:
+        tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+        if not tc_id:
+            continue
+        tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
+        messages.append(
+            ToolMessage(
+                content=json.dumps(
+                    {
+                        "ok": False,
+                        "error": "skipped_parallel_call",
+                        "note": (
+                            "ReAct policy is sequential — only one tool call per "
+                            "iteration is dispatched. Re-issue this call in the "
+                            "next step if it is still needed."
+                        ),
+                        "tool_name": tc_name,
+                    }
+                ),
+                tool_call_id=tc_id,
+            )
+        )
+        appended += 1
+    if appended:
+        logger.info(
+            "🔧 [agent] parallel tool_calls: kept 1, skipped %d (synthetic results appended)",
+            appended,
+        )
+    return appended
 
 
 async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
@@ -422,6 +539,21 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — fail-soft to current system content
         logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
         logger.info("🧠 [v3:memory] skip · build error")
+
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-002 — append sticky LANG directive as the
+    # LAST line of system_content (highest transformer recency before the user
+    # message). `session_lang(sess)` is the single source of LANG resolution.
+    _lang = session_lang(sess)
+    _lang_label = LANG_NAME.get(_lang, "English")
+    if _lang == "ko":
+        _lang_directive = (
+            "[LANG=ko — MUST reply in Korean 반말 (NEVER 해요체, NEVER 합니다체). "
+            "EVERY sentence ends in ~야/~지/~네/~어/~아/~거든/~잖아/~까/~자. "
+            "If you wrote ~요/~예요/~네요/~까요/~세요/~습니다 anywhere, REWRITE before responding.]"
+        )
+    else:
+        _lang_directive = f"[LANG={_lang} — MUST reply in {_lang_label}]"
+    system_content = f"{system_content}\n\n{_lang_directive}"
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
     messages: list[dict[str, Any]] = [
@@ -555,6 +687,10 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                     "response_text": fb.get("response_text"),
                 }
             messages.append(ai_msg)
+            # Pair any parallel-call extras that DO have ids so Bedrock does
+            # not 400 on the corrective retry (tc[0] is still orphan — that is
+            # the structural failure being corrected by the user nudge below).
+            _append_skipped_parallel_tool_results(messages, tool_calls)
             messages.append(
                 {
                     "role": "user",
@@ -584,6 +720,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             # precede its toolResult block, matched by id.
             messages.append(ai_msg)
             messages.append(ToolMessage(content=json.dumps({"error": err}), tool_call_id=tc_id))
+            _append_skipped_parallel_tool_results(messages, tool_calls)
             # Emit tool_call (with error).
             emit(
                 event_type="tool_call",
@@ -638,6 +775,22 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         is_terminal = bool(REGISTRY[tool_name]["terminates_loop"])
         effective_max_retries = 0 if is_terminal else tool_max_retries
         effective_timeout = float(settings.AGENT_RESPOND_TIMEOUT_S) if is_terminal else tool_timeout
+
+        # SPEC-AGENT-UX-P0-001 / REQ-UX-003 — typing indicator hook.
+        # search/refine 는 수초 걸리는 임베딩 + RPC, respond 는 카드 캐러셀
+        # 전송 직전. 사용자가 "응답이 오긴 오나" 의심하지 않도록 'typing…'
+        # 인디케이터 1회 발사 (fire-and-forget, fail-open).
+        if tool_name in _TYPING_HOOK_TOOLS:
+            _fire_typing(ctx)
+
+        # Pre-dispatch trace — what the LLM asked us to do this iteration.
+        logger.info(
+            "🔧 [tool:%s] dispatch iter=%d args=%s",
+            tool_name,
+            it,
+            json.dumps(_args_summary(raw_args), ensure_ascii=False),
+        )
+
         t0 = time.monotonic()
         result: dict[str, Any]
         dispatch_err: str | None = None
@@ -681,7 +834,28 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         if dispatch_err:
             logger.info("🔧 [tool:%s] → err %s %dms", tool_name, dispatch_err, latency_ms)
         else:
-            logger.info("🔧 [tool:%s] → ok %dms", tool_name, latency_ms)
+            # Surface a compact result preview so we can see WHAT came back
+            # (candidates_count, card_sent, refined query, error flags) without
+            # having to grep service-level logs.
+            _preview_keys = (
+                "ok",
+                "candidates_count",
+                "card_sent",
+                "refined_text_query",
+                "category",
+                "subcategory",
+                "brand_names_count",
+                "error",
+                "fallback",
+                "skipped",
+            )
+            preview = {k: result.get(k) for k in _preview_keys if k in result}
+            logger.info(
+                "🔧 [tool:%s] → ok %dms result=%s",
+                tool_name,
+                latency_ms,
+                json.dumps(preview, ensure_ascii=False, default=str),
+            )
 
         history_entry = {
             "iter": it,
@@ -749,6 +923,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         # toolUse block to precede its toolResult block, matched by id.
         messages.append(ai_msg)
         messages.append(ToolMessage(content=json.dumps(result, default=str)[:2000], tool_call_id=tc_id))
+        _append_skipped_parallel_tool_results(messages, tool_calls)
 
     else:
         # for-else: loop completed without break (no respond) → exhaustion.

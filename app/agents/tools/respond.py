@@ -429,9 +429,16 @@ def _build_summary(batch: list[Any], lang: str) -> str:
     """
     n = len(batch)
     if lang == "ko":
-        header = f"✨ 마음에 들 만한 {n}개 추려봤어요"
+        header = f"✨ 마음에 들 만한 {n}개 추려봤어"
     else:
         header = f"✨ Here are {n} picks I think you'll like"
+    # Footer help line (KO/EN) — explains the LIKE buttons' purpose so users
+    # understand the ❤️ taps are a taste signal, not just "card numbering".
+    # The line is rendered AFTER the numbered list (see end of function).
+    if lang == "ko":
+        help_line = "💡 마음에 든 번호의 ❤️ 를 눌러주면 취향에 반영해서 다음 추천을 더 잘 골라줄게!"
+    else:
+        help_line = "💡 Tap the ❤️ next to any pick — it tunes my taste model so the next batch fits you better!"
     lines: list[str] = [header, ""]
     for i, c in enumerate(batch, start=1):
         brand = str(_candidate_field(c, "brand", "")).strip()
@@ -450,11 +457,16 @@ def _build_summary(batch: list[Any], lang: str) -> str:
         if price_str:
             line += f" · {_esc(price_str)}"
         lines.append(line)
+    lines.append("")
+    lines.append(help_line)
     return "\n".join(lines)
 
 
-# Number emoji for the per-item like buttons (1..5).
-_NUM_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+# Per-item LIKE buttons (1..5). Prefixed with ❤️ so the affordance reads as
+# "like this one" rather than "card numbering" (which is what the summary
+# list above already does with plain numbers). Paired with the help line in
+# `_build_summary` that explains taps feed the taste profile.
+_NUM_EMOJI = ["❤️ 1", "❤️ 2", "❤️ 3", "❤️ 4", "❤️ 5"]
 # Telegram callback_data 64-byte budget minus the "card:like:" prefix (10).
 _LIKE_SUFFIX_BUDGET = 53
 

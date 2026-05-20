@@ -25,9 +25,9 @@ def test_v3_flags_removed():
 
 
 def test_v3_memory_max_tokens_default():
-    """The char-approx token cap default is 1500."""
+    """The char-approx token cap default is 3000 (bumped 2026-05-20)."""
     s = Settings(_env_file=None)
-    assert s.AGENT_V3_MEMORY_MAX_TOKENS == 1500
+    assert s.AGENT_V3_MEMORY_MAX_TOKENS == 3000
 
 
 def test_v3_memory_max_tokens_override():
