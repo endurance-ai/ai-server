@@ -86,7 +86,8 @@ class SearchProductsArgs(TypedDict, total=False):
     max_price: float | None
     exclude_keywords: list[str]
     boost_keywords: list[str]
-    top_k: int
+    # NOTE (2026-05-20): `top_k` removed from LLM schema — Haiku 가 카드 캐러셀
+    # 크기(5)를 따라하며 페이지네이션을 죽였음. dispatch 기본값 15 유지.
 
 
 class RefineSearchArgs(TypedDict, total=False):
@@ -234,7 +235,7 @@ REGISTRY: dict[str, ToolMetadata] = {
         "name": "search_products",
         "description": (
             "Search the 78k-product catalog. Provide `text_query` plus optional "
-            "filters (style_node_primary, color_family, fit, price, top_k). Do "
+            "filters (style_node_primary, color_family, fit, price). Do "
             "NOT provide an image_url — the tool handles imagery internally "
             "from session state. Returns top candidates with brand/title/price.\n"
             "\n"

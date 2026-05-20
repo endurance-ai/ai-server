@@ -93,14 +93,17 @@ def test_ssrf_canonicalization_public_ip_not_blocked(empty_allowlist):
 # ── P1-5: validate_args value-type enforcement ─────────────────────────────
 
 
+# NOTE (2026-05-20): search_products.top_k REMOVED from LLM schema — int-only
+# validation tests now use get_recent_history.n (the surviving int field).
+# Coercion logic is identical (both go through the `("top_k", "n")` loop).
 @pytest.mark.parametrize(
     "tool,args",
     [
         # Genuinely unconvertible: dict for int field, list for number field, etc.
-        ("search_products", {"text_query": "x", "top_k": {"nested": 1}}),
+        ("get_recent_history", {"n": {"nested": 1}}),
         ("get_recent_history", {"n": "abc"}),  # non-digit str
         ("search_products", {"text_query": "x", "max_price": [1]}),
-        ("search_products", {"text_query": "x", "top_k": True}),  # bool != int (ambiguous intent)
+        ("get_recent_history", {"n": True}),  # bool != int (ambiguous intent)
     ],
 )
 def test_validate_args_rejects_wrong_value_type(tool, args):
@@ -110,7 +113,9 @@ def test_validate_args_rejects_wrong_value_type(tool, args):
 
 
 def test_validate_args_accepts_correct_value_types():
-    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 15, "min_price": 0})
+    ok, err = validate_args("search_products", {"text_query": "x", "min_price": 0})
+    assert ok is True, err
+    ok, err = validate_args("get_recent_history", {"n": 15})
     assert ok is True, err
 
 
@@ -119,10 +124,9 @@ def test_validate_args_accepts_correct_value_types():
     "tool,args,expected",
     [
         # int fields: str of digits → int
-        ("search_products", {"text_query": "x", "top_k": "15"}, {"top_k": 15}),
         ("get_recent_history", {"n": "20"}, {"n": 20}),
         # int fields: integer-valued float → int
-        ("search_products", {"text_query": "x", "top_k": 15.0}, {"top_k": 15}),
+        ("get_recent_history", {"n": 20.0}, {"n": 20}),
         # number fields: str → float
         ("search_products", {"text_query": "x", "min_price": "10"}, {"min_price": 10.0}),
         ("search_products", {"text_query": "x", "max_price": "59.99"}, {"max_price": 59.99}),
@@ -138,7 +142,7 @@ def test_validate_args_accepts_correct_value_types():
     ],
 )
 def test_validate_args_auto_casts_safe_mismatches(tool, args, expected):
-    """LLM (Haiku 4.5) occasionally sends `top_k="15"` / `boost_keywords="tee"`
+    """LLM (Haiku 4.5) occasionally sends `n="20"` / `boost_keywords="tee"`
     instead of int / list. Strict rejection burned ReAct iters. Auto-cast keeps
     the loop on the happy path. Critical: never `list(str)` — must wrap as [str]
     to avoid `["t","-","s","h","i","r","t"]` per-char explosion."""
@@ -155,9 +159,9 @@ def test_validate_args_auto_casts_safe_mismatches(tool, args, expected):
         ("update_taste", {"brand_likes": {"x": 1}}),
         ("update_taste", {"brand_likes": 42}),
         # int field: str that isn't digit-only
-        ("search_products", {"text_query": "x", "top_k": "fifteen"}),
+        ("get_recent_history", {"n": "fifteen"}),
         # int field: float with fractional part (not safely castable to int)
-        ("search_products", {"text_query": "x", "top_k": 15.7}),
+        ("get_recent_history", {"n": 15.7}),
         # number field: garbage str
         ("search_products", {"text_query": "x", "min_price": "abc"}),
     ],
@@ -166,3 +170,13 @@ def test_validate_args_auto_cast_still_rejects_unconvertible(tool, args):
     ok, err = validate_args(tool, args)
     assert ok is False, f"{tool} {args} should reject (unconvertible)"
     assert "bad_type" in err
+
+
+def test_search_products_top_k_now_unknown_key():
+    """top_k removed from LLM-facing schema (2026-05-20). If LLM somehow still
+    sends it, validate_args rejects as unknown_keys (not bad_type). dispatch
+    default (15) is the only correct value going forward."""
+    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 15})
+    assert ok is False
+    assert "unknown_keys" in err
+    assert "top_k" in err

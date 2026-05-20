@@ -88,25 +88,28 @@ def test_validate_args_accepts_float_price():
     assert ok is True, err
 
 
-def test_validate_args_top_k_is_int_only():
-    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 12})
+def test_validate_args_n_is_int_only():
+    # NOTE (2026-05-20): search_products.top_k removed from LLM schema —
+    # int-only validation now tested via get_recent_history.n (the surviving
+    # int field). Coercion logic identical for both.
+    ok, err = validate_args("get_recent_history", {"n": 12})
     assert ok is True, err
-    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 12.5})
+    ok, err = validate_args("get_recent_history", {"n": 12.5})
     assert ok is False
-    assert "top_k must be int" in err
+    assert "n must be int" in err
 
 
 @pytest.mark.parametrize(
-    ("args", "field"),
+    ("tool", "args", "field"),
     [
-        ({"text_query": "x", "top_k": True}, "top_k must be int"),
-        ({"text_query": "x", "min_price": True}, "min_price must be number"),
-        ({"text_query": "x", "max_price": False}, "max_price must be number"),
+        ("get_recent_history", {"n": True}, "n must be int"),
+        ("search_products", {"text_query": "x", "min_price": True}, "min_price must be number"),
+        ("search_products", {"text_query": "x", "max_price": False}, "max_price must be number"),
     ],
 )
-def test_validate_args_rejects_bool(args, field):
+def test_validate_args_rejects_bool(tool, args, field):
     """bool is an int subclass — rejected for both int-only and number groups."""
-    ok, err = validate_args("search_products", args)
+    ok, err = validate_args(tool, args)
     assert ok is False
     assert field in err
 
