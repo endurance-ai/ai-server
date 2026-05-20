@@ -248,10 +248,27 @@ def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
          (the dict carries `category` per vision.py:413 → derive_legacy_dict);
       2. single Vision item → `state.vision_selected_item.category` (the
          Vision v2 item; falls back to the legacy detected_items[0] dict).
-    Returns None when no Vision item is in play (text-only path) → downstream
+
+    Photo-turn gate (2026-05-20, vision_category leak fix): vision context
+    is only valid for THIS turn when the turn is photo-driven —
+      - `state.image_url` set → fresh image resolved this turn, OR
+      - `state.selected_item_index` set → picker callback active this turn
+        (pick_item node already populated the WorkingState fields).
+    A plain text turn ("그레이 반팔 티셔츠 찾아줘") MUST return None even
+    when `sess.detected_items` still carries a previous photo's Vision items —
+    otherwise the stale category (e.g. "Outer" from a prior bomber-jacket
+    photo) leaks into the new search and the family gate rejects every
+    t-shirt result. Live trace 2026-05-20.
+
+    Returns None on text-only / no-Vision turns → downstream
     `to_canonical_family(None)` → `other` → family gate skipped (correct
     graceful behavior; never fabricate a category).
     """
+    has_fresh_image = bool(state.image_url)
+    has_picker_callback = state.selected_item_index is not None
+    if not (has_fresh_image or has_picker_callback):
+        return None
+
     items = _detected_items(state, sess)
     idx = state.selected_item_index
     if idx is not None and isinstance(idx, int) and 0 <= idx < len(items):
