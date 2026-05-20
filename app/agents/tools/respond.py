@@ -262,6 +262,37 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
         except Exception as exc:  # noqa: BLE001
             logger.debug("[tool.respond] bot_text emit best-effort failed: %r", exc)
 
+        # Pending-question state machine (2026-05-20). When this respond text
+        # ends with a question mark we stash the question + the original user
+        # intent in an in-process module dict so the NEXT turn's user-message
+        # builder (react_loop) can splice the user's short affirmative reply
+        # ("어"/"yes") back into the original intent — instead of treating
+        # the short reply as a fragmented fresh query.
+        #
+        # Storage is intentionally NOT on the Session dataclass: the PG-backed
+        # session store re-creates dataclasses on every fetch from columns,
+        # so any new dataclass field that isn't also in the SQL schema would
+        # silently disappear on the next get_or_create. The pending-question
+        # module dict survives across the single turn boundary that matters
+        # and drops cleanly on restart (which is exactly what we want for
+        # ephemeral conversational state). Best-effort — never blocks the send.
+        try:
+            from app.agents.pending_question import clear_pending, set_pending
+
+            stripped = (text or "").strip()
+            is_question = stripped.endswith(("?", "？"))
+            if is_question:
+                # Original user intent for this turn — best signal is
+                # ctx["text_query"] (search_products already overwrites this
+                # with the LLM-translated English query). Falls back to None
+                # when no search ran this turn; react_loop logs "(unknown)".
+                intent = str(ctx.get("text_query") or "").strip() or None
+                set_pending(chat_id, stripped, intent)
+            else:
+                clear_pending(chat_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] pending_question state best-effort failed: %r", exc)
+
     # Source cards INTERNALLY from this turn's last search, rendered via the
     # EXACT V1 card path (send_results._candidate_to_card + adapter.send_card).
     # The LLM never provides cards.

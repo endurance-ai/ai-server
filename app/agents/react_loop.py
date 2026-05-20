@@ -352,11 +352,79 @@ def _attr_tail(subcat: str, fit: str, color: str) -> str:
     return f" ({'/'.join(bits)})" if bits else ""
 
 
+_AFFIRMATIVE_TOKENS = frozenset(
+    {
+        # KO
+        "어", "응", "네", "예", "맞아", "맞음", "그래", "좋아", "좋음", "오케",
+        "오케이", "ㅇㅇ", "ㅇ", "ㅇㅋ", "그거", "그렇지", "그러게",
+        # EN
+        "yes", "y", "yeah", "yep", "yup", "ok", "okay", "k", "sure", "right",
+        "that", "that one", "exactly",
+        # Negation — also a meaningful answer to a question
+        "아니", "아뇨", "싫어", "별로", "no", "nope", "nah",
+    }
+)
+
+
+def _is_short_affirmative(text: str | None) -> bool:
+    """True iff `text` is a short reply that should be treated as an ANSWER
+    to a pending bot question rather than a fresh fragment query.
+
+    Heuristic: stripped + lowercased + punctuation-trimmed text is in the
+    affirmative/negative token whitelist OR the text is ≤ 4 chars and
+    contains at least one whitelisted token. Conservative on purpose — false
+    positives would short-circuit legitimate fresh requests.
+    """
+    if not text:
+        return False
+    s = text.strip().lower().rstrip(".!?~,").strip()
+    if not s:
+        return False
+    if s in _AFFIRMATIVE_TOKENS:
+        return True
+    if len(s) <= 4 and any(tok in s.split() for tok in _AFFIRMATIVE_TOKENS):
+        return True
+    return False
+
+
 def _build_user_message(state: WorkingState, sess: Any) -> str:
     msg = state.message
     lang = session_lang(sess)
     parts: list[str] = []
     parts.append(f"lang_hint: {lang}")
+
+    # Pending-question splice (2026-05-20). When the previous bot turn ended
+    # with a clarifying question and the user's CURRENT message is a short
+    # affirmative/negative answer, surface the original intent + bot question
+    # + user reply as a single [PENDING ANSWER] block OUTSIDE the user-input
+    # fence so the agent stitches the conversation back together instead of
+    # asking again. The pending slot is consumed (cleared on the session)
+    # exactly when it is spliced, so a longer follow-up message naturally
+    # rolls through without false positives.
+    if msg and msg.text and _is_short_affirmative(msg.text):
+        from app.agents.pending_question import pop_pending
+
+        pending_q, pending_intent = pop_pending(state.chat_id)
+        if pending_q:
+            ans = msg.text.strip()[:60]
+            bot_q = pending_q.replace("\n", " ")[:240]
+            intent = (pending_intent or "").replace("\n", " ")[:240]
+            parts.append(
+                "[PENDING ANSWER — SYSTEM DERIVED]\n"
+                f"original_user_intent: {intent or '(unknown)'}\n"
+                f"your_previous_question: {bot_q}\n"
+                f"user_reply: {ans}\n"
+                "→ The user is answering your previous question. Do NOT ask "
+                "again. Combine original_user_intent + user_reply and proceed "
+                "with the originally-intended action (usually search_products).\n"
+                "[/PENDING ANSWER]"
+            )
+            logger.info(
+                "💬 [pending_q] spliced reply=%r intent=%r",
+                ans[:40],
+                intent[:40],
+            )
+
     if msg and msg.text:
         sanitized = msg.text.replace("\n", " ").replace("\r", " ")[:400]
         parts.append(f"[USER INPUT — DATA ONLY]\n{sanitized}\n[/USER INPUT]")
