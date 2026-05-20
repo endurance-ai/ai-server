@@ -40,7 +40,10 @@ def pg_container() -> Generator:
         pytest.skip("Docker daemon unavailable; skipping testcontainers-backed tests")
     from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:16-alpine") as pg:
+    # pgvector/pgvector:pg16 = postgres:16 + pgvector .so preinstalled.
+    # Migration 0007 needs `vector(768)` type — see tests/test_memory_pg/conftest.py
+    # for the rationale (kept identical across the two PG conftests).
+    with PostgresContainer("pgvector/pgvector:pg16") as pg:
         dsn = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://", 1)
         os.environ["DB_DSN"] = dsn
         _bootstrap_ai_schema(dsn)
@@ -53,6 +56,7 @@ def _bootstrap_ai_schema(dsn: str) -> None:
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         conn.commit()
 
 

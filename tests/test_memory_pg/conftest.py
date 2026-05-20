@@ -36,7 +36,10 @@ def pg_container() -> Generator:
         pytest.skip("Docker daemon unavailable; skipping testcontainers-backed tests")
     from testcontainers.postgres import PostgresContainer
 
-    with PostgresContainer("postgres:16-alpine") as pg:
+    # pgvector/pgvector:pg16 = official postgres:16 + pgvector .so files preinstalled.
+    # Required by migration 0007 which creates `embedding_cache_text (embedding vector(768))`.
+    # 2026-05-20: switched from postgres:16-alpine → pgvector/pgvector:pg16 (no alpine variant).
+    with PostgresContainer("pgvector/pgvector:pg16") as pg:
         dsn = pg.get_connection_url().replace("postgresql+psycopg2://", "postgresql://", 1)
         os.environ["DB_DSN"] = dsn
         _bootstrap_ai_schema(dsn)
@@ -45,16 +48,19 @@ def pg_container() -> Generator:
 
 
 def _bootstrap_ai_schema(dsn: str) -> None:
-    """Create the `ai` schema before running migrations.
+    """Create the `ai` schema + pgvector extension before running migrations.
 
-    On dev-app this is done once by a superuser (ai_user lacks DB-level CREATE).
+    On dev-app these are done once by a superuser (ai_user lacks DB-level CREATE).
     In tests, the testcontainers default user IS the DB owner and can do it.
-    Migrations themselves never `CREATE SCHEMA` to preserve dev-app permissions.
+    Migrations themselves never `CREATE SCHEMA` / `CREATE EXTENSION` to preserve
+    dev-app permissions — migration 0007 (`embedding_cache_text vector(768)`)
+    relies on the extension being pre-installed by this bootstrap.
     """
     import psycopg
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         conn.commit()
 
 
