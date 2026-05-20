@@ -281,3 +281,72 @@ async def list_models() -> dict[str, Any]:
         "default_rewrite_model": settings.AGENT_LLM_MODEL or None,
         "vision_model": settings.VISION_MODEL,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 4) /debug/resolve-url — IG/Pinterest URL → 실제 이미지 URL 리스트
+# ──────────────────────────────────────────────────────────────────────
+
+
+class ResolveRequest(BaseModel):
+    url: str = Field(..., min_length=4)
+
+
+class ResolveResponse(BaseModel):
+    ok: bool
+    source_url: str
+    detected_kind: str  # "instagram" / "pinterest" / "other"
+    latency_ms: int
+    images: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+@router.post(
+    "/resolve-url",
+    response_model=ResolveResponse,
+    dependencies=[Depends(verify_internal_token)],
+)
+async def resolve_url(req: ResolveRequest) -> ResolveResponse:
+    """Resolve IG/Pinterest/일반 URL → 이미지 URL 리스트.
+
+    production 봇과 동일한 `app.channels.link_resolver.resolve()` 재사용.
+    - IG URL → Apify (instagram_apify.fetch_post_images) 로 슬라이드 이미지 전체
+    - Pinterest URL → og:image 추출 + 풀해상도 치환
+    - 일반 URL → og:image / fetch
+    """
+    from urllib.parse import urlparse
+
+    try:
+        from app.channels.link_resolver import resolve as link_resolve
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"link_resolver import: {e}") from e
+
+    host = (urlparse(req.url).hostname or "").lower()
+    if host == "pin.it" or host.endswith("pinterest.com"):
+        kind = "pinterest"
+    elif "instagram.com" in host:
+        kind = "instagram"
+    else:
+        kind = "other"
+
+    t0 = time.perf_counter()
+    try:
+        images = await link_resolve(req.url)
+    except Exception as exc:  # noqa: BLE001
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        return ResolveResponse(
+            ok=False,
+            source_url=req.url,
+            detected_kind=kind,
+            latency_ms=elapsed,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    elapsed = int((time.perf_counter() - t0) * 1000)
+
+    return ResolveResponse(
+        ok=True,
+        source_url=req.url,
+        detected_kind=kind,
+        latency_ms=elapsed,
+        images=list(images or []),
+    )
