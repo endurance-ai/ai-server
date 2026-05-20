@@ -201,10 +201,19 @@ class VisionResponse(BaseModel):
 )
 async def vision_analyze(req: VisionRequest) -> VisionResponse:
     try:
+        from app.channels.schemas import _ssrf_guard_url
         from app.channels.vision import _model as _vision_model
         from app.channels.vision import extract as vision_extract
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"vision import: {e}") from e
+
+    # SSRF guard (2026-05-20) — admin-auth-gated endpoint still must not be
+    # weaponizable as a probe vector for internal IPs (169.254.169.254 metadata,
+    # 172.31.x EC2 private range, etc.).
+    try:
+        _ssrf_guard_url(req.image_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"ssrf_blocked: {exc}") from exc
 
     model_used = _vision_model()
 
@@ -318,6 +327,7 @@ async def resolve_url(req: ResolveRequest) -> ResolveResponse:
 
     try:
         from app.channels.link_resolver import resolve as link_resolve
+        from app.channels.schemas import _ssrf_guard_url
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"link_resolver import: {e}") from e
 
@@ -328,6 +338,15 @@ async def resolve_url(req: ResolveRequest) -> ResolveResponse:
         kind = "instagram"
     else:
         kind = "other"
+
+    # SSRF guard (2026-05-20) — link_resolver only guards intermediate og:image
+    # extractions, NOT the initial fetch of req.url. Without this pre-flight,
+    # an authed admin can probe internal endpoints (EC2 metadata, K8s control
+    # plane). Defense in depth even on auth-gated routes.
+    try:
+        _ssrf_guard_url(req.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"ssrf_blocked: {exc}") from exc
 
     t0 = time.perf_counter()
     try:
