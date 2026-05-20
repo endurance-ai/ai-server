@@ -127,13 +127,15 @@ def _collect_all_taste_sources() -> set[str]:
 # graph-node / implicit_feedback file. The TasteSource Literal still defines
 # all 7 values (still valid event types), so they move to UNIMPLEMENTED to
 # keep the meta-check's type↔matrix union intact.
+# SPEC-ONBOARD-LITE-001 — `onboard` / `pinterest` emit sites lived in the
+# deleted onboarding helpers. The TasteSource Literal still defines all 7
+# values (design §4: TypedDicts retained, emit stopped), so they move to
+# UNIMPLEMENTED to keep the type↔matrix union intact.
 _IMPLEMENTED_SOURCES = {
     "no_click",
-    "onboard",
-    "pinterest",
     "re_query",
 }
-_UNIMPLEMENTED_SOURCES: set[str] = {"click", "critique", "free_text"}
+_UNIMPLEMENTED_SOURCES: set[str] = {"click", "critique", "free_text", "onboard", "pinterest"}
 
 
 @pytest.mark.parametrize("source", sorted(_IMPLEMENTED_SOURCES))

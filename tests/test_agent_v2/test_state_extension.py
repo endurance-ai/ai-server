@@ -41,11 +41,9 @@ def _existing_fields() -> set[str]:
         "clarify_delta",
         "messages",
         "log_events",
-        "onboard_stage",
-        "onboard_selections",
-        "onboard_card_message_id",
-        "continuous_origin",
-        "onboard_pin_weights",
+        # SPEC-ONBOARD-LITE-001 — onboarding scratchpad fields removed with
+        # the card subgraph (onboard_stage / onboard_selections /
+        # onboard_card_message_id / continuous_origin / onboard_pin_weights).
     }
 
 

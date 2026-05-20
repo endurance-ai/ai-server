@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from app.graphs.fashion_bot import GRAPH, build_graph
 
-# SPEC-AGENT-V2-CLEANUP-001 — the (only) ReAct agent topology node set. `intro`
-# is always registered by build_graph (the first-touch service intro for the
-# onboarding-cards-OFF path).
+# SPEC-ONBOARD-LITE-001 — ReAct agent topology, onboarding card subgraph
+# removed. `intro` is the lightweight first-touch node (new user + /start-only).
 _EXPECTED_NODES = {
     "ingest",
     "intro",
@@ -28,13 +27,6 @@ _EXPECTED_NODES = {
     "ask_clarify",
     "apply_clarify",
     "agent",
-    # Onboarding subgraph — preserved.
-    "onboard_intro",
-    "onboard_mood",
-    "onboard_color",
-    "onboard_fit",
-    "onboard_pinterest",
-    "pinterest_ingest",
     "__start__",
     "__end__",
 }
@@ -59,18 +51,17 @@ def test_topology_node_set_matches_spec():
 
 
 def test_topology_unconditional_edges_match_spec():
-    """SPEC-AGENT-V2-CLEANUP-001 — agent terminus + preserved onboarding edges.
-    The V1 unconditional edges (send_results→respond, taste_update→respond,
-    respond→END) no longer exist.
+    """SPEC-ONBOARD-LITE-001 — agent terminus + intro terminus. The onboarding
+    subgraph edges and the V1 unconditional edges (send_results→respond,
+    taste_update→respond, respond→END) no longer exist.
     """
     g = GRAPH.get_graph()
     unconditional = {(e.source, e.target) for e in g.edges if not e.conditional}
     assert ("__start__", "ingest") in unconditional
     assert ("agent", "__end__") in unconditional
-    assert ("pinterest_ingest", "__end__") in unconditional
     assert ("intro", "__end__") in unconditional
-    for onboard in ("onboard_intro", "onboard_mood", "onboard_color", "onboard_pinterest"):
-        assert (onboard, "__end__") in unconditional
+    # Onboarding subgraph edges must be gone.
+    assert not any(s.startswith("onboard") or s == "pinterest_ingest" for s, _ in unconditional)
     # Deprecated V1 edges must be gone.
     assert ("send_results", "respond") not in unconditional
     assert ("taste_update", "respond") not in unconditional
@@ -78,9 +69,9 @@ def test_topology_unconditional_edges_match_spec():
 
 
 def test_topology_conditional_edge_sources_match_spec():
-    """SPEC-AGENT-V2-CLEANUP-001 — conditional sources are the deterministic
-    pre-agent funnel (ingest, resolve_image, vision_node, pick_item) plus the
-    preserved onboard_fit branch.
+    """SPEC-ONBOARD-LITE-001 — conditional sources are the deterministic
+    pre-agent funnel only (ingest, resolve_image, vision_node, pick_item);
+    the onboard_fit branch was removed with the onboarding subgraph.
     """
     g = GRAPH.get_graph()
     cond_sources = {e.source for e in g.edges if e.conditional}
@@ -89,7 +80,6 @@ def test_topology_conditional_edge_sources_match_spec():
         "resolve_image",
         "vision_node",
         "pick_item",
-        "onboard_fit",
     }
 
 

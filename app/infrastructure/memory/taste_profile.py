@@ -169,11 +169,6 @@ class TasteProfileStore(Protocol):
     def lock_for(self, user_key: str) -> asyncio.Lock: ...
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
-    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-SEED-001 + SPEC-MEMORY-001 v1.1.0 amendment.
-    # Additive merge into `liked_keywords` — NEVER overwrite. Per-keyword cap so
-    # one onboarding seed cannot drown out long-running runtime click signals.
-    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
-    def seed_from_onboarding(self, user_key: str, weights: dict[str, float]) -> None: ...
 
 
 class InMemoryTasteProfileStore:
@@ -232,45 +227,6 @@ class InMemoryTasteProfileStore:
             except (asyncio.CancelledError, Exception):
                 pass
             self._evict_task = None
-
-    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-SEED-001.
-    def seed_from_onboarding(self, user_key: str, weights: dict[str, float]) -> None:
-        """Additive merge into `liked_keywords` from onboarding card/Pinterest seed.
-
-        Per-keyword contribution is capped at `ONBOARDING_SEED_MAX_WEIGHT` (default
-        0.7). Existing weights are preserved (additive, never overwritten); this
-        keeps long-running runtime click signals dominant over a one-shot seed.
-
-        Empty `weights` is a silent no-op. Non-positive weights are dropped.
-
-        @MX:SPEC: SPEC-ONBOARD-CARDS-001
-        """
-        if not weights:
-            return
-        cap = float(getattr(settings, "ONBOARDING_SEED_MAX_WEIGHT", 0.7))
-        profile = self.get_or_create(user_key)
-        for raw_kw, raw_w in weights.items():
-            if not raw_kw:
-                continue
-            try:
-                w = float(raw_w)
-            except (TypeError, ValueError):
-                continue
-            if w <= 0.0:
-                continue
-            kw = raw_kw.strip().lower()
-            if not kw:
-                continue
-            applied = min(w, cap)
-            # Additive — don't run through `reinforce_*` because that triggers a
-            # 0.9 decay over ALL existing keys on every call; we want a single
-            # bulk merge without side effects on unrelated keywords.
-            profile.liked_keywords[kw] = profile.liked_keywords.get(kw, 0.0) + applied
-            # Mirror reinforce_liked_keywords semantics: a kw seeded into liked
-            # cannot remain in disliked (avoid contradictory signals).
-            profile.disliked_keywords.pop(kw, None)
-        profile._cap()
-        self.update(profile)
 
 
 _StoreFactory = Callable[[], TasteProfileStore]

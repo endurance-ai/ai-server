@@ -85,16 +85,11 @@ class Session:
     # Sticky reply language. Set on every text turn by `app.channels.lang`.
     # Defaults to 'en' for back-compat with existing snapshots / tests.
     lang: str = "en"
-    # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — REQ-ONBOARD-MIGRATION-002 + REQ-ONBOARD-GRAPH-002.
-    # 7 persisted onboarding columns per plan §5.3. All default None / empty for
-    # backward compat with `Session(chat_id=1)` constructions in pre-onboarding tests.
+    # SPEC-ONBOARD-LITE-001 — onboarded_at retained as the sole first-touch
+    # discriminator (new user iff IS NULL). The card-flow staging fields were
+    # removed with the onboarding subgraph; their PG columns are kept
+    # physically (no destructive migration) and simply no longer read/written.
     onboarded_at: datetime | None = None
-    onboard_stage: str | None = None
-    onboard_selections: dict = field(default_factory=dict)
-    onboard_card_message_id: int | None = None
-    last_pinterest_scrape_url: str | None = None
-    last_pinterest_scrape_at: datetime | None = None
-    last_pinterest_pins: dict | None = None
 
 
 class SessionStore(Protocol):

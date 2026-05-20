@@ -12,6 +12,13 @@ labels: [agentic, react-loop, tool-registry, langgraph, refactor, post-onboardin
 
 # SPEC-AGENT-V2-REACT: True Agentic Refactor — ReAct Loop + Tool Registry for Post-Onboarding Telegram Fashion Bot
 
+> ℹ️ **AMENDED 2026-05-19 by SPEC-ONBOARD-LITE-001.** The first-touch service
+> intro contract (onboarding-cards-OFF `intro` gate) changed: the onboarding
+> card subgraph was removed, so a brand-new user's actionable first message
+> is greeted inline by `ingest` (`maybe_first_touch`) and proceeds to a
+> recommendation the same turn; only a `/start`-only first message reaches
+> the `intro` node. The ReAct loop / tool-registry core is unchanged.
+
 ## HISTORY
 
 - 2026-05-15 (v0.1.1): plan-auditor iteration 1/3 (composite 0.95, MP-3 strict-fail) 결과 반영. 변경 2건: (D1 blocker) Frontmatter `created` / `updated` → `created_at` / `updated_at` 으로 정렬 — 본 SPEC 은 greenfield 라 SPEC-MEMORY-001 family 의 `created` 컨벤션 적용보다 MP-3 strict 준수가 깔끔. (D2 minor) Env vars 표의 `AGENT_LLM_MODEL` 기본값 `TBD` → "_(unset; agent disabled until configured — fail-closed)_" 로 변경. 미설정 시 `AGENT_V2_REACT_ENABLED` 가 효과적으로 false 가 되도록 fail-closed 의미 명시. 양 변경은 spec.md 단독 — 다른 SPEC 무변경. iteration 2 expected composite 0.96+.

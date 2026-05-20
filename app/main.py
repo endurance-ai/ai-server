@@ -62,10 +62,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await init_taste_store()
     adapter = get_adapter()
 
-    # SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 cascade — Apify warmup.
-    # @MX:SPEC: SPEC-ONBOARD-CARDS-001
-    _warmup_apify_provider()
-
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()
     secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
     if isinstance(adapter, TelegramAdapter) and public_url and secret:
@@ -87,21 +83,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await LLMProvider.close()
     # SPEC-OBSERVABILITY-002 / REQ-OBS-COST-001 — drain Langfuse background queue.
     langfuse_flush()
-
-
-# @MX:NOTE: [AUTO] SPEC-ONBOARD-CARDS-001 / REQ-ONBOARD-ENTRY-001 — Apify
-# warmup logger. The provider is stateless (httpx-on-demand) but operators
-# need a startup-time signal whether scrape calls will succeed or degrade.
-# @MX:SPEC: SPEC-ONBOARD-CARDS-001
-def _warmup_apify_provider() -> None:
-    log = logging.getLogger(__name__)
-    token = (getattr(settings, "APIFY_TOKEN", "") or "").strip()
-    actor = getattr(settings, "APIFY_PINTEREST_ACTOR", "")
-    if token:
-        # Token redacted — never log raw token bytes (REQ-ONBOARD-SEC-001).
-        log.info("🎨 [APIFY] provider armed actor=%s token_len=%d", actor, len(token))
-    else:
-        log.info("🎨 [APIFY] degraded — APIFY_TOKEN empty; board/profile scrapes will return []")
 
 
 async def _probe_conversation_log(app: FastAPI) -> None:

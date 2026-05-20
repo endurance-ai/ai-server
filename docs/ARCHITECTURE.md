@@ -1,7 +1,7 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-18 (v1.2.0 — SPEC-SEARCH-V6-001 v5→v6 마이그레이션 + canonical category family gate).
+> 마지막 업데이트: 2026-05-19 (v1.3.0 — SPEC-ONBOARD-LITE-001: 온보딩 카드 서브그래프 제거 + 경량 first-touch 대체).
 
 ## 한 줄 요약
 
@@ -50,7 +50,6 @@ flowchart TB
         MODAL["Modal /embed\nFashionSigLIP T4"]
         PG[("dev-app Postgres\npgvector (v6 embedding-first)\nPostgREST nginx shim\n※ app과 DB만 공유")]
         CONVLOG[("ai.log_conversation_event\n(append-only)")]
-        APIFY["Apify Pinterest scraper"]
     end
 
     subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
@@ -61,7 +60,6 @@ flowchart TB
     TG_USER -->|메시지| TG_API
     TG_API -->|webhook| WH
     WH --> GRAPH
-    GRAPH -->|Pinterest scrape| APIFY
     GRAPH -.emit.-> CONVLOG
     GRAPH --> PIPE
     PIPE -->|sendMediaGroup / sendMessage| TG_API
@@ -85,7 +83,7 @@ flowchart TB
     class TG_USER,TG_API primary
     class WH,GRAPH,PIPE,LITELLM,LFW ai
     class REC muted
-    class MODAL,APIFY ext
+    class MODAL ext
     class PG,CONVLOG data
     class FIND,V4 muted
 ```
@@ -100,21 +98,16 @@ webhook 수신부터 사용자 응답까지의 전체 라우팅 경로.
 
 ```mermaid
 flowchart TD
-    WH["POST /webhooks/telegram"] --> INGEST["ingest\nUpdate 파싱, 세션 로드\nclarify:/cards:/implicit_feedback: 콜백 인라인 처리"]
+    WH["POST /webhooks/telegram"] --> INGEST["ingest\nUpdate 파싱, 세션 로드\nclarify:/cards:/implicit_feedback: 콜백 인라인 처리\n신규 유저 actionable 메시지 → inline greeting + onboarded_at 마킹"]
 
-    INGEST -->|"/start + onboarded_at IS NULL\n또는 onboard: 콜백\n또는 재시작 키워드"| OB_INTRO["onboard_intro"]
-    INGEST -->|"ONBOARDING_CARDS_ENABLED=false\n+ 첫 방문"| INTRO["intro\n1회성 서비스 안내"]
+    INGEST -->|"/start-only + onboarded_at IS NULL"| INTRO["intro\n1회성 서비스 안내 + onboarded_at 마킹"]
+    INGEST -->|"/reset 키워드 → TasteProfile 초기화 ack"| END_TURN["__end__"]
     INGEST -->|"사진 첨부 + item picker 필요"| PICK["pick_item\n아이템 선택 카드"]
     INGEST -->|"Vision 결과 약함"| CLARIFY["ask_clarify\n6-axes 결정형 카드\n(LLM 호출 없음)"]
     INGEST -->|"일반 텍스트·사진·콜백"| AGENT["agent\nReAct loop"]
 
     CLARIFY -->|"clarify:* 콜백"| APPLY["apply_clarify\nboost_keywords 누적"]
     APPLY --> AGENT
-
-    OB_INTRO --> OB_MOOD["onboard_mood"] --> OB_COLOR["onboard_color"] --> OB_FIT["onboard_fit"]
-    OB_FIT -->|"PINTEREST_BOOTSTRAP_ENABLED"| OB_PIN["onboard_pinterest"]
-    OB_PIN --> PIN_ING["pinterest_ingest\nApify + Vision batch\n→ TasteProfile reinforce"]
-    OB_FIT & PIN_ING -->|"완료"| AGENT
 
     PICK -->|"URL 해석 필요"| RESOLVE["resolve_image\nPinterest og:image"]
     RESOLVE --> VISION["vision_node\nGPT-4o-mini Vision v2 schema"]
@@ -123,14 +116,14 @@ flowchart TD
     AGENT -->|"respond 툴 호출 → 하이브리드 카드 전송"| TG["Telegram Bot API\nsendMediaGroup + summary text"]
 
     classDef node fill:#1565c0,color:#fff
-    classDef onboard fill:#2e7d32,color:#fff
     classDef agent fill:#ef6c00,color:#fff
     classDef ext fill:#6a1b9a,color:#fff
+    classDef term fill:#757575,color:#fff
 
     class INGEST,PICK,RESOLVE,VISION,CLARIFY,APPLY,INTRO node
-    class OB_INTRO,OB_MOOD,OB_COLOR,OB_FIT,OB_PIN,PIN_ING onboard
     class AGENT agent
     class TG,WH ext
+    class END_TURN term
 ```
 
 ### (b) ReAct agent loop 내부
@@ -219,36 +212,33 @@ flowchart LR
 | Postgres (`search_products_v6` RPC) | embedding-first cosine distance ASC → top-K 후보 반환. FILTER2 canonical family gate (`p_category`). `degraded` flag (style-node filter drop → category-only fallback). pgroonga/RRF DROPPED |
 | Python (`diversify_service.py`) | 브랜드/플랫폼 다양성 캡, tolerance 산술 (banker's rounding), 최종 정렬 |
 
-### (d) 온보딩 서브그래프 (6 노드)
+### (d) 경량 first-touch (SPEC-ONBOARD-LITE-001)
 
-`ONBOARDING_CARDS_ENABLED=true` + `onboarded_at IS NULL` 시 진입. `routing.py::onboarding_required()` 가 게이트.
+온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 완전 제거됨. 신규 유저 진입은 두 경로만 존재한다.
 
 ```mermaid
 flowchart LR
-    START(["ingest\n/start 또는 첫 방문"]) --> INTRO["onboard_intro\n언어 KO 기본 설정\n인트로 카드 발송"]
+    INGEST(["ingest\n매 턴 진입점"]) --> FT{"신규 유저?\nonboarded_at IS NULL"}
 
-    INTRO -->|"onboard:mood:*"| MOOD["onboard_mood\nStage 1 — 무드 4-axes 카드"]
-    MOOD -->|"onboard:color:*"| COLOR["onboard_color\nStage 2 — 컬러 카드"]
-    COLOR -->|"onboard:fit:*"| FIT["onboard_fit\nStage 3 — 핏 카드\n+ seed_from_onboarding → TasteProfile 시드\n+ onboarded_at 기록"]
+    FT -->|"actionable 메시지\n(photo / url / 비어있지 않은 text)"| GREET["inline greeting 발송\n+ onboarded_at 마킹\n→ 같은 턴 정상 추천 경로 진행"]
+    FT -->|"/start-only\n(photo/url/callback 없음)"| INTRONODE["intro 노드\n1회성 서비스 소개\n+ onboarded_at 마킹\n→ 턴 종료"]
 
-    FIT -->|"PINTEREST_BOOTSTRAP_ENABLED=true"| PIN["onboard_pinterest\nStage 4 (선택)\nPinterest 보드 URL 요청"]
-    FIT -->|"Pinterest 비활성"| AGENT(["agent\nReAct loop 진입"])
+    FT -->|"기존 유저\nonboarded_at NOT NULL"| NORMAL["정상 라우팅\n(agent / resolve_image / pick_item 등)"]
 
-    PIN -->|"URL 수신"| INGEST_PIN["pinterest_ingest\nApify board/profile 스크래핑\nVision batch → TasteProfile.reinforce_liked_*"]
-    PIN -->|"건너뜀"| AGENT
+    INGEST -->|"/reset 키워드"| RESET["TasteProfile 초기화\n+ ack 발송 → __end__"]
 
-    INGEST_PIN --> AGENT
+    classDef node fill:#1565c0,color:#fff
+    classDef action fill:#2e7d32,color:#fff
+    classDef agent fill:#ef6c00,color:#fff
+    classDef gate fill:#f57f17,color:#fff
 
-    classDef onboard fill:#2e7d32,color:#fff
-    classDef gate fill:#1565c0,color:#fff
-    classDef terminal fill:#ef6c00,color:#fff
-
-    class INTRO,MOOD,COLOR,FIT,PIN,INGEST_PIN onboard
-    class START gate
-    class AGENT terminal
+    class INGEST node
+    class FT gate
+    class GREET,INTRONODE,RESET action
+    class NORMAL agent
 ```
 
-재시작 키워드(`/reset`, "온보딩 다시" 등) 수신 시 언제든 `onboard_intro`로 강제 복귀.
+> **SPEC-ONBOARD-CARDS-001 (retired 2026-05-19)**: 카드 온보딩 서브그래프(mood/color/fit/pinterest 노드), Apify 보드/프로필 대량 스크랩, `seed_from_onboarding` 완전 제거. 핀 링크 → 추천(`link_resolver`) 경로는 영향 없음.
 
 ### 보조 입구 — `POST /recommend` (현재 운영 미사용)
 
@@ -263,27 +253,22 @@ kikoai/app → POST /recommend → pipeline runner → search_products_v6 RPC �
 
 ## 그래프 노드 역할 표
 
-현재 15개 노드 (+ `__start__`/`__end__`).
+현재 9개 노드 (+ `__start__`/`__end__`). 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거됨.
 
 | 노드 | 역할 | 비고 |
 |------|------|------|
-| `ingest` | Update 파싱, 세션 로드, 콜백 인라인 처리 (`clarify:*`/`cards:*`/`implicit_feedback:`) | 매 턴 진입점 |
-| `intro` | 첫 방문 서비스 소개 (1회성) | `ONBOARDING_CARDS_ENABLED=false` + `onboarded_at IS NULL` 시만 진입 |
+| `ingest` | Update 파싱, 세션 로드, 콜백 인라인 처리 (`clarify:*`/`cards:*`/`implicit_feedback:`). 신규 유저 actionable 메시지 → `maybe_first_touch` 인라인 그리팅 + `onboarded_at` 마킹 | 매 턴 진입점 |
+| `intro` | `/start`-only 신규 유저(`onboarded_at IS NULL`) 전용 1회성 서비스 소개 + `onboarded_at` 마킹 후 턴 종료 | SPEC-ONBOARD-LITE-001 |
 | `resolve_image` | Pinterest / pin.it og:image URL 해석 | `link_resolver.py` 활용 |
 | `vision_node` | LiteLLM Vision v2 schema 패션 아이템 추출 | `styleNode/mood/palette/items[].searchQuery` |
 | `pick_item` | 복수 아이템 선택 인라인 키보드 | 콜백으로 단일 아이템 특정 |
 | `ask_clarify` | weak-vision 시 6-axes 결정형 카드 | LLM 호출 없음, `CLARIFY_CARDS_ENABLED` |
 | `apply_clarify` | `clarify:*` 콜백 → `session.boost_keywords` 누적 | ingest 인라인 처리로 대부분 처리됨 |
 | `agent` | ReAct loop 실행 (`run_react_loop`) | V3 강화 전부 여기에 |
-| `onboard_intro` | 온보딩 Stage 0 인트로 카드, 언어 KO 기본 설정 | `ONBOARDING_CARDS_ENABLED` 필요 |
-| `onboard_mood` | 온보딩 Stage 1 — 무드 4-axes | |
-| `onboard_color` | 온보딩 Stage 2 — 컬러 | |
-| `onboard_fit` | 온보딩 Stage 3 — 핏 카드 + TasteProfile 시드 + `onboarded_at` 기록 | |
-| `onboard_pinterest` | 온보딩 Stage 4 (선택) — Pinterest 보드 URL 요청 | `PINTEREST_BOOTSTRAP_ENABLED` |
-| `pinterest_ingest` | Apify 스크래핑 → Vision batch → TasteProfile reinforce | `APIFY_TOKEN` 필요 |
 | `_trace.py` | 구조화 node-trace 로깅 헬퍼 (`▶️`/`✅`/`⏭️`) | logging-only, 노드 아님 |
 
-> **제거된 노드 (언급 불가):** `router_text`, `critique_apply`, `search` (graph node), `send_results` (graph node), `taste_update` (graph node), `respond` (graph node), `evaluator` (graph node), `apply_self_critique`.
+> **제거된 노드 (SPEC-ONBOARD-LITE-001):** `onboard_intro`, `onboard_mood`, `onboard_color`, `onboard_fit`, `onboard_pinterest`, `pinterest_ingest`.
+> **이전 제거된 노드 (언급 불가):** `router_text`, `critique_apply`, `search` (graph node), `send_results` (graph node), `taste_update` (graph node), `respond` (graph node), `evaluator` (graph node), `apply_self_critique`.
 > `evaluator.py` 파일은 **Gap2 헬퍼 보존** 목적으로 존재하며 graph에 등록되지 않음.
 
 ---
@@ -320,20 +305,20 @@ app/
 │   ├── lang.py              # detect_lang / remember_lang / session_lang (KO/EN sticky)
 │   ├── recommendation.py    # RecommendationPort Protocol + DTO + PipelineRecommendationPort
 │   ├── link_resolver.py     # Pinterest / pin.it og:image 해석
+│   ├── reset_keywords.py    # is_reset_keyword() — /reset·취향초기화 단일 소스 (SPEC-ONBOARD-LITE-001)
 │   ├── vision.py            # Vision v2 schema 추출 (SPEC-VISION-UNIFY-001)
 │   ├── vision_prompt.py     # Vision v2 프롬프트 + JSON 스키마
 │   ├── clarify.py           # clarify 카드 빌더 (6 axes)
-│   ├── onboarding_cards.py  # 온보딩 카드 빌더 (mood/color/fit/pinterest)
-│   ├── pinterest_url.py     # URL 파싱·검증 (board/profile/pin, SSRF allowlist)
+│   ├── clarify_values.py    # clarify axis별 옵션 값 + 한글 라벨
 │   ├── _jsonable.py         # 5-step JSON-serializable cascade 헬퍼
 │   └── telegram/
 │       ├── adapter.py       # TelegramAdapter (sendMessage/sendPhoto/sendMediaGroup/InlineKeyboard)
 │       └── webhook.py       # Telegram Update 파싱
 ├── graphs/                  # LangGraph StateGraph
-│   ├── fashion_bot.py       # build_graph() — 단일 영구 토폴로지, _log_topology_banner
+│   ├── fashion_bot.py       # build_graph() — 단일 영구 토폴로지 (SPEC-ONBOARD-LITE-001), _log_topology_banner
 │   ├── state.py             # InputState / WorkingState / OutputState (Pydantic v2)
-│   ├── routing.py           # 조건부 엣지 (onboarding_required, first_touch_intro_required 등)
-│   └── nodes/               # 15개 노드 + 헬퍼
+│   ├── routing.py           # 조건부 엣지 순수 술어 (_route_after_resolve, _is_weak_vision*). 온보딩 진입 술어 제거됨 (SPEC-ONBOARD-LITE-001)
+│   └── nodes/               # 9개 노드 + 헬퍼 (_first_touch.py, _trace.py)
 │       ├── evaluator.py     # [Gap2 헬퍼 보존] graph 노드 아님; _call_llm/_build_fastpath_delta 만 사용
 │       └── ... (노드 역할 표 참고)
 ├── services/                # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001)
@@ -358,8 +343,7 @@ app/
 ├── providers/               # 외부 시스템 클라이언트
 │   ├── database.py          # SupabaseProvider (PostgREST 클라이언트, 논리명 유지)
 │   ├── embedding.py         # Modal HTTP + 응답 스키마 검증
-│   ├── llm.py               # LiteLLM HTTP
-│   └── apify.py             # Apify Pinterest 스크래퍼 (board/profile/pin, ApifyTimeoutError)
+│   └── llm.py               # LiteLLM HTTP
 ├── observability/
 │   ├── langfuse.py          # @observe (no-op fallback) + current_langfuse_trace_id()
 │   ├── conversation_log.py  # emit() fire-and-forget → ai.log_conversation_event (SPEC-CONVERSATION-LOG-001)
@@ -423,7 +407,7 @@ app/
 |------|------|
 | `/recommend` 인증 | `X-Internal-Token` (Next.js → AI 서버 shared secret) |
 | Telegram webhook 인증 | `X-Telegram-Bot-Api-Secret-Token` 헤더 일치 확인. 불일치 시 401. 파싱 오류 시 200 (재시도 방지) |
-| SSRF | `RecommendRequest.image_url` + `pinterest_url.py` — `ALLOWED_IMAGE_HOSTS` 화이트리스트 검증 |
+| SSRF | `RecommendRequest.image_url` — `ALLOWED_IMAGE_HOSTS` 화이트리스트 검증 |
 | Prompt injection 방어 | `persona.py` — 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 |
 | 에러 노출 | 고정 detail (`pipeline_failed`) 반환, 내부 오류는 Langfuse/로그에만 |
 

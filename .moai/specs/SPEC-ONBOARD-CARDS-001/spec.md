@@ -1,7 +1,7 @@
 ---
 id: SPEC-ONBOARD-CARDS-001
 version: 0.3.2
-status: draft
+status: retired
 created: 2026-05-14
 updated: 2026-05-14
 author: hchsa77@gmail.com
@@ -11,6 +11,13 @@ labels: [onboarding, telegram, taste-profile, pinterest, apify, cards, agentic, 
 ---
 
 # SPEC-ONBOARD-CARDS-001: 3-Stage Card Onboarding + Multi-Mode Pinterest Bootstrap for Telegram Fashion Bot
+
+> ⚠️ **RETIRED 2026-05-19 — superseded by SPEC-ONBOARD-LITE-001.** The card
+> onboarding subgraph (mood/color/fit/pinterest nodes, Apify board/profile
+> bootstrap, `seed_from_onboarding`) was fully removed: diagnosis confirmed
+> the seeded taste never reached search ranking (zero payoff) while the gate
+> blocked a new user's first actionable message (friction). Pin-link →
+> recommendation (`link_resolver`) is unaffected. Kept for history only.
 
 ## HISTORY
 

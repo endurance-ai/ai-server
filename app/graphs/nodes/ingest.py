@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 
 from app.channels.lang import remember_lang
+from app.graphs.nodes._adapter_ctx import get_adapter
+from app.graphs.nodes._first_touch import maybe_first_touch
 from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store
@@ -233,6 +235,15 @@ async def ingest(state: WorkingState) -> dict:
             await _handle_cards_more(state, sess, breadcrumbs)
     except Exception as exc:  # noqa: BLE001 — never block webhook
         logger.debug("[ingest] hybrid card callback handling failed: %r", exc)
+
+    # SPEC-ONBOARD-LITE-001 — first-touch greeting / /reset taste clear /
+    # returning-/start ack. Inline side effects (same pattern as the
+    # clarify/hybrid-card handlers above). Routing decision is in
+    # _route_after_ingest_v2.
+    try:
+        await maybe_first_touch(state, sess, get_adapter(), breadcrumbs=breadcrumbs)
+    except Exception as exc:  # noqa: BLE001 — never block webhook
+        logger.debug("[ingest] first_touch handling failed: %r", exc)
 
     # SPEC-AGENT-V2-CLEANUP-001 — the ReAct agent topology is the only
     # topology, so ingest NEVER invokes the legacy LLM 4-way `route_text`

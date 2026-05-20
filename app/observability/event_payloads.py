@@ -45,6 +45,12 @@ __all__ = [
 ]
 
 # REQ-LOG-CATALOG-001 — taste_update.source 7-value Literal (catalog #18).
+# SPEC-ONBOARD-LITE-001 design §4: `"onboard"` and `"pinterest"` are no longer
+# emitted (the onboarding helpers that produced them were removed). The Literal
+# values are retained intentionally so `test_payload_shapes.py`'s
+# type↔matrix union assertion stays stable and the catalog can be re-activated
+# (e.g., when the taste→search loop-closing SPEC lands). See also the two dead
+# TypedDicts below (`OnboardSelectPayload`, `PinterestIngestPayload`).
 TasteSource = Literal[
     "click",
     "onboard",
@@ -166,14 +172,22 @@ class CardClickedPayload(TypedDict, total=False):
     dwell_ms: int | None
 
 
-# 15. onboard_select — SPEC-ONBOARD-CARDS-001 (deferred)
+# 15. onboard_select — DEAD (SPEC-ONBOARD-LITE-001 design §4).
+# The onboarding card subgraph that emitted this event was removed; no
+# current code path emits `event_type="onboard_select"`. The TypedDict is
+# retained so the 20-event catalog count and `__all__` smoke tests stay
+# stable, and so the catalog can be re-activated without re-declaring the
+# schema. Re-evaluate when the taste→search loop-closing SPEC lands.
 class OnboardSelectPayload(TypedDict, total=False):
     stage: str  # "mood" | "color" | "fit" | "pinterest" | "completion"
     axis: str
     selected_values: list[str]
 
 
-# 16. pinterest_ingest — resolve_image node (Pinterest branch)
+# 16. pinterest_ingest — DEAD (SPEC-ONBOARD-LITE-001 design §4).
+# Emitted by the deleted `pinterest_ingest` node / `_pinterest_helpers`. The
+# core pin-link → recommendation flow (`link_resolver`) does NOT emit this
+# event. Same retention rationale as `OnboardSelectPayload` above.
 class PinterestIngestPayload(TypedDict, total=False):
     mode: str  # "board" | "profile" | "pin"
     pin_count: int
