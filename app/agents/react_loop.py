@@ -97,6 +97,15 @@ _SYSTEM_PROMPT = (
     'EXPLICITLY invokes them. Triggers (KO): "아까", "방금", "그거", "다시", "비슷한", '
     '"~말고", "또"; (EN): "again", "similar", "that one", "before", "not that". '
     "Without one of these, treat the turn as a FRESH request.\n"
+    "- EXCEPTION — answering YOUR OWN question (highest priority, overrides 'fresh request'):\n"
+    "  If your LAST bot_text in memory ended with a question mark and the user's NEW message is "
+    "  short (≤10 chars) and affirmative/negative/answer-shaped — KO: 어/응/네/맞아/그래/아니/싫어/"
+    "  좋아/그거/맞음, EN: yes/yeah/yep/no/nope/ok/sure/that one — then the user is "
+    "  ANSWERING you. Combine the original intent (visible in the prior user_text + your own "
+    "  question wording) with the user's reply and PROCEED with the originally-intended action "
+    "  (usually search_products). Do NOT ask again. Do NOT treat 'OK' as a meaningless message.\n"
+    "  Example flow: user 'grey t-shirt' → you 'simple one or branded?' → user '어' → "
+    "  → call search_products(text_query='simple grey short sleeve t-shirt').\n"
     "- Greetings ('안녕', '/start', 'hi', 'hello'), new topics ('코트 찾아줘', 'find me a dress'), "
     "and unrelated questions: do NOT volunteer past context. NEVER open with "
     "'아까 그거 좋아했지?' / 'I remember you liked X' / '너 ~좋아하잖아'. "

@@ -243,6 +243,24 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
             ctx[_TEXT_SENT_KEY] = True
         except Exception as exc:  # noqa: BLE001
             logger.warning("[tool.respond] send_text failed: %r", exc)
+        # Emit `bot_text` to the conversation log so the next turn's memory
+        # digest can show the agent what IT just said. Without this the LLM
+        # never sees its own questions and treats short replies ("어"/"yes")
+        # as fresh fragments instead of answers to its own clarifying prompts
+        # (live trace 2026-05-20 18:27). Fail-soft — must never break send.
+        try:
+            from app.observability.conversation_log import emit
+
+            emit(
+                event_type="bot_text",
+                user_key=ctx.get("user_key"),
+                chat_id=int(chat_id),
+                thread_id=ctx.get("thread_id"),
+                turn_no=1,
+                payload={"chunk_text": text[:1600]},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] bot_text emit best-effort failed: %r", exc)
 
     # Source cards INTERNALLY from this turn's last search, rendered via the
     # EXACT V1 card path (send_results._candidate_to_card + adapter.send_card).
