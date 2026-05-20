@@ -33,15 +33,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Activate pgvector in its own committed statement BEFORE the CREATE TABLE.
-    # Alembic의 transactional_ddl 환경에서 같은 TX 안에 CREATE EXTENSION + 그
-    # 타입을 참조하는 CREATE TABLE 을 묶으면 일부 환경에서 type 등록이 다음
-    # statement 에 안 보이는 race 가 나는 듯 (CI testcontainers 에서 재현).
-    # bind connection 의 exec_driver_sql + commit 으로 강제 분리.
-    bind = op.get_bind()
-    bind.exec_driver_sql("CREATE EXTENSION IF NOT EXISTS vector")
-    bind.exec_driver_sql("COMMIT")
-    bind.exec_driver_sql("BEGIN")
+    # pgvector 활성화는 마이그레이션 BEFORE-step 에서 별도 autocommit 으로 처리
+    # (CI testcontainers race 회피 — tests/test_memory_pg/conftest.py 참고).
+    # dev-app 은 이미 extension 설치돼있어 별도 step 불필요.
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS ai.embedding_cache_text (

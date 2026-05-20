@@ -73,11 +73,25 @@ def _bootstrap_ai_schema(dsn: str) -> None:
 
 
 def _alembic_upgrade(dsn: str) -> None:
+    """Upgrade 마이그레이션 — 0007 (vector 컬럼) 전후로 분리해 race 회피.
+
+    CI testcontainers (pgvector/pgvector:pg16) 에서 같은 alembic transaction
+    안에 CREATE EXTENSION + CREATE TABLE vector 가 묶이면 두 번째 statement 가
+    type 을 못 찾는 race 가 재현됨. 0006 까지 먼저 올린 뒤, 별도 connection
+    으로 CREATE EXTENSION 을 autocommit, 그 다음 head 까지 올린다.
+    """
+    import psycopg
     from alembic import command
     from alembic.config import Config
 
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", dsn.replace("postgresql://", "postgresql+psycopg://", 1))
+
+    command.upgrade(cfg, "0006")
+
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+
     command.upgrade(cfg, "head")
 
 
