@@ -241,7 +241,7 @@ REGISTRY: dict[str, ToolMetadata] = {
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"
-            "  \"{color} {fit} {garment} {gender}\"\n"
+            '  "{color} {fit} {garment} {gender}"\n'
             "Rules:\n"
             "  - ENGLISH ONLY, lowercase, space-separated.\n"
             "  - No articles (a / an / the), no prepositions (for / with), no "
@@ -257,14 +257,14 @@ REGISTRY: dict[str, ToolMetadata] = {
             "  - Gender: 'men' / 'women' / 'unisex'. Omit if unspecified.\n"
             "  - Omit any field you don't have — never pad with vague words.\n"
             "Examples:\n"
-            "  ✅ \"grey fitted t-shirt men\"\n"
-            "  ✅ \"black wide jeans\"\n"
-            "  ✅ \"beige oversized hoodie women\"\n"
-            "  ✅ \"leather loafers men\"\n"
-            "  ❌ \"Grey Fitted T-Shirt for Men\"          (caps, preposition)\n"
+            '  ✅ "grey fitted t-shirt men"\n'
+            '  ✅ "black wide jeans"\n'
+            '  ✅ "beige oversized hoodie women"\n'
+            '  ✅ "leather loafers men"\n'
+            '  ❌ "Grey Fitted T-Shirt for Men"          (caps, preposition)\n'
             "  ❌ \"men's grey tee that's fitted\"          (possessive, clause)\n"
-            "  ❌ \"fitted grey t-shirt for men\"           (wrong order)\n"
-            "  ❌ \"a pair of denim jeans\"                 (article, redundant)"
+            '  ❌ "fitted grey t-shirt for men"           (wrong order)\n'
+            '  ❌ "a pair of denim jeans"                 (article, redundant)'
         ),
         "args_typeddict": SearchProductsArgs,
         "result_typeddict": SearchProductsResult,

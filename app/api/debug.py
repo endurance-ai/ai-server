@@ -136,9 +136,7 @@ async def rewrite_query(req: RewriteRequest) -> RewriteResponse:
 
     raw_content = getattr(ai_msg, "content", None)
     if isinstance(raw_content, list):
-        raw_content = " ".join(
-            (p.get("text") if isinstance(p, dict) else str(p)) for p in raw_content
-        )
+        raw_content = " ".join((p.get("text") if isinstance(p, dict) else str(p)) for p in raw_content)
 
     usage = getattr(ai_msg, "usage_metadata", None) or {}
     response_meta = getattr(ai_msg, "response_metadata", None) or {}

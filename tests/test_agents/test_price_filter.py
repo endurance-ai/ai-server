@@ -65,9 +65,9 @@ def test_min_price_inclusive_at_bound():
 
 def test_both_bounds_inclusive_window():
     cands = [
-        _Cand("a", 30000),   # below
-        _Cand("b", 50000),   # at min
-        _Cand("c", 75000),   # in
+        _Cand("a", 30000),  # below
+        _Cand("b", 50000),  # at min
+        _Cand("c", 75000),  # in
         _Cand("d", 100000),  # at max
         _Cand("e", 150000),  # above
     ]
@@ -90,6 +90,7 @@ def test_unparseable_price_dropped():
     class _BadCand:
         id: str
         price: object
+
     cands = [_BadCand("a", "오십만원"), _BadCand("b", 80000)]
     out = apply_price_filter(cands, None, 100000)
     assert _ids(out) == ["b"]

@@ -101,8 +101,7 @@ async def fetch_post_images(post_url: str) -> list[str]:
 
     actor = settings.APIFY_INSTAGRAM_ACTOR or "apify~instagram-post-scraper"
     url = (
-        f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
-        f"?timeout={int(settings.APIFY_SYNC_TIMEOUT_S)}"
+        f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?timeout={int(settings.APIFY_SYNC_TIMEOUT_S)}"
     )
     body = {"username": [post_url], "addParentData": False}
 

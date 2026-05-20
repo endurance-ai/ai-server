@@ -89,10 +89,28 @@ def test_isolated_chat_ids():
 @pytest.mark.parametrize(
     "text",
     [
-        "어", "응", "네", "맞아", "그래", "좋아", "오케이", "ㅇㅇ", "ㅇㅋ",
-        "yes", "Yes", "yeah", "ok", "OK", "sure",
-        "아니", "no", "nope",
-        "어.", "응!", "yes!", "ok?",  # punctuation tolerant
+        "어",
+        "응",
+        "네",
+        "맞아",
+        "그래",
+        "좋아",
+        "오케이",
+        "ㅇㅇ",
+        "ㅇㅋ",
+        "yes",
+        "Yes",
+        "yeah",
+        "ok",
+        "OK",
+        "sure",
+        "아니",
+        "no",
+        "nope",
+        "어.",
+        "응!",
+        "yes!",
+        "ok?",  # punctuation tolerant
     ],
 )
 def test_classifier_accepts_affirmative_tokens(text):
