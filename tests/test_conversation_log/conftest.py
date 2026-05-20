@@ -54,10 +54,12 @@ def pg_container() -> Generator:
 def _bootstrap_ai_schema(dsn: str) -> None:
     import psycopg
 
-    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        conn.commit()
+        cur.execute("SELECT extname FROM pg_extension WHERE extname='vector'")
+        if cur.fetchone() is None:
+            raise RuntimeError("pgvector 확장 활성화 실패")
 
 
 def _alembic_upgrade(dsn: str) -> None:

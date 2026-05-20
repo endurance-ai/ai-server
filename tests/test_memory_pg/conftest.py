@@ -55,13 +55,21 @@ def _bootstrap_ai_schema(dsn: str) -> None:
     Migrations themselves never `CREATE SCHEMA` / `CREATE EXTENSION` to preserve
     dev-app permissions — migration 0007 (`embedding_cache_text vector(768)`)
     relies on the extension being pre-installed by this bootstrap.
+
+    autocommit=True 로 CREATE EXTENSION 을 명시적 commit 없이 즉시 반영
+    (psycopg context manager 의 rollback-on-exception 경로 우회).
     """
     import psycopg
 
-    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+    with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        conn.commit()
+        # 검증: 정말 등록됐는지 catalog 조회 — 등록 실패 시 명확한 에러로 변환.
+        cur.execute("SELECT extname FROM pg_extension WHERE extname='vector'")
+        if cur.fetchone() is None:
+            raise RuntimeError(
+                "pgvector 확장 활성화 실패 — pgvector/pgvector:pg16 이미지 또는 testcontainers 설정 점검"
+            )
 
 
 def _alembic_upgrade(dsn: str) -> None:
