@@ -29,6 +29,38 @@ from app.agents.tools.search_products import (
 logger = logging.getLogger(__name__)
 
 
+def _as_keyword_list(v: object) -> list[str]:
+    """Defensive cast for refine_search list args.
+
+    `validate_args` already rejects non-list `boost_keywords` /
+    `exclude_keywords` upstream (B), but if anything slips through (test
+    monkeypatch, future tool added with a different shape), naive
+    `list(some_string)` explodes a single keyword string into per-character
+    tokens (["t","-","s","h","i","r","t"]) that then contaminate the
+    embedded query. This belt-and-suspenders cast keeps the embed input
+    well-formed regardless of upstream validation state.
+
+    Mapping:
+      None / empty / whitespace-only → []
+      single string → [string.strip()]
+      list/tuple → [str(x) for each truthy x]
+      anything else → []
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        s = v.strip()
+        return [s] if s else []
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v if x]
+    return []
+
+
+# Test seam — import alias so tests can reference the helper without a
+# module-internal underscore prefix concern.
+_as_keyword_list_for_test = _as_keyword_list
+
+
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
     # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — refine 도 같은 "search" 멘트
     # ("잠시만요, …찾아볼게요"). search_products 와 동일 ctx marker 키
@@ -57,8 +89,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     # Reconstruct text_query from ctx + boost_keywords if present.
     base_query = ctx.get("text_query") or ""
-    boost = list(args.get("boost_keywords") or [])
-    exclude_kw = list(args.get("exclude_keywords") or [])
+
+    boost = _as_keyword_list(args.get("boost_keywords"))
+    exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
     text_query = " ".join([base_query, *boost]).strip() or "fashion"
 
     # Translate action → price clamp / drops.

@@ -406,6 +406,15 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     if not text_query and not has_image:
         return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
 
+    # Persist the LLM-supplied (typically English-translated) text_query into
+    # ctx so a subsequent `refine_search` in the same turn / loop reuses the
+    # translated form instead of the raw Korean user message that was seeded
+    # by react_loop._build_ctx. Without this, refine_search rebuilds its
+    # query as `<original Korean> <boost_keywords>` and the embedding picks
+    # up a mixed-language string with degraded recall (live trace 2026-05-20).
+    if text_query:
+        ctx["text_query"] = text_query
+
     top_k = int(args.get("top_k") or 15)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
     # REAL Vision garment category from ctx (`vision_category`, set in

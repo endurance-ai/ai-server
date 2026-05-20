@@ -396,6 +396,13 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
         "keyword_dislikes",
         "event_types",
         "options",
+        # 2026-05-20: refine_search list fields. Without strict check, an LLM
+        # passing a string ("t-shirt") flows through `list(...)` in dispatch
+        # and explodes into per-character tokens (["t","-","s","h","i","r","t"])
+        # which then contaminate the embedded query. Reject early so the LLM
+        # retries with the correct shape.
+        "boost_keywords",
+        "exclude_keywords",
     ):
         if key in args and not isinstance(args[key], list):
             return False, f"bad_type: {key} must be list"
