@@ -280,28 +280,30 @@ app/
 ├── main.py                  # FastAPI 엔트리포인트 + lifespan (DB/adapter 워밍업 + setWebhook)
 ├── agents/                  # ReAct 에이전트 패키지 (항상 활성)
 │   ├── react_loop.py        # run_react_loop — iteration cap / 무한루프 가드 / token budget / deadline
-│   │                        #   Gap1 build_memory_context, Gap2 _maybe_reflexion, Gap3 proactive directive
-│   ├── tool_registry.py     # 8-tool REGISTRY + TypedDict 스키마 + validate_args (단일 소스)
+│   │                        #   Gap1 build_memory_context, Gap2 _maybe_reflexion(빈결과만), Gap3 proactive directive
+│   ├── tool_registry.py     # 8-tool REGISTRY + TypedDict 스키마 + validate_args (단일 소스, str/float auto-cast)
 │   ├── llm_client.py        # ChatOpenAI 싱글톤 (LiteLLM proxy, AGENT_LLM_MODEL)
 │   ├── _memory_context.py   # Gap1: TasteProfile + 최근 5턴 요약 system context 주입 빌더
-│   ├── _reflexion.py        # Gap2: evaluator._call_llm 래핑, quality delta 생성
+│   ├── _reflexion.py        # Gap2: evaluator._call_llm 래핑, quality delta 생성 (빈결과 시에만 발동)
+│   ├── pending_question.py  # 봇 질문 ↔ 사용자 짧은 답변 pending-state 관리 (NEW)
 │   └── tools/               # 8개 툴 래퍼
 │       ├── analyze_image.py
-│       ├── search_products.py  # Gap4: apply_dislike_discount unconditional
-│       ├── refine_search.py    # Gap4: apply_dislike_discount unconditional
+│       ├── search_products.py  # Gap4: apply_dislike_discount unconditional. top_k LLM 스키마 제거
+│       ├── refine_search.py    # Gap4: apply_dislike_discount unconditional. 가격 필터 + boost_keywords explosion fix
 │       ├── update_taste.py
 │       ├── ask_user_clarification.py
 │       ├── get_recent_history.py
-│       ├── respond.py          # send_hybrid_batch — album + summary text + inline keyboard
+│       ├── respond.py          # send_hybrid_batch — album + summary text + inline keyboard. cursor/impression → Redis(chat_state)
 │       └── suggest_next_step.py  # Gap3: 8번째 tool, 선제 제안 버튼
 ├── api/
 │   ├── health.py            # GET /health (liveness) / GET /health/ready (auth + 상태)
 │   ├── recommend.py         # POST /recommend (X-Internal-Token)
+│   ├── debug.py             # 어드민 디버그 엔드포인트 (INTERNAL_API_TOKEN 인증): /debug/vision-analyze, /debug/resolve-url, /debug/rewrite-query, /debug/list-models, /debug/v6-trace. SSRF 가드 포함 (NEW)
 │   └── webhooks/telegram.py # POST /webhooks/telegram (X-Telegram-Bot-Api-Secret-Token)
 ├── channels/                # 채널 어댑터 레이어
 │   ├── adapter.py           # MessengerAdapter ABC
 │   ├── factory.py           # MESSENGER_BACKEND 기반 팩토리
-│   ├── persona.py           # kiko 페르소나 system prompt (단일 소스)
+│   ├── persona.py           # kiko 페르소나 system prompt (단일 소스). language-override 공격 방어 + meta-announce 금지
 │   ├── lang.py              # detect_lang / remember_lang / session_lang (KO/EN sticky)
 │   ├── recommendation.py    # RecommendationPort Protocol + DTO + PipelineRecommendationPort
 │   ├── link_resolver.py     # Pinterest / pin.it og:image 해석
@@ -311,6 +313,8 @@ app/
 │   ├── clarify.py           # clarify 카드 빌더 (6 axes)
 │   ├── clarify_values.py    # clarify axis별 옵션 값 + 한글 라벨
 │   ├── _jsonable.py         # 5-step JSON-serializable cascade 헬퍼
+│   ├── pre_messages.py      # 사전 안내 멘트 단일 소스 + fire_pre_message (NEW, SPEC-AGENT-UX-P0-001 REQ-UX-004)
+│   ├── instagram_apify.py   # Apify 경유 IG 포스트 이미지 fetch (NEW — IG direct URL 우회)
 │   └── telegram/
 │       ├── adapter.py       # TelegramAdapter (sendMessage/sendPhoto/sendMediaGroup/InlineKeyboard)
 │       └── webhook.py       # Telegram Update 파싱
@@ -331,6 +335,8 @@ app/
 │   │   ├── category_family.py     # CANONICAL_FAMILIES (20 tokens) + to_canonical_family() — v6 family gate 단일 소스 (SPEC-SEARCH-V6-001)
 │   │   ├── search_repository.py   # SearchRepository (_RPC_NAME="search_products_v6" 단일 소스, build_params 6-key, search)
 │   │   └── search_rpc_contract.py # SearchRpcRowContract (v6: distance+degraded) + RpcContractError + validate_rpc_rows
+│   ├── cache/
+│   │   └── chat_state.py        # Redis-backed pager cursor + impression dedupe (NEW, SPEC-CHAT-STATE-REDIS-001). fail-open
 │   └── memory/
 │       ├── session.py           # SessionStore Protocol + InMemorySessionStore
 │       ├── session_pg.py        # Postgres 기반 세션 저장소
@@ -343,6 +349,7 @@ app/
 ├── providers/               # 외부 시스템 클라이언트
 │   ├── database.py          # SupabaseProvider (PostgREST 클라이언트, 논리명 유지)
 │   ├── embedding.py         # Modal HTTP + 응답 스키마 검증
+│   ├── embedding_cache.py   # PG 벡터 캐시 — text_query → 768-dim 재사용 (NEW, migration 0007). Modal cold-start 우회
 │   └── llm.py               # LiteLLM HTTP
 ├── observability/
 │   ├── langfuse.py          # @observe (no-op fallback) + current_langfuse_trace_id()
@@ -447,3 +454,4 @@ app/
 | 2026-05-18 | **v1.1.0** | **bot/AI 중심으로 재편, /recommend(app) 경로를 보조·현재 미사용으로 강등. Telegram 봇이 Vision도 독자 처리함을 명시 (app과 DB만 공유).** |
 | 2026-05-18 | **v1.2.0** | **SPEC-SEARCH-V6-001 — search_products_v5+pgroonga+product_search_text DROPPED → search_products_v6 (embedding-first, distance ASC, p_category canonical family gate). EmbedProvider.embed_text() 신규 (text query → Modal /embed/text). zero-dense stopgap 제거. product_ai_analysis 테이블 dead path 제거. category_family.py 신규 (20-token CANONICAL_FAMILIES + to_canonical_family). react_loop._build_ctx 가 vision_category 노출.** |
 | 2026-05-19 | **v1.3.0** | **P0 암묵 피드백 → Langfuse v3 score retro-attach. `emit_feedback_score()` 신규 (observability/langfuse.py). `ai.card_impression.langfuse_trace` 컬럼 추가 (migration 0006). 호출처: implicit_feedback.py 3곳 (click/no_click/re_query). kill-switch: `LANGFUSE_FEEDBACK_SCORES`.** |
+| 2026-05-20 | **v1.4.0** | **SPEC-CHAT-STATE-REDIS-001 — pager cursor/impression dedupe dict를 Redis 외부화 (infrastructure/cache/chat_state.py, fail-open). SPEC-AGENT-UX-P0-001 — pre_messages 사전 안내 멘트, typing indicator, diversify dedup 가드, sticky lang directive. validate_args str/float 자동 캐스팅(top_k/n bad_type 제거). Reflexion 발동 조건 빈결과만으로 축소 + exhaust salvage. text_query canonical form 강제. PG 임베딩 캐시(embedding_cache.py, migration 0007). IG Apify 이미지 fetch(instagram_apify.py). pending_question 봇Q↔사용자A 상태. 어드민 디버그 엔드포인트 5개(debug.py) + SSRF 가드. persona language-override 방어.** |

@@ -147,6 +147,28 @@ Gap2 Reflexion은 기존 SPEC-AGENTIC-CRITIQUE-001 env를 재사용 (live depend
 - `SELF_CRITIQUE_TIMEOUT_S` — turn_deadline과 함께 잔여-budget 계산 기준
 - `EVALUATOR_MODEL` / `EVALUATOR_MAX_TOKENS` / `EVALUATOR_TEMPERATURE` / `EVALUATOR_TIMEOUT_S` — `evaluator._call_llm` 직접 참조
 
+## Redis (SPEC-CHAT-STATE-REDIS-001)
+
+| 키 | 기본 | 용도 |
+|----|-----|------|
+| `REDIS_URL` | `redis://localhost:6379/1` | pager cursor + impression dedupe 외부화. 로컬: docker-compose `redis:7-alpine` / 테스트: `fakeredis` / prod: dev-ai 기존 redis DB 1 (`redis://:${REDIS_AUTH}@redis:6379/1`). fail-open — redis 다운 시 추천 차단 없음 |
+
+> `kiko:*` prefix 사용. DB 0은 Langfuse 전용이므로 반드시 DB 1 이상 지정.
+
+## IG Apify 채널
+
+| 키 | 기본 | 용도 |
+|----|-----|------|
+| `APIFY_TOKEN` | (필수, Apify 콘솔 발급) | Apify API 인증. IG 포스트 이미지 fetch (instagram_apify.py) |
+| `APIFY_INSTAGRAM_ACTOR` | `apify~instagram-post-scraper` | 사용할 Apify Actor ID |
+| `APIFY_SYNC_TIMEOUT_S` | `120` | Apify run 동기 완료 대기 (초) |
+| `APIFY_FETCH_TIMEOUT_S` | `130` | Apify 전체 fetch 타임아웃 (초) |
+| `APIFY_402_COOLOFF_S` | `600` | Apify 402 응답 시 재시도 금지 쿨다운 (초) |
+
+## 임베딩 캐시
+
+텍스트 임베딩을 Postgres에 캐싱해 Modal cold-start(~26s) 우회. migration 0007에서 테이블 생성. 별도 env flag 없음 — `DB_URL`/`DB_TOKEN` 재사용.
+
 ## 앱 메타
 
 | 키 | 기본 |

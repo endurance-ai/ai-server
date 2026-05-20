@@ -29,25 +29,27 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 ```
 app/
 ├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
-├── api/                 # 라우터 (recommend, health, webhooks/telegram)
+├── api/                 # 라우터 (recommend, health, webhooks/telegram, debug — 어드민 5개 엔드포인트 + SSRF 가드)
 ├── agents/              # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-CLEANUP-001 — 영구 단일 토폴로지)
-│   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout). Gap1 memory injection + Gap2 _maybe_reflexion + Gap3 proactive directive (모두 unconditional)
-│   ├── tool_registry.py # 8-tool REGISTRY + validate_args (단일 소스). suggest_next_step 항상 등록
+│   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout). Gap1 memory injection + Gap2 _maybe_reflexion(빈결과만) + Gap3 proactive directive (모두 unconditional)
+│   ├── tool_registry.py # 8-tool REGISTRY + validate_args (단일 소스, str/float auto-cast). suggest_next_step 항상 등록
 │   ├── llm_client.py    # ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유)
 │   ├── _memory_context.py  # Gap1: TasteProfile + 최근 N턴 요약 자동 주입 빌더 (항상 호출)
-│   ├── _reflexion.py       # Gap2: evaluator 헬퍼 래핑 — in-loop Reflexion 평가 (항상 적용)
+│   ├── _reflexion.py       # Gap2: evaluator 헬퍼 래핑 — in-loop Reflexion 평가 (빈결과 시에만 발동)
+│   ├── pending_question.py # 봇 질문 ↔ 사용자 짧은 답변 pending-state 관리 (NEW)
 │   └── tools/           # 8-tool 래퍼: analyze_image, search_products, refine_search, update_taste, ask_user_clarification, get_recent_history, respond, suggest_next_step
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, persona (kiko 페르소나 단일 소스), link_resolver, reset_keywords, session, lang, vision (+ vision_prompt, clarify, clarify_values, _jsonable)
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, persona (kiko 페르소나 단일 소스), link_resolver, reset_keywords, session, lang, vision (+ vision_prompt, clarify, clarify_values, _jsonable), pre_messages, instagram_apify
 │   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
 │   └── nodes/           # 노드: ingest, resolve_image, vision_node, pick_item, ask_clarify, apply_clarify, agent, intro (+ _first_touch / _trace.py 헬퍼). evaluator.py는 Gap2 헬퍼 보존 목적 존재(graph 미등록). 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거
 ├── services/            # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001): embed_service, search_service, diversify_service, database_service
 ├── infrastructure/      # 인프라 레이어 (SPEC-ARCH-AI-001)
 │   ├── repositories/    # SearchRepository (RPC name + param 단일 소스), search_rpc_contract (REQ-AI-006)
+│   ├── cache/           # Redis-backed chat-state (SPEC-CHAT-STATE-REDIS-001): chat_state.py — cursor + impression dedupe, fail-open
 │   └── memory/          # 메모리 저장소 — session, session_pg, taste_profile, taste_profile_pg (app/channels/에서 이전)
 ├── domain/              # 도메인 모델 — SearchResult, Candidate (app/models/과 분리된 도메인 타입)
 ├── pipeline/            # 검색 파이프라인 thin shim (SPEC-ARCH-AI-001): @observe 래핑 + 테스트 seam 재노출 → 실제 로직은 app/services/ 에 위치
-├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider
+├── providers/           # SupabaseProvider (PostgREST 클라이언트, 논리명 유지), EmbedProvider, LLMProvider, embedding_cache (PG 벡터 캐시, migration 0007)
 ├── observability/       # Langfuse @observe 래퍼 + build_callback_handler + conversation_log + event_payloads (SPEC-CONVERSATION-LOG-001)
 ├── models/              # Pydantic request/response
 ├── core/                # config (env) + di.py (DI 컨테이너 — provide_db_pool / provide_settings / provide_embed_provider, SPEC-ARCH-AI-001 REQ-AI-003) + types.py
@@ -100,11 +102,13 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
 | `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + messenger 상태) |
 | `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
+| `app/api/debug.py` | **NEW** — 어드민 디버그 5개 엔드포인트 (INTERNAL_API_TOKEN 인증): `/debug/vision-analyze`, `/debug/resolve-url` (SSRF 가드), `/debug/rewrite-query`, `/debug/list-models`, `/debug/v6-trace` |
 | `app/channels/adapter.py` | `MessengerAdapter` ABC. `send_chat_action(chat_id, action='typing') -> bool` 은 default no-op (`return False`) — 미구현 채널 어댑터 자동 skip (SPEC-AGENT-UX-P0-001 REQ-UX-003) |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
 | `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001). 시스템 프롬프트 마지막 라인에 `[LANG=<ko\|en> — MUST reply in <Korean\|English>]` sticky directive 강제 주입 (SPEC-AGENT-UX-P0-001 REQ-UX-002). `search_products`/`refine_search`/`respond` dispatch 직전 `_fire_typing` (fire-and-forget, fail-open) 으로 Telegram typing indicator 1회 발사 (REQ-UX-003) |
-| `app/agents/tool_registry.py` | 8-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). `suggest_next_step` 항상 등록 |
+| `app/agents/tool_registry.py` | 8-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). str/float 자동 캐스팅 — LLM 타입 실수로 loop 헛돌이 방지. `suggest_next_step` 항상 등록 |
+| `app/agents/pending_question.py` | **NEW** — 봇 질문 ↔ 사용자 짧은 답변 pending-state 관리. 다음 turn 에서 pending Q+A 를 ctx에 주입 후 클리어 |
 | `app/agents/llm_client.py` | ChatOpenAI 싱글톤 (bind_tools, LiteLLM proxy 경유). `AGENT_LLM_MODEL` 미설정 시 fail-closed (기본 `nova-lite`) |
 | `app/agents/_memory_context.py` | Gap1: `build_memory_context(state, sess, ctx) -> str` — TasteProfile + 최근 N턴(기본 5) 요약 자동 주입, char-cap(`AGENT_V3_MEMORY_MAX_TOKENS`*4), `[MEMORY CONTEXT — SYSTEM DERIVED]` 펜스 |
 | `app/agents/_reflexion.py` | Gap2: `evaluate_search_quality(...) -> dict` — `evaluator._call_llm`/`_build_fastpath_delta` 래핑, fail-open(score=1.0), 빈결과 fastpath |
@@ -118,6 +122,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/graphs/nodes/apply_clarify.py` | `clarify:*` callback 소비 → `session.boost_keywords` 누적 (SPEC-CLARIFY-CARDS-001) |
 | `app/graphs/nodes/evaluator.py` | **graph 노드 아님** — Gap2 헬퍼 보존 전용. `_call_llm`/`_build_fastpath_delta` 만 `_reflexion.py` 가 래핑해 사용. `SELF_CRITIQUE_*`/`EVALUATOR_*` env 의존 |
 | `app/channels/pre_messages.py` | **NEW (SPEC-AGENT-UX-P0-001 REQ-UX-004)** — 사전 안내 멘트 단일 소스 `PRE_MESSAGES` (4 키: vision/search/pinterest/analyze_image × KO/EN) + `fire_pre_message` helper (idempotent per-turn, fail-open). 4개 firing site: `app/graphs/nodes/vision.py` (key=vision, thread_id 마커), `app/agents/tools/search_products.py` & `refine_search.py` (key=search, ctx 마커 공유), `app/agents/tools/analyze_image.py` (key=analyze_image, ctx 마커). pinterest 키는 SPEC contract 로 보존 — pinterest_ingest 노드 부재 (SPEC-ONBOARD-LITE-001 §4) 라 런타임 firing 없음 |
+| `app/channels/instagram_apify.py` | **NEW** — Apify 경유 IG 포스트 이미지 fetch. IG direct URL CDN 차단 우회. `APIFY_TOKEN` + `APIFY_INSTAGRAM_ACTOR` 환경변수, fail-open (fetch 실패 시 원본 URL 반환) |
 | `app/channels/link_resolver.py` | Pinterest / pin.it og:image URL 해석 |
 | `app/channels/lang.py` | 언어 감지 헬퍼 — `detect_lang` / `remember_lang` / `session_lang`. Hangul 유무 기준 KO/EN 판별, `Session.lang` sticky 갱신 |
 | `app/infrastructure/memory/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체. `set_store_factory/set_store/reset_store` 주입 지점 포함. `Session.lang: str = "en"` (sticky 언어 필드). 구 경로: `app/channels/session.py` (SPEC-ARCH-AI-001 이전) |
@@ -153,6 +158,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/domain/search.py` | 도메인 타입 — `SearchResult`, `Candidate` (app/models/ DTO 와 분리) (SPEC-ARCH-AI-001) |
 | `app/providers/database.py` | SupabaseProvider — PostgREST 클라이언트 (논리명 유지, async, lifespan 워밍업) |
 | `app/providers/embedding.py` | Modal HTTP + 응답 스키마 검증. `embed_image_url` (image → 768-dim) + **`embed_text`** (text query → 768-dim, same FashionSigLIP L2 space, SPEC-SEARCH-V6-001) |
+| `app/providers/embedding_cache.py` | **NEW** — PG 벡터 캐시. `text_query → 768-dim` 재사용 (migration 0007 `ai.embedding_cache_text`). Modal cold-start ~26s 우회. hit 시 `EMBED_CACHE_HIT` 로그 |
 | `app/providers/llm.py` | LiteLLM HTTP |
 | `app/observability/langfuse.py` | `@observe` (no-op fallback) + langfuse env 자동 주입 + `current_langfuse_trace_id()` export + `emit_feedback_score()` (P0 암묵 피드백 → 원본 trace score retro-attach, fail-open) |
 | `app/observability/conversation_log.py` | 대화 이벤트 로거 — `log_event()` (async, never raises) + `emit()` (fire-and-forget asyncio.create_task) + `_truncate()` payload cap. `MEMORY_BACKEND_IS_POSTGRES` 가드. 모든 graph 노드 + webhook intake 에서 호출 (SPEC-CONVERSATION-LOG-001) |
@@ -179,6 +185,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - `RESPONSE_SPLIT_ENABLED` (기본 `true`) + `RESPONSE_SPLIT_DELAY_MS` / `RESPONSE_SPLIT_MIN_CHARS` — 문장 단위 분할 발화 (noscroll benchmark P0)
 - `LANGFUSE_FEEDBACK_SCORES` (기본 `true`) — P0 암묵 피드백 → 원본 추천 trace Langfuse score kill-switch (click/no_click/re_query). off 시 `create_score()` 만 침묵, 피드백 경로는 그대로
 - `REDIS_URL` (기본 `redis://localhost:6379/1`) — SPEC-CHAT-STATE-REDIS-001 chat-state(pager cursor + impression dedupe) 외부화. 로컬 docker-compose `redis:7-alpine` / 테스트 fakeredis / prod dev-ai Langfuse redis 컨테이너 DB 1(`redis://:${REDIS_AUTH}@redis:6379/1`, Langfuse 는 DB 0). 키 prefix `kiko:*`. fail-open — Redis 다운이 추천을 막지 않음
+- `APIFY_TOKEN` / `APIFY_INSTAGRAM_ACTOR` / `APIFY_SYNC_TIMEOUT_S` / `APIFY_FETCH_TIMEOUT_S` / `APIFY_402_COOLOFF_S` — IG 포스트 이미지 Apify fetch (`instagram_apify.py`). 상세는 `docs/infra/env.md § IG Apify 채널`
 - **ReAct 에이전트 루프 (영구 단일 토폴로지, SPEC-AGENT-V2-CLEANUP-001)**: `AGENT_LLM_MODEL` (기본 `nova-lite` via LiteLLM, 미설정 시 fail-closed) + `AGENT_MAX_ITERATIONS` / `AGENT_TURN_TOKEN_BUDGET` / `AGENT_TOOL_TIMEOUT_S` / `AGENT_LLM_TIMEOUT_S` / `AGENT_LLM_MAX_RETRIES` / `AGENT_TOOL_MAX_RETRIES` / `AGENT_RESPOND_TIMEOUT_S`. V3 4-Gap(memory/Reflexion/proactive/dislike) 모두 unconditional — 개별 플래그 제거됨
   - `AGENT_V3_MEMORY_MAX_TOKENS` (기본 `1500`) — Gap1 메모리 주입 페이로드 token cap (char 근사: *4, 유일하게 남은 V3 튜닝값)
 
