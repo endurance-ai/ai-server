@@ -14,7 +14,10 @@ Text-query 임베딩 캐시. Modal /embed/text 호출 결과(768-dim FashionSigL
 - 정규화 로직 변경: `normalize_ver` 새 값으로 caller 변경 → 옛 row 자연히 miss
 - 옛 row 정리는 별도 housekeeping(미구현, 누적량 보면서 결정)
 
-pgvector 는 search_products_v6 에서 이미 사용 중이라 별도 CREATE EXTENSION 불필요.
+pgvector 활성화: dev-app PG 는 search_products_v6 RPC 가 이미 pgvector 를
+사용 중이라 extension 이 설치돼있음 — `CREATE EXTENSION IF NOT EXISTS` 는
+no-op (CREATE 권한 불필요). CI testcontainer (pgvector/pgvector:pg16) 에서는
+testcontainers 의 기본 user(test) 가 DB owner 라 활성화 가능.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS ai.embedding_cache_text (
