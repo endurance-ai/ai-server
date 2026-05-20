@@ -86,7 +86,8 @@ class SearchProductsArgs(TypedDict, total=False):
     max_price: float | None
     exclude_keywords: list[str]
     boost_keywords: list[str]
-    top_k: int
+    # NOTE (2026-05-20): `top_k` removed from LLM schema — Haiku 가 카드 캐러셀
+    # 크기(5)를 따라하며 페이지네이션을 죽였음. dispatch 기본값 15 유지.
 
 
 class RefineSearchArgs(TypedDict, total=False):
@@ -233,12 +234,37 @@ REGISTRY: dict[str, ToolMetadata] = {
     "search_products": {
         "name": "search_products",
         "description": (
-            "Search the 78k-product catalog. Provide `text_query` (a concise "
-            "ENGLISH description of the item, e.g. 'leather loafers', 'denim jeans') "
-            "plus optional filters (style_node_primary, color_family, fit, price, "
-            "top_k). Do NOT provide an image_url — the tool handles imagery "
-            "internally from session state. Returns top candidates with "
-            "brand/title/price."
+            "Search the 78k-product catalog. Provide `text_query` plus optional "
+            "filters (style_node_primary, color_family, fit, price). Do "
+            "NOT provide an image_url — the tool handles imagery internally "
+            "from session state. Returns top candidates with brand/title/price.\n"
+            "\n"
+            "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
+            "Always produce text_query in this exact shape:\n"
+            '  "{color} {fit} {garment} {gender}"\n'
+            "Rules:\n"
+            "  - ENGLISH ONLY, lowercase, space-separated.\n"
+            "  - No articles (a / an / the), no prepositions (for / with), no "
+            "possessives (men's → men, women's → women).\n"
+            "  - Garment must be singular and use the most common term: "
+            "'t-shirt' (not 'tee' / 'tees' / 'tshirt'), 'jeans' (not 'denim "
+            "pants'), 'sneakers' (not 'trainers'), 'hoodie' (not 'hooded "
+            "sweatshirt'), 'sweater' (not 'jumper' / 'knit top').\n"
+            "  - Color: prefer 'grey' over 'gray', 'beige' over 'tan/khaki' "
+            "unless explicitly khaki.\n"
+            "  - Fit: one of 'fitted' / 'slim' / 'regular' / 'loose' / 'oversized' "
+            "/ 'wide' / 'straight' / 'cropped'. Omit if unspecified.\n"
+            "  - Gender: 'men' / 'women' / 'unisex'. Omit if unspecified.\n"
+            "  - Omit any field you don't have — never pad with vague words.\n"
+            "Examples:\n"
+            '  ✅ "grey fitted t-shirt men"\n'
+            '  ✅ "black wide jeans"\n'
+            '  ✅ "beige oversized hoodie women"\n'
+            '  ✅ "leather loafers men"\n'
+            '  ❌ "Grey Fitted T-Shirt for Men"          (caps, preposition)\n'
+            "  ❌ \"men's grey tee that's fitted\"          (possessive, clause)\n"
+            '  ❌ "fitted grey t-shirt for men"           (wrong order)\n'
+            '  ❌ "a pair of denim jeans"                 (article, redundant)'
         ),
         "args_typeddict": SearchProductsArgs,
         "result_typeddict": SearchProductsResult,
@@ -379,16 +405,46 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
     # `float | None` (SearchProductsArgs/RefineSearchArgs) — the LLM
     # legitimately sends e.g. 59.99, so accept int OR float there.
     # bool is a subclass of int — reject it explicitly in both groups.
+    #
+    # AUTO-CAST (2026-05-20): Haiku 4.5 occasionally sends type-mismatched JSON
+    # (`top_k="15"`, `boost_keywords="t-shirt"`, `min_price="50000"`). Strict
+    # rejection burns a ReAct iter per occurrence — turns saw 3 consecutive
+    # bad_args eating half the iter budget before search even started. Safe
+    # coercions are done in-place; only genuinely unconvertible values reject.
+    #
+    # CRITICAL: never `list(v)` a string — `list("t-shirt")` explodes to
+    # `["t","-","s","h","i","r","t"]` which contaminates the embedded query
+    # (the bug the previous strict check was avoiding). Use `[v]` to wrap.
     for key in ("top_k", "n"):
         if key in args:
             v = args[key]
-            if not isinstance(v, int) or isinstance(v, bool):
+            if isinstance(v, bool):
                 return False, f"bad_type: {key} must be int"
+            if isinstance(v, int):
+                continue
+            if isinstance(v, float) and v.is_integer():
+                args[key] = int(v)
+                continue
+            if isinstance(v, str):
+                stripped = v.strip()
+                if stripped.lstrip("-").isdigit():
+                    args[key] = int(stripped)
+                    continue
+            return False, f"bad_type: {key} must be int"
     for key in ("min_price", "max_price"):
         if key in args:
             v = args[key]
-            if not isinstance(v, (int, float)) or isinstance(v, bool):
+            if isinstance(v, bool):
                 return False, f"bad_type: {key} must be number"
+            if isinstance(v, (int, float)):
+                continue
+            if isinstance(v, str):
+                try:
+                    args[key] = float(v.strip())
+                    continue
+                except (ValueError, AttributeError):
+                    pass
+            return False, f"bad_type: {key} must be number"
     for key in (
         "brand_likes",
         "brand_dislikes",
@@ -396,8 +452,24 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
         "keyword_dislikes",
         "event_types",
         "options",
+        # 2026-05-20: refine_search list fields. Without strict check, an LLM
+        # passing a string ("t-shirt") flows through `list(...)` in dispatch
+        # and explodes into per-character tokens (["t","-","s","h","i","r","t"]).
+        # Auto-cast (2026-05-20): wrap single str in `[v]` so a lone keyword
+        # passes safely; reject anything else (dict, int, etc.).
+        "boost_keywords",
+        "exclude_keywords",
     ):
-        if key in args and not isinstance(args[key], list):
+        if key in args:
+            v = args[key]
+            if isinstance(v, list):
+                continue
+            if isinstance(v, str):
+                # Lone non-empty string → 1-element list. Empty string drops the
+                # field entirely (LLM occasionally sends "" as a no-op).
+                stripped = v.strip()
+                args[key] = [stripped] if stripped else []
+                continue
             return False, f"bad_type: {key} must be list"
 
     return True, None

@@ -36,20 +36,20 @@ logger = logging.getLogger(__name__)
 
 
 _TOAST_TEMPLATES_KO: dict[str, str] = {
-    "formality": "{label} 분위기로 찾아볼게요",
-    "fit": "{label} 핏으로 찾아볼게요",
-    "occasion": "{label} 자리에 어울리는 걸로 골라볼게요",
-    "category_pick": "{label} 위주로 찾아볼게요",
-    "subcategory_disambiguation": "{label} 위주로 찾아볼게요",
-    "generic_fallback": "{label} 위주로 찾아볼게요",
+    "formality": "{label} 분위기로 찾아볼게",
+    "fit": "{label} 핏으로 찾아볼게",
+    "occasion": "{label} 자리에 어울리는 걸로 골라볼게",
+    "category_pick": "{label} 위주로 찾아볼게",
+    "subcategory_disambiguation": "{label} 위주로 찾아볼게",
+    "generic_fallback": "{label} 위주로 찾아볼게",
 }
-_TOAST_SKIP_KO = "그대로 검색해 볼게요"
+_TOAST_SKIP_KO = "그대로 검색해볼게"
 
 
 def _toast_for(delta: ClarifyDelta) -> str:
     if delta.is_skip:
         return _TOAST_SKIP_KO
-    template = _TOAST_TEMPLATES_KO.get(delta.axis.value, "{label} 으로 찾아볼게요")
+    template = _TOAST_TEMPLATES_KO.get(delta.axis.value, "{label} 으로 찾아볼게")
     # value 는 영문 enum — 사용자 친화 라벨이 필요하면 clarify_values 로 lookup.
     from app.channels.clarify_values import get_option
 

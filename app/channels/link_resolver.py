@@ -134,9 +134,25 @@ async def resolve(url: str) -> list[str]:
     logger.info("🔗 [LINK] 시작 host=%s url=%s", host, url)
 
     if _is_instagram(host):
-        logger.info("🔗 [LINK] ⏭️  인스타그램은 P2 (현재 미지원) → []")
-        _cache_put(url, [])
-        return []
+        # Apify-backed Instagram resolver (mirrors kikoai/app's main-flow v2).
+        # When APIFY_TOKEN is unset or Apify fails (402/408/network/Reel), the
+        # function returns [] — identical to the previous P2-skip contract, so
+        # the caller's fallback path is unchanged.
+        from app.channels.instagram_apify import fetch_post_images
+
+        images = await fetch_post_images(url)
+        # SSRF-guard each returned CDN URL (Instagram CDN host is public, but
+        # the guard catches malformed/scheme-less surprises). Drop offenders
+        # silently — we never raise from the link resolver.
+        safe: list[str] = []
+        for u in images:
+            try:
+                _ssrf_guard_url(u)
+                safe.append(u)
+            except ValueError as e:
+                logger.warning("🔗 [LINK] 🛡️  IG slide SSRF 차단 url=%s err=%s", u, e)
+        _cache_put(url, safe)
+        return safe
 
     client = _get_client()
 

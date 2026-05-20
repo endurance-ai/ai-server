@@ -29,11 +29,11 @@ from app.observability.conversation_log import emit
 
 logger = logging.getLogger(__name__)
 
-_GREET_KO = "안녕! 난 kiko야 🐱 바로 찾아볼게요."
+_GREET_KO = "안녕! 난 kiko야 🐱 바로 찾아볼게."
 _GREET_EN = "Hey! I'm kiko 🐱 — finding it now."
-_RESET_KO = "취향 기록을 초기화했어요 🐱 새로 시작해요!"
+_RESET_KO = "취향 기록 초기화했어 🐱 새로 시작해보자!"
 _RESET_EN = "Cleared your taste history 🐱 fresh start!"
-_READY_KO = "어 왔구나 🐱 뭐 찾아줄까요?"
+_READY_KO = "어 왔구나 🐱 뭐 찾아줄까?"
 _READY_EN = "Hey, welcome back 🐱 what are we looking for?"
 
 

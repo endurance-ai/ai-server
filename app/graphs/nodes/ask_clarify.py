@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 _FALLBACK_EN = "Got it — is that a top, a dress, or outerwear?"
-_FALLBACK_KO = "넵! 혹시 상의예요, 원피스예요, 아우터예요?"
+_FALLBACK_KO = "오케이! 혹시 상의야, 원피스야, 아우터야?"
 # Back-compat alias (some older imports may still reference _FALLBACK).
 _FALLBACK = _FALLBACK_EN
 
@@ -113,7 +113,7 @@ def _build_buttons(axis: ClarifyAxis) -> list[tuple[str, str]]:
 async def _send_card_path(state: WorkingState, axis: ClarifyAxis) -> dict:
     """CARD 경로 — 인라인 키보드 1개 발행."""
     breadcrumbs: list[str] = []
-    body = AXIS_PROMPTS_KO.get(axis.value) or "조금 더 자세히 알려주실 수 있어요?"
+    body = AXIS_PROMPTS_KO.get(axis.value) or "조금 더 자세히 알려줄래?"
     buttons = _build_buttons(axis)
 
     try:

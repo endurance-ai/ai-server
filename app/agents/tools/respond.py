@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from app.agents.tool_registry import RespondResult
+from app.infrastructure.cache import chat_state
 from app.observability.conversation_log import emit
 
 
@@ -67,38 +68,14 @@ _SENT_CARD_IDS_KEY = "_respond_sent_card_ids"
 # defensive second entry (or react_loop retry) must not resend it.
 _ALBUM_SENT_KEY = "_respond_album_sent"
 
-# In-memory "더보기 / More" pager cursor, keyed by chat_id. Module-global so it
-# survives across webhook calls within the process (the original search turn
-# sets it; a later `cards:more` tap reads + advances it). NOT persisted: a
-# process restart simply restarts the pager from the first batch, which is
-# harmless (last_results may not survive an in-memory store restart either).
-# Avoiding a Session field keeps this change free of an Alembic migration
-# (the PG session store uses an explicit column list, not field reflection).
-_CARD_BATCH_CURSOR: dict[int, int] = {}
-
-
-# SPEC-IMPLICIT-FB-001 / REQ-FB-IMPRESSION-001 — per-chat set of product_ids
-# already impression-logged this process lifetime. `ai.card_impression` has NO
-# unique constraint / ON CONFLICT (migration 0002 — only a NON-unique
-# (chat_id, product_id) index), so the same item re-shown via `cards:more`
-# (offset paging) or a defensive re-entry would INSERT a duplicate row,
-# inflating no-click attribution. Dedupe HERE, at the single delivery seam.
-# Module-global, same lifecycle/rationale as `_CARD_BATCH_CURSOR`: not
-# persisted, a process restart simply re-allows logging (harmless — at worst
-# one extra impression row per item after a restart, bounded by the search cap).
-# Memory bound: the inner set is CLEARED at the start of every new search
-# (offset==0 fresh-recommendation delivery), so each set stays ≤ the search cap
-# (tiny). The outer dict grows by distinct chat_id only — accepted, identical
-# structure/precedent to the pre-existing `_CARD_BATCH_CURSOR`; deliberately NO
-# LRU/cap (would be over-engineering for the same bound the codebase already
-# tolerates).
-_LOGGED_IMPRESSION_IDS: dict[int, set[str]] = {}
-
-
-def reset_card_batch_cursor_for_tests() -> None:
-    """Clear the pager cursor + impression-dedup set (test hook only)."""
-    _CARD_BATCH_CURSOR.clear()
-    _LOGGED_IMPRESSION_IDS.clear()
+# SPEC-CHAT-STATE-REDIS-001 — the "더보기 / More" pager cursor + per-chat
+# impression-dedupe set are now externalized to Redis via
+# `app.infrastructure.cache.chat_state` (keys `kiko:cursor:{chat_id}` TTL 24h
+# and `kiko:imp:{chat_id}` TTL 7d). The prior in-process module-global dicts
+# leaked memory and would split across uvicorn workers once multi-worker
+# scaling lands. All access in this file goes through the 5 fail-open helpers
+# (`get_cursor`/`set_cursor`/`is_logged`/`mark_logged`/`clear_logged`). Redis
+# unavailability NEVER blocks card delivery — helpers swallow + DEBUG log.
 
 
 # @MX:ANCHOR: [AUTO] live-path impression logging — the ONLY invocation of
@@ -136,11 +113,11 @@ async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], 
     try:
         from app.channels.implicit_feedback import _product_id_of, log_impressions
 
+        cid = int(chat_id)
         if is_fresh_search:
             # New search → drop the prior search's dedupe set so its products
             # are re-logged against the NEW recommendation trace.
-            _LOGGED_IMPRESSION_IDS.pop(int(chat_id), None)
-        seen = _LOGGED_IMPRESSION_IDS.setdefault(int(chat_id), set())
+            await chat_state.clear_logged(cid)
         fresh: list[Any] = []
         for c in batch:
             pid = _product_id_of(c)
@@ -149,14 +126,15 @@ async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], 
                 # they cannot be deduped but also cannot be re-correlated.
                 fresh.append(c)
                 continue
-            if pid in seen:
+            pid_s = str(pid)
+            if await chat_state.is_logged(cid, pid_s):
                 continue
-            seen.add(pid)
+            await chat_state.mark_logged(cid, pid_s)
             fresh.append(c)
         if not fresh:
             return
         from_user_id = getattr(sess, "from_user_id", None)
-        await log_impressions(int(chat_id), from_user_id, fresh)
+        await log_impressions(cid, from_user_id, fresh)
     except Exception as exc:  # noqa: BLE001 — never break/delay card delivery
         # type name only — exc repr can surface raw chat_id via psycopg
         # exception args (app/observability/pii.py log-line policy).
@@ -243,6 +221,55 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
             ctx[_TEXT_SENT_KEY] = True
         except Exception as exc:  # noqa: BLE001
             logger.warning("[tool.respond] send_text failed: %r", exc)
+        # Emit `bot_text` to the conversation log so the next turn's memory
+        # digest can show the agent what IT just said. Without this the LLM
+        # never sees its own questions and treats short replies ("어"/"yes")
+        # as fresh fragments instead of answers to its own clarifying prompts
+        # (live trace 2026-05-20 18:27). Fail-soft — must never break send.
+        try:
+            from app.observability.conversation_log import emit
+
+            emit(
+                event_type="bot_text",
+                user_key=ctx.get("user_key"),
+                chat_id=int(chat_id),
+                thread_id=ctx.get("thread_id"),
+                turn_no=1,
+                payload={"chunk_text": text[:1600]},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] bot_text emit best-effort failed: %r", exc)
+
+        # Pending-question state machine (2026-05-20). When this respond text
+        # ends with a question mark we stash the question + the original user
+        # intent in an in-process module dict so the NEXT turn's user-message
+        # builder (react_loop) can splice the user's short affirmative reply
+        # ("어"/"yes") back into the original intent — instead of treating
+        # the short reply as a fragmented fresh query.
+        #
+        # Storage is intentionally NOT on the Session dataclass: the PG-backed
+        # session store re-creates dataclasses on every fetch from columns,
+        # so any new dataclass field that isn't also in the SQL schema would
+        # silently disappear on the next get_or_create. The pending-question
+        # module dict survives across the single turn boundary that matters
+        # and drops cleanly on restart (which is exactly what we want for
+        # ephemeral conversational state). Best-effort — never blocks the send.
+        try:
+            from app.agents.pending_question import clear_pending, set_pending
+
+            stripped = (text or "").strip()
+            is_question = stripped.endswith(("?", "？"))
+            if is_question:
+                # Original user intent for this turn — best signal is
+                # ctx["text_query"] (search_products already overwrites this
+                # with the LLM-translated English query). Falls back to None
+                # when no search ran this turn; react_loop logs "(unknown)".
+                intent = str(ctx.get("text_query") or "").strip() or None
+                set_pending(chat_id, stripped, intent)
+            else:
+                clear_pending(chat_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[tool.respond] pending_question state best-effort failed: %r", exc)
 
     # Source cards INTERNALLY from this turn's last search, rendered via the
     # EXACT V1 card path (send_results._candidate_to_card + adapter.send_card).
@@ -429,9 +456,16 @@ def _build_summary(batch: list[Any], lang: str) -> str:
     """
     n = len(batch)
     if lang == "ko":
-        header = f"✨ 마음에 들 만한 {n}개 추려봤어요"
+        header = f"✨ 마음에 들 만한 {n}개 추려봤어"
     else:
         header = f"✨ Here are {n} picks I think you'll like"
+    # Footer help line (KO/EN) — explains the LIKE buttons' purpose so users
+    # understand the ❤️ taps are a taste signal, not just "card numbering".
+    # The line is rendered AFTER the numbered list (see end of function).
+    if lang == "ko":
+        help_line = "💡 마음에 든 번호의 ❤️ 를 눌러주면 취향에 반영해서 다음 추천을 더 잘 골라줄게!"
+    else:
+        help_line = "💡 Tap the ❤️ next to any pick — it tunes my taste model so the next batch fits you better!"
     lines: list[str] = [header, ""]
     for i, c in enumerate(batch, start=1):
         brand = str(_candidate_field(c, "brand", "")).strip()
@@ -450,11 +484,16 @@ def _build_summary(batch: list[Any], lang: str) -> str:
         if price_str:
             line += f" · {_esc(price_str)}"
         lines.append(line)
+    lines.append("")
+    lines.append(help_line)
     return "\n".join(lines)
 
 
-# Number emoji for the per-item like buttons (1..5).
-_NUM_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+# Per-item LIKE buttons (1..5). Prefixed with ❤️ so the affordance reads as
+# "like this one" rather than "card numbering" (which is what the summary
+# list above already does with plain numbers). Paired with the help line in
+# `_build_summary` that explains taps feed the taste profile.
+_NUM_EMOJI = ["❤️ 1", "❤️ 2", "❤️ 3", "❤️ 4", "❤️ 5"]
 # Telegram callback_data 64-byte budget minus the "card:like:" prefix (10).
 _LIKE_SUFFIX_BUDGET = 53
 
@@ -602,7 +641,7 @@ async def send_hybrid_batch(
     # bind the new trace) from a within-search page (dedupe so paging doesn't
     # double-log the same result set).
     is_fresh_search = offset == 0
-    start = _CARD_BATCH_CURSOR.get(int(chat_id), 0) if offset is None else int(offset)
+    start = (await chat_state.get_cursor(int(chat_id))) if offset is None else int(offset)
     if start < 0:
         start = 0
     # Pre-filter to album-eligible candidates from `start` onward, take ≤5.
@@ -674,7 +713,8 @@ async def send_hybrid_batch(
         # position in `all_candidates` (not by eligible count) so a "더보기"
         # tap neither repeats nor skips items when broken-image candidates are
         # interspersed (P1-2).
-        _CARD_BATCH_CURSOR[int(chat_id)] = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
+        next_cursor = (batch_pos[-1][0] + 1) if batch_pos else start + len(batch)
+        await chat_state.set_cursor(int(chat_id), next_cursor)
         if ctx is not None:
             ctx[_ALBUM_SENT_KEY] = True
         logger.info(

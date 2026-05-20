@@ -152,6 +152,20 @@ class Settings(BaseSettings):
     # 카드당 버튼 상한(skip 포함). 범위 [3, 8].
     CLARIFY_MAX_BUTTONS: int = 5
 
+    # Apify — Instagram post image scraping. Same actor + token as kikoai/app.
+    # Empty token → Instagram links resolve to [] (P2-skip behavior preserved).
+    # Token present → link_resolver._is_instagram branch dispatches to Apify.
+    APIFY_TOKEN: str = ""
+    # Apify actor id and sync timeout. Defaults match kikoai/app.
+    APIFY_INSTAGRAM_ACTOR: str = "apify~instagram-post-scraper"
+    APIFY_SYNC_TIMEOUT_S: int = 120
+    # Httpx wall-clock cap for the whole Apify call (Apify sync timeout + α).
+    APIFY_FETCH_TIMEOUT_S: float = 130.0
+    # 402 (free credit exhausted) circuit-breaker cool-off — once hit, suppress
+    # further Instagram resolution attempts for this many seconds to avoid log
+    # spam and pointless network calls.
+    APIFY_402_COOLOFF_S: int = 600
+
     # DEMO MODE — local-only POC short-circuit for video shoot.
     # When true, search_node bypasses DB/Modal and returns fixture candidates
     # from app.pipeline.demo_fixtures. Restore production by leaving false.
@@ -205,7 +219,16 @@ class Settings(BaseSettings):
     # UNCONDITIONAL. The AGENT_V3_*_ENABLED flags were removed; only the
     # memory-injection payload token cap remains as a tunable.
     # Memory-injection payload token cap (char-approx ×4).
-    AGENT_V3_MEMORY_MAX_TOKENS: int = 1500
+    # Bumped 1500→3000 (2026-05-20) to widen the recent-turn digest so the
+    # ReAct agent has more room to reason about prior search/refine signals
+    # and recent user phrasing without exhausting the budget after 2-3 turns.
+    AGENT_V3_MEMORY_MAX_TOKENS: int = 3000
+
+    # SPEC-CHAT-STATE-REDIS-001 / REQ-CHAT-STATE-004 — single gate for 3환경
+    # (local docker-compose / fakeredis pytest / dev-ai prod DB 1). Default
+    # points at the local docker-compose redis. Prod overrides via env
+    # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
+    REDIS_URL: str = "redis://localhost:6379/1"
 
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:

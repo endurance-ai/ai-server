@@ -150,7 +150,10 @@ async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
 
     await rl.run_react_loop(_state(), _sess())
     sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
-    mem = sys_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
+    # Memory block sits between its own fence and the trailing LANG directive
+    # (REQ-UX-002 appends [LANG=...] as last block — exclude it from the cap check).
+    after_fence = sys_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
+    mem = after_fence.split("\n\n[LANG=", 1)[0]
     assert len(mem) <= 60 * 4 + 64  # block (within fence) bounded by cap*4
     assert "NEWEST_MARKER" in mem  # newest preserved
     assert "old19" * 2 not in mem  # an old turn dropped under the cap

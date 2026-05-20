@@ -30,8 +30,10 @@ class _StubAdapter(MessengerAdapter):
         self._raise()
         return None
 
-    async def send_chat_action(self, chat_id: int, action: str) -> None:
-        self._raise()
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-003 — typing indicator는 fail-open contract.
+    # 미구현 어댑터는 raise 하지 않고 ABC default (False) 로 위임한다.
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
+        return False
 
     async def get_me(self) -> dict:
         return {}

@@ -42,10 +42,12 @@ class _CapturingLLM:
 # tests/test_agent_v3/conftest.py::_v3_isolation (autouse).
 
 
-def test_summarize_payload_caps_user_text_at_200():
-    """The reused payload-truncation policy caps past-turn user_text at 200."""
+def test_summarize_payload_caps_user_text_at_500():
+    """The reused payload-truncation policy caps past-turn user_text at 500
+    (bumped 2026-05-20 from 200 to widen recent-turn context for the ReAct
+    agent; still bounded downstream by AGENT_V3_MEMORY_MAX_TOKENS char cap)."""
     out = _summarize_payload("user_text", {"text": "A" * 5000})
-    assert len(out["text"]) == 200
+    assert len(out["text"]) == 500
 
 
 @pytest.mark.asyncio

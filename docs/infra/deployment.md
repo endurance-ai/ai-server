@@ -22,11 +22,12 @@ merge → deploy-dev.yml             EC2 t4g.medium (ap-northeast-2)         (T4
 | 컨테이너 | 역할 | 포트 | 메모리 |
 |---------|------|------|-------|
 | `ai-server` | FastAPI (이 프로젝트) | 8000 | 512M |
+| `redis` | chat-state (cursor + impression dedupe) — `redis:7-alpine`, DB 1 (SPEC-CHAT-STATE-REDIS-001) | (내부) | ~50M |
 | `litellm` | LiteLLM proxy | 4000 | 1024M |
 | `litellm-db` | LiteLLM 메타 (Postgres) | (내부) | 256M |
 | `langfuse-web` | Langfuse UI/API | 3000 | 512M |
 | `langfuse-db` | Langfuse 데이터 (Postgres) | (내부) | 512M |
-| **합계** | | | **~2.8GB** (4GB 캡 내) |
+| **합계** | | | **~2.85GB** (4GB 캡 내) |
 
 > AI 서버 자체는 stateless. 영속 데이터는 Supabase + Langfuse Postgres 만.
 

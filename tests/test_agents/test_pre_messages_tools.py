@@ -1,0 +1,241 @@
+"""SPEC-AGENT-UX-P0-001 v0.2.0 / REQ-UX-004 — tool dispatch pre-message firing.
+
+검증:
+- search_products / refine_search dispatch 진입부 → PRE_MESSAGES["search"][lang]
+  1회 발사. 같은 ctx 안에서 두 dispatch 가 연속 호출돼도 같은 key 라 idempotent.
+- analyze_image dispatch → PRE_MESSAGES["analyze_image"][lang] 1회.
+- KO/EN 둘 다 ctx["lang"] 따라 분기.
+- send_text 가 raise 해도 본 작업 (search / vision) 은 그대로 실행.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+
+from app.channels.adapter import MessengerAdapter
+from app.channels.pre_messages import PRE_MESSAGES, _reset_node_markers_for_tests
+from app.channels.schemas import BotCard, ChannelMessage
+
+
+class _SpyAdapter(MessengerAdapter):
+    def __init__(self) -> None:
+        self.texts: list[tuple[int, str]] = []
+
+    async def parse_inbound(self, payload: dict) -> ChannelMessage:  # pragma: no cover
+        raise NotImplementedError
+
+    async def send_text(self, chat_id: int, text: str) -> None:
+        self.texts.append((chat_id, text))
+
+    async def send_card(self, chat_id: int, card: BotCard) -> int | None:  # pragma: no cover
+        return None
+
+
+class _RaisingTextAdapter(MessengerAdapter):
+    def __init__(self) -> None:
+        self.send_text_called = 0
+
+    async def parse_inbound(self, payload: dict) -> ChannelMessage:  # pragma: no cover
+        raise NotImplementedError
+
+    async def send_text(self, chat_id: int, text: str) -> None:
+        self.send_text_called += 1
+        raise RuntimeError("simulated send failure")
+
+    async def send_card(self, chat_id: int, card: BotCard) -> int | None:  # pragma: no cover
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _reset_markers() -> None:
+    _reset_node_markers_for_tests()
+
+
+def _bind_adapter(monkeypatch: pytest.MonkeyPatch, adapter: MessengerAdapter) -> None:
+    from app.graphs.nodes import _adapter_ctx
+
+    _adapter_ctx.set_adapter(adapter)
+
+
+def _make_ctx(lang: str = "ko", chat_id: int = 42, image_url: str | None = None) -> dict[str, Any]:
+    return {
+        "chat_id": chat_id,
+        "from_user_id": 99,
+        "user_key": "u:test",
+        "image_url": image_url,
+        "thread_id": "test-thread",
+        "lang": lang,
+        "text_query": "leather loafers",
+        "style_node_primary": None,
+        "vision_category": None,
+    }
+
+
+# ── search_products / refine_search fire "search" pre-message ─────────────
+
+
+@pytest.mark.asyncio
+async def test_search_products_dispatch_fires_search_message_ko(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    # search_step / diversify 경로 우회 — run_text_only_search 스텁.
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.run_text_only_search",
+        AsyncMock(return_value=[]),
+    )
+
+    from app.agents.tools.search_products import dispatch
+
+    ctx = _make_ctx(lang="ko")
+    await dispatch({"text_query": "leather loafers"}, ctx)
+    assert spy.texts == [(42, PRE_MESSAGES["search"]["ko"])]
+    assert ctx["_pre_msg_sent:search"] is True
+
+
+@pytest.mark.asyncio
+async def test_search_products_dispatch_fires_search_message_en(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.run_text_only_search",
+        AsyncMock(return_value=[]),
+    )
+
+    from app.agents.tools.search_products import dispatch
+
+    await dispatch({"text_query": "loafers"}, _make_ctx(lang="en"))
+    assert spy.texts == [(42, PRE_MESSAGES["search"]["en"])]
+
+
+@pytest.mark.asyncio
+async def test_refine_search_dispatch_fires_same_search_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    monkeypatch.setattr(
+        "app.agents.tools.refine_search.run_text_only_search",
+        AsyncMock(return_value=[]),
+    )
+
+    from app.agents.tools.refine_search import dispatch as refine_dispatch
+
+    await refine_dispatch({"action": "broaden"}, _make_ctx(lang="ko"))
+    assert spy.texts == [(42, PRE_MESSAGES["search"]["ko"])]
+
+
+@pytest.mark.asyncio
+async def test_search_and_refine_share_marker_within_same_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """search_products → refine_search 연속 호출 시 같은 "search" 멘트는 1회만."""
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.run_text_only_search",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "app.agents.tools.refine_search.run_text_only_search",
+        AsyncMock(return_value=[]),
+    )
+
+    from app.agents.tools.refine_search import dispatch as refine_dispatch
+    from app.agents.tools.search_products import dispatch as search_dispatch
+
+    ctx = _make_ctx(lang="ko")
+    await search_dispatch({"text_query": "loafers"}, ctx)
+    await refine_dispatch({"action": "broaden"}, ctx)
+    # 두 dispatch 모두 같은 "search" 키 → marker 차단으로 send_text 1번만.
+    assert len(spy.texts) == 1
+
+
+# ── analyze_image fires its own pre-message ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_dispatch_fires_analyze_image_message_en(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    # vision_extract 우회.
+    fake_result = type("V", (), {"styleNode": None, "mood": [], "palette": [], "items": []})()
+    monkeypatch.setattr(
+        "app.channels.vision.extract",
+        AsyncMock(return_value=fake_result),
+    )
+
+    from app.agents.tools.analyze_image import dispatch as analyze_dispatch
+
+    await analyze_dispatch(
+        {},
+        _make_ctx(lang="en", image_url="https://cdn.example.com/x.jpg"),
+    )
+    assert spy.texts == [(42, PRE_MESSAGES["analyze_image"]["en"])]
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_dispatch_ko_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+    fake_result = type("V", (), {"styleNode": None, "mood": [], "palette": [], "items": []})()
+    monkeypatch.setattr(
+        "app.channels.vision.extract",
+        AsyncMock(return_value=fake_result),
+    )
+
+    from app.agents.tools.analyze_image import dispatch as analyze_dispatch
+
+    await analyze_dispatch(
+        {},
+        _make_ctx(lang="ko", image_url="https://cdn.example.com/x.jpg"),
+    )
+    assert spy.texts == [(42, PRE_MESSAGES["analyze_image"]["ko"])]
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_skips_pre_message_when_missing_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    """missing image → early-return 으로 pre-message 도 건너뛴다."""
+    spy = _SpyAdapter()
+    _bind_adapter(monkeypatch, spy)
+
+    from app.agents.tools.analyze_image import dispatch as analyze_dispatch
+
+    result = await analyze_dispatch({}, _make_ctx(image_url=None))
+    assert result["ok"] is False
+    assert spy.texts == []
+
+
+# ── Fail-open: send_text raise → tool body still runs ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_dispatch_send_text_failure_does_not_block_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    raising = _RaisingTextAdapter()
+    _bind_adapter(monkeypatch, raising)
+    search_stub = AsyncMock(return_value=[])
+    monkeypatch.setattr("app.agents.tools.search_products.run_text_only_search", search_stub)
+
+    from app.agents.tools.search_products import dispatch
+
+    result = await dispatch({"text_query": "loafers"}, _make_ctx(lang="ko"))
+    assert raising.send_text_called == 1
+    assert search_stub.await_count == 1  # 본 검색 그대로 실행
+    assert result["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_analyze_image_send_text_failure_does_not_block_vision(monkeypatch: pytest.MonkeyPatch) -> None:
+    raising = _RaisingTextAdapter()
+    _bind_adapter(monkeypatch, raising)
+    fake_result = type("V", (), {"styleNode": None, "mood": [], "palette": [], "items": []})()
+    vision_stub = AsyncMock(return_value=fake_result)
+    monkeypatch.setattr("app.channels.vision.extract", vision_stub)
+
+    from app.agents.tools.analyze_image import dispatch as analyze_dispatch
+
+    result = await analyze_dispatch(
+        {},
+        _make_ctx(lang="ko", image_url="https://cdn.example.com/x.jpg"),
+    )
+    assert raising.send_text_called == 1
+    assert vision_stub.await_count == 1
+    assert result["ok"] is True

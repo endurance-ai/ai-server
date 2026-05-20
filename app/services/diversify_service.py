@@ -44,11 +44,20 @@ async def diversify_service(state: PipelineState) -> PipelineState:
 
     seen_brand: dict[str, int] = {}
     seen_platform: dict[str, int] = {}
+    # @MX:NOTE: [AUTO] SPEC-AGENT-UX-P0-001 REQ-UX-001 — product_id 레벨 dedup.
+    # v6 RPC distance-tie 또는 refine cumulative merge 에서 동일 id 가 두 번
+    # 들어와도 사용자에게 한 번만 노출. falsy id 는 bypass (graceful fallback).
+    seen_ids: set[str] = set()
     out: list[dict] = []
     drops_brand = 0
     drops_platform = 0
+    drops_dup = 0
 
     for c in state.raw_candidates:
+        pid = c.get("id")
+        if pid and pid in seen_ids:
+            drops_dup += 1
+            continue
         brand = (c.get("brand") or "").lower()
         platform = (c.get("platform") or "").lower()
         if seen_brand.get(brand, 0) >= brand_cap:
@@ -58,6 +67,8 @@ async def diversify_service(state: PipelineState) -> PipelineState:
             drops_platform += 1
             continue
         out.append(c)
+        if pid:
+            seen_ids.add(pid)
         seen_brand[brand] = seen_brand.get(brand, 0) + 1
         seen_platform[platform] = seen_platform.get(platform, 0) + 1
         if len(out) >= target:
@@ -67,10 +78,11 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     brand_dist = sorted(seen_brand.items(), key=lambda x: -x[1])[:5]
     platform_dist = sorted(seen_platform.items(), key=lambda x: -x[1])[:5]
     logger.info(
-        "[STEP 4.8][diversify] 끝 — out=%d drops_brand=%d drops_platform=%d",
+        "[STEP 4.8][diversify] 끝 — out=%d drops_brand=%d drops_platform=%d drops_dup=%d",
         len(out),
         drops_brand,
         drops_platform,
+        drops_dup,
     )
     logger.info("[STEP 4.8][diversify] brand_top5=%s", brand_dist)
     logger.info("[STEP 4.8][diversify] platform_top5=%s", platform_dist)

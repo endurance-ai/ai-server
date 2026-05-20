@@ -57,12 +57,18 @@ def _session_with_results(n: int, *, lang: str = "en") -> Session:
 
 
 @pytest.fixture(autouse=True)
-def _reset_pager():
-    from app.agents.tools.respond import reset_card_batch_cursor_for_tests
+def _reset_pager(monkeypatch):
+    """SPEC-CHAT-STATE-REDIS-001 — bind chat_state._pool to a fresh fakeredis
+    per test so cursor + impression-dedupe state is isolated. Replaces the
+    pre-SPEC `reset_card_batch_cursor_for_tests` module-global wipe."""
+    import fakeredis.aioredis
 
-    reset_card_batch_cursor_for_tests()
+    from app.infrastructure.cache import chat_state
+
+    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(chat_state, "_pool", client)
     yield
-    reset_card_batch_cursor_for_tests()
+    monkeypatch.setattr(chat_state, "_pool", None)
 
 
 def _adapter(group_ok: bool = True) -> MagicMock:
@@ -199,7 +205,7 @@ async def test_respond_hybrid_summary_ko(monkeypatch):
 
         assert res["cards_sent"] == 5
         (_, summary, keyboard), kwargs = adapter.send_text_with_keyboard.await_args
-        assert "추려봤어요" in summary
+        assert "추려봤어" in summary
         assert summary.splitlines()[2].startswith("1.")  # numbered "1." format
         assert kwargs.get("parse_mode") == "HTML"
         assert "더보기" in keyboard[-1][0][0]
@@ -514,9 +520,13 @@ async def test_new_search_relogs_product_shown_in_previous_search(monkeypatch):
         # include p0, p1, p2 again. A real new search resets the pager cursor;
         # the dedupe set MUST also be cleared (by is_fresh_search) so p0..p2
         # re-log against the NEW trace.
-        from app.agents.tools.respond import _CARD_BATCH_CURSOR
+        from app.infrastructure.cache import chat_state as _cs
 
-        _CARD_BATCH_CURSOR.pop(42, None)
+        # Mirror the prior `_CARD_BATCH_CURSOR.pop(42, None)`: ensure the
+        # pager cursor is back at 0 before the second NEW search begins.
+        # Dedupe-set clearing is now driven by `is_fresh_search=True` inside
+        # `_log_delivered_impressions` itself (SPEC-CHAT-STATE-REDIS-001).
+        await _cs.set_cursor(42, 0)
         set_store(_FakeStore(_session_with_results(3)))
         await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
 

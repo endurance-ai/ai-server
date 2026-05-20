@@ -133,6 +133,60 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
         return 0
 
 
+def apply_price_filter(
+    cands: list[Any],
+    min_price: float | None,
+    max_price: float | None,
+) -> list[Any]:
+    """Client-side price bound filter (SPEC-SEARCH-V6-001 + 2026-05-20 user
+    requirement).
+
+    pgvector + HNSW does not push-down range predicates cleanly — the
+    canonical pattern is "fetch wider, filter in app" so vector recall stays
+    intact. The RPC therefore stays price-agnostic and we trim here.
+
+    Policy:
+      - When neither bound is set, returns `cands` unchanged.
+      - When at least one bound is set, candidates without a usable numeric
+        `price` field are DROPPED (treat absent price as out-of-bounds — the
+        user's price constraint is explicit, so silently keeping un-priced
+        rows would violate intent).
+      - Bounds are inclusive. KRW assumed throughout the repo (Candidate
+        prices, summary formatting, and LLM-supplied args all denominate in
+        KRW integer 원).
+    """
+    if min_price is None and max_price is None:
+        return cands
+    lo = float(min_price) if min_price is not None else None
+    hi = float(max_price) if max_price is not None else None
+    kept: list[Any] = []
+    for c in cands:
+        raw = getattr(c, "price", None)
+        if raw is None and isinstance(c, dict):
+            raw = c.get("price")
+        try:
+            p = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            p = None
+        if p is None:
+            continue
+        if lo is not None and p < lo:
+            continue
+        if hi is not None and p > hi:
+            continue
+        kept.append(c)
+    dropped = len(cands) - len(kept)
+    if dropped > 0:
+        logger.info(
+            "💰 [price_filter] kept=%d dropped=%d min=%s max=%s",
+            len(kept),
+            dropped,
+            min_price,
+            max_price,
+        )
+    return kept
+
+
 def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     """SPEC-AGENT-V3-REACT Gap4 — flag-gated cross-thread dislike discount.
 
@@ -269,9 +323,22 @@ async def run_text_only_search(
     # Modal. Caught by the caller's dispatch try/except → ok=False.
     if not text_query.strip():
         raise ValueError("run_text_only_search requires a non-empty text_query")
+    logger.info(
+        "🔍 [text_search] embed text_query=%r category=%r fit=%r color_family=%r top_k=%d",
+        text_query[:120],
+        category,
+        fit,
+        color_family,
+        max(1, int(top_k)),
+    )
     state.embedding = await EmbedProvider.embed_text(text_query)
     state = await search_step(state)
     state = await diversify_step(state)
+    logger.info(
+        "🔍 [text_search] done text_query=%r → final=%d",
+        text_query[:120],
+        len(state.final_candidates or []),
+    )
     return list(state.final_candidates or [])
 
 
@@ -311,6 +378,25 @@ async def run_image_search(
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsResult:
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — 사전 안내 멘트 ("잠시만요, …찾아볼게요").
+    # 본 검색 (Modal embed / DB RPC) 직전, REQ-UX-003 typing 보다 먼저 1회.
+    # react_loop._fire_typing 은 dispatch 이후가 아닌 직전에 호출되므로 ordering
+    # 보장을 위해 이 await 가 typing 보다 먼저 일어나도록 react_loop 가 helper
+    # 분기를 통해 호출 — 여기서는 dispatch 진입 첫 줄로 await 한다.
+    try:
+        from app.channels.pre_messages import fire_pre_message
+        from app.graphs.nodes._adapter_ctx import _adapter_var
+
+        await fire_pre_message(
+            _adapter_var.get(),
+            ctx,
+            key="search",
+            lang=ctx.get("lang") or "en",
+            chat_id=ctx.get("chat_id"),
+        )
+    except Exception:  # noqa: BLE001 — never block search pipeline
+        logger.debug("[tool.search_products] pre-message skipped")
+
     text_query = (args.get("text_query") or "").strip()
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)
@@ -319,6 +405,15 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # query nor a usable image is unanswerable.
     if not text_query and not has_image:
         return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
+
+    # Persist the LLM-supplied (typically English-translated) text_query into
+    # ctx so a subsequent `refine_search` in the same turn / loop reuses the
+    # translated form instead of the raw Korean user message that was seeded
+    # by react_loop._build_ctx. Without this, refine_search rebuilds its
+    # query as `<original Korean> <boost_keywords>` and the embedding picks
+    # up a mixed-language string with degraded recall (live trace 2026-05-20).
+    if text_query:
+        ctx["text_query"] = text_query
 
     top_k = int(args.get("top_k") or 15)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
@@ -366,6 +461,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting
     # (flag-gated; OFF → cands unchanged → V2 byte-identical).
     cands = apply_dislike_discount(ctx, cands)
+
+    # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
+    # ranking + dislike discount so cosine ordering is preserved.
+    cands = apply_price_filter(cands, args.get("min_price"), args.get("max_price"))
 
     # Persist FULL candidates for the turn so `respond` can render real cards
     # internally (the LLM never hand-serializes cards). LLM context still gets

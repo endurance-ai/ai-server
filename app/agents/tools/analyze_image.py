@@ -126,6 +126,22 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AnalyzeImageRes
     if not image_url:
         return AnalyzeImageResult(ok=False, error="missing_image_url")
 
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — 사전 안내 멘트 ("이미지 들여다볼게요").
+    # Vision LLM 호출 직전, fail-open.
+    try:
+        from app.channels.pre_messages import fire_pre_message
+        from app.graphs.nodes._adapter_ctx import _adapter_var
+
+        await fire_pre_message(
+            _adapter_var.get(),
+            ctx,
+            key="analyze_image",
+            lang=ctx.get("lang") or "en",
+            chat_id=ctx.get("chat_id"),
+        )
+    except Exception:  # noqa: BLE001 — never block analyze pipeline
+        logger.debug("[tool.analyze_image] pre-message skipped")
+
     ssrf_ok, ssrf_err = _ssrf_ok(image_url)
     if not ssrf_ok:
         return AnalyzeImageResult(ok=False, error=f"ssrf_blocked:{ssrf_err}")

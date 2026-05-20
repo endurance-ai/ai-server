@@ -93,20 +93,17 @@ def test_ssrf_canonicalization_public_ip_not_blocked(empty_allowlist):
 # ── P1-5: validate_args value-type enforcement ─────────────────────────────
 
 
+# NOTE (2026-05-20): search_products.top_k REMOVED from LLM schema — int-only
+# validation tests now use get_recent_history.n (the surviving int field).
+# Coercion logic is identical (both go through the `("top_k", "n")` loop).
 @pytest.mark.parametrize(
     "tool,args",
     [
-        ("search_products", {"text_query": "x", "top_k": {"nested": 1}}),
-        ("get_recent_history", {"n": "abc"}),
-        ("search_products", {"text_query": "x", "min_price": "10"}),
+        # Genuinely unconvertible: dict for int field, list for number field, etc.
+        ("get_recent_history", {"n": {"nested": 1}}),
+        ("get_recent_history", {"n": "abc"}),  # non-digit str
         ("search_products", {"text_query": "x", "max_price": [1]}),
-        ("search_products", {"text_query": "x", "top_k": True}),  # bool != int
-        ("update_taste", {"brand_likes": "nike"}),
-        ("update_taste", {"brand_dislikes": "adidas"}),
-        ("update_taste", {"keyword_likes": "minimal"}),
-        ("update_taste", {"keyword_dislikes": "loud"}),
-        ("get_recent_history", {"event_types": "user_text"}),
-        ("ask_user_clarification", {"options": "a"}),
+        ("get_recent_history", {"n": True}),  # bool != int (ambiguous intent)
     ],
 )
 def test_validate_args_rejects_wrong_value_type(tool, args):
@@ -116,5 +113,70 @@ def test_validate_args_rejects_wrong_value_type(tool, args):
 
 
 def test_validate_args_accepts_correct_value_types():
-    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 15, "min_price": 0})
+    ok, err = validate_args("search_products", {"text_query": "x", "min_price": 0})
     assert ok is True, err
+    ok, err = validate_args("get_recent_history", {"n": 15})
+    assert ok is True, err
+
+
+# ── AUTO-CAST (2026-05-20): safe coercions when LLM sends type-mismatched JSON ─
+@pytest.mark.parametrize(
+    "tool,args,expected",
+    [
+        # int fields: str of digits → int
+        ("get_recent_history", {"n": "20"}, {"n": 20}),
+        # int fields: integer-valued float → int
+        ("get_recent_history", {"n": 20.0}, {"n": 20}),
+        # number fields: str → float
+        ("search_products", {"text_query": "x", "min_price": "10"}, {"min_price": 10.0}),
+        ("search_products", {"text_query": "x", "max_price": "59.99"}, {"max_price": 59.99}),
+        # list fields: lone non-empty str → [str] (NEVER list(str) per anti-explosion guard)
+        ("update_taste", {"brand_likes": "nike"}, {"brand_likes": ["nike"]}),
+        ("update_taste", {"brand_dislikes": "adidas"}, {"brand_dislikes": ["adidas"]}),
+        ("update_taste", {"keyword_likes": "minimal"}, {"keyword_likes": ["minimal"]}),
+        ("update_taste", {"keyword_dislikes": "loud"}, {"keyword_dislikes": ["loud"]}),
+        ("get_recent_history", {"event_types": "user_text"}, {"event_types": ["user_text"]}),
+        ("ask_user_clarification", {"axis": "fit", "options": "a"}, {"options": ["a"]}),
+        # list fields: empty str → [] (drops the field as no-op)
+        ("update_taste", {"brand_likes": ""}, {"brand_likes": []}),
+    ],
+)
+def test_validate_args_auto_casts_safe_mismatches(tool, args, expected):
+    """LLM (Haiku 4.5) occasionally sends `n="20"` / `boost_keywords="tee"`
+    instead of int / list. Strict rejection burned ReAct iters. Auto-cast keeps
+    the loop on the happy path. Critical: never `list(str)` — must wrap as [str]
+    to avoid `["t","-","s","h","i","r","t"]` per-char explosion."""
+    ok, err = validate_args(tool, args)
+    assert ok is True, f"{tool} {args} should auto-cast (err={err})"
+    for key, want in expected.items():
+        assert args[key] == want, f"{tool}.{key}: expected {want!r}, got {args[key]!r}"
+
+
+@pytest.mark.parametrize(
+    "tool,args",
+    [
+        # Anti-explosion guard: list field must reject non-str/non-list (dict, int, ...)
+        ("update_taste", {"brand_likes": {"x": 1}}),
+        ("update_taste", {"brand_likes": 42}),
+        # int field: str that isn't digit-only
+        ("get_recent_history", {"n": "fifteen"}),
+        # int field: float with fractional part (not safely castable to int)
+        ("get_recent_history", {"n": 15.7}),
+        # number field: garbage str
+        ("search_products", {"text_query": "x", "min_price": "abc"}),
+    ],
+)
+def test_validate_args_auto_cast_still_rejects_unconvertible(tool, args):
+    ok, err = validate_args(tool, args)
+    assert ok is False, f"{tool} {args} should reject (unconvertible)"
+    assert "bad_type" in err
+
+
+def test_search_products_top_k_now_unknown_key():
+    """top_k removed from LLM-facing schema (2026-05-20). If LLM somehow still
+    sends it, validate_args rejects as unknown_keys (not bad_type). dispatch
+    default (15) is the only correct value going forward."""
+    ok, err = validate_args("search_products", {"text_query": "x", "top_k": 15})
+    assert ok is False
+    assert "unknown_keys" in err
+    assert "top_k" in err

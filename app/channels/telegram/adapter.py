@@ -215,8 +215,31 @@ class TelegramAdapter(MessengerAdapter):
         )
         return ok
 
-    async def send_chat_action(self, chat_id: int, action: str) -> None:
-        await self._post("sendChatAction", {"chat_id": chat_id, "action": action})
+    # SPEC-AGENT-UX-P0-001 / REQ-UX-003 — typing indicator.
+    # Fail-open: 모든 예외 swallow, DEBUG 로그만, bool 반환. 실패가 봇 응답을
+    # 지연시키거나 막아서는 안 됨 (인디케이터는 best-effort 신호).
+    async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
+        client = self._get_client()
+        url = self._bot_url("sendChatAction")
+        payload = {"chat_id": chat_id, "action": action}
+        try:
+            resp = await client.post(url, json=payload, timeout=2.0)
+        except Exception as exc:  # noqa: BLE001 — fail-open
+            logger.debug("sendChatAction failed: %r", exc)
+            return False
+        if resp.status_code != 200:
+            logger.debug(
+                "sendChatAction non-200: status=%d body=%s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            return False
+        try:
+            body = resp.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("sendChatAction json decode failed: %r", exc)
+            return False
+        return bool(body.get("ok"))
 
     async def send_text_with_buttons(
         self,

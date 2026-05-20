@@ -48,6 +48,31 @@ def _emit_intent_routed(state: WorkingState) -> None:
         logger.debug("[ingest] intent_routed emit best-effort")
 
 
+async def _send_callback_toast(state: WorkingState, sess, *, text: str | None) -> None:
+    """Pop a tiny toast above the chat in response to an inline-button tap.
+
+    Without this the user only sees Telegram's faint button-press flash and
+    assumes the button is broken. Lang-aware default copy when `text` is None.
+    Best-effort: any failure is swallowed (we never block the webhook on UX).
+    """
+    cb_id = getattr(state.message, "callback_query_id", None) if state.message else None
+    if not cb_id:
+        return
+    try:
+        from app.channels.lang import session_lang
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+        if adapter is None or not hasattr(adapter, "answer_callback_query"):
+            return
+        if text is None:
+            lang = session_lang(sess)
+            text = "❤️ 취향에 반영했어!" if lang == "ko" else "❤️ Got it — tuning your taste!"
+        await adapter.answer_callback_query(cb_id, text=text)
+    except Exception as exc:  # noqa: BLE001 — UX-only, must never raise
+        logger.debug("[ingest] answer_callback_query best-effort failed: %r", exc)
+
+
 async def _handle_card_like(state: WorkingState, sess, cb_data: str, breadcrumbs: list[str]) -> None:
     """`card:like:{product_id_or_idx}` → positive taste signal.
 
@@ -75,13 +100,24 @@ async def _handle_card_like(state: WorkingState, sess, cb_data: str, breadcrumbs
             target = last_results[idx]
     if target is None:
         breadcrumbs.append("ingest: card:like unresolved")
+        logger.info("❤️  [card:like] unresolved suffix=%r last_results=%d", suffix, len(last_results))
+        await _send_callback_toast(state, sess, text=None)
         return
 
     product_id = str(_attr(target, "id", "") or "")
     brand = _brand_of(target)
     keywords = _keywords_for_product(target)
+    logger.info(
+        "❤️  [card:like] resolved product_id=%s brand=%r keywords=%s",
+        product_id,
+        brand,
+        keywords[:5] if keywords else [],
+    )
     await record_click(state.chat_id, sess.from_user_id, product_id, brand, keywords)
     breadcrumbs.append("ingest: card:like → record_click")
+    logger.info("❤️  [card:like] record_click ok product_id=%s", product_id)
+    # User-visible toast — without this the button looks dead.
+    await _send_callback_toast(state, sess, text=None)
 
     try:
         position: int | None = None
@@ -128,7 +164,7 @@ async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) 
         except Exception:  # noqa: BLE001
             lang = "en"
         msg = (
-            "이게 마지막이에요 🐱 다른 스타일로 찾아볼까요? 원하는 걸 알려주세요!"
+            "이게 마지막이야 🐱 다른 스타일로 찾아볼까? 원하는 거 알려줘!"
             if lang == "ko"
             else "That's the last of them 🐱 Want me to look for a different style? Just tell me!"
         )

@@ -28,6 +28,45 @@ LANG_KO = "ko"
 LANG_EN = "en"
 
 
+# Explicit language-switch triggers. Beats the Hangul-detection default so a
+# Korean sentence asking for English ("영어로 말해줘") flips the sticky lang to
+# EN instead of staying KO just because the request contains Hangul. Patterns
+# are intentionally narrow — only direct switch requests, not casual mentions
+# ("영어 노래 추천" must NOT switch). Matched case-insensitively on the
+# lowercased stripped text.
+_LANG_SWITCH_EN_RE = re.compile(
+    r"(?:영어로|영문으로|english로|영어\s*로|switch\s+to\s+english|"
+    r"in\s+english|reply\s+in\s+english|answer\s+in\s+english|speak\s+english|"
+    r"english\s+please)",
+    re.IGNORECASE,
+)
+_LANG_SWITCH_KO_RE = re.compile(
+    r"(?:한국어로|한글로|한국말로|국문으로|switch\s+to\s+korean|"
+    r"in\s+korean|reply\s+in\s+korean|answer\s+in\s+korean|speak\s+korean|"
+    r"korean\s+please)",
+    re.IGNORECASE,
+)
+
+
+def detect_explicit_switch(text: str | None) -> str | None:
+    """Return 'en'/'ko' if the text contains an explicit language-switch
+    request, else None. Used as a sticky-lang override before Hangul detection.
+    """
+    if not text:
+        return None
+    s = text.strip().lower()
+    if not s:
+        return None
+    # KO check first — Korean trigger phrases often coexist with the word
+    # "english" inside them (e.g. "english로 답해줘"), so the more specific
+    # English-switch regex wins by being checked first when both match.
+    if _LANG_SWITCH_EN_RE.search(s):
+        return LANG_EN
+    if _LANG_SWITCH_KO_RE.search(s):
+        return LANG_KO
+    return None
+
+
 def detect_lang(text: str | None) -> str:
     """Return 'ko' if any Hangul syllable is present, else 'en'.
 
@@ -60,6 +99,16 @@ def remember_lang(sess: Any, text: str | None) -> str:
     # Commands never carry a language signal — preserve sticky.
     if stripped.startswith("/"):
         return prior
+    # Explicit language-switch request wins over Hangul-based detection. The
+    # canonical case: a Korean user typing "영어로 말해줘" — the sentence is
+    # Hangul-positive (would detect as KO) but the INTENT is to flip to EN.
+    explicit = detect_explicit_switch(stripped)
+    if explicit is not None:
+        try:
+            setattr(sess, "lang", explicit)
+        except Exception:  # noqa: BLE001
+            pass
+        return explicit
     # Short text without Hangul → preserve sticky (avoid "ok"/"hi"/"음" 등으로 영구 전환).
     if len(stripped) < 3 and not _HANGUL_RE.search(stripped):
         return prior

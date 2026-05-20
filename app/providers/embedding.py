@@ -1,8 +1,12 @@
+import logging
 from typing import ClassVar
 
 import httpx
 
 from app.core.config import settings
+from app.providers import embedding_cache
+
+logger = logging.getLogger(__name__)
 
 
 class EmbedProvider:
@@ -54,8 +58,16 @@ class EmbedProvider:
         Modal /embed/text 엔드포인트는 동일한 FashionSigLIP L2 공간을 노출하므로
         이미지 임베딩과 cross-modal cosine 비교가 유효하다 (v6 embedding-first).
         Modal 측 응답 스키마: {"embedding": [float, ...], "dim": 768}
-        (embed_image_url 과 동일한 검증/에러 스타일 + 동일 auth header path).
+
+        PG 캐시 (ai.embedding_cache_text) 우선 조회 — hit 시 Modal 호출 스킵.
+        모델이 deterministic 이므로 동일 (model_ver, normalize_ver, text) → 동일
+        벡터 보장. 캐시 lookup/put 실패는 fail-open (Modal 본 경로로 계속).
         """
+        cached = await embedding_cache.get_cached(text)
+        if cached is not None:
+            logger.info("🗃️  [embed_cache] hit text='%s' dim=%d", text[:60], len(cached))
+            return cached
+
         client = cls.get_client()
         resp = await client.post("/embed/text", json={"text": text})
         resp.raise_for_status()
@@ -63,6 +75,8 @@ class EmbedProvider:
         embedding = data.get("embedding")
         if not isinstance(embedding, list) or not embedding:
             raise ValueError(f"Modal /embed/text unexpected response keys={list(data.keys())}")
+        logger.info("🗃️  [embed_cache] miss → put text='%s' dim=%d", text[:60], len(embedding))
+        await embedding_cache.put_cached(text, embedding)
         return embedding
 
     @classmethod
