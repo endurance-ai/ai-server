@@ -404,16 +404,46 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
     # `float | None` (SearchProductsArgs/RefineSearchArgs) — the LLM
     # legitimately sends e.g. 59.99, so accept int OR float there.
     # bool is a subclass of int — reject it explicitly in both groups.
+    #
+    # AUTO-CAST (2026-05-20): Haiku 4.5 occasionally sends type-mismatched JSON
+    # (`top_k="15"`, `boost_keywords="t-shirt"`, `min_price="50000"`). Strict
+    # rejection burns a ReAct iter per occurrence — turns saw 3 consecutive
+    # bad_args eating half the iter budget before search even started. Safe
+    # coercions are done in-place; only genuinely unconvertible values reject.
+    #
+    # CRITICAL: never `list(v)` a string — `list("t-shirt")` explodes to
+    # `["t","-","s","h","i","r","t"]` which contaminates the embedded query
+    # (the bug the previous strict check was avoiding). Use `[v]` to wrap.
     for key in ("top_k", "n"):
         if key in args:
             v = args[key]
-            if not isinstance(v, int) or isinstance(v, bool):
+            if isinstance(v, bool):
                 return False, f"bad_type: {key} must be int"
+            if isinstance(v, int):
+                continue
+            if isinstance(v, float) and v.is_integer():
+                args[key] = int(v)
+                continue
+            if isinstance(v, str):
+                stripped = v.strip()
+                if stripped.lstrip("-").isdigit():
+                    args[key] = int(stripped)
+                    continue
+            return False, f"bad_type: {key} must be int"
     for key in ("min_price", "max_price"):
         if key in args:
             v = args[key]
-            if not isinstance(v, (int, float)) or isinstance(v, bool):
+            if isinstance(v, bool):
                 return False, f"bad_type: {key} must be number"
+            if isinstance(v, (int, float)):
+                continue
+            if isinstance(v, str):
+                try:
+                    args[key] = float(v.strip())
+                    continue
+                except (ValueError, AttributeError):
+                    pass
+            return False, f"bad_type: {key} must be number"
     for key in (
         "brand_likes",
         "brand_dislikes",
@@ -423,13 +453,22 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
         "options",
         # 2026-05-20: refine_search list fields. Without strict check, an LLM
         # passing a string ("t-shirt") flows through `list(...)` in dispatch
-        # and explodes into per-character tokens (["t","-","s","h","i","r","t"])
-        # which then contaminate the embedded query. Reject early so the LLM
-        # retries with the correct shape.
+        # and explodes into per-character tokens (["t","-","s","h","i","r","t"]).
+        # Auto-cast (2026-05-20): wrap single str in `[v]` so a lone keyword
+        # passes safely; reject anything else (dict, int, etc.).
         "boost_keywords",
         "exclude_keywords",
     ):
-        if key in args and not isinstance(args[key], list):
+        if key in args:
+            v = args[key]
+            if isinstance(v, list):
+                continue
+            if isinstance(v, str):
+                # Lone non-empty string → 1-element list. Empty string drops the
+                # field entirely (LLM occasionally sends "" as a no-op).
+                stripped = v.strip()
+                args[key] = [stripped] if stripped else []
+                continue
             return False, f"bad_type: {key} must be list"
 
     return True, None

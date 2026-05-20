@@ -48,20 +48,25 @@ def test_defensive_cast_unknown_type_returns_empty():
     assert _as_keyword_list_for_test({"k": "v"}) == []
 
 
-# ─── B: validate_args strict rejection ────────────────────────────────────
+# ─── B: validate_args auto-cast (2026-05-20 update) ───────────────────────
+# Previously: strict reject. Now: auto-wrap str in [str] (NEVER list(str) per
+# anti-explosion guard — would yield ["t","-","s","h","i","r","t"]). The B
+# defense complements A (refine_search dispatch defensive cast) — validation
+# upgrades the args dict in-place so downstream code receives a clean list.
 
 
-def test_validate_rejects_string_boost_keywords_for_refine_search():
-    ok, err = validate_args("refine_search", {"boost_keywords": "t-shirt"})
-    assert ok is False
-    assert "boost_keywords" in (err or "")
-    assert "must be list" in (err or "")
+def test_validate_auto_casts_string_boost_keywords_for_refine_search():
+    args = {"boost_keywords": "t-shirt"}
+    ok, err = validate_args("refine_search", args)
+    assert ok is True, err
+    assert args["boost_keywords"] == ["t-shirt"]  # wrapped, NOT list-exploded
 
 
-def test_validate_rejects_string_exclude_keywords_for_refine_search():
-    ok, err = validate_args("refine_search", {"exclude_keywords": "jacket"})
-    assert ok is False
-    assert "exclude_keywords" in (err or "")
+def test_validate_auto_casts_string_exclude_keywords_for_refine_search():
+    args = {"exclude_keywords": "jacket"}
+    ok, err = validate_args("refine_search", args)
+    assert ok is True, err
+    assert args["exclude_keywords"] == ["jacket"]  # wrapped, NOT list-exploded
 
 
 def test_validate_accepts_list_boost_keywords_for_refine_search():
