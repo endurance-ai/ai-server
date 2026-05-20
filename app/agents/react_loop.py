@@ -744,6 +744,11 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             # No tool call — treat as JSON malformation (the LLM should always
             # call a tool, terminating with `respond`).
             json_malform_streak += 1
+            logger.info(
+                "🧩 [agent] iter=%d → no_tool_call (nudge, streak=%d)",
+                it,
+                json_malform_streak,
+            )
             if json_malform_streak >= 2:
                 fb = await _fallback_respond(state, sess, "json_malform_repeated")
                 return {
@@ -779,6 +784,12 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             # toolUse/toolResult by id). Treat as a malformed-LLM event rather
             # than inventing an id (which reproduces the Bedrock 400).
             json_malform_streak += 1
+            logger.info(
+                "🧩 [agent] iter=%d → missing_tc_id tool=%s (nudge, streak=%d)",
+                it,
+                tool_name,
+                json_malform_streak,
+            )
             if json_malform_streak >= 2:
                 fb = await _fallback_respond(state, sess, "json_malform_repeated")
                 return {
@@ -804,6 +815,12 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         # Args validation.
         ok, err = validate_args(tool_name or "", raw_args)
         if not ok:
+            logger.info(
+                "🧩 [agent] iter=%d → bad_args tool=%s err=%s",
+                it,
+                tool_name,
+                err,
+            )
             history_entry = {
                 "iter": it,
                 "tool_name": tool_name,
