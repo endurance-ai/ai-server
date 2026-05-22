@@ -107,6 +107,32 @@ def _is_pinterest(host: str) -> bool:
     return host == "pin.it" or host.endswith("pinterest.com")
 
 
+# P1-3 (260521 V3 eval): direct-image CDN hosts. URLs on these hosts ARE the
+# image (no HTML page to scrape og:image from), so og:image fetch returns ""
+# and the resolver fails. Short-circuit: accept the URL verbatim (still SSRF-
+# guarded by the caller's existing scheme/IP guard). Suffix matching on the
+# host lets *.cdninstagram.com / *.pinimg.com etc. all hit.
+_DIRECT_IMAGE_HOSTS: tuple[str, ...] = (
+    "images.unsplash.com",
+    "i.pinimg.com",
+    "pinimg.com",
+    "cdninstagram.com",  # *.cdninstagram.com
+    "fbcdn.net",  # *.fbcdn.net (Meta image CDN)
+    "pbs.twimg.com",
+    "media.discordapp.net",
+)
+
+
+def _is_direct_image_host(host: str) -> bool:
+    # Exact match OR proper subdomain (dot-prefixed) only. The bare
+    # `endswith(d)` form was removed (review 260522): it let lookalike hosts
+    # like `evilpinimg.com` / `notcdninstagram.com` satisfy the allowlist.
+    # `_ssrf_guard_url` still runs downstream, but the allowlist itself must
+    # not be bypassable.
+    h = host.lower()
+    return any(h == d or h.endswith("." + d) for d in _DIRECT_IMAGE_HOSTS)
+
+
 def _cache_get(url: str) -> list[str] | None:
     entry = _CACHE.get(url)
     if entry is None:
@@ -132,6 +158,21 @@ async def resolve(url: str) -> list[str]:
     parsed = urlparse(url)
     host = (parsed.hostname or "").lower()
     logger.info("🔗 [LINK] 시작 host=%s url=%s", host, url)
+
+    # P1-3 (260521 V3 eval): known direct-image CDN → URL IS the image, no
+    # og:image scrape needed. Without this, Unsplash photo URLs and IG CDN
+    # URLs both returned [] (og:image absent) → vision skipped → agent fell
+    # back to text-only path that leaked the prior turn's pending_question.
+    if _is_direct_image_host(host):
+        try:
+            _ssrf_guard_url(url)
+        except ValueError as e:
+            logger.warning("🔗 [LINK] 🛡️  direct-image SSRF 차단 url=%s err=%s", url, e)
+            _cache_put(url, [])
+            return []
+        logger.info("🔗 [LINK] ✅ direct-image fastpath host=%s", host)
+        _cache_put(url, [url])
+        return [url]
 
     if _is_instagram(host):
         # Apify-backed Instagram resolver (mirrors kikoai/app's main-flow v2).

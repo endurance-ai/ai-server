@@ -78,6 +78,14 @@ _SYSTEM_PROMPT = (
     "user sent a NEW image this turn AND no such vision context is present.\n"
     "- Prefer the fewest tool calls. Once you have enough to answer, call `respond`. Never "
     "repeat a tool with identical args.\n\n"
+    "REFINE vs SEARCH (260522) — when the user ADJUSTS the SAME items rather than starting a "
+    "new search, use `refine_search`, NOT `search_products`. refine_search REUSES the previous "
+    "search's product query and applies a delta (price clamp, exclude brand, color swap), so the "
+    "results stay on-topic. Triggers: '더 저렴하게' / '20만원 이하로' / '더 싼 걸로' / 'cheaper' / "
+    "'under $X' (→ refine_search action='cheaper', max_price=...), '이 브랜드 빼고' / 'without X' "
+    "(→ action='exclude'), '다른 색으로' / 'in blue' (→ action='color_swap', color=...), "
+    "'더 다양하게' / 'show more options' (→ action='broaden'). Do NOT regenerate the query via "
+    "search_products for these — that drops the price/filter and can drift off the original items.\n\n"
     "Price bounds — when the user mentions a budget, convert to KRW integer 원 and pass it "
     "to `search_products` / `refine_search` as `min_price` / `max_price`:\n"
     "  - '5만원 이하' → max_price=50000  ·  '10만원 정도' → max_price=120000 (대략 ±20%)\n"
@@ -85,23 +93,36 @@ _SYSTEM_PROMPT = (
     "  - 'under $100' → max_price=130000 (USD≈1300원 환산)  ·  'around 200' → max_price=280000\n"
     "Pass numeric values only (no currency symbols, no strings). Omit the field when the user "
     "didn't mention price — never invent a budget.\n\n"
-    "Required slots before calling `search_products` (MUST gather first — NEVER search without both):\n"
-    "  - `category` — top / bottom / outer / dress / shoes / bag / accessories (1 of 7)\n"
-    "  - `gender` — women / men / unisex. Note: catalog is women-leaning; `search_products` has "
-    "    no explicit gender param, so encode gender as a WORD inside `text_query` "
-    "    ('men shirt' / 'women dress' / 'unisex sneakers').\n"
-    "When EITHER slot is missing AND not inferable, ask the user in ONE flowing sentence "
-    "(NOT a list, NOT markdown). Example:\n"
-    "  user '셔츠 추천해줘' → you '오케이! 누가 입을 거야 (남자/여자), 그리고 어떤 분위기 좋아?' "
-    "  → user '남자, 클래식' → search_products(text_query='classic men shirt'). If results are "
-    "  weak for men's request, acknowledge briefly: '여성 위주 카탈로그라 정확한 매칭은 어려운데 "
-    "  비슷한 무드로 골라봤어' + `suggest_next_step`.\n"
-    "Silent gender inference (do NOT ask) when context clearly implies it:\n"
+    "SEARCH-FIRST POLICY (260521 V3 eval — overrides all other clarify advice):\n"
+    "When the user gives you ANY two of {category, color, fit, brand, style, garment_name}, your "
+    "FIRST action MUST be `search_products`, not `ask_user_clarification`. Clarify is for AFTER a "
+    "weak result, not before a never-tried search. Concrete rules:\n"
+    "  - '검정 오버사이즈 후드 추천해줘' → search_products immediately (color=black, fit=oversized, "
+    "    garment=hoodie are three signals — enough). Do NOT ask about gender first.\n"
+    "  - 'leather loafers' → search_products immediately (garment+material).\n"
+    "  - 'recommend a cozy beige knit' → search_products immediately (mood+color+garment).\n"
+    "  - Only if you have ≤1 signal (e.g. bare '셔츠 추천해줘' / 'something nice') do you ask, and\n"
+    "    even then prefer `ask_user_clarification(axis='category_pick' or 'subcategory_disambiguation')`.\n"
+    "GENDER (260522 fix) — gender is NEVER a blocker (do NOT ask just for gender). Rule:\n"
+    "  - Add a gender word to text_query ONLY when there is an EXPLICIT signal. Sources:\n"
+    "    (a) user text ('men shirt', '남자 후드'); (b) the `suggested_query:` line from a picked "
+    "    Vision item — if it contains 'men'/'women' (or '남성'/'여성'), preserve THAT gender "
+    "    EXACTLY. NEVER translate '남성'→'women' or flip a gender.\n"
+    "  - NO explicit signal → OMIT gender entirely from text_query (do NOT guess 'women'). "
+    "    The system appends 'unisex' deterministically downstream — your job is just to NOT "
+    "    invent a gender. Example: bare '검정 오버사이즈 후드 추천해줘' → 'black oversized hoodie' "
+    "    (no gender word; system makes it unisex).\n"
+    "  - If `search_products` returns error 'awaiting_gender', the system ALREADY sent the user a "
+    "    gender-pick card (buttons). Do NOT re-ask gender in your own words. Just `respond` with a "
+    "    SHORT one-liner pointing at the card (KO: '위에서 한 번만 골라줘! 🐱' / EN: 'Just tap one "
+    "    above 🐱') and end.\n"
+    "Silent gender inference (do NOT ask, treat as EXPLICIT) when context clearly implies it:\n"
     "  - KO: '사장님 선물' / '아빠가 입을' / '남편한테' / '남친 옷' → men\n"
     "  - KO: '여친 옷' / '엄마 옷' / '내가 입을' (사용자 본인이 여성 페르소나) → women\n"
     "  - EN: 'for him' / 'for my dad' / 'boyfriend' → men · 'for her' / 'mom' → women\n"
-    "Other slots (occasion, color, fit, price) are OPTIONAL — only ask if it would meaningfully "
-    "narrow the search; otherwise proceed with whatever the user gave.\n\n"
+    "When the first search returns weak results (candidates_count < 3), THEN follow `_PROACTIVE_DIRECTIVE` "
+    "below — call `suggest_next_step` or `ask_user_clarification`, never apologize without offering a "
+    "concrete next step.\n\n"
     "Conversation memory: a digest of recent turns (user/bot text, prior search filters and "
     "results, taste profile) is auto-injected at the bottom of this system prompt inside a "
     "system-derived memory block. When the user references something earlier "
@@ -354,10 +375,13 @@ def _item_attrs(it: dict[str, Any], lang: str) -> tuple[str, str, str, str, str]
     color = str(it.get("colorFamily") or it.get("color") or "").strip()
     sq_ko = str(it.get("searchQueryKo") or "").strip()
     sq_en = str(it.get("searchQuery") or "").strip()
-    if lang == "ko":
-        query = sq_ko or sq_en
-    else:
-        query = sq_en or sq_ko
+    # 260522 fix: `query` feeds `suggested_query:` → search_products.text_query,
+    # which is ENGLISH-ONLY. Always prefer the English searchQuery regardless of
+    # conversation lang. Passing the Korean variant forced the LLM to translate
+    # it, and the gender token was being LOST/FLIPPED in translation (live trace
+    # 15:09: vision '...반바지 남성' → text_query 'navy relaxed shorts women').
+    # `label` stays lang-aware (it's display-only in `user_selected_item:`).
+    query = sq_en or sq_ko
     if not query:
         kws = it.get("keywords") or []
         query = " ".join(str(k) for k in kws if k) if isinstance(kws, list) else ""
@@ -564,6 +588,29 @@ async def _maybe_reflexion(
         from app.agents._reflexion import evaluate_search_quality
 
         quality = await asyncio.wait_for(evaluate_search_quality(state, sess, ctx), timeout=remaining)
+        # P1-5 (260521 V3 eval): emit `evaluator_run` so the catalog event
+        # actually appears in `ai.log_conversation_event`. Without this the
+        # only Reflexion signal was a single 🔬 server log line — not
+        # queryable, not bound to a Langfuse trace from the PG side.
+        try:
+            from app.infrastructure.memory.taste_profile import user_key_for
+            from app.observability.conversation_log import emit
+
+            emit(
+                event_type="evaluator_run",
+                user_key=user_key_for(state.from_user_id, state.chat_id),
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=ctx[_V3_REFLEXION_COUNT_KEY],
+                payload={
+                    "iteration_no": ctx[_V3_REFLEXION_COUNT_KEY],
+                    "score": float(quality.get("score", 1.0)) if isinstance(quality, dict) else 1.0,
+                    "retry_decision": str(quality.get("reason", ""))[:200] if isinstance(quality, dict) else "",
+                    "exhausted": False,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[agent_v3] evaluator_run emit best-effort failed: %r", exc)
         return quality
     except TimeoutError:
         logger.warning("[agent_v3] reflexion cancelled at residual budget boundary")

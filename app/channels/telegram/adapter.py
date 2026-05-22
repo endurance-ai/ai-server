@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import logging
+import re
 import time
 from datetime import UTC, datetime
 
@@ -55,7 +56,17 @@ class TelegramAdapter(MessengerAdapter):
         payload: dict,
         retry_429: bool = True,
         timeout: float | None = None,
+        return_error: bool = False,
     ) -> dict | None:
+        """POST a Bot API method. Returns the parsed JSON on success, else None.
+
+        `return_error=True` (260522): on a 4xx/5xx, instead of returning None,
+        return a sentinel dict `{"ok": False, "_tg_status": code, "_tg_error":
+        description}` so callers (send_media_group) can inspect WHICH item
+        Telegram rejected and retry-with-drop. Default False preserves the prior
+        None-on-error contract for every other caller (and the _post-mocking
+        tests that assert None → False).
+        """
         client = self._get_client()
         url = self._bot_url(method)
         try:
@@ -77,7 +88,7 @@ class TelegramAdapter(MessengerAdapter):
                 retry_after = 1.0
             logger.warning("telegram %s ⚠️  429 rate-limited retry_after=%.1fs", method, retry_after)
             await asyncio.sleep(retry_after)
-            return await self._post(method, payload, retry_429=False, timeout=timeout)
+            return await self._post(method, payload, retry_429=False, timeout=timeout, return_error=return_error)
         if resp.status_code >= 400:
             try:
                 err_body = resp.json()
@@ -85,6 +96,8 @@ class TelegramAdapter(MessengerAdapter):
             except Exception:
                 desc = resp.text[:200]
             logger.warning("telegram %s ❌ status=%d desc=%s", method, resp.status_code, desc)
+            if return_error:
+                return {"ok": False, "_tg_status": resp.status_code, "_tg_error": desc}
             return None
         try:
             return resp.json()
@@ -199,19 +212,55 @@ class TelegramAdapter(MessengerAdapter):
                 if parse_mode:
                     entry["parse_mode"] = parse_mode
             input_media.append(entry)
-        payload = {"chat_id": chat_id, "media": input_media}
-        # sendMediaGroup fetches every photo URL server-side; reuse the longer
-        # multi-photo budget (single sendPhoto is 4s — a 5-photo group needs
-        # proportionally more) rather than the 5s default _post timeout.
-        result = await self._post("sendMediaGroup", payload, timeout=15.0)
+        # sendMediaGroup is ATOMIC server-side: one unreachable photo URL fails
+        # the whole group with "Bad Request: failed to send message #N ...
+        # WEBPAGE_CURL_FAILED". 260522 fix: instead of giving up (→ caller's
+        # per-card 1-by-1 fallback, which the user saw as "카드가 따로따로 나옴"),
+        # parse the offending 1-based index, DROP that item, and retry the group
+        # — keeping the single-bubble album for the remaining reachable photos.
+        # Bounded: at most len-1 drops, and we stop once <2 items remain (a
+        # 1-item "group" is invalid) → then return False so the caller's
+        # per-card fallback delivers the lone survivor.
+        cur_media = list(input_media)
+        result: dict | None = None
+        attempts = 0
+        max_attempts = len(cur_media)  # worst case: drop down to the bounds floor
+        while len(cur_media) >= 2 and attempts < max_attempts:
+            attempts += 1
+            payload = {"chat_id": chat_id, "media": cur_media}
+            # sendMediaGroup fetches every photo URL server-side; reuse the
+            # longer multi-photo budget (single sendPhoto is 4s) rather than the
+            # 5s default _post timeout.
+            result = await self._post("sendMediaGroup", payload, timeout=15.0, return_error=True)
+            if result and result.get("ok"):
+                break
+            # Parse "failed to send message #N" (1-based) from the error; drop
+            # that item and retry. No parseable index → unrecoverable, stop.
+            desc = str((result or {}).get("_tg_error") or "")
+            m = re.search(r"message #(\d+)", desc)
+            if not m:
+                result = None  # generic failure → caller fallback
+                break
+            bad_idx = int(m.group(1)) - 1
+            if not (0 <= bad_idx < len(cur_media)):
+                result = None
+                break
+            logger.warning(
+                "🐱 [telegram] 🖼️  send_media_group dropping unreachable item #%d, retrying (n=%d→%d)",
+                bad_idx + 1,
+                len(cur_media),
+                len(cur_media) - 1,
+            )
+            cur_media.pop(bad_idx)
         elapsed = int((time.perf_counter() - t0) * 1000)
         ok = bool(result and result.get("ok"))
         logger.info(
-            "🐱 [telegram] 🖼️  send_media_group chat=%s elapsed_ms=%d ok=%s n=%d",
+            "🐱 [telegram] 🖼️  send_media_group chat=%s elapsed_ms=%d ok=%s n=%d sent=%d",
             _hash_chat_id(chat_id),
             elapsed,
             ok,
             n,
+            len(cur_media) if ok else 0,
         )
         return ok
 

@@ -16,13 +16,22 @@ from app.agents.tool_registry import AskUserClarificationResult
 
 logger = logging.getLogger(__name__)
 
-_VALID_AXES = {"category_pick", "formality", "fit", "occasion", "subcategory_disambiguation", "generic_fallback"}
+_VALID_AXES = ("category_pick", "formality", "fit", "occasion", "subcategory_disambiguation", "generic_fallback")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarificationResult:
     axis = args.get("axis")
     if axis not in _VALID_AXES:
-        return AskUserClarificationResult(ok=False, error=f"invalid_axis:{axis}", card_sent=False, axis=str(axis))
+        # P0-1 (260521 V3 eval): include valid axes in the error so the LLM's
+        # next iter can self-correct. The structural validator already rejects
+        # this case (see tool_registry.validate_args); this is belt-and-braces
+        # for direct dispatch paths that may bypass the validator.
+        return AskUserClarificationResult(
+            ok=False,
+            error=f"invalid_axis: {axis!r} not in {list(_VALID_AXES)}",
+            card_sent=False,
+            axis=str(axis),
+        )
 
     options = list(args.get("options") or [])
     prompt = (args.get("prompt") or "").strip()

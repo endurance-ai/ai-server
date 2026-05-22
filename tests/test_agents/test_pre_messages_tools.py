@@ -60,6 +60,19 @@ def _bind_adapter(monkeypatch: pytest.MonkeyPatch, adapter: MessengerAdapter) ->
     _adapter_ctx.set_adapter(adapter)
 
 
+@pytest.fixture(autouse=True)
+def _pin_gender(monkeypatch: pytest.MonkeyPatch) -> None:
+    """260522 (SPEC-GENDER-PIN-001): these tests assert the pre-message is the
+    ONLY text sent on a genderless search. With the gender pin, a genderless
+    query + no pinned gender now also fires a one-time gender card (an extra
+    send). Pin the profile gender to 'unisex' so the gate passes silently and
+    these tests keep measuring ONLY pre-message firing."""
+    monkeypatch.setattr(
+        "app.agents.tools.search_products._lookup_profile_gender",
+        lambda ctx: "unisex",
+    )
+
+
 def _make_ctx(lang: str = "ko", chat_id: int = 42, image_url: str | None = None) -> dict[str, Any]:
     return {
         "chat_id": chat_id,

@@ -265,7 +265,12 @@ async def test_build_user_message_includes_picked_item():
 
     out = rl._build_user_message(state, sess)
     assert "relaxed dark brown wool blazer" in out
-    assert "릴렉스드 다크 브라운 울 블레이저" in out  # ko suggested_query
+    # 260522 (SPEC-GENDER-PIN-001): suggested_query is now ALWAYS the English
+    # searchQuery (text_query is English-only) so the LLM never has to translate
+    # the Korean variant — which was losing/flipping the gender token. KO
+    # searchQueryKo is no longer surfaced as suggested_query.
+    assert "릴렉스드 다크 브라운 울 블레이저" not in out
+    assert 'suggested_query: "relaxed dark brown wool blazer"' in out
     assert "user_selected_item:" in out
     assert "suggested_query:" in out
     # Opaque raw callback must be replaced by the resolved description.
@@ -563,9 +568,12 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
         AsyncMock(return_value=[0.1] * 768),
     )
 
+    # 260522 (SPEC-GENDER-PIN-001): an explicit gender token in text_query
+    # satisfies the gender gate (per-request override) so this respond-retry
+    # test reaches the search/card path instead of the one-time gender card.
     fake = _FakeLLM(
         [
-            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "boots"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "boots men"}, "id": "1"}]),
             _FakeAIMessage([{"name": "respond", "args": {"text": "here you go"}, "id": "2"}]),
         ]
     )

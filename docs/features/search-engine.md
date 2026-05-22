@@ -63,6 +63,15 @@ query_embedding → cosine distance (HNSW pgvector)
 
 텍스트 전용 턴: `EmbedProvider.embed_text(text_query)` → Modal `POST /embed/text` → 768-dim 벡터 (동일 FashionSigLIP L2 공간 — cross-modal cosine 유효). v5의 zero-dense + pgroonga 트릭 및 `_suppress_zero_dense_noise` stopgap 완전 제거.
 
+**SPEC-GENDER-PIN-001 gender resolution (260522)** — `search_products.dispatch` 에서 임베딩 전 실행:
+
+1. `_query_gender(text_query)` — text_query 내 `men`/`women`/`unisex` whole-word 탐지 (per-request explicit gender)
+2. 없으면 `_lookup_profile_gender(ctx)` — `TasteProfile.gender` 핀 조회 (크로스세션)
+3. 없고 이미지 없으면 → `_send_gender_card` 로 성별 카드 전송 + `pending_gender.set_pending` → `awaiting_gender` 에러 반환 (이 turn 종료)
+4. `clarify:gender:*` 콜백 → `ingest._handle_gender_pick` — gender 를 `TasteProfile.gender` 에 핀 + pending 팝 후 gender-appended query 로 `run_text_only_search` 재실행 (migration 0008 `ai.user_taste_profile.gender TEXT` 필요)
+
+이미지 포함 턴은 gender 없으면 `unisex` 자동 추가 (카드 블로킹 없음).
+
 ## 다양성 캡 (Python 측)
 
 `app/services/diversify_service.py` (thin shim: `app/pipeline/diversify.py`):
@@ -73,11 +82,15 @@ brand_cap    = SEARCH_BRAND_CAP * 3 if req.brand_filter else SEARCH_BRAND_CAP   
 platform_cap = SEARCH_PLATFORM_CAP                                              # 3
 
 for c in raw_candidates:                # distance ASC 순서 유지
+    if pid in seen_ids: continue        # product_id 레벨 dedup
+    if content_key in seen_content: continue  # (brand, name_norm, price) 컨텐츠 레벨 dedup (260522)
     if seen_brand[c.brand] >= brand_cap: continue
     if seen_platform[c.platform] >= platform_cap: continue
     out.append(c)
     if len(out) >= target: break
 ```
+
+> **컨텐츠 레벨 dedup (260522)**: 동일 상품이 다른 `product_id` 로 중복 등록된 경우 id-only 가드는 통과함. `(brand, name_norm, price)` 키로 추가 필터링 — `brand` 또는 `name` 이 비어있는 항목은 content key 없이 통과 (graceful fallback).
 
 | tolerance | target |
 |-----------|--------|
@@ -128,5 +141,10 @@ AI 서버 5xx/timeout 시 Next.js 의 `/api/find/search` 가 기존 v4 검색(`/
 | `app/infrastructure/repositories/category_family.py` | `CANONICAL_FAMILIES` (20 tokens) + `to_canonical_family()` — family gate 단일 소스 |
 | `app/infrastructure/repositories/search_repository.py` | `_RPC_NAME = "search_products_v6"` + `build_params` (6-key) |
 | `app/infrastructure/repositories/search_rpc_contract.py` | v6 row contract (`distance`+`degraded`) |
-| `app/providers/embedding.py` | `embed_image_url` + `embed_text` (v6 text path) |
+| `app/providers/embedding.py` | `embed_image_url` + `embed_text` (v6 text path). 260522: cache/Modal 각 타이밍 로그 |
+| `app/agents/tools/search_products.py` | gender resolution (`_query_gender`, `_lookup_profile_gender`, `_send_gender_card`), `pipeline_exc_detail` 헬퍼, per-step 타이밍 |
+| `app/agents/pending_gender.py` | gender 카드 pending 스토어 (SPEC-GENDER-PIN-001) |
+| `app/agents/last_query.py` | 크로스턴 product query 스토어 (refine 드리프트 방지) |
+| `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + content-level dedup (260522) |
+| `migrations/versions/0008_add_taste_gender.py` | `ai.user_taste_profile.gender TEXT` 추가 (SPEC-GENDER-PIN-001) |
 | `infra/search-rpc-contract.md` | RPC 계약 상세 + drift 동작 |

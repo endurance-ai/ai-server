@@ -48,6 +48,12 @@ class TasteProfile:
     # @MX:SPEC: SPEC-AGENT-V3-REACT
     disliked_brands_ts: dict[str, float] = field(default_factory=dict)
     disliked_keywords_ts: dict[str, float] = field(default_factory=dict)
+    # SPEC-GENDER-PIN-001 (260522) — pinned shopping gender, persisted
+    # cross-session. One of 'men' / 'women' / 'unisex', or None when not yet
+    # pinned (the agent asks via a one-time gender card on the first genderless
+    # text search). A per-request explicit gender in the user's message
+    # overrides this value for that search only (it is NOT written back here).
+    gender: str | None = None
 
     def reinforce_liked_brand(self, brand: str, weight: float = 1.0) -> None:
         if not brand:

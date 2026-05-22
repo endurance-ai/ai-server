@@ -174,6 +174,85 @@ async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) 
             logger.debug("[ingest] cards:more empty-notice send failed: %r", exc)
 
 
+async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumbs: list[str]) -> None:
+    """SPEC-GENDER-PIN-001 — `clarify:gender:{men|women|unisex}` callback.
+
+    Pins the chosen gender to the user's taste profile (cross-session), then
+    pops the pending search args stashed by `search_products` and re-runs the
+    search WITH the gender applied, delivering the hybrid album inline (same
+    sender the post-search reply uses). Deterministic — does NOT route back
+    through the agent. Best-effort throughout; never raises into the webhook.
+    """
+    from app.channels.lang import session_lang
+
+    g = gender.strip().lower()
+    if g not in ("men", "women", "unisex"):
+        return
+    # 1) Pin to taste profile (persisted).
+    try:
+        from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
+
+        store = get_taste_store()
+        profile = store.get_or_create(user_key_for(state.from_user_id, state.chat_id))
+        profile.gender = g
+        store.update(profile)
+        breadcrumbs.append(f"ingest: gender pinned={g}")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] gender pin failed: %r", exc)
+
+    # Toast acknowledging the tap.
+    _ack = "✅ 기억해둘게!" if session_lang(sess) == "ko" else "✅ Got it!"
+    await _send_callback_toast(state, sess, text=_ack)
+
+    # 2) Pop the pending search and re-run with gender applied.
+    from app.agents import pending_gender
+
+    pending = pending_gender.pop_pending(state.chat_id)
+    if not pending:
+        # No pending search (e.g. user tapped a stale card) — just confirm.
+        try:
+            from app.graphs.nodes._adapter_ctx import get_adapter
+
+            adapter = get_adapter()
+            if session_lang(sess) == "ko":
+                msg = "좋아, 이제 뭐 찾아줄까? 🐱"
+            else:
+                msg = "Great — what should I find for you? 🐱"
+            await adapter.send_text(state.chat_id, msg)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[ingest] gender pick no-pending notice failed: %r", exc)
+        return
+
+    base_query = str(pending.get("text_query") or "").strip()
+    text_query = f"{base_query} {g}".strip() if base_query else g
+    try:
+        from app.agents.tools.respond import send_hybrid_batch
+        from app.agents.tools.search_products import persist_last_results, run_text_only_search
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        cands = await run_text_only_search(
+            text_query=text_query,
+            category=pending.get("category"),
+            top_k=int(pending.get("top_k") or 15),
+        )
+        # Persist to session so send_hybrid_batch (which reads sess.last_results)
+        # and the pager cursor work exactly like the post-search reply path.
+        persist_last_results({"chat_id": state.chat_id}, cands)
+        # Cross-turn: store the gender-pinned query so a follow-up refine
+        # ("더 저렴하게") reuses it instead of the raw refine instruction.
+        try:
+            from app.agents.last_query import set_last_query
+
+            set_last_query(state.chat_id, text_query)
+        except Exception:  # noqa: BLE001
+            pass
+        adapter = get_adapter()
+        delivered = await send_hybrid_batch(adapter, state.chat_id, ctx=None, offset=0)
+        breadcrumbs.append(f"ingest: gender resume search='{text_query}' delivered={delivered}")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] gender resume search failed: %r", exc)
+
+
 @observe(name="node.ingest", as_type="span")
 async def ingest(state: WorkingState) -> dict:
     node_enter("ingest")
@@ -201,6 +280,23 @@ async def ingest(state: WorkingState) -> dict:
         f"photo={bool(msg.photo_file_id)} urls={len(msg.urls)} cb={msg.callback_data or '—'}"
     ]
 
+    # P1-4 (260521 V3 eval): clear pending_question whenever the inbound is
+    # NOT a plain-text answer. The 2026-05-20 pending-question carry-across-
+    # turn mechanism (app/agents/pending_question.py) was designed to splice
+    # short affirmative replies ("어"/"yes") back into the original intent.
+    # But it kept firing on image/URL/callback turns too — the prior turn's
+    # clarification question would be re-emitted as the bot's "response" to a
+    # brand-new photo, which is what S3 of the V3 eval surfaced. A photo /
+    # URL / callback is never an answer to a text question; clear pending.
+    try:
+        from app.agents.pending_question import clear_pending
+
+        is_text_answer = bool(msg.text) and not msg.photo_file_id and not msg.urls and not msg.callback_data
+        if not is_text_answer:
+            clear_pending(state.chat_id)
+    except Exception as exc:  # noqa: BLE001 — UX-only, never raise
+        logger.debug("[ingest] pending_question clear best-effort failed: %r", exc)
+
     # SPEC-IMPLICIT-FB-001 / REQ-FB-NOCLICK-001 + REQ-FB-REQUERY-001 — lazy steps.
     # Run BEFORE state-mutating logic so re-query can read last_results.
     try:
@@ -220,7 +316,13 @@ async def ingest(state: WorkingState) -> dict:
     # ignored + node_error logged.
     try:
         cb_data = msg.callback_data or ""
-        if cb_data.startswith("clarify:"):
+        # SPEC-GENDER-PIN-001 — gender clarify is special: it pins to the taste
+        # profile + re-runs the pending search inline (NOT boost_keywords).
+        # Handled before the generic clarify path below.
+        if cb_data.startswith("clarify:gender:"):
+            gender_val = cb_data.split(":", 2)[2] if len(cb_data.split(":", 2)) >= 3 else ""
+            await _handle_gender_pick(state, sess, gender_val, breadcrumbs)
+        elif cb_data.startswith("clarify:"):
             if getattr(sess, "onboarded_at", None) is None:
                 breadcrumbs.append("ingest_v2: clarify mid-onboarding ignored")
                 emit(
