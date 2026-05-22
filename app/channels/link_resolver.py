@@ -116,8 +116,8 @@ _DIRECT_IMAGE_HOSTS: tuple[str, ...] = (
     "images.unsplash.com",
     "i.pinimg.com",
     "pinimg.com",
-    "cdninstagram.com",     # *.cdninstagram.com
-    "fbcdn.net",            # *.fbcdn.net (Meta image CDN)
+    "cdninstagram.com",  # *.cdninstagram.com
+    "fbcdn.net",  # *.fbcdn.net (Meta image CDN)
     "pbs.twimg.com",
     "media.discordapp.net",
 )
