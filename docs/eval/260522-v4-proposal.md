@@ -1,10 +1,26 @@
 # V4 플로우 제안서 — 리서치 + 우선순위
 
-> **작성일**: 2026-05-22
-> **상태**: 제안 (의사결정 대기 — 한상호 검토용)
-> **선행**: `260521-v3-eval-report.md` (V3 자동 평가 + P0/P1 패치 6건 §7)
+> **작성일**: 2026-05-22 · **갱신**: 2026-05-22 PM (실측 calibration 반영 + 실테스트 완료분 반영)
+> **상태**: 제안 (V4-A 착수 대기)
+> **선행**: `260521-v3-eval-report.md` (V3 자동 평가 §0-7 + 실테스트 후속 §8-10)
 > **목적**: V3 패치로 메꿔진 부분을 제외하고, V4 로 가져갈 후보를 근거·리스크·SPEC 가능성과 함께 우선순위화
-> **검증 기반**: V3 자동 평가 12 시나리오 실측 + 코드 직접 확인 + 2026 리서치 (하단 Sources)
+> **검증 기반**: V3 자동 평가 12 시나리오 + 실 텔레그램 3차 검증 + RPC/distance 실측 + 2026 리서치 (하단 Sources)
+
+---
+
+## 0-pre. 갱신 로그 (2026-05-22 PM)
+
+이 제안서 작성 후 **실 텔레그램 테스트로 발견된 건들을 먼저 처리**했다 (커밋 `d539934`). 제안서 원래 후보(A~F)와는 별개의 실전 수습 + 신규 기능:
+
+| 처리됨 (제안서 외 / 실테스트 발견) | 비고 |
+|---|---|
+| ✅ 카드 묶음 (sendMediaGroup WEBPAGE_CURL_FAILED drop-retry) | report §8 |
+| ✅ 중복 상품 dedup (brand+name+price) | report §9 |
+| ✅ 단계별 ⏱ 타이밍 로그 | report §9 |
+| ✅ **SPEC-GENDER-PIN-001** 성별 픽스 기능 (migration 0008 + 카드+영구저장+override) | report §9 |
+| ✅ **refine 쿼리 재사용** (last_query — raw 지시문 임베딩 버그) | report §10 |
+
+**distance 실측 (중요 — V4-A 전제 수정)**: cross-modal(텍스트→이미지 SigLIP) 코사인은 **modality gap** 으로 스케일이 압축됨. 완벽 매칭도 distance ~0.88 이 천장, 무의미 쿼리 ~0.90, 전체 0.87~0.96 에 뭉침. min 단독은 거의 비차별적(완벽 0.88 vs 무의미 0.90, 0.02 차이). → **§2-A 의 "min > 0.55" 절대 임계값은 폐기**, median/spread/baseline-relative 로 재설계 (메모리 `project-search-distance-calibration` 참조).
 
 ---
 
@@ -36,16 +52,19 @@ V4 의 무게중심은 **"검색을 더 부르자"가 아니라 "검색 품질�
 
 **문제**: v6 는 항상 15건 반환 → 에이전트는 "결과 있음 = 성공"으로 착각. 거리가 멀어 사실상 미스인 경우(S9 라벤더 카프리)에도 그냥 카드를 쏜다. Reflexion 은 count==0 만 보므로 영영 안 터진다.
 
-**제안**:
-- `search_products` result_summary 에 **distance 통계** 노출 (`min_distance`, `median_distance`, `degraded_count`). RPC 가 이미 반환하므로 신규 계산 없음.
-- 에이전트 의사결정 신호를 count → distance 로 전환:
-  - `min_distance > 임계값` (예: 0.55, 캘리브레이션 필요) → "weak result" 로 간주 → `suggest_next_step` / `ask_user_clarification` 유도
-  - `degraded_count` 높음 (style-node 필터 드롭多) → 검색이 카테고리-only 폴백했다는 신호 → 사용자에게 톤다운된 멘트
-- **Reflexion 트리거 재정의**: `candidates_count == 0` → `min_distance > 임계값 OR candidates_count == 0`. 그래야 Gap2 가 실제로 동작.
+**제안 (260522 실측 반영 — 절대 임계값 폐기)**:
+- `search_products` result_summary 에 **distance 통계** 노출 (`min_distance`, `median_distance`, `spread`(=median−min 또는 p90−min), `degraded_count`). RPC 가 이미 distance 반환하므로 신규 계산 없음.
+- 에이전트 의사결정 신호를 count → distance **분포 형태**로 전환 (단일 절대 임계값 아님):
+  - 실측: 완벽 매칭 ~min 0.88/median 0.896 (촘촘) vs 무의미 ~min 0.90/median 0.957 (퍼짐). → **`median` + `spread`** 가 min 보다 변별력 큼.
+  - "weak result" 판정 = `median > 임계` AND `spread 큼` (캘리브레이션 필요, env 화). weak → `suggest_next_step` / 톤다운 멘트.
+  - `degraded_count` 높음 (style-node 필터 드롭多) → 카테고리-only 폴백 신호.
+- **Reflexion 트리거 재정의**: `candidates_count == 0` → `weak-distribution OR count==0` (§2-B 와 연결).
 
-**근거**: 리서치 — "taking the top 50 but also dropping anything with a distance above 0.3 as a sanity filter" (단 임계값은 query-dependent 라 글로벌 상수는 위험 → 캘리브레이션 데이터 필요).
+**선결 작업 (필수)**: 절대 임계값을 코드에 박지 말 것. dev-app 실데이터로 **good/bad 쿼리 30~50개의 min/median/spread 분포**를 모아 weak 판정식을 캘리브레이션. (오늘 5개 샘플이 시작점 — 메모리 `project-search-distance-calibration`)
 
-**리스크**: raw cosine 임계값은 쿼리마다 의미가 달라 글로벌 상수가 부정확할 수 있음. → **선결 작업**: dev-app `ai.card_impression` + Langfuse trace 의 distance 분포를 실데이터로 모아 임계값 캘리브레이션. 임계값을 env 로 빼서 튜닝.
+**근거 (수정됨)**: RAG 텍스트↔텍스트의 "distance > 0.3 drop" 은 **cross-modal 에 적용 불가** (modality gap). 이 시스템 천장은 ~0.87. 절대값 아닌 분포/상대 신호로 가야 함.
+
+**리스크**: 캘리브레이션 데이터 없이 임계값 추측 시 정상 결과를 weak 로 오판(과민) 또는 그 반대. → 반드시 선결 캘리브레이션. 임계값 env 화.
 
 **SPEC 가능성**: 높음. `SPEC-SEARCH-QUALITY-SIGNAL-001`. distance 노출(작음) + 트리거 재정의(중간) + 캘리브레이션(데이터 의존).
 
@@ -130,18 +149,20 @@ V4 의 무게중심은 **"검색을 더 부르자"가 아니라 "검색 품질�
 
 ```
 ---
-🎯 V4 후보 우선순위
+🎯 V4 후보 우선순위 (260522 PM 갱신)
 
-[🥇] V4-A 검색 품질 distance 신호       ← 최우선. 나머지 다수가 여기에 의존
+[🥇] V4-A 검색 품질 distance 신호       ← 최우선. 절대임계값 폐기→median/spread+캘리브레이션. 나머지가 의존
 [🥈] V4-B Reflexion 존폐               ← A 와 묶어 결정 (A 하면 살리고, 안 하면 죽임)
-[🥉] V4-C 모호성-인지 라우팅            ← A 선행 필요. clarify vs search 정교화
-[ ] V4-D picker auto-pick             ← 독립적, UX 턴 절약. 병행 가능
-[ ] V4-E card:like taste_update emit  ← quick-win, SPEC 불필요, 지금 바로 가능
-[ ] V4-F eval 러너 강화               ← 테스트 인프라, 독립적
+[🥉] V4-C 모호성-인지 라우팅            ← A 선행 필요. search-first(P0-2)는 됨, distance→clarify 정교화 잔여
+[⏸️] V4-D picker auto-pick             ← 독립적, UX 턴 절약 (이미지 3-hop→2-hop). 병행 가능
+[⏸️] V4-E card:like taste_update emit  ← quick-win, SPEC 불필요. 미착수
+[🟡] V4-F eval 러너 강화               ← 러너 작성됨(scripts/eval/run.py). picker 시뮬/실chat 모드 잔여
 ---
 ```
 
 **의존 그래프**: V4-A → (V4-B 결정, V4-C 라우팅) 가 핵심 체인. V4-D/E/F 는 독립 병행 가능.
+
+**260522 PM 결론**: 실테스트 수습(성별핀/refine/카드묶음/dedup/타이밍)은 끝. 다음 세션은 **V4-A 부터** — 단 코드 박기 전에 distance 분포 캘리브레이션(good/bad 쿼리 30~50개) 선행 필수.
 
 ---
 
