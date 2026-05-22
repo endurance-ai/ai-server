@@ -1,7 +1,7 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-19 (v1.3.0 — SPEC-ONBOARD-LITE-001: 온보딩 카드 서브그래프 제거 + 경량 first-touch 대체).
+> 마지막 업데이트: 2026-05-22 (v1.5.0 — SPEC-GENDER-PIN-001: gender pin + pending_gender/last_query + search-first policy + diversify content-dedup + sendMediaGroup retry + CDN fastpath).
 
 ## 한 줄 요약
 
@@ -257,7 +257,7 @@ kikoai/app → POST /recommend → pipeline runner → search_products_v6 RPC �
 
 | 노드 | 역할 | 비고 |
 |------|------|------|
-| `ingest` | Update 파싱, 세션 로드, 콜백 인라인 처리 (`clarify:*`/`cards:*`/`implicit_feedback:`). 신규 유저 actionable 메시지 → `maybe_first_touch` 인라인 그리팅 + `onboarded_at` 마킹 | 매 턴 진입점 |
+| `ingest` | Update 파싱, 세션 로드, 콜백 인라인 처리 (`clarify:*`/`cards:*`/`implicit_feedback:`/`clarify:gender:*`). 신규 유저 actionable 메시지 → `maybe_first_touch` 인라인 그리팅 + `onboarded_at` 마킹. **SPEC-GENDER-PIN-001**: `_handle_gender_pick` — gender 핀 + pending search 재실행 인라인 완결 | 매 턴 진입점 |
 | `intro` | `/start`-only 신규 유저(`onboarded_at IS NULL`) 전용 1회성 서비스 소개 + `onboarded_at` 마킹 후 턴 종료 | SPEC-ONBOARD-LITE-001 |
 | `resolve_image` | Pinterest / pin.it og:image URL 해석 | `link_resolver.py` 활용 |
 | `vision_node` | LiteLLM Vision v2 schema 패션 아이템 추출 | `styleNode/mood/palette/items[].searchQuery` |
@@ -340,8 +340,8 @@ app/
 │   └── memory/
 │       ├── session.py           # SessionStore Protocol + InMemorySessionStore
 │       ├── session_pg.py        # Postgres 기반 세션 저장소
-│       ├── taste_profile.py     # TasteProfile 도메인 모델 (Gap4 dislike ts 포함)
-│       └── taste_profile_pg.py  # Postgres 기반 취향 프로파일 저장소
+│       ├── taste_profile.py     # TasteProfile 도메인 모델 (Gap4 dislike ts + SPEC-GENDER-PIN-001 gender 필드)
+│       └── taste_profile_pg.py  # Postgres 기반 취향 프로파일 저장소 (migration 0008 gender 컬럼 포함)
 ├── pipeline/                # thin @observe shim (실제 로직은 services/ 에)
 │   ├── runner.py            # 파이프라인 조립 + @observe
 │   ├── embed.py / search.py / diversify.py  # shim + monkeypatch seam 재노출
@@ -402,7 +402,7 @@ app/
 | AI 서버 5xx / timeout | `kikoai/app`이 v4 폴백 (`/api/search-products`) 호출 |
 | Modal /embed 실패 | AI 서버 502 반환 → Next.js 폴백 트리거 |
 | PostgREST RPC 실패 | `RpcContractError` → fail-open 빈 결과 반환 + 구조화 ERROR 로그 |
-| sendMediaGroup 실패 (broken photo) | `send_hybrid_batch` → per-card fallback loop (`send_results._candidate_to_card` 재사용) |
+| sendMediaGroup 실패 (broken photo / WEBPAGE_CURL_FAILED) | `TelegramAdapter._post(return_error=True)` → 실패 항목 드롭 재시도 → 2개 미만 시 per-card fallback loop |
 | Gap2 Reflexion timeout | `asyncio.wait_for` 취소 → fail-open (score=1.0, LLM 자율 판단 스킵) |
 | LLM 호출 실패 (agent loop) | `_fallback_respond` 오류 안내 발송 후 루프 종료 |
 
@@ -455,3 +455,4 @@ app/
 | 2026-05-18 | **v1.2.0** | **SPEC-SEARCH-V6-001 — search_products_v5+pgroonga+product_search_text DROPPED → search_products_v6 (embedding-first, distance ASC, p_category canonical family gate). EmbedProvider.embed_text() 신규 (text query → Modal /embed/text). zero-dense stopgap 제거. product_ai_analysis 테이블 dead path 제거. category_family.py 신규 (20-token CANONICAL_FAMILIES + to_canonical_family). react_loop._build_ctx 가 vision_category 노출.** |
 | 2026-05-19 | **v1.3.0** | **P0 암묵 피드백 → Langfuse v3 score retro-attach. `emit_feedback_score()` 신규 (observability/langfuse.py). `ai.card_impression.langfuse_trace` 컬럼 추가 (migration 0006). 호출처: implicit_feedback.py 3곳 (click/no_click/re_query). kill-switch: `LANGFUSE_FEEDBACK_SCORES`.** |
 | 2026-05-20 | **v1.4.0** | **SPEC-CHAT-STATE-REDIS-001 — pager cursor/impression dedupe dict를 Redis 외부화 (infrastructure/cache/chat_state.py, fail-open). SPEC-AGENT-UX-P0-001 — pre_messages 사전 안내 멘트, typing indicator, diversify dedup 가드, sticky lang directive. validate_args str/float 자동 캐스팅(top_k/n bad_type 제거). Reflexion 발동 조건 빈결과만으로 축소 + exhaust salvage. text_query canonical form 강제. PG 임베딩 캐시(embedding_cache.py, migration 0007). IG Apify 이미지 fetch(instagram_apify.py). pending_question 봇Q↔사용자A 상태. 어드민 디버그 엔드포인트 5개(debug.py) + SSRF 가드. persona language-override 방어.** |
+| 2026-05-22 | **v1.5.0** | **SPEC-GENDER-PIN-001 — TasteProfile.gender 크로스세션 핀 (migration 0008 `ai.user_taste_profile.gender TEXT`). search_products gender resolution (explicit > pinned > card ask). pending_gender / last_query 인메모리 스토어 신규. ingest._handle_gender_pick (clarify:gender 콜백 인라인 완결). fashion_bot clarify:gender:* → __end__ 라우팅. SEARCH-FIRST 정책 + REFINE-vs-SEARCH 시스템 프롬프트 강화. ask_user_clarification axis Literal 검증(validate_args). sendMediaGroup WEBPAGE_CURL_FAILED 드롭-재시도. diversify content-level dedup (brand+name+price). link_resolver CDN fastpath (_DIRECT_IMAGE_HOSTS). per-step 타이밍 로그 (embed/rpc/divers ms). evaluator_run + taste_update 이벤트 emit. pipeline_exc_detail 공유 헬퍼. pending_question 비텍스트 턴 자동 클리어.** |

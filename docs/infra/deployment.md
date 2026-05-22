@@ -161,6 +161,8 @@ uv run alembic upgrade head
 # 0004_add_onboarded_at               — user_session onboarded_at + 7 cols
 # 0005_add_taste_dislike_ts           — ai.user_taste_profile +2 JSONB (Gap4 dislike)
 # 0006_add_card_impression_langfuse_trace — ai.card_impression.langfuse_trace (P0)
+# 0007_add_embedding_cache_text       — ai.embedding_cache_text (PG 벡터 캐시, Modal cold-start 우회)
+# 0008_add_taste_gender               — ai.user_taste_profile.gender TEXT (SPEC-GENDER-PIN-001)
 # ※ onboard_stage 등 DB 컬럼은 물리적으로 존치 (파괴적 migration 없음, 코드에서 미사용)
 ```
 
