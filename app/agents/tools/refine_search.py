@@ -22,6 +22,7 @@ from app.agents.tools.search_products import (
     apply_dislike_discount,
     apply_price_filter,
     persist_last_results,
+    pipeline_exc_detail,
     run_image_search,
     run_text_only_search,
 )
@@ -150,24 +151,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=15,
             )
     except Exception as exc:  # noqa: BLE001
-        # P1-6 (260521 V3 eval): same status-code + host enrichment as
-        # search_products. Operators need to tell Modal cold-start from
-        # PostgREST 5xx from Langfuse 4xx at a glance.
-        detail = type(exc).__name__
-        status = getattr(exc, "status_code", None)
-        if status is None:
-            resp = getattr(exc, "response", None)
-            status = getattr(resp, "status_code", None)
-        if isinstance(status, int):
-            detail = f"{detail}:{status}"
-        req = getattr(exc, "request", None)
-        url_obj = getattr(req, "url", None)
-        host = getattr(url_obj, "host", None) if url_obj is not None else None
-        if isinstance(host, str) and host:
-            detail = f"{detail}@{host}"
-        logger.warning("[tool.refine_search] pipeline raised: %s (%r)", detail, exc)
+        # P1-6 (260521): shared enrichment helper. Host in log only (internal
+        # infra — security 260522); status code kept in Result.error.
+        logger.warning(
+            "[tool.refine_search] pipeline raised: %s (%r)",
+            pipeline_exc_detail(exc, include_host=True),
+            exc,
+        )
         return RefineSearchResult(
-            ok=False, error=f"pipeline_failed:{detail}", candidates_count=0, top_candidates=[]
+            ok=False,
+            error=f"pipeline_failed:{pipeline_exc_detail(exc, include_host=False)}",
+            candidates_count=0,
+            top_candidates=[],
         )
 
     # Apply exclude_keywords client-side as a thin filter (best-effort).

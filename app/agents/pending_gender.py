@@ -18,6 +18,10 @@ from __future__ import annotations
 from typing import Any
 
 # chat_id -> stored search args dict (text_query/category/fit/color/top_k).
+# @MX:WARN: [AUTO] process-local (review P1-D 260522). Multi-worker: a gender
+#   callback landing on a different worker than the one that stashed → no pending
+#   → _handle_gender_pick falls to the "stale card" notice (harmless UX, no data
+#   leak). pop_pending consumes on read (no replay). Move to Redis at scale.
 _PENDING: dict[int, dict[str, Any]] = {}
 
 

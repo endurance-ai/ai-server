@@ -50,6 +50,35 @@ def _query_gender(text_query: str) -> str | None:
     return None
 
 
+def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
+    """Render a `pipeline_failed:` suffix from an exception (review P1-C 260522).
+
+    Shared by `search_products` + `refine_search` (was duplicated). Pulls the
+    HTTP status code and, when `include_host=True`, the target host so an
+    operator can tell Modal cold-start from PostgREST 5xx at a glance.
+
+    `include_host` is True for the LOG line (full diagnostic) and False for the
+    value returned in `Result.error` (security 260522: the host is internal
+    infra — Modal endpoint / PostgREST shim — and `Result.error` can transit to
+    the LLM context / user, so the host stays log-only). The status code is
+    kept in both (it is the key signal and not sensitive).
+    """
+    detail = type(exc).__name__
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        resp = getattr(exc, "response", None)
+        status = getattr(resp, "status_code", None)
+    if isinstance(status, int):
+        detail = f"{detail}:{status}"
+    if include_host:
+        req = getattr(exc, "request", None)
+        url_obj = getattr(req, "url", None)
+        host = getattr(url_obj, "host", None) if url_obj is not None else None
+        if isinstance(host, str) and host:
+            detail = f"{detail}@{host}"
+    return detail
+
+
 def _lookup_profile_gender(ctx: dict[str, Any]) -> str | None:
     """Read the user's PINNED gender from the taste profile (cross-session).
 
@@ -521,7 +550,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                     ctx.get("chat_id"),
                     {
                         "text_query": text_query,
-                        "category": ctx.get("vision_category"),
+                        # Prefer the LLM-supplied category, fall back to Vision's
+                        # (review P1-A 260522: stashing only vision_category
+                        # dropped an explicit category on pure-text turns).
+                        "category": args.get("category") or ctx.get("vision_category"),
                         "top_k": int(args.get("top_k") or 15),
                     },
                 )
@@ -596,28 +628,19 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
             )
     except Exception as exc:  # noqa: BLE001
-        # P1-6 (260521 V3 eval): surface the actual HTTP status code / target
-        # host when the underlying httpx call fails. The previous
-        # `pipeline_failed:HTTPStatusError` was indistinguishable across Modal
-        # /embed/text cold-start timeouts, PostgREST RPC 5xx, and Langfuse 4xx
-        # — operators couldn't tell what to fix. We pull `.response.status_code`
-        # / `.request.url.host` when available; anything missing degrades to
-        # the plain type name so behavior is otherwise unchanged.
-        detail = type(exc).__name__
-        status = getattr(exc, "status_code", None)
-        if status is None:
-            resp = getattr(exc, "response", None)
-            status = getattr(resp, "status_code", None)
-        if isinstance(status, int):
-            detail = f"{detail}:{status}"
-        req = getattr(exc, "request", None)
-        url_obj = getattr(req, "url", None)
-        host = getattr(url_obj, "host", None) if url_obj is not None else None
-        if isinstance(host, str) and host:
-            detail = f"{detail}@{host}"
-        logger.warning("[tool.search_products] pipeline raised: %s (%r)", detail, exc)
+        # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /
+        # PostgREST 5xx / Langfuse 4xx are distinguishable. Host is log-only
+        # (internal infra — security 260522). Shared helper avoids duplication.
+        logger.warning(
+            "[tool.search_products] pipeline raised: %s (%r)",
+            pipeline_exc_detail(exc, include_host=True),
+            exc,
+        )
         return SearchProductsResult(
-            ok=False, error=f"pipeline_failed:{detail}", candidates_count=0, top_candidates=[]
+            ok=False,
+            error=f"pipeline_failed:{pipeline_exc_detail(exc, include_host=False)}",
+            candidates_count=0,
+            top_candidates=[],
         )
 
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting

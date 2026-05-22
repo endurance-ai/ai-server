@@ -20,6 +20,11 @@ from __future__ import annotations
 from typing import Any
 
 # chat_id -> last successful search query (English, gender-pinned).
+# @MX:WARN: [AUTO] process-local + unbounded; written on EVERY successful search.
+# @MX:REASON: single-worker assumption (review P1-D 260522). Multi-worker: a refine
+#   landing on a different worker misses → falls back to ctx['text_query'] (quality
+#   degrade, not data leak). At scale move to Redis (chat_state already exists) and
+#   add eviction/TTL. Same pattern as pending_question.py.
 _LAST: dict[int, str] = {}
 
 

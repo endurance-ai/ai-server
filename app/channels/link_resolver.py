@@ -124,8 +124,13 @@ _DIRECT_IMAGE_HOSTS: tuple[str, ...] = (
 
 
 def _is_direct_image_host(host: str) -> bool:
+    # Exact match OR proper subdomain (dot-prefixed) only. The bare
+    # `endswith(d)` form was removed (review 260522): it let lookalike hosts
+    # like `evilpinimg.com` / `notcdninstagram.com` satisfy the allowlist.
+    # `_ssrf_guard_url` still runs downstream, but the allowlist itself must
+    # not be bypassable.
     h = host.lower()
-    return any(h == d or h.endswith("." + d) or h.endswith(d) for d in _DIRECT_IMAGE_HOSTS)
+    return any(h == d or h.endswith("." + d) for d in _DIRECT_IMAGE_HOSTS)
 
 
 def _cache_get(url: str) -> list[str] | None:
