@@ -35,6 +35,79 @@ logger = logging.getLogger(__name__)
 # EmbedProvider.embed_text directly — SPEC-SEARCH-V6-001).
 _TEXT_ONLY_SENTINEL = "https://text-only.invalid/none"
 
+# 260522 gender pin (SPEC-GENDER-PIN-001) — recognized gender tokens (English;
+# the LLM canonical-form is always English; Korean gender words never reach
+# here — the prompt + the English `suggested_query` keep text_query English).
+_GENDER_TOKENS = ("men", "women", "unisex")
+
+
+def _query_gender(text_query: str) -> str | None:
+    """Return the gender token present in `text_query` (whole-word), else None."""
+    tokens = text_query.lower().split()
+    for g in _GENDER_TOKENS:
+        if g in tokens:
+            return g
+    return None
+
+
+def _lookup_profile_gender(ctx: dict[str, Any]) -> str | None:
+    """Read the user's PINNED gender from the taste profile (cross-session).
+
+    Returns 'men'/'women'/'unisex' or None when never pinned. Best-effort —
+    any failure (no user_key, store error) → None (treated as "ask")."""
+    user_key = ctx.get("user_key")
+    if not user_key:
+        return None
+    try:
+        from app.infrastructure.memory.taste_profile import get_taste_store
+
+        profile = get_taste_store().get_or_create(user_key)
+        g = (getattr(profile, "gender", None) or "").strip().lower()
+        return g if g in _GENDER_TOKENS else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _send_gender_card(ctx: dict[str, Any], *, lang: str) -> bool:
+    """Send the one-time [남성][여성][상관없음] gender card. Returns True on send.
+
+    Callback shape `clarify:gender:{men|women|unisex}` is consumed inline by
+    `ingest` (SPEC-GENDER-PIN-001) — it pins the choice to taste_profile and
+    re-runs the pending search. Best-effort: any failure → False (caller then
+    falls back to a unisex search rather than dead-ending the turn)."""
+    chat_id = ctx.get("chat_id")
+    if chat_id is None:
+        return False
+    try:
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+        if lang == "ko":
+            prompt = "누가 입을 거야? 한 번만 알려주면 다음부터 딱 맞게 골라줄게 🐱"
+            buttons = [
+                [("👔 남성", "clarify:gender:men")],
+                [("👗 여성", "clarify:gender:women")],
+                [("🙆 상관없음", "clarify:gender:unisex")],
+            ]
+        else:
+            prompt = "Who's it for? Tell me once and I'll tune every pick from here 🐱"
+            buttons = [
+                [("👔 Men", "clarify:gender:men")],
+                [("👗 Women", "clarify:gender:women")],
+                [("🙆 Either", "clarify:gender:unisex")],
+            ]
+        if hasattr(adapter, "send_text_with_keyboard"):
+            await adapter.send_text_with_keyboard(chat_id, prompt, buttons)
+        elif hasattr(adapter, "send_text_with_buttons"):
+            flat = [b[0] for b in buttons]
+            await adapter.send_text_with_buttons(chat_id, prompt, flat)
+        else:
+            await adapter.send_text(chat_id, prompt)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[tool.search_products] gender card send failed: %r", exc)
+        return False
+
 
 def _is_real_image_url(value: Any) -> bool:
     """A usable, externally-resolved image URL (pin / og:image / R2).
@@ -331,13 +404,32 @@ async def run_text_only_search(
         color_family,
         max(1, int(top_k)),
     )
+    # 260522 per-step timing — the text-only path was opaquely slow (live: a
+    # single search_products took 29.7s with a Modal embed timeout+retry). Time
+    # each stage so the bottleneck is attributable from logs alone:
+    #   ⏱ embed  = Modal /embed/text (cold-start prone; cache hit ≈ 0ms)
+    #   ⏱ rpc    = search_step (PostgREST RPC + family gate)
+    #   ⏱ divers = diversify_step (brand/platform/content caps)
+    _t_embed0 = time.perf_counter()
     state.embedding = await EmbedProvider.embed_text(text_query)
+    _embed_ms = int((time.perf_counter() - _t_embed0) * 1000)
+
+    _t_rpc0 = time.perf_counter()
     state = await search_step(state)
+    _rpc_ms = int((time.perf_counter() - _t_rpc0) * 1000)
+
+    _t_div0 = time.perf_counter()
     state = await diversify_step(state)
+    _div_ms = int((time.perf_counter() - _t_div0) * 1000)
+
     logger.info(
-        "🔍 [text_search] done text_query=%r → final=%d",
+        "🔍 [text_search] done text_query=%r → final=%d · ⏱ embed=%dms rpc=%dms divers=%dms total=%dms",
         text_query[:120],
         len(state.final_candidates or []),
+        _embed_ms,
+        _rpc_ms,
+        _div_ms,
+        _embed_ms + _rpc_ms + _div_ms,
     )
     return list(state.final_candidates or [])
 
@@ -406,6 +498,45 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     if not text_query and not has_image:
         return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
 
+    # SPEC-GENDER-PIN-001 (260522) — gender resolution before searching.
+    # Priority: (1) per-request gender word the LLM put in text_query (e.g.
+    # user said "여자 걸로" → 'women') OVERRIDES everything for this search;
+    # (2) the user's PINNED taste_profile.gender (cross-session); (3) neither →
+    # for a pure-text search, ASK once via a gender card (store the args, end
+    # the turn — the clarify:gender callback re-runs this search). Image-pick
+    # turns never block on the card: gender comes from Vision, and a missing
+    # one falls back to 'unisex' so the pick flow is not interrupted.
+    if text_query:
+        explicit_gender = _query_gender(text_query)
+        if explicit_gender is None:
+            pinned = _lookup_profile_gender(ctx)
+            if pinned:
+                text_query = f"{text_query} {pinned}".strip()
+            elif not has_image:
+                # Unknown + never pinned + pure text → ask once. Stash the
+                # search args so the callback can resume without re-typing.
+                from app.agents import pending_gender
+
+                pending_gender.set_pending(
+                    ctx.get("chat_id"),
+                    {
+                        "text_query": text_query,
+                        "category": ctx.get("vision_category"),
+                        "top_k": int(args.get("top_k") or 15),
+                    },
+                )
+                sent = await _send_gender_card(ctx, lang=ctx.get("lang") or "en")
+                if sent:
+                    return SearchProductsResult(
+                        ok=False, error="awaiting_gender", candidates_count=0, top_candidates=[]
+                    )
+                # Card couldn't be sent → don't dead-end; fall back to unisex.
+                text_query = f"{text_query} unisex".strip()
+            else:
+                # Image path, no token, no pinned gender → unisex (no block).
+                text_query = f"{text_query} unisex".strip()
+        # else: explicit per-request gender already present → use verbatim.
+
     # Persist the LLM-supplied (typically English-translated) text_query into
     # ctx so a subsequent `refine_search` in the same turn / loop reuses the
     # translated form instead of the raw Korean user message that was seeded
@@ -414,6 +545,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # up a mixed-language string with degraded recall (live trace 2026-05-20).
     if text_query:
         ctx["text_query"] = text_query
+        # 260522 cross-turn: stash the final (English, gender-pinned) product
+        # query so a NEXT-TURN `refine_search` ("더 저렴하게 해줘") reuses THIS
+        # query instead of embedding the raw refinement instruction (which
+        # returned unrelated cheap junk — live trace 16:31). Stored only on the
+        # query path; the actual >0-result guard is irrelevant (a 0-result
+        # query is still the thing the user is refining).
+        try:
+            from app.agents.last_query import set_last_query
+
+            set_last_query(ctx.get("chat_id"), text_query)
+        except Exception:  # noqa: BLE001
+            pass
 
     top_k = int(args.get("top_k") or 15)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
@@ -453,9 +596,28 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[tool.search_products] pipeline raised: %r", exc)
+        # P1-6 (260521 V3 eval): surface the actual HTTP status code / target
+        # host when the underlying httpx call fails. The previous
+        # `pipeline_failed:HTTPStatusError` was indistinguishable across Modal
+        # /embed/text cold-start timeouts, PostgREST RPC 5xx, and Langfuse 4xx
+        # — operators couldn't tell what to fix. We pull `.response.status_code`
+        # / `.request.url.host` when available; anything missing degrades to
+        # the plain type name so behavior is otherwise unchanged.
+        detail = type(exc).__name__
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
+        if isinstance(status, int):
+            detail = f"{detail}:{status}"
+        req = getattr(exc, "request", None)
+        url_obj = getattr(req, "url", None)
+        host = getattr(url_obj, "host", None) if url_obj is not None else None
+        if isinstance(host, str) and host:
+            detail = f"{detail}@{host}"
+        logger.warning("[tool.search_products] pipeline raised: %s (%r)", detail, exc)
         return SearchProductsResult(
-            ok=False, error=f"pipeline_failed:{type(exc).__name__}", candidates_count=0, top_candidates=[]
+            ok=False, error=f"pipeline_failed:{detail}", candidates_count=0, top_candidates=[]
         )
 
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting

@@ -48,6 +48,13 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     # v6 RPC distance-tie 또는 refine cumulative merge 에서 동일 id 가 두 번
     # 들어와도 사용자에게 한 번만 노출. falsy id 는 bypass (graceful fallback).
     seen_ids: set[str] = set()
+    # 260522: content-level dedup. The catalog has the SAME product scraped under
+    # different product_ids (live: 'Rier t-shirt, fog ₩1,295,000' appeared as #4
+    # AND #5 — distinct ids, identical brand+name+price). The id-only guard let
+    # both through (drops_dup=0). Key on (brand, name, price) so visual dupes are
+    # collapsed regardless of id. Falsy/empty content → no content key (bypass,
+    # graceful — never drop an item we can't identify).
+    seen_content: set[tuple[str, str, str]] = set()
     out: list[dict] = []
     drops_brand = 0
     drops_platform = 0
@@ -59,6 +66,14 @@ async def diversify_service(state: PipelineState) -> PipelineState:
             drops_dup += 1
             continue
         brand = (c.get("brand") or "").lower()
+        # Content key: brand + normalized name + price. Only used when both
+        # brand and name are present (else it cannot reliably identify a dupe).
+        name_norm = " ".join(str(c.get("name") or "").lower().split())
+        price_key = str(c.get("price") or "")
+        content_key = (brand, name_norm, price_key) if (brand and name_norm) else None
+        if content_key is not None and content_key in seen_content:
+            drops_dup += 1
+            continue
         platform = (c.get("platform") or "").lower()
         if seen_brand.get(brand, 0) >= brand_cap:
             drops_brand += 1
@@ -69,6 +84,8 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         out.append(c)
         if pid:
             seen_ids.add(pid)
+        if content_key is not None:
+            seen_content.add(content_key)
         seen_brand[brand] = seen_brand.get(brand, 0) + 1
         seen_platform[platform] = seen_platform.get(platform, 0) + 1
         if len(out) >= target:

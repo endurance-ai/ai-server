@@ -70,4 +70,33 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> UpdateTasteResu
         logger.warning("[tool.update_taste] raised: %r", exc)
         return UpdateTasteResult(ok=False, error=f"store_failed:{type(exc).__name__}", applied=False)
 
+    # P1-5 (260521 V3 eval): emit `taste_update` event so observability matches
+    # the documented catalog (event_payloads.py #18). Best-effort — never fail
+    # the tool dispatch over an emit failure.
+    try:
+        from app.observability.conversation_log import emit
+
+        chat_id = ctx.get("chat_id")
+        if isinstance(chat_id, int):
+            brands_delta: dict[str, int] = {}
+            for b in args.get("brand_likes", []) or []:
+                brands_delta[str(b)] = brands_delta.get(str(b), 0) + 1
+            for b in args.get("brand_dislikes", []) or []:
+                brands_delta[str(b)] = brands_delta.get(str(b), 0) - 1
+            keywords_delta: dict[str, int] = {}
+            for k in args.get("keyword_likes", []) or []:
+                keywords_delta[str(k)] = keywords_delta.get(str(k), 0) + 1
+            for k in args.get("keyword_dislikes", []) or []:
+                keywords_delta[str(k)] = keywords_delta.get(str(k), 0) - 1
+            emit(
+                event_type="taste_update",
+                user_key=user_key,
+                chat_id=chat_id,
+                thread_id=ctx.get("thread_id"),
+                turn_no=None,
+                payload={"source": source, "brands_delta": brands_delta, "keywords_delta": keywords_delta},
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[tool.update_taste] taste_update emit best-effort failed: %r", exc)
+
     return UpdateTasteResult(ok=True, error=None, applied=True)

@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import ClassVar
 
 import httpx
@@ -63,19 +64,38 @@ class EmbedProvider:
         모델이 deterministic 이므로 동일 (model_ver, normalize_ver, text) → 동일
         벡터 보장. 캐시 lookup/put 실패는 fail-open (Modal 본 경로로 계속).
         """
+        # 260522 timing — separate cache-lookup time from Modal HTTP time so a
+        # slow text search is attributable (cache hit ≈ 0ms; miss = Modal call,
+        # cold-start prone). Live trace: a cold Modal /embed/text took ~19s and
+        # tripped the agent's per-tool timeout → retry → ~29s total.
+        _t_cache0 = time.perf_counter()
         cached = await embedding_cache.get_cached(text)
+        _cache_ms = int((time.perf_counter() - _t_cache0) * 1000)
         if cached is not None:
-            logger.info("🗃️  [embed_cache] hit text='%s' dim=%d", text[:60], len(cached))
+            logger.info(
+                "🗃️  [embed_cache] hit text='%s' dim=%d · ⏱ lookup=%dms",
+                text[:60],
+                len(cached),
+                _cache_ms,
+            )
             return cached
 
         client = cls.get_client()
+        _t_modal0 = time.perf_counter()
         resp = await client.post("/embed/text", json={"text": text})
         resp.raise_for_status()
         data = resp.json()
+        _modal_ms = int((time.perf_counter() - _t_modal0) * 1000)
         embedding = data.get("embedding")
         if not isinstance(embedding, list) or not embedding:
             raise ValueError(f"Modal /embed/text unexpected response keys={list(data.keys())}")
-        logger.info("🗃️  [embed_cache] miss → put text='%s' dim=%d", text[:60], len(embedding))
+        logger.info(
+            "🗃️  [embed_cache] miss → put text='%s' dim=%d · ⏱ lookup=%dms modal=%dms",
+            text[:60],
+            len(embedding),
+            _cache_ms,
+            _modal_ms,
+        )
         await embedding_cache.put_cached(text, embedding)
         return embedding
 

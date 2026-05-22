@@ -254,13 +254,16 @@ REGISTRY: dict[str, ToolMetadata] = {
             "unless explicitly khaki.\n"
             "  - Fit: one of 'fitted' / 'slim' / 'regular' / 'loose' / 'oversized' "
             "/ 'wide' / 'straight' / 'cropped'. Omit if unspecified.\n"
-            "  - Gender: 'men' / 'women' / 'unisex'. Omit if unspecified.\n"
+            "  - Gender: include 'men' / 'women' ONLY when there's an explicit signal (user text or "
+            "picked Vision item — never flip it). When NO signal exists, OMIT gender (the system "
+            "appends 'unisex' downstream). Never guess 'women'.\n"
             "  - Omit any field you don't have — never pad with vague words.\n"
-            "Examples:\n"
-            '  ✅ "grey fitted t-shirt men"\n'
-            '  ✅ "black wide jeans"\n'
-            '  ✅ "beige oversized hoodie women"\n'
-            '  ✅ "leather loafers men"\n'
+            "Examples (gender word ONLY when there's a signal; else omit → system adds unisex):\n"
+            '  ✅ "grey fitted t-shirt men"               (user said men)\n'
+            '  ✅ "black wide jeans"                       (no signal → omit; system → unisex)\n'
+            '  ✅ "beige oversized hoodie"                 (no signal → omit)\n'
+            '  ✅ "leather loafers men"                    (picked vision item said men)\n'
+            '  ❌ "black wide jeans women"                 (invented gender — no signal existed)\n'
             '  ❌ "Grey Fitted T-Shirt for Men"          (caps, preposition)\n'
             "  ❌ \"men's grey tee that's fitted\"          (possessive, clause)\n"
             '  ❌ "fitted grey t-shirt for men"           (wrong order)\n'
@@ -302,8 +305,15 @@ REGISTRY: dict[str, ToolMetadata] = {
     "ask_user_clarification": {
         "name": "ask_user_clarification",
         "description": (
-            "Send the user an inline-keyboard card asking to clarify intent on one axis "
-            "(category, fit, occasion, etc.). Use when the request is ambiguous."
+            "Send the user an inline-keyboard card asking to clarify intent on one axis. "
+            "`axis` MUST be EXACTLY one of these 6 strings (case-sensitive, no variants):\n"
+            "  - 'category_pick'              — when user didn't say what garment (top/bottom/outer/dress/shoes/bag)\n"
+            "  - 'formality'                  — casual vs business vs formal\n"
+            "  - 'fit'                        — slim/regular/oversized/etc\n"
+            "  - 'occasion'                   — daily/date/work/party/wedding/etc\n"
+            "  - 'subcategory_disambiguation' — narrowing within a category (e.g. shirt: oxford vs linen vs flannel)\n"
+            "  - 'generic_fallback'           — when none of the above fit (last resort)\n"
+            "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected."
         ),
         "args_typeddict": AskUserClarificationArgs,
         "result_typeddict": AskUserClarificationResult,
@@ -471,5 +481,20 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
                 args[key] = [stripped] if stripped else []
                 continue
             return False, f"bad_type: {key} must be list"
+
+    # P0-1 (260521 V3 eval): Literal-value enforcement for type-critical enum
+    # fields. The structural TypedDict check above accepts ANY string for
+    # `axis`, then the dispatcher returns `invalid_axis:gender` and the LLM
+    # often retries with the SAME invalid value (an info-poor reject loop).
+    # Reject here so the validator error message itself spells out the valid
+    # set — `bad_axis: 'gender' not in ['category_pick', ...]` — which the
+    # ReAct loop returns to the LLM as result_summary, enabling self-correction
+    # on the very next iter. Scoped to `ask_user_clarification` until other
+    # tools demand the same.
+    if tool_name == "ask_user_clarification" and "axis" in args:
+        valid_axes = ("category_pick", "formality", "fit", "occasion", "subcategory_disambiguation", "generic_fallback")
+        axis = args["axis"]
+        if not isinstance(axis, str) or axis not in valid_axes:
+            return False, f"bad_axis: {axis!r} not in {list(valid_axes)}"
 
     return True, None

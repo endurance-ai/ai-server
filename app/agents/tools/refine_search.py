@@ -87,12 +87,37 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)
 
-    # Reconstruct text_query from ctx + boost_keywords if present.
-    base_query = ctx.get("text_query") or ""
+    # Reconstruct text_query from the PREVIOUS search's product query + any
+    # boost keywords. 260522 fix: prefer the cross-turn stored query
+    # (`last_query`) over `ctx['text_query']` — on a refine turn the latter is
+    # the RAW refinement instruction ("더 저렴하게 해줘 20만원 이하로"), and
+    # embedding that returned semantically-unrelated cheap junk (bags/perfume).
+    # The stored query is the actual product query ('grey floral lace dress
+    # women'); a "cheaper" refine then just re-applies the price clamp on it.
+    base_query = ""
+    try:
+        from app.agents.last_query import get_last_query
+
+        base_query = get_last_query(ctx.get("chat_id")) or ""
+    except Exception:  # noqa: BLE001
+        base_query = ""
+    if not base_query:
+        base_query = ctx.get("text_query") or ""
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
     text_query = " ".join([base_query, *boost]).strip() or "fashion"
+
+    # 260522: persist the refined query so a CHAINED refine reuses it (and
+    # ctx so an in-turn respond/refine sees it). Mirrors search_products.
+    if text_query and text_query != "fashion":
+        ctx["text_query"] = text_query
+        try:
+            from app.agents.last_query import set_last_query
+
+            set_last_query(ctx.get("chat_id"), text_query)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Translate action → price clamp / drops.
     max_price = args.get("max_price")
@@ -125,9 +150,24 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=15,
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[tool.refine_search] pipeline raised: %r", exc)
+        # P1-6 (260521 V3 eval): same status-code + host enrichment as
+        # search_products. Operators need to tell Modal cold-start from
+        # PostgREST 5xx from Langfuse 4xx at a glance.
+        detail = type(exc).__name__
+        status = getattr(exc, "status_code", None)
+        if status is None:
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
+        if isinstance(status, int):
+            detail = f"{detail}:{status}"
+        req = getattr(exc, "request", None)
+        url_obj = getattr(req, "url", None)
+        host = getattr(url_obj, "host", None) if url_obj is not None else None
+        if isinstance(host, str) and host:
+            detail = f"{detail}@{host}"
+        logger.warning("[tool.refine_search] pipeline raised: %s (%r)", detail, exc)
         return RefineSearchResult(
-            ok=False, error=f"pipeline_failed:{type(exc).__name__}", candidates_count=0, top_candidates=[]
+            ok=False, error=f"pipeline_failed:{detail}", candidates_count=0, top_candidates=[]
         )
 
     # Apply exclude_keywords client-side as a thin filter (best-effort).

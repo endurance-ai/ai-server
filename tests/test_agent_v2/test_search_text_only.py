@@ -110,7 +110,10 @@ async def test_text_only_uses_search_step_not_run_pipeline(monkeypatch):
     assert res["top_candidates"][0]["title"] == "Leather Loafer"  # name → title fallback
     # Real text embedding injected (v6); sentinel set; never LLM/placeholder.
     assert calls["embedding_len"] == _TEXT_EMBED_DIM
-    assert calls["search_query"] == "leather loafers"
+    # 260522 gender pin: a genderless text_query gets 'unisex' appended
+    # deterministically (search_products._ensure_gender_token) so it never
+    # silently skews against the women-leaning catalog.
+    assert calls["search_query"] == "leather loafers unisex"
     assert calls["image_url"] == sp._TEXT_ONLY_SENTINEL
 
 
@@ -166,7 +169,8 @@ async def test_photo_pick_uses_real_ctx_image(monkeypatch):
     assert res["ok"] is True
     assert res["candidates_count"] == 1
     assert seen["image_url"] == real  # the REAL resolved url, not a placeholder
-    assert seen["search_query"] == "casual jacket"
+    # 260522 gender pin — genderless query → 'unisex' appended deterministically.
+    assert seen["search_query"] == "casual jacket unisex"
 
 
 # ── No query + no image → clean error (agent will ask the user) ────────────
