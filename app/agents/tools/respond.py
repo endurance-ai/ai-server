@@ -272,7 +272,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
             logger.debug("[tool.respond] pending_question state best-effort failed: %r", exc)
 
     # Source cards INTERNALLY from this turn's last search, rendered via the
-    # EXACT V1 card path (send_results._candidate_to_card + adapter.send_card).
+    # local _candidate_to_card + adapter.send_card path.
     # The LLM never provides cards.
     #
     # CRITICAL GATE: send cards ONLY when `search_products` / `refine_search`
@@ -437,7 +437,7 @@ def _set_trace_io(ctx: dict[str, Any], text: str, cards_sent: int) -> None:
 
 
 def _format_price(price: Any) -> str | None:
-    """Mirror `send_results._format_price` (₩-grouped, drops non-positive)."""
+    """₩-grouped price string; returns None for None/zero/non-numeric."""
     if price is None:
         return None
     try:
@@ -447,6 +447,89 @@ def _format_price(price: Any) -> str | None:
     if n <= 0:
         return None
     return f"₩{n:,}"
+
+
+def _html_escape(s: str) -> str:
+    """Minimal HTML escape for card captions (no quote=True needed here)."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _critique_buttons_for(idx: int, lang: str = "en", product_id: str | None = None) -> list[tuple[str, str]]:
+    from app.channels.implicit_feedback import click_callback_for
+
+    click_cb = click_callback_for(product_id) if product_id else f"crit:click:{idx}"
+    if lang == "ko":
+        return [
+            ("♥ 비슷한 거 더", f"crit:more:{idx}"),
+            ("✕ 다른 느낌", f"crit:less:{idx}"),
+            ("💰 더 저렴", f"crit:cheap:{idx}"),
+            ("👀 자세히", click_cb),
+        ]
+    return [
+        ("♥ More like this", f"crit:more:{idx}"),
+        ("✕ Less like this", f"crit:less:{idx}"),
+        ("💰 Cheaper", f"crit:cheap:{idx}"),
+        ("👀 View", click_cb),
+    ]
+
+
+def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> Any:
+    """Build a BotCard from a Candidate; returns None when image/product_url missing."""
+    from pydantic import ValidationError
+
+    from app.channels.schemas import BotCard
+
+    image_url = getattr(c, "image_url", None)
+    product_url = getattr(c, "product_url", None)
+    brand = (getattr(c, "brand", "") or "").strip()
+    name = (getattr(c, "name", "") or "").strip()
+    platform = (getattr(c, "platform", "") or "").strip()
+    subcategory = (getattr(c, "subcategory", "") or "").strip()
+    price_str = _format_price(getattr(c, "price", None))
+
+    if not image_url or not product_url:
+        return None
+
+    lines: list[str] = []
+    if name:
+        lines.append(f"<b>{_html_escape(name)}</b>")
+    meta_bits: list[str] = []
+    if brand:
+        meta_bits.append(_html_escape(brand))
+    if subcategory:
+        meta_bits.append(_html_escape(subcategory))
+    if meta_bits:
+        lines.append(" · ".join(meta_bits))
+    if price_str:
+        lines.append(f"💰 <b>{_html_escape(price_str)}</b>")
+    if platform and platform.lower() != brand.lower():
+        lines.append(f"🏬 {_html_escape(platform)}")
+
+    if lines:
+        caption = "\n".join(lines)
+    else:
+        caption = "추천 아이템" if lang == "ko" else "Recommended"
+    if len(caption) > 1024:
+        caption = caption[:1020] + "…"
+
+    if lang == "ko":
+        button_label = f"🛒  {brand}에서 보기" if brand else "🛒  지금 보러가기  →"
+    else:
+        button_label = f"🛒  Shop on {brand}" if brand else "🛒  Shop now  →"
+    if len(button_label) > 64:
+        button_label = "🛒  지금 보러가기  →" if lang == "ko" else "🛒  Shop now  →"
+
+    try:
+        return BotCard(
+            image_url=image_url,
+            caption=caption,
+            button_text=button_label,
+            button_url=product_url,
+            parse_mode="HTML",
+            critique_buttons=_critique_buttons_for(idx, lang=lang, product_id=str(getattr(c, "id", "") or "") or None),
+        )
+    except ValidationError:
+        return None
 
 
 def _build_summary(batch: list[Any], lang: str) -> str:
@@ -540,11 +623,9 @@ async def _fallback_send_cards(
 ) -> int:
     """Per-card `send_card` loop — the V1 path, used as the safety net when
     `send_media_group` is unavailable or fails atomically (so a search NEVER
-    yields zero cards). Reuses `send_results._candidate_to_card` verbatim."""
+    yields zero cards)."""
     if not hasattr(adapter, "send_card"):
         return 0
-    from app.graphs.nodes.send_results import _candidate_to_card
-
     sent = 0
     for c in batch:
         ident = _candidate_identity(c)

@@ -236,8 +236,8 @@ Respond in this exact JSON format (no markdown, no code fences):
       "colorHex": "#2E3336",
       "fit": "oversized",
       "colorFamily": "GREY",
-      "searchQuery": "oversized charcoal grey wool long coat men",
-      "searchQueryKo": "오버사이즈 차콜 그레이 울 롱 코트 남성",
+      "searchQuery": "oversized charcoal grey wool single-breasted mid-thigh coat men",
+      "searchQueryKo": "오버사이즈 차콜 그레이 울 싱글브레스티드 미드타이 코트 남성",
       "position": {{"top": 30, "left": 50}}
     }},
     {{
@@ -251,8 +251,8 @@ Respond in this exact JSON format (no markdown, no code fences):
       "colorHex": "#1A1A1A",
       "fit": "boxy",
       "colorFamily": "BLACK",
-      "searchQuery": "boxy black graphic print jersey t-shirt men",
-      "searchQueryKo": "박시 블랙 그래픽 프린트 저지 티셔츠 남성",
+      "searchQuery": "boxy black jersey crew-neck graphic-print t-shirt men",
+      "searchQueryKo": "박시 블랙 저지 크루넥 그래픽프린트 티셔츠 남성",
       "position": {{"top": 42, "left": 48}}
     }}
   ]
@@ -294,21 +294,24 @@ Rules:
 - Be specific about silhouette, fabric, and fit in item names
 
 searchQuery rules (CRITICAL for accurate product matching):
-- MUST include: fit (from enum), color (specific: "charcoal grey" not just "grey"), fabric (from enum), subcategory (from enum)
-- MUST include gender keyword: use "men" / "women" / "unisex" based on detectedGender. This prevents cross-gender results.
-- SHOULD include: length (long/cropped/midi), style detail (pleated/ribbed/distressed/raw hem)
-- Format: "[fit] [color] [fabric] [subcategory] [men/women]"
-- Example good: "oversized charcoal grey wool overcoat men"
-- Example bad: "blue jeans"
-- Think like someone searching on Google Shopping for this exact item
+- This text is embedded and compared against product IMAGES (FashionSigLIP, a fashion model trained on colors / materials / fine-details). DENSE, visually-grounded attribute queries match the right products far better than sparse ones.
+- MUST include: fit (from enum), color (specific: "charcoal grey" not just "grey"), fabric (from enum), subcategory (from enum), gender ("men" / "women" / "unisex" from detectedGender — prevents cross-gender results).
+- MUST add 2-3 of the MOST DISTINCTIVE visual details from this item's `detail` — the attributes that make THIS garment recognizable in a photo. Draw from: neckline (crew/v-neck/cowl/turtleneck), silhouette or cut (boxy/A-line/double-breasted/cropped/pleated), sleeve (short/puff/long), length (midi/knee-length/longline), pattern (graphic-print/striped/floral/ribbed/checked), construction (button-front/frayed-hem/raw-hem).
+- Visually-grounded ONLY: include attributes a model can SEE in the image. Do NOT add mood / occasion / season / brand-story words — they add noise and hurt image matching.
+- MEASURED, not maximal: pick the 2-3 attributes most defining of the item. Do NOT pile on every adjective — over-stuffing a niche item drifts the match away from the catalog.
+- Format: "[fit] [color] [fabric] [2-3 key visual details] [subcategory] [men/women]"
+- Example good: "oversized charcoal grey wool double-breasted knee-length coat men"
+- Example good: "slim navy denim five-pocket frayed-hem shorts men"
+- Example bad: "blue jeans" (too sparse) / "trendy cool summer party blue jeans" (mood/occasion noise)
+- Think like a fashion stylist describing this exact garment so an image search can find its twin
 
 searchQueryKo rules (CRITICAL for Korean product DB matching):
-- MUST be a Korean translation of searchQuery, using fashion industry Korean terms
-- MUST include: 핏(오버사이즈/레귤러/슬림/박시 등), 색상(차콜/블랙/네이비 등), 소재(울/코튼/데님/저지 등), 아이템명(코트/티셔츠/팬츠 등)
-- MUST include gender: 남성/여성/유니섹스
+- MUST be a Korean translation of searchQuery, carrying the SAME enriched attributes, using fashion industry Korean terms
+- MUST include: 핏(오버사이즈/레귤러/슬림/박시 등), 색상(차콜/블랙/네이비 등), 소재(울/코튼/데님/저지 등), 아이템명(코트/티셔츠/팬츠 등), 성별(남성/여성/유니섹스)
+- MUST add the SAME 2-3 핵심 시각 디테일 you put in searchQuery: 넥라인(크루넥/브이넥), 실루엣(박시/A라인/더블브레스티드/크롭), 소매(반팔/퍼프), 기장(미디/니렝스), 패턴(그래픽프린트/스트라이프/플로럴/리브드)
 - Use Korean fashion shopping terms (how Korean shoppers would search)
-- Format: "[핏] [색상] [소재] [아이템] [성별]"
-- Example: "오버사이즈 차콜 그레이 울 롱 코트 남성"
+- Format: "[핏] [색상] [소재] [핵심디테일 2~3개] [아이템] [성별]"
+- Example: "오버사이즈 차콜 그레이 울 더블브레스티드 니렝스 코트 남성"
 - Return valid JSON only"""
 
 

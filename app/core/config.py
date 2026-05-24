@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     MODAL_EMBED_TOKEN: str = ""  # Modal proxy auth (optional)
     MODAL_EMBED_TIMEOUT: float = 90.0  # cold start (모델 GPU 로드) 여유 — warm 시 1초 내
 
-    # LiteLLM Proxy — LLM 호출 (enhance_query, future rerank)
+    # LiteLLM Proxy — LLM 호출
     LITELLM_BASE_URL: str = "http://localhost:4000"
     LITELLM_MASTER_KEY: str = ""
 
@@ -44,16 +44,6 @@ class Settings(BaseSettings):
     SEARCH_BRAND_CAP: int = 2  # 다양성: 브랜드당 최대
     SEARCH_PLATFORM_CAP: int = 3  # 다양성: 플랫폼당 최대
     SEARCH_FINAL_LIMIT: int = 15  # 최종 응답 개수
-
-    # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
-    # 안전 롤아웃: 기본 False. 운영 검증 후 .env 에서 true 로 전환.
-    ENHANCE_QUERY_ENABLED: bool = False
-    ENHANCE_QUERY_MODEL: str = "gpt-4o-mini"
-    ENHANCE_QUERY_TIMEOUT_MS: int = 1500
-    ENHANCE_QUERY_MAX_TOKENS: int = 200
-    ENHANCE_QUERY_TEMPERATURE: float = 0.2
-    # embed + enhance_query 병렬 실행 (asyncio.gather). false 시 sequential.
-    PIPELINE_PARALLEL_ENABLED: bool = True
 
     # SPEC-MEMORY-001 — Postgres-backed memory persistence
     # ENV: deployment environment marker. "production" 일 때 fail-loud 정책 (REQ-MEMORY-FALLBACK-002).
@@ -87,7 +77,7 @@ class Settings(BaseSettings):
     SESSION_TTL_SECONDS: int = 1800
 
     # Routing-LLM (paraphrase/intent classification + critique parsing)
-    # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
+    # Cheap fast model — separate from VISION to keep cost lines clear.
     ROUTER_MODEL: str = "gpt-4o-mini"
     # 1500ms 는 LiteLLM proxy + OpenAI roundtrip (300~2000ms) 에 너무 빡빡해서
     # 거의 매 턴 timeout fallback 으로 빠짐. 3000ms 로 완화. fallback 자체는
@@ -119,10 +109,7 @@ class Settings(BaseSettings):
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
 
-    # SPEC-VISION-UNIFY-001 — Rich Vision schema (parity with kikoai/app analyze.ts)
-    # Master flag for the new rich-schema behavior. When false, falls back to
-    # the pre-migration minimal schema (REQ-VISION-COMPAT-005).
-    VISION_SCHEMA_V2: bool = True
+    # Vision — rich schema (SPEC-VISION-UNIFY-001; v2 is the only path)
     # Raised from 600 to fit the rich schema (REQ-VISION-UNIFY-003).
     VISION_MAX_TOKENS: int = 2500
     # Raised from 0.2 to match kikoai/app run-vision.ts (REQ-VISION-UNIFY-003).
@@ -135,20 +122,7 @@ class Settings(BaseSettings):
     # Extends ASK_CLARIFY_AMBIGUOUS_LABELS — applied to subcategory in v2.
     ASK_CLARIFY_AMBIGUOUS_SUBCATEGORIES: str = "item,clothing,thing,piece"
 
-    # SPEC-AGENTIC-CRITIQUE-001 — Self-critique loop ──────────────────────
-    SELF_CRITIQUE_ENABLED: bool = True
-    SELF_CRITIQUE_MAX_ITERATIONS: int = 2
-    SELF_CRITIQUE_THRESHOLD: float = 0.6
-    SELF_CRITIQUE_TIMEOUT_S: float = 30.0
-    SELF_CRITIQUE_FASTPATH_DROP_FILTERS: str = "min_price,max_price,exclude_keywords"
-    EVALUATOR_MODEL: str = "nova-lite"
-    EVALUATOR_MAX_TOKENS: int = 400
-    EVALUATOR_TEMPERATURE: float = 0.2
-    EVALUATOR_TIMEOUT_S: float = 8.0
-
     # SPEC-CLARIFY-CARDS-001 — Inline-keyboard clarify cards ──────────────
-    # 비활성 시 ask_clarify 는 본 SPEC 이전(자유 텍스트 LLM) 동작으로 회귀.
-    CLARIFY_CARDS_ENABLED: bool = True
     # 카드당 버튼 상한(skip 포함). 범위 [3, 8].
     CLARIFY_MAX_BUTTONS: int = 5
 
@@ -184,11 +158,8 @@ class Settings(BaseSettings):
     IMPLICIT_FB_REQUERY_WEIGHT: float = 0.5
 
     # SPEC-AGENT-V2-CLEANUP-001 — ReAct agent loop is now the PERMANENT, ONLY
-    # topology. The V1 (18-node legacy) graph and the AGENT_V2_REACT_ENABLED /
-    # AGENT_V3_* feature flags were removed; the ReAct ("V3") behavior is
-    # unconditional. AGENT_LLM_MODEL is the model ID (not a feature flag) and
-    # keeps a fail-closed empty-string safety net in llm_client, now
-    # unreachable via the default below.
+    # topology. The V1 (18-node legacy) graph and all feature flags were removed;
+    # the ReAct behavior is unconditional.
     # Max iterations per turn (REQ-AGENT-LOOP-ITERATION-001).
     AGENT_MAX_ITERATIONS: int = 6
     # Per-turn cumulative LLM token budget (REQ-AGENT-PERF-TURN-BUDGET-001).
@@ -214,14 +185,8 @@ class Settings(BaseSettings):
     # truncating a legit card batch (SPEC-AGENT-V2-REACT double-send fix).
     AGENT_RESPOND_TIMEOUT_S: float = 30.0
 
-    # SPEC-AGENT-V2-CLEANUP-001 — the four V3 enhancements (memory injection,
-    # Reflexion loop, proactive suggestion, cross-thread dislike memory) are now
-    # UNCONDITIONAL. The AGENT_V3_*_ENABLED flags were removed; only the
-    # memory-injection payload token cap remains as a tunable.
-    # Memory-injection payload token cap (char-approx ×4).
-    # Bumped 1500→3000 (2026-05-20) to widen the recent-turn digest so the
-    # ReAct agent has more room to reason about prior search/refine signals
-    # and recent user phrasing without exhausting the budget after 2-3 turns.
+    # SPEC-AGENT-V2-CLEANUP-001 — memory injection payload token cap (char-approx ×4).
+    # Bumped 1500→3000 (2026-05-20) to widen the recent-turn digest.
     AGENT_V3_MEMORY_MAX_TOKENS: int = 3000
 
     # SPEC-CHAT-STATE-REDIS-001 / REQ-CHAT-STATE-004 — single gate for 3환경
@@ -229,10 +194,6 @@ class Settings(BaseSettings):
     # points at the local docker-compose redis. Prod overrides via env
     # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
     REDIS_URL: str = "redis://localhost:6379/1"
-
-    @property
-    def self_critique_fastpath_drop_filters(self) -> list[str]:
-        return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]
 
     @property
     def ask_clarify_ambiguous_labels(self) -> list[str]:

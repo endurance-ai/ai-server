@@ -10,12 +10,10 @@ import app.graphs.nodes as nodes_pkg
 
 def test_node_inventory_matches_v2_topology():
     """SPEC-AGENT-V2-CLEANUP-001 — the V1-only node modules (critique_apply,
-    search, taste_update, respond) were deleted with the V1 topology.
-    evaluator + send_results are preserved (evaluator helpers wrap into
-    _reflexion.py; send_results._candidate_to_card is reused by tools/respond).
+    search, taste_update, respond, evaluator, send_results) were deleted with
+    the V1 topology.
 
-    Excludes private modules (`_adapter_ctx`, `_evaluator_models`,
-    `_first_touch`, `_trace`, `_evaluator_prompt`) and __init__.
+    Excludes private modules (`_adapter_ctx`, `_first_touch`, `_trace`) and __init__.
 
     SPEC-ONBOARD-LITE-001 — the onboarding card node modules
     (onboard_intro/mood/color/fit/pinterest, pinterest_ingest) were deleted
@@ -35,8 +33,6 @@ def test_node_inventory_matches_v2_topology():
             "pick_item",
             "ask_clarify",
             "apply_clarify",
-            "send_results",
-            "evaluator",
             # SPEC-AGENT-V2-REACT — ReAct agent node.
             "agent",
             # SPEC-ONBOARD-LITE-001 — lightweight first-touch intro node
@@ -58,8 +54,6 @@ def test_each_node_exposes_async_callable():
         "pick_item": "pick_item",
         "ask_clarify": "ask_clarify",
         "apply_clarify": "apply_clarify",
-        "send_results": "send_results",
-        "evaluator": "evaluator",
         "agent": "agent",
         "intro": "intro",
     }

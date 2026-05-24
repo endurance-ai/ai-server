@@ -19,7 +19,7 @@ from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState, WorkingState
 from app.infrastructure.memory.session import InMemorySessionStore, set_store
 from app.infrastructure.memory.taste_profile import InMemoryTasteProfileStore, set_taste_store
-from tests.conftest_graph import FakeAdapter, FakeCandidate
+from tests.conftest_graph import FakeAdapter
 
 
 # Override the package-level autouse truncate fixture so these tests do NOT
@@ -168,77 +168,10 @@ async def test_log_t14_pick_item_carousel_emits(adapter_ctx):
 # tool_call coverage.
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T17 — send_results → diversify_done + card_sent per card
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t17_send_results_emits_diversify_and_card_sent(adapter_ctx, monkeypatch):
-    from app.graphs.nodes.send_results import send_results
-
-    monkeypatch.setattr("app.core.config.settings.DEMO_MODE", False)
-
-    cands = [FakeCandidate(id=f"p-{i}") for i in range(3)]
-    s = _state(_msg(), candidates=cands)
-
-    # Adapter.send_card returns sequential message_ids (1001, 1002, 1003).
-    adapter_ctx.send_card_returns = True
-
-    with patch("app.graphs.nodes.send_results.emit") as m:
-        await send_results(s)
-
-    events = [c.kwargs.get("event_type") for c in m.call_args_list]
-    # exactly one diversify_done + 3 card_sent rows.
-    assert events.count("diversify_done") == 1
-    assert events.count("card_sent") == 3
-
-    # card_sent rows carry distinct source_message_id values (LOG-T09 dep).
-    card_sent_calls = [c for c in m.call_args_list if c.kwargs.get("event_type") == "card_sent"]
-    msg_ids = [c.kwargs["payload"]["source_message_id"] for c in card_sent_calls]
-    assert len(set(msg_ids)) == 3
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# LOG-T17 — implicit_feedback coexistence: card_sent (3) + card_impression (3)
-# ─────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_log_t17_implicit_fb_coexistence(adapter_ctx, monkeypatch):
-    """REQ-LOG-IMPLICIT-FB-COEXIST-001 — `card_sent` events DO NOT affect the
-    `ai.card_impression` write. Three cards → three card_sent emits AND three
-    log_impressions calls.
-    """
-    from app.graphs.nodes.send_results import send_results
-
-    monkeypatch.setattr("app.core.config.settings.DEMO_MODE", False)
-
-    impression_calls: list = []
-
-    async def _fake_log_impressions(chat_id, from_user_id, products):
-        impression_calls.append((chat_id, len(products)))
-        return len(products)
-
-    monkeypatch.setattr(
-        "app.channels.implicit_feedback.log_impressions",
-        _fake_log_impressions,
-    )
-
-    cands = [FakeCandidate(id=f"p-{i}") for i in range(3)]
-    s = _state(_msg(), candidates=cands)
-    adapter_ctx.send_card_returns = True
-
-    with patch("app.graphs.nodes.send_results.emit") as m:
-        await send_results(s)
-
-    card_sent_n = sum(1 for c in m.call_args_list if c.kwargs.get("event_type") == "card_sent")
-    assert card_sent_n == 3
-    # `card_impression` write (via log_impressions) ran exactly once with 3 products.
-    assert impression_calls == [(42, 3)]
-
-
-# SPEC-AGENT-V2-CLEANUP-001 — the LOG-T19 (respond), LOG-T20 (taste_update)
-# and LOG-T21 (critique_apply) per-node emit tests were removed: those V1
-# nodes were deleted with the V1 topology. The agent path emits bot_text /
-# taste_update / tool_call via the ReAct loop (tests/test_agent_v2/).
+# SPEC-AGENT-V2-CLEANUP-001 — the LOG-T17 send_results node tests were removed:
+# the unregistered V1 send_results node is deleted. Card delivery now runs via
+# respond tool's send_hybrid_batch / _fallback_send_cards (tests/test_agent_v2/).
+# The LOG-T19 (respond), LOG-T20 (taste_update) and LOG-T21 (critique_apply)
+# per-node emit tests were also removed: those V1 nodes were deleted with the
+# V1 topology. The agent path emits bot_text / taste_update / tool_call via
+# the ReAct loop (tests/test_agent_v2/).

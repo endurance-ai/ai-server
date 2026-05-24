@@ -1,10 +1,8 @@
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any
 
 from app.models.request import RecommendRequest
-
-EnhanceQueryStatus = Literal["ok", "fallback", "disabled", "skipped"]
 
 
 @dataclass
@@ -19,11 +17,6 @@ class PipelineState:
     embedding: list[float] | None = None
     raw_candidates: list[dict[str, Any]] = field(default_factory=list)
     final_candidates: list[dict[str, Any]] = field(default_factory=list)
-
-    # enhance_query (SPEC-PIPELINE-001) — status=="ok" 일 때만 enhanced_* 사용
-    enhanced_query: str | None = None
-    enhanced_query_ko: str | None = None
-    enhance_query_status: EnhanceQueryStatus = "disabled"
 
     # 측정
     counts: dict[str, int] = field(default_factory=dict)

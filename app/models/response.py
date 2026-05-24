@@ -13,8 +13,6 @@ class Candidate(BaseModel):
     platform: str | None = None
     subcategory: str | None = None
     score: float
-    dense_rank: int | None = Field(default=None, serialization_alias="denseRank")
-    sparse_rank: int | None = Field(default=None, serialization_alias="sparseRank")
 
     model_config = {"populate_by_name": True}
 

@@ -64,24 +64,23 @@ async def test_stale_click_no_db_no_taste(pg_pool_with_impressions, in_memory_ta
 
 def test_send_results_builds_four_critique_buttons():
     """REQ-FB-UX-001 — 4th 👀 button added per card with KO/EN labels."""
-    from app.graphs.nodes.send_results import (
-        CRIT_CLICK_EN,
-        CRIT_CLICK_KO,
-        _critique_buttons_for,
-    )
+    from app.agents.tools.respond import _critique_buttons_for
+
+    crit_click_en = "👀 View"
+    crit_click_ko = "👀 자세히"
 
     en = _critique_buttons_for(0, lang="en", product_id="p1")
     assert len(en) == 4
-    assert en[3][0] == CRIT_CLICK_EN
+    assert en[3][0] == crit_click_en
     assert en[3][1] == "crit:click:p1"
 
     ko = _critique_buttons_for(0, lang="ko", product_id="p1")
-    assert ko[3][0] == CRIT_CLICK_KO
+    assert ko[3][0] == crit_click_ko
     assert ko[3][1] == "crit:click:p1"
 
 
 def test_critique_buttons_callback_within_64_bytes():
-    from app.graphs.nodes.send_results import _critique_buttons_for
+    from app.agents.tools.respond import _critique_buttons_for
 
     long_id = "x" * 100
     buttons = _critique_buttons_for(0, lang="en", product_id=long_id)

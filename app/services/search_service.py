@@ -4,10 +4,8 @@ Search orchestration. PR2 (REQ-AI-002): the RPC name and param-dict
 construction live in app/infrastructure/repositories/search_repository.py —
 this service delegates both to SearchRepository.
 
-v6 embedding-first → query_text/enhance_query RPC path retired (module
-retained, dormant): enhance_query_step (SPEC-PIPELINE-001, flag-off by
-default) still runs in the pipeline but its output is no longer consumed for
-RPC params — search_products_v6 has no text param.
+v6 embedding-first — search_products_v6 has no text param; query_embedding
+is the sole ranking signal.
 
 The actual RPC invocation goes through the
 app.pipeline.search.SupabaseProvider.rpc monkeypatch seam (dispatched inside
@@ -41,11 +39,6 @@ async def search_service(state: PipelineState) -> PipelineState:
 
     req = state.request
     state.start("search")
-
-    # v6 embedding-first → query_text/enhance_query RPC path retired (module
-    # retained, dormant). search_products_v6 has no text param: query_embedding
-    # is the sole ranking signal, so enhance_query_step's output is no longer
-    # consumed here (the step still runs in the pipeline, just not fed to RPC).
 
     # REQ-AI-002: param mapping + RPC name owned solely by SearchRepository.
     # SPEC-SEARCH-V6-001 family gate: pass the real Vision/app item category;

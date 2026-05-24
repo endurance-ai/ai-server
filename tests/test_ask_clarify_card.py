@@ -1,6 +1,6 @@
 """SPEC-CLARIFY-CARDS-001 — ask_clarify 카드 vs 텍스트 분기 테스트.
 
-REQ-CLARIFY-CARD-001/002/003, REQ-CLARIFY-COMPAT-001/002.
+REQ-CLARIFY-CARD-001/002/003, REQ-CLARIFY-COMPAT-001.
 """
 
 from __future__ import annotations
@@ -64,37 +64,8 @@ async def test_card_path_when_axis_picked(store, adapter):
 
 
 @pytest.mark.asyncio
-async def test_card_skipped_when_flag_off(store, adapter, monkeypatch):
-    """REQ-CLARIFY-COMPAT-002 — CLARIFY_CARDS_ENABLED=false → 텍스트 폴백."""
-    monkeypatch.setattr("app.graphs.nodes.ask_clarify.settings.CLARIFY_CARDS_ENABLED", False)
-
-    import app.graphs.nodes.ask_clarify as ac
-
-    class _Boom:
-        async def ainvoke(self, *a, **k):
-            raise RuntimeError("stub")
-
-    monkeypatch.setattr(ac, "_llm", _Boom())
-
-    msg = make_msg()
-    state = WorkingState(message=msg, chat_id=42, vision_result=_vision(subcategory="", detected_gender=""))
-    await ask_clarify(state)
-
-    assert adapter.texts, "flag off 시 자유 텍스트 폴백"
-    assert not adapter.buttons
-
-
-@pytest.mark.asyncio
-async def test_card_falls_back_to_text_when_axis_none(store, adapter, monkeypatch):
-    """REQ-CLARIFY-COMPAT-001 — pick_clarify_axis=None → 텍스트 폴백."""
-    import app.graphs.nodes.ask_clarify as ac
-
-    class _Boom:
-        async def ainvoke(self, *a, **k):
-            raise RuntimeError("stub")
-
-    monkeypatch.setattr(ac, "_llm", _Boom())
-
+async def test_card_falls_back_to_text_when_axis_none(store, adapter):
+    """REQ-CLARIFY-COMPAT-001 — pick_clarify_axis=None → static 텍스트 폴백."""
     msg = make_msg()
     # vision_result=None → pick_clarify_axis 가 None 반환.
     state = WorkingState(message=msg, chat_id=42, vision_result=None)

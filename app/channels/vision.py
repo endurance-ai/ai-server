@@ -1,8 +1,7 @@
 """Vision extraction via LiteLLM proxy (GPT-4o-mini default).
 
 SPEC-VISION-UNIFY-001 — emits the rich `VisionResult` schema mirroring
-kikoai/app's `analyze.ts`. The legacy minimal schema is kept behind the
-`VISION_SCHEMA_V2` flag for one-flip rollback (REQ-VISION-COMPAT-005).
+kikoai/app's `analyze.ts`. The v2 schema is the only path.
 
 `extract()` always returns a `VisionResult` and never raises.
 """
@@ -27,22 +26,6 @@ from app.providers.llm import LLMProvider
 logger = logging.getLogger(__name__)
 
 _MAX_ITEMS = 4
-
-# Legacy minimal-schema prompt (used only when VISION_SCHEMA_V2=False).
-_LEGACY_SYSTEM_PROMPT = (
-    "You are a fashion vision tagger. Look at the provided photo and identify the "
-    "distinct fashion items the person is wearing or carrying (top, bottom, outerwear, "
-    "footwear, bag, hat, accessory, etc.). Respond with ONLY a single JSON object on "
-    "one line, no prose, no code fence. Schema: "
-    '{"items": [{"label": string, "description": string, "color": string, "keywords": [string]}]}. '
-    f"Return AT MOST {_MAX_ITEMS} items, ranked by visual prominence. "
-    "`label` is 2-4 word English noun phrase (e.g. 'white cotton t-shirt'). "
-    "`description` is 4-10 word English detail (e.g. 'round neck, short sleeve, slim fit'). "
-    "`color` is the dominant English color word for THAT item. "
-    "`keywords` is 3-8 lowercase English search keywords for THAT item only "
-    "(garment type, color, fit, fabric, style). Do NOT mix keywords across items. "
-    "Respond with English only."
-)
 
 
 # ── Pydantic v2 models — mirror kikoai/app's VisionAnalysisResult ──────────
@@ -141,13 +124,13 @@ def _fallback_result() -> VisionResult:
     )
 
 
-# ── Legacy-shape adapter (for VISION_SCHEMA_V2=False) ──────────────────────
-
-
 def _legacy_to_vision_result(legacy: dict) -> VisionResult:
-    """Adapt legacy {items:[{label,description,color,keywords}]} dict into a
-    VisionResult so callers always see the same return type. Used when
-    `VISION_SCHEMA_V2=False`.
+    """Adapt a legacy {items:[{label,description,color,keywords}]} dict into a
+    VisionResult so callers always see the same return type.
+
+    The legacy minimal-schema PROMPT was removed (v2 is the only path now), but
+    this coercion is still used by `app/graphs/nodes/vision.py` to normalize a
+    monkeypatched/legacy dict-shaped `extract` result (REQ-VISION-COMPAT-001).
     """
     raw_items = legacy.get("items") if isinstance(legacy, dict) else None
     if not isinstance(raw_items, list):
@@ -171,8 +154,8 @@ def _legacy_to_vision_result(legacy: dict) -> VisionResult:
                 name=label or "item",
                 detail=desc,
                 color=color,
-                # Legacy path doesn't produce searchQuery/Ko — leave empty so
-                # downstream fallbacks (keyword-based query) still work.
+                # Legacy dict has no searchQuery/Ko — leave empty so downstream
+                # keyword-based fallbacks still work.
                 searchQuery=kw_str,
                 searchQueryKo="",
             )
@@ -209,20 +192,13 @@ def _parse_json_relaxed(content: str) -> dict | None:
     return None
 
 
-def _build_messages(image_url_value: str, *, schema_v2: bool) -> list[dict[str, Any]]:
-    if schema_v2:
-        system_prompt = ANALYZE_SYSTEM_PROMPT
-        user_text = ANALYZE_USER_PROMPT
-    else:
-        system_prompt = _LEGACY_SYSTEM_PROMPT
-        user_text = "List every distinct fashion item in this photo as JSON only."
-
+def _build_messages(image_url_value: str) -> list[dict[str, Any]]:
     return [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": user_text},
+                {"type": "text", "text": ANALYZE_USER_PROMPT},
                 {"type": "image_url", "image_url": {"url": image_url_value}},
             ],
         },
@@ -277,21 +253,6 @@ def _log_v2(result: VisionResult, elapsed_ms: int) -> None:
         )
 
 
-def _log_legacy(result: VisionResult, elapsed_ms: int) -> None:
-    """Legacy log format when VISION_SCHEMA_V2=False (parity with pre-SPEC)."""
-    logger.info("👁️  [VISION] ✅ 완료 elapsed=%dms items=%d", elapsed_ms, len(result.items))
-    for i, it in enumerate(result.items):
-        num = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"][i] if i < 4 else f"{i + 1}."
-        kw_preview = it.searchQuery[:60]
-        logger.info(
-            "👁️  [VISION]   %s %s — %s [kw: %s]",
-            num,
-            it.name or "?",
-            (it.detail or "")[:60],
-            kw_preview,
-        )
-
-
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
@@ -300,8 +261,7 @@ async def extract(image: str | bytes) -> VisionResult:
     """Run the Vision LLM and return a `VisionResult`.
 
     Never raises — any failure path returns the documented fallback
-    (REQ-VISION-COMPAT-004). Schema is selected by `VISION_SCHEMA_V2`
-    (REQ-VISION-COMPAT-005).
+    (REQ-VISION-COMPAT-004).
     """
     if isinstance(image, bytes):
         b64 = base64.b64encode(image).decode("ascii")
@@ -309,19 +269,17 @@ async def extract(image: str | bytes) -> VisionResult:
     else:
         image_url_value = image
 
-    schema_v2 = bool(settings.VISION_SCHEMA_V2)
-    messages = _build_messages(image_url_value, schema_v2=schema_v2)
+    messages = _build_messages(image_url_value)
     src = "url" if isinstance(image, str) else f"bytes({len(image)}B)"
     logger.info(
-        "👁️  [VISION] 🚀 호출 시작 model=%s source=%s schema_v2=%s",
+        "👁️  [VISION] 🚀 호출 시작 model=%s source=%s",
         _model(),
         src,
-        schema_v2,
     )
 
     timeout_s = float(settings.VISION_TIMEOUT_S)
-    max_tokens = int(settings.VISION_MAX_TOKENS) if schema_v2 else 600
-    temperature = float(settings.VISION_TEMPERATURE) if schema_v2 else 0.2
+    max_tokens = int(settings.VISION_MAX_TOKENS)
+    temperature = float(settings.VISION_TEMPERATURE)
 
     t0 = time.perf_counter()
     try:
@@ -358,12 +316,8 @@ async def extract(image: str | bytes) -> VisionResult:
         )
         return _fallback_result()
 
-    if schema_v2:
-        result = _validate_v2(parsed)
-        _log_v2(result, elapsed_ms)
-    else:
-        result = _legacy_to_vision_result(parsed)
-        _log_legacy(result, elapsed_ms)
+    result = _validate_v2(parsed)
+    _log_v2(result, elapsed_ms)
     return result
 
 

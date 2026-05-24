@@ -5,8 +5,8 @@ from __future__ import annotations
 import inspect
 
 # SPEC-AGENT-V2-CLEANUP-001 — V1-only node entrypoints (critique_apply,
-# search, taste_update, respond) were deleted with the V1 topology. evaluator
-# + send_results are preserved (helpers reused by _reflexion / tools.respond).
+# search, taste_update, respond, evaluator, send_results) were deleted
+# with the V1 topology.
 NODE_FUNCS = [
     ("app.graphs.nodes.ingest", "ingest"),
     ("app.graphs.nodes.resolve_image", "resolve_image"),
@@ -14,8 +14,6 @@ NODE_FUNCS = [
     ("app.graphs.nodes.pick_item", "pick_item"),
     ("app.graphs.nodes.ask_clarify", "ask_clarify"),
     ("app.graphs.nodes.apply_clarify", "apply_clarify"),
-    ("app.graphs.nodes.evaluator", "evaluator"),
-    ("app.graphs.nodes.send_results", "send_results"),
 ]
 
 

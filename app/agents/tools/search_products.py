@@ -183,8 +183,6 @@ def _to_card_candidate(cand: Any) -> Any:
             platform=cand.get("platform"),
             subcategory=cand.get("subcategory"),
             score=float(1.0 - cand.get("distance", 1.0)),
-            dense_rank=None,
-            sparse_rank=None,
         )
     except Exception:  # noqa: BLE001
         return cand

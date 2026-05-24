@@ -175,7 +175,6 @@ class TestExtractParameters:
             return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
 
         monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _capture)
-        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
         monkeypatch.setattr(settings, "VISION_MAX_TOKENS", 2500)
         monkeypatch.setattr(settings, "VISION_TEMPERATURE", 0.3)
 
@@ -184,46 +183,6 @@ class TestExtractParameters:
         assert captured["temperature"] == 0.3
         # Verify the rich system prompt is used.
         assert "isApparel" in captured["system"]
-
-
-# ── REQ-VISION-COMPAT-005 — flag rollback to legacy schema ─────────────────
-
-
-class TestSchemaV2Flag:
-    @pytest.mark.asyncio
-    async def test_v2_off_uses_legacy_prompt_and_params(self, monkeypatch):
-        captured = {}
-
-        async def _capture(*, model, messages, temperature, max_tokens):
-            captured["temperature"] = temperature
-            captured["max_tokens"] = max_tokens
-            captured["system"] = messages[0]["content"]
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": (
-                                '{"items": [{"label":"white tee",'
-                                '"description":"crew slim","color":"white","keywords":["tee","white"]}]}'
-                            )
-                        }
-                    }
-                ]
-            }
-
-        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _capture)
-        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", False)
-
-        result = await extract("https://example.com/x.jpg")
-        assert isinstance(result, VisionResult)
-        # Legacy path: temperature=0.2, max_tokens=600 (per the legacy behavior).
-        assert captured["temperature"] == 0.2
-        assert captured["max_tokens"] == 600
-        # Legacy system prompt does NOT contain `isApparel`.
-        assert "isApparel" not in captured["system"]
-        # Legacy result still adapts to VisionResult — searchQueryKo empty.
-        assert result.items
-        assert result.items[0].searchQueryKo == ""
 
 
 # ── REQ-VISION-WEAKVISION-001 — 5 rules ────────────────────────────────────

@@ -77,15 +77,3 @@ def patch_rpc(monkeypatch):
         return cap
 
     return _install
-
-
-@pytest.fixture(autouse=True)
-def _enhance_disabled(monkeypatch):
-    """Deterministic: force ENHANCE_QUERY_ENABLED=False for the whole net so
-    no LLM call ever happens and query_text falls back to raw (search_query_ko
-    or search_query). Individual tests may flip parallel/enhance explicitly.
-    """
-    from app.core.config import settings as app_settings
-
-    monkeypatch.setattr(app_settings, "ENHANCE_QUERY_ENABLED", False)
-    yield

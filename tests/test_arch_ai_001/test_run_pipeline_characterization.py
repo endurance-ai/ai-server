@@ -1,22 +1,16 @@
 """Net (1) -- run_pipeline end-to-end response snapshot
 (v6-migrated by SPEC-SEARCH-V6-001).
 
-Full path: run_pipeline -> embed (fixed vector) -> enhance_query (disabled)
--> v6 search RPC (fixed hand-authored rows) -> diversify -> RecommendResponse.
+Full path: run_pipeline -> embed (fixed vector) -> v6 search RPC (fixed
+hand-authored rows) -> diversify -> RecommendResponse.
 
 v6 rows carry `distance` (cosine, ASC=better) + `degraded`; the runner maps
-score = 1.0 - distance and sets dense_rank/sparse_rank = None. The rows below
-set distance = 1.0 - score so the locked `score` golden values are preserved
-verbatim (the v5 score-equivalence subject is retired with SPEC basis; the
-SAME end-to-end snapshot guard is preserved against v6). diversify is
-order-preserving and never reads score/distance, so the brand/platform cap
-survivor logic is byte-identical — only the rank fields change (-> None).
+score = 1.0 - distance. The rows below set distance = 1.0 - score so the
+locked `score` golden values are preserved verbatim.
 
-Locks resp.item_id, resp.results (ordered (id,brand,score,dense_rank,
-sparse_rank) tuples), and the full resp.counts dict. resp.latency_ms VALUES
-are wall-clock (non-deterministic) -> only its key SET is asserted.
-
-Also locks PIPELINE_PARALLEL_ENABLED True vs False equivalence.
+Locks resp.item_id, resp.results (ordered (id,brand,score) tuples), and the
+full resp.counts dict. resp.latency_ms VALUES are wall-clock (non-deterministic)
+-> only its key SET is asserted.
 """
 
 from __future__ import annotations
@@ -32,7 +26,7 @@ from app.pipeline.runner import run_pipeline
 # = 1.0 - default(1.0) = 0.0. One row (r9) omits `brand` -> "".
 # v6 shape: distance (= 1.0 - target_score) + degraded; no score/ranks.
 def _rows() -> list[dict]:
-    def mk(i, brand, platform, score, dense, sparse, *, no_score=False, no_brand=False):
+    def mk(i, brand, platform, score, *, no_score=False, no_brand=False):
         d: dict = {
             "id": f"p{i}",
             "name": f"Item {i}",
@@ -52,20 +46,20 @@ def _rows() -> list[dict]:
         return d
 
     return [
-        mk(0, "uniqlo", "shop", 0.95, 1, 1),
-        mk(1, "uniqlo", "shop", 0.94, 2, 2),
-        mk(2, "uniqlo", "shop", 0.93, 3, 3),  # 3rd uniqlo -> brand cap 2 drops
-        mk(3, "cos", "shop", 0.92, 4, None),
-        mk(4, "cos", "market", 0.91, None, 4),
-        mk(5, "zara", "market", 0.90, 5, 5),
-        mk(6, "zara", "web", 0.89, 6, 6),
-        mk(7, "musinsa", "web", 0.0, 7, 7, no_score=True),  # score omitted
-        mk(8, "musinsa", "web", 0.87, 8, 8),
-        mk(9, "", "shop", 0.86, 9, 9, no_brand=True),  # brand key omitted
-        mk(10, "cos", "market", 0.85, 10, 10),
-        mk(11, "zara", "web", 0.84, 11, 11),
-        mk(12, "uniqlo", "market", 0.83, 12, 12),
-        mk(13, "musinsa", "shop", 0.82, 13, 13),
+        mk(0, "uniqlo", "shop", 0.95),
+        mk(1, "uniqlo", "shop", 0.94),
+        mk(2, "uniqlo", "shop", 0.93),  # 3rd uniqlo -> brand cap 2 drops
+        mk(3, "cos", "shop", 0.92),
+        mk(4, "cos", "market", 0.91),
+        mk(5, "zara", "market", 0.90),
+        mk(6, "zara", "web", 0.89),
+        mk(7, "musinsa", "web", 0.0, no_score=True),  # score omitted
+        mk(8, "musinsa", "web", 0.87),
+        mk(9, "", "shop", 0.86, no_brand=True),  # brand key omitted
+        mk(10, "cos", "market", 0.85),
+        mk(11, "zara", "web", 0.84),
+        mk(12, "uniqlo", "market", 0.83),
+        mk(13, "musinsa", "shop", 0.82),
     ]
 
 
@@ -92,7 +86,7 @@ def _req(
 
 
 def _tuples(resp):
-    return [(c.id, c.brand, c.score, c.dense_rank, c.sparse_rank) for c in resp.results]
+    return [(c.id, c.brand, c.score) for c in resp.results]
 
 
 # Expected diversify trace (brand_cap=2, platform_cap=3, target by tolerance):
@@ -111,17 +105,15 @@ def _tuples(resp):
 #  p12 uniqlo/mkt  DROP brand cap (uniqlo>=2)
 #  p13 musinsa/shp DROP brand cap (musinsa>=2)
 #  -> survivors: p0,p1,p3,p4,p5,p6,p7,p8  (8 rows; target 15 not reached)
-# v6: dense_rank/sparse_rank are always None (runner sets them None); score
-# is preserved (distance = 1.0 - score round-trips exactly).
 _EXPECTED_BASE = [
-    ("p0", "uniqlo", 0.95, None, None),
-    ("p1", "uniqlo", 0.94, None, None),
-    ("p3", "cos", 0.92, None, None),
-    ("p4", "cos", 0.91, None, None),
-    ("p5", "zara", 0.90, None, None),
-    ("p6", "zara", 0.89, None, None),
-    ("p7", "musinsa", 0.0, None, None),
-    ("p8", "musinsa", 0.87, None, None),
+    ("p0", "uniqlo", 0.95),
+    ("p1", "uniqlo", 0.94),
+    ("p3", "cos", 0.92),
+    ("p4", "cos", 0.91),
+    ("p5", "zara", 0.90),
+    ("p6", "zara", 0.89),
+    ("p7", "musinsa", 0.0),
+    ("p8", "musinsa", 0.87),
 ]
 _EXPECTED_COUNTS_BASE = {"raw": 14, "after_diversify": 8, "final": 8}
 
@@ -135,7 +127,7 @@ async def test_characterize_run_pipeline_tolerance(fixed_embed, patch_rpc, toler
     assert _tuples(resp) == _EXPECTED_BASE
     assert resp.counts == _EXPECTED_COUNTS_BASE
     # latency_ms: keys present, values non-deterministic -> assert key set only.
-    assert set(resp.latency_ms.keys()) == {"embed", "enhance_query", "search", "diversify"}
+    assert set(resp.latency_ms.keys()) == {"embed", "search", "diversify"}
 
 
 @pytest.mark.parametrize("final_limit", [None, 5])
@@ -171,34 +163,14 @@ async def test_characterize_run_pipeline_brand_filter(fixed_embed, patch_rpc, br
         ids = [t[0] for t in tuples]
         assert ids == ["p0", "p1", "p2", "p4", "p5", "p6", "p7", "p8", "p10"]
         assert tuples == [
-            ("p0", "uniqlo", 0.95, None, None),
-            ("p1", "uniqlo", 0.94, None, None),
-            ("p2", "uniqlo", 0.93, None, None),
-            ("p4", "cos", 0.91, None, None),
-            ("p5", "zara", 0.90, None, None),
-            ("p6", "zara", 0.89, None, None),
-            ("p7", "musinsa", 0.0, None, None),
-            ("p8", "musinsa", 0.87, None, None),
-            ("p10", "cos", 0.85, None, None),
+            ("p0", "uniqlo", 0.95),
+            ("p1", "uniqlo", 0.94),
+            ("p2", "uniqlo", 0.93),
+            ("p4", "cos", 0.91),
+            ("p5", "zara", 0.90),
+            ("p6", "zara", 0.89),
+            ("p7", "musinsa", 0.0),
+            ("p8", "musinsa", 0.87),
+            ("p10", "cos", 0.85),
         ]
         assert resp.counts == {"raw": 14, "after_diversify": 9, "final": 9}
-
-
-async def test_characterize_run_pipeline_parallel_equivalence(fixed_embed, patch_rpc, monkeypatch):
-    """PIPELINE_PARALLEL_ENABLED True vs False -> byte-identical response."""
-    from app.core.config import settings as app_settings
-
-    patch_rpc(_rows())
-    monkeypatch.setattr(app_settings, "PIPELINE_PARALLEL_ENABLED", True)
-    resp_par = await run_pipeline(_req(tolerance=0.5))
-
-    patch_rpc(_rows())
-    monkeypatch.setattr(app_settings, "PIPELINE_PARALLEL_ENABLED", False)
-    resp_seq = await run_pipeline(_req(tolerance=0.5))
-
-    assert resp_par.item_id == resp_seq.item_id
-    assert _tuples(resp_par) == _tuples(resp_seq)
-    assert resp_par.counts == resp_seq.counts
-    # And both equal the locked golden.
-    assert _tuples(resp_par) == _EXPECTED_BASE
-    assert resp_par.counts == _EXPECTED_COUNTS_BASE

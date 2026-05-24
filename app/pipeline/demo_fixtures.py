@@ -32,8 +32,6 @@ def _c(
         platform=platform,
         subcategory="t-shirt",
         score=score,
-        dense_rank=None,
-        sparse_rank=None,
     )
 
 

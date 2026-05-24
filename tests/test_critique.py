@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import pytest
-
 from app.channels import critique
 
 
@@ -60,15 +58,4 @@ def test_callback_no_price_yields_no_max_price():
     assert d.max_price is None
 
 
-@pytest.mark.asyncio
-async def test_parse_text_falls_back_when_router_disabled(monkeypatch):
-    monkeypatch.setattr(critique.settings, "ROUTER_LLM_ENABLED", False)
-    d = await critique.parse_text("less denim, in beige", [])
-    assert d.op == "free_text"
-    assert d.extra_intent and "less denim" in d.extra_intent
-
-
-@pytest.mark.asyncio
-async def test_parse_text_empty_input_is_noop():
-    d = await critique.parse_text("   ", [])
-    assert d.op == "noop"
+# parse_text (LLM-backed free-text critique) was removed — no live callers.

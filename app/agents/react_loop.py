@@ -551,75 +551,6 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
     return "\n".join(parts)
 
 
-# SPEC-AGENT-V3-REACT Gap2 — per-turn Reflexion bound (REQ-AGENT-V3-REFLEX-BOUND-001).
-_V3_REFLEXION_COUNT_KEY = "_v3_reflexion_count"
-
-
-async def _maybe_reflexion(
-    state: WorkingState, sess: Any, ctx: dict[str, Any], turn_deadline: float
-) -> dict[str, Any] | None:
-    """Run one bounded Reflexion evaluation. Returns the `_quality` dict to
-    merge into the ToolMessage, or None when skipped (cap reached / deadline /
-    error). NEVER mutates `history` or consumes a ReAct iteration.
-
-    @MX:WARN: [AUTO] The evaluator call MUST be wrapped in
-      asyncio.wait_for(timeout=remaining turn budget). Pre-check is
-      insufficient — EVALUATOR_TIMEOUT_S (8s) may exceed the residual budget,
-      so cancel-on-overrun is normative (REQ-AGENT-V3-REFLEX-DEADLINE-001).
-    @MX:REASON: a non-cancelled slow evaluator overruns turn_deadline and the
-      inherited p95<8s budget; the wait_for wrap mechanically bounds it.
-    @MX:SPEC: SPEC-AGENT-V3-REACT
-    """
-    # Bound: per-turn evaluator-call cap = SELF_CRITIQUE_MAX_ITERATIONS.
-    max_calls = max(0, int(settings.SELF_CRITIQUE_MAX_ITERATIONS))
-    count = int(ctx.get(_V3_REFLEXION_COUNT_KEY, 0))
-    if count >= max_calls:
-        return None
-
-    # Residual-budget timeout wrap (REQ-AGENT-V3-REFLEX-DEADLINE-001, D2). The
-    # pre-check alone is insufficient; the wait_for cancels an overrunning
-    # evaluator at the residual boundary (NOT at EVALUATOR_TIMEOUT_S).
-    remaining = max(0.0, turn_deadline - time.monotonic())
-    if remaining <= 0.0:
-        return {"skipped": True, "reason": "deadline"}
-
-    ctx[_V3_REFLEXION_COUNT_KEY] = count + 1
-    try:
-        from app.agents._reflexion import evaluate_search_quality
-
-        quality = await asyncio.wait_for(evaluate_search_quality(state, sess, ctx), timeout=remaining)
-        # P1-5 (260521 V3 eval): emit `evaluator_run` so the catalog event
-        # actually appears in `ai.log_conversation_event`. Without this the
-        # only Reflexion signal was a single 🔬 server log line — not
-        # queryable, not bound to a Langfuse trace from the PG side.
-        try:
-            from app.infrastructure.memory.taste_profile import user_key_for
-            from app.observability.conversation_log import emit
-
-            emit(
-                event_type="evaluator_run",
-                user_key=user_key_for(state.from_user_id, state.chat_id),
-                chat_id=state.chat_id,
-                thread_id=state.thread_id,
-                turn_no=ctx[_V3_REFLEXION_COUNT_KEY],
-                payload={
-                    "iteration_no": ctx[_V3_REFLEXION_COUNT_KEY],
-                    "score": float(quality.get("score", 1.0)) if isinstance(quality, dict) else 1.0,
-                    "retry_decision": str(quality.get("reason", ""))[:200] if isinstance(quality, dict) else "",
-                    "exhausted": False,
-                },
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("[agent_v3] evaluator_run emit best-effort failed: %r", exc)
-        return quality
-    except TimeoutError:
-        logger.warning("[agent_v3] reflexion cancelled at residual budget boundary")
-        return {"skipped": True, "reason": "deadline"}
-    except Exception as exc:  # noqa: BLE001 — fail-open: never break the loop
-        logger.warning("[agent_v3] reflexion raised, fail-open: %r", exc)
-        return None
-
-
 async def _fallback_respond(
     state: WorkingState,
     sess: Any,
@@ -1137,42 +1068,6 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "result_summary": history_entry["result_summary"],
             },
         )
-
-        # ── SPEC-AGENT-V2-CLEANUP-001 — Reflexion in-loop evaluation (ALWAYS) ─
-        # tool ∈ {search_products, refine_search} & result.ok → wrap the
-        # existing evaluator helper, merge a `_quality` marker into the
-        # ToolMessage the LLM sees next so it can AUTONOMOUSLY decide refine
-        # vs respond (the agent never forces a refine).
-        #
-        # Invariants (REQ-AGENT-V3-REFLEX-BOUND-001):
-        #  - per-turn ctx counter `_v3_reflexion_count` < SELF_CRITIQUE_MAX_ITERATIONS
-        #  - evaluator call does NOT touch `history` / `tool_call_history`
-        #  - evaluator call does NOT consume a ReAct iteration (in-dispatch
-        #    side call) → infinite-loop guard unaffected
-        # NARROW SCOPE (2026-05-20): Reflexion 이 매 성공 검색에 발동해 false-positive
-        # refine 사이클을 양산하던 문제 (사용자가 ma-1 카키 검색 → 유효한 MA-1 결과
-        # 받았는데 evaluator LLM 이 색이 sage/olive 라 score=0.0 → 헛 refine →
-        # iter cap 도달 → exhaust). 진짜 가치 있는 케이스는 "0건 반환" 같은 명백한
-        # 실패뿐이므로 그때만 발동시킨다. evaluator 자체에 empty-result fastpath
-        # 가 이미 있어 LLM 호출도 안 함 → 비용/지연 무료.
-        _reflexion_eligible = (
-            tool_name in ("search_products", "refine_search")
-            and isinstance(result, dict)
-            and result.get("ok")
-            and int(result.get("candidates_count") or 0) == 0
-        )
-        if _reflexion_eligible:
-            quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
-            if quality is not None:
-                result = {**result, "_quality": quality}
-                if quality.get("skipped") and quality.get("reason") == "deadline":
-                    logger.info("🔬 [v3:reflexion] skip · deadline (residual≤0)")
-                else:
-                    _score = quality.get("score")
-                    _decision = "refine" if quality.get("retry_suggested") else "accept"
-                    logger.info("🔬 [v3:reflexion] eval score=%s → %s", _score, _decision)
-            else:
-                logger.info("🔬 [v3:reflexion] skip · cap/error")
 
         # Termination check (REQ-AGENT-LOOP-TERMINATION-001).
         if REGISTRY[tool_name]["terminates_loop"]:

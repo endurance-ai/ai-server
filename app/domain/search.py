@@ -27,7 +27,6 @@ class SearchCandidate:
       brand     -> row.get("brand", "")        (absent key -> "")
       name      -> row.get("name", "")
       score     -> float(row.get("score", 0.0))
-      *_rank    -> row.get(...) (None passthrough)
     """
 
     id: str
@@ -39,8 +38,6 @@ class SearchCandidate:
     platform: str | None
     subcategory: str | None
     score: float
-    dense_rank: int | None
-    sparse_rank: int | None
 
 
 def search_candidate_from_row(row: RpcRow) -> SearchCandidate:
@@ -56,8 +53,6 @@ def search_candidate_from_row(row: RpcRow) -> SearchCandidate:
         platform=row.get("platform"),
         subcategory=row.get("subcategory"),
         score=float(row.get("score", 0.0)),
-        dense_rank=row.get("dense_rank"),
-        sparse_rank=row.get("sparse_rank"),
     )
 
 
