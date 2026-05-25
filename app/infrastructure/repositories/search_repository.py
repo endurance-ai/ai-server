@@ -16,8 +16,8 @@ locked param snapshot — is preserved against v6).
 
 Patch-seam preservation: the RPC is dispatched through DatabaseService
 (SPEC-ARCH-AI-001 PR1 DI seam). DatabaseService resolves the
-`SupabaseProvider` CLASS attribute at call time; the existing monkeypatch
-seam (`app.pipeline.search.SupabaseProvider.rpc`) mutates that same shared
+`DatabaseProvider` CLASS attribute at call time; the existing monkeypatch
+seam (`app.pipeline.search.DatabaseProvider.rpc`) mutates that same shared
 class object, so the characterization net and
 tests/test_pipeline_with_enhance.py keep intercepting.
 """
@@ -103,9 +103,9 @@ class SearchRepository:
 
         Dispatched through the SPEC-mandated DatabaseService DI seam
         (review P1-b: previously DatabaseService was exported but never
-        wired). DatabaseService resolves the SupabaseProvider class attribute
+        wired). DatabaseService resolves the DatabaseProvider class attribute
         at call time; the monkeypatch seam
-        `app.pipeline.search.SupabaseProvider.rpc` mutates that same shared
+        `app.pipeline.search.DatabaseProvider.rpc` mutates that same shared
         class object, so interception stays byte-identical.
         """
         from app.services.database_service import DatabaseService

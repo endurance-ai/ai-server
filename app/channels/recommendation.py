@@ -35,7 +35,7 @@ class ChannelRecommendationRequest:
     service tomorrow).
 
     Critique fields (exclude_*, boost_keywords, max_price, min_price) are
-    applied Python-side post-RPC — no Supabase function signature change.
+    applied Python-side post-RPC — no DB function signature change.
     """
 
     image_url: str

@@ -30,7 +30,7 @@ from app.infrastructure.memory.taste_profile import (
 from app.infrastructure.memory.taste_profile_pg import PostgresTasteProfileStore
 from app.observability.langfuse import flush as langfuse_flush
 from app.providers import db_pool
-from app.providers.database import SupabaseProvider
+from app.providers.database import DatabaseProvider
 from app.providers.embedding import EmbedProvider
 from app.providers.llm import LLMProvider
 
@@ -47,7 +47,7 @@ logging.getLogger("app").setLevel(logging.DEBUG)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Startup — 비동기 클라이언트 워밍업으로 첫 요청 race condition 회피
     if settings.DB_URL and settings.DB_TOKEN:
-        await SupabaseProvider.get_client()
+        await DatabaseProvider.get_client()
 
     # SPEC-MEMORY-001 — choose memory backend before factory injection
     await _select_memory_backend()
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await db_pool.close_pool()
     await reset_adapter()
     await link_resolver.aclose()
-    await SupabaseProvider.close()
+    await DatabaseProvider.close()
     await EmbedProvider.close()
     await LLMProvider.close()
     # SPEC-CHAT-STATE-REDIS-001 — close the chat-state redis pool. Fail-open.

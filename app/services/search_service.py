@@ -10,7 +10,7 @@ default) still runs in the pipeline but its output is no longer consumed for
 RPC params — search_products_v6 has no text param.
 
 The actual RPC invocation goes through the
-app.pipeline.search.SupabaseProvider.rpc monkeypatch seam (dispatched inside
+app.pipeline.search.DatabaseProvider.rpc monkeypatch seam (dispatched inside
 SearchRepository).
 """
 
@@ -72,7 +72,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     # RPC 입력 파라미터 — query_embedding 은 길어서 dim 만
     diag_params = {k: v for k, v in params.items() if k != "query_embedding"}
     diag_params["query_embedding_dim"] = len(state.embedding)
-    logger.info("[STEP 4.5][search] Supabase RPC 호출 시작 — fn=search_products_v6 params=%s", diag_params)
+    logger.info("[STEP 4.5][search] DB RPC 호출 시작 — fn=search_products_v6 params=%s", diag_params)
 
     # REQ-AI-006: SearchRepository.search raises RpcContractError when the RPC
     # returns a row violating the documented contract. Catch it at the SERVICE

@@ -44,7 +44,7 @@ from app.core.config import settings  # noqa: E402
 
 MODEL_ID = "Marqo/marqo-fashionSigLIP"
 PAGE_SIZE = 200
-UPSERT_CHUNK = 25  # HNSW 인덱스 유지비용 — chunk 크면 Supabase statement_timeout(~8s) 초과
+UPSERT_CHUNK = 25  # HNSW 인덱스 유지비용 — chunk 크면 DB statement_timeout(~8s) 초과
 UPSERT_MIN_CHUNK = 5  # 자동 분할 하한
 
 
@@ -189,7 +189,7 @@ def main() -> None:
         "--upsert-chunk",
         type=int,
         default=UPSERT_CHUNK,
-        help=f"Supabase RPC 1회 upsert row 수 (default {UPSERT_CHUNK} — HNSW 인덱스 timeout 자동 감소)",
+        help=f"DB RPC 1회 upsert row 수 (default {UPSERT_CHUNK} — HNSW 인덱스 timeout 자동 감소)",
     )
     ap.add_argument("--dry-run", action="store_true", help="upsert 직전 중단 — 검증용")
     args = ap.parse_args()

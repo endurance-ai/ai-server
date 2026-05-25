@@ -1,7 +1,7 @@
 """Integration tests for pipeline with enhance_query (SPEC-PIPELINE-001;
 v6-migrated by SPEC-SEARCH-V6-001).
 
-embed_step (Modal) 과 search_step (Supabase RPC) 을 mock 으로 대체해
+embed_step (Modal) 과 search_step (DB RPC) 을 mock 으로 대체해
 runner.run_pipeline 전 경로를 검증한다. v6 는 embedding-first 라 RPC 에
 query_text 파라미터가 없다 — enhance_query_step 은 여전히 파이프라인에서
 실행되지만 그 출력은 RPC 로 전달되지 않는다 (모듈은 휴면 상태로 보존).
@@ -55,7 +55,7 @@ def _ok_chat_response(
 
 
 class _RPCCapture:
-    """Supabase RPC mock — 호출 인자를 capture 한다."""
+    """DB RPC mock — 호출 인자를 capture 한다."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -79,13 +79,13 @@ class _RPCCapture:
 
 @pytest.fixture
 def patch_pipeline(monkeypatch):
-    """embed + supabase RPC 를 항상 mock. LLM 은 케이스별 override."""
+    """embed + DB RPC 를 항상 mock. LLM 은 케이스별 override."""
     monkeypatch.setattr(
         "app.pipeline.embed.EmbedProvider.embed_image_url",
         AsyncMock(return_value=[0.1] * 1024),
     )
     rpc = _RPCCapture()
-    monkeypatch.setattr("app.pipeline.search.SupabaseProvider.rpc", rpc)
+    monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", rpc)
     return rpc
 
 
