@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 
 class Candidate(BaseModel):
-    """검색 결과 단건. product_id + 스코어 + 핵심 메타. 상세는 kikoai/app이 Supabase 재조회."""
+    """검색 결과 단건. product_id + 스코어 + 핵심 메타. 상세는 kikoai/app이 DB 재조회."""
 
     id: str
     brand: str

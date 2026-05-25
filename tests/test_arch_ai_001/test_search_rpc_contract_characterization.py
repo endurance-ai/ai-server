@@ -1,4 +1,4 @@
-"""Net (3) -- SupabaseProvider.rpc("search_products_v6", ...) param mapping
+"""Net (3) -- DatabaseProvider.rpc("search_products_v6", ...) param mapping
 (re-pointed by SPEC-SEARCH-V6-001).
 
 Locks the FULL params dict app.pipeline.search.search_step passes to the v6

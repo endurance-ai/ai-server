@@ -5,8 +5,8 @@ from supabase._async.client import AsyncClient, create_client
 from app.core.config import settings
 
 
-class SupabaseProvider:
-    """Supabase async 클라이언트 (싱글톤). 검색 RPC + 상품 메타 조회."""
+class DatabaseProvider:
+    """DB async 클라이언트 (싱글톤). 검색 RPC + 상품 메타 조회."""
 
     _client: ClassVar[AsyncClient | None] = None
 
@@ -21,11 +21,11 @@ class SupabaseProvider:
 
     @classmethod
     async def check_connection(cls) -> bool:
-        """Supabase 연결 확인. service role로 가벼운 쿼리 수행."""
+        """DB 연결 확인. service role로 가벼운 쿼리 수행."""
         try:
             client = await cls.get_client()
-            # 가벼운 SELECT — embedding coverage 뷰 (읽기 전용)
-            await client.from_("product_embedding_coverage").select("platform").limit(1).execute()
+            # 가벼운 SELECT — products 테이블 (읽기 전용, 항상 존재하는 관계)
+            await client.from_("products").select("id").limit(1).execute()
             return True
         except Exception:
             return False

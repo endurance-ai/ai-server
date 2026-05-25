@@ -22,7 +22,7 @@ async def test_health_ready_reports_postgres_backend():
     session_mod.set_store(PostgresSessionStore())
     try:
         with (
-            patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
+            patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
             patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=True),
             patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=True),
         ):
@@ -44,7 +44,7 @@ async def test_health_ready_reports_in_memory_backend():
     taste_mod.set_taste_store(InMemoryTasteProfileStore())
     try:
         with (
-            patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
+            patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
             patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=True),
             patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=True),
         ):

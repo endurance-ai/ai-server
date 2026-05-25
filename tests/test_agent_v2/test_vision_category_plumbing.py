@@ -67,7 +67,7 @@ async def test_vision_category_outer_plumbs_to_canonical_outerwear(monkeypatch):
     async def fake_rpc(fn_name, params):
         return [{"id": "p1", "name": "Trench Coat", "brand": "Acme", "distance": 0.1, "degraded": False}]
 
-    monkeypatch.setattr("app.pipeline.search.SupabaseProvider.rpc", staticmethod(fake_rpc))
+    monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", staticmethod(fake_rpc))
 
     # WorkingState with a picked Vision item whose garment category is "Outer".
     # vision_outfit_style_node_primary is a DIFFERENT concept (style-node
@@ -124,7 +124,7 @@ async def test_text_only_no_vision_item_resolves_to_other(monkeypatch):
     async def fake_rpc(fn_name, params):
         return [{"id": "p1", "name": "Jeans", "brand": "B", "distance": 0.2, "degraded": True}]
 
-    monkeypatch.setattr("app.pipeline.search.SupabaseProvider.rpc", staticmethod(fake_rpc))
+    monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", staticmethod(fake_rpc))
 
     msg = ChannelMessage(chat_id=2, text="slim dark jeans", received_at=datetime.now(UTC))
     state = WorkingState(message=msg, chat_id=2, from_user_id=7)

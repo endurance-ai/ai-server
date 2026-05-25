@@ -5,7 +5,7 @@ Reuses the proven monkeypatch seams from tests/test_pipeline_with_enhance.py:
 - app.pipeline.embed.EmbedProvider.embed_image_url  (AsyncMock fixed vector)
 - app.pipeline.embed.EmbedProvider.embed_text       (AsyncMock fixed vector —
   v6 text-only path; same seam parity as embed_image_url)
-- app.pipeline.search.SupabaseProvider.rpc          (capture/stub callable)
+- app.pipeline.search.DatabaseProvider.rpc          (capture/stub callable)
 
 The embedding vector is intentionally [0.1234567] * 768 so that the pgvector
 `:.7f` formatting in embedding_to_pgvector is exercised (0.1234567 ->
@@ -27,7 +27,7 @@ FIXED_EMBEDDING: list[float] = [FIXED_EMBED_VALUE] * FIXED_EMBED_DIM
 
 
 class RPCCapture:
-    """SupabaseProvider.rpc stub that records (fn_name, params) and returns a
+    """DatabaseProvider.rpc stub that records (fn_name, params) and returns a
     fixed row list. Mirrors _RPCCapture in tests/test_pipeline_with_enhance.py
     but with a configurable return payload.
     """
@@ -58,12 +58,12 @@ def fixed_embed(monkeypatch):
 
 @pytest.fixture
 def rpc_capture(monkeypatch):
-    """Patch SupabaseProvider.rpc with an empty-return capture by default.
+    """Patch DatabaseProvider.rpc with an empty-return capture by default.
 
     Tests that need rows install their own RPCCapture via patch_rpc().
     """
     cap = RPCCapture([])
-    monkeypatch.setattr("app.pipeline.search.SupabaseProvider.rpc", cap)
+    monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", cap)
     return cap
 
 
@@ -73,7 +73,7 @@ def patch_rpc(monkeypatch):
 
     def _install(rows: list[dict[str, Any]]) -> RPCCapture:
         cap = RPCCapture(rows)
-        monkeypatch.setattr("app.pipeline.search.SupabaseProvider.rpc", cap)
+        monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", cap)
         return cap
 
     return _install

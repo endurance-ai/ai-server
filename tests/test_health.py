@@ -10,16 +10,16 @@ async def test_health_liveness(client: AsyncClient):
     data = resp.json()
     assert data["status"] == "ok"
     assert "version" in data
-    # 인프라 토폴로지(supabase/modal/litellm) 가 노출되지 않아야 함
-    assert "supabase" not in data
+    # 인프라 토폴로지(database/modal/litellm) 가 노출되지 않아야 함
+    assert "database" not in data
     assert "modal_embed" not in data
     assert "litellm" not in data
 
 
 async def test_health_ready_all_connected(client: AsyncClient):
-    """/health/ready — Supabase + Modal + LiteLLM 모두 연결되면 status=ok."""
+    """/health/ready — DB + Modal + LiteLLM 모두 연결되면 status=ok."""
     with (
-        patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
+        patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=True),
     ):
@@ -28,14 +28,14 @@ async def test_health_ready_all_connected(client: AsyncClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["supabase"] == "connected"
+    assert data["database"] == "connected"
     assert data["modal_embed"] == "connected"
     assert data["litellm"] == "connected"
 
 
-async def test_health_ready_supabase_down(client: AsyncClient):
+async def test_health_ready_database_down(client: AsyncClient):
     with (
-        patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=False),
+        patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=False),
         patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=True),
     ):
@@ -44,12 +44,12 @@ async def test_health_ready_supabase_down(client: AsyncClient):
     assert resp.status_code == 503
     data = resp.json()
     assert data["status"] == "degraded"
-    assert data["supabase"] == "disconnected"
+    assert data["database"] == "disconnected"
 
 
 async def test_health_ready_modal_down(client: AsyncClient):
     with (
-        patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
+        patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=False),
         patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=True),
     ):
@@ -63,7 +63,7 @@ async def test_health_ready_modal_down(client: AsyncClient):
 
 async def test_health_ready_litellm_down(client: AsyncClient):
     with (
-        patch("app.api.health.SupabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
+        patch("app.api.health.DatabaseProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.EmbedProvider.check_connection", new_callable=AsyncMock, return_value=True),
         patch("app.api.health.LLMProvider.check_connection", new_callable=AsyncMock, return_value=False),
     ):
