@@ -463,6 +463,92 @@ async def run_text_only_search(
     return list(state.final_candidates or [])
 
 
+async def run_blended_search(
+    *,
+    origin_url: str,
+    modifier_query: str,
+    chat_id: int | None = None,
+    alpha: float = 0.7,
+    category: str | None = None,
+    fit: str | None = None,
+    color_family: str | None = None,
+    top_k: int = 15,
+) -> list[Any]:
+    """Multi-turn blended search (Level 1 image-first refinement).
+
+    Blends the stored origin image vector with the text modifier embedding so
+    follow-up turns ("more casual", "different colour") preserve the original
+    outfit identity instead of re-embedding a raw refinement instruction.
+
+    The image vector is lazily embedded on the first refine turn and cached in
+    `origin_image` for subsequent calls -- avoiding extra Modal calls at Vision time.
+
+    query_vec = normalize(alpha * origin_image_vec + (1-alpha) * modifier_text_vec)
+    """
+    from app.agents.origin_image import blend_vectors, get_origin_vector, set_origin_vector
+    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.pipeline.diversify import diversify_step
+    from app.pipeline.embed import EmbedProvider
+    from app.pipeline.search import search_step
+    from app.pipeline.state import PipelineState
+
+    _t0 = time.perf_counter()
+    modifier_query = modifier_query.strip() or "fashion"
+
+    origin_vec = get_origin_vector(chat_id) if chat_id is not None else None
+    if origin_vec is None:
+        origin_vec = await EmbedProvider.embed_image_url(origin_url)
+        if origin_vec and chat_id is not None:
+            set_origin_vector(chat_id, origin_vec)
+
+    if not origin_vec:
+        return await run_text_only_search(
+            text_query=modifier_query,
+            category=category,
+            fit=fit,
+            color_family=color_family,
+            top_k=top_k,
+        )
+
+    modifier_vec = await EmbedProvider.embed_text(modifier_query)
+    _embed_ms = int((time.perf_counter() - _t0) * 1000)
+
+    blended = blend_vectors(origin_vec, modifier_vec, alpha)
+
+    item = AnalyzedItem(
+        id="agent-blended",
+        category=category or "apparel",
+        subcategory=None,
+        fit=fit,
+        color_family=color_family,
+        search_query=modifier_query,
+    )
+    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
+    state = PipelineState(request=req)
+    state.embedding = blended
+
+    _t_rpc0 = time.perf_counter()
+    state = await search_step(state)
+    _rpc_ms = int((time.perf_counter() - _t_rpc0) * 1000)
+
+    _t_div0 = time.perf_counter()
+    state = await diversify_step(state)
+    _div_ms = int((time.perf_counter() - _t_div0) * 1000)
+
+    logger.info(
+        "🔍 [blended_search] modifier=%r alpha=%.1f cached_vec=%s → final=%d "
+        "· embed=%dms rpc=%dms divers=%dms",
+        modifier_query[:80],
+        alpha,
+        origin_vec is not None,
+        len(state.final_candidates or []),
+        _embed_ms,
+        _rpc_ms,
+        _div_ms,
+    )
+    return list(state.final_candidates or [])
+
+
 async def run_image_search(
     *,
     image_url: str,

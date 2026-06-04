@@ -227,6 +227,17 @@ async def vision_node(state: WorkingState) -> dict:
         except Exception:
             logger.exception("👁 [vision] ❌ session persist failed")
 
+    # Store origin image URL for multi-turn vector blending (Level 1).
+    # URL is stored immediately (no Modal call); vector is lazily embedded
+    # and cached by refine_search on the first follow-up turn.
+    if result.isApparel and state.image_url:
+        try:
+            from app.agents.origin_image import set_origin_url
+
+            set_origin_url(state.chat_id, state.image_url)
+        except Exception:  # noqa: BLE001
+            logger.debug("👁 [vision] origin url store best-effort failed", exc_info=True)
+
     # LOG-T13 — emit BEFORE return so the row reflects the v2 schema payload.
     _emit_vision_done(state, result)
 
