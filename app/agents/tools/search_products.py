@@ -690,6 +690,22 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     fit = args.get("fit")
     color_family = args.get("color_family")
 
+    # Multi-turn image blending (Level 1 image-first refinement):
+    # when no current image URL exists but an origin image URL is stored from
+    # a prior Vision turn, blend the cached image vector with the text modifier
+    # so follow-up text turns ("반팔 헨리넥 찾아줘") preserve the original outfit
+    # context instead of dropping to a text-only embedding. This kicks in even
+    # when the LLM picked `search_products` instead of `refine_search` — the
+    # blending is keyed off chat-state, not the tool name.
+    origin_url = None
+    if not has_image:
+        try:
+            from app.agents.origin_image import get_origin_url
+
+            origin_url = get_origin_url(ctx.get("chat_id"))
+        except Exception:  # noqa: BLE001
+            pass
+
     try:
         if has_image:
             # Photo-pick: real resolved image drives the v6 query embedding.
@@ -699,6 +715,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             cands = await run_image_search(
                 image_url=str(ctx_image),
                 text_query=query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=top_k,
+            )
+        elif origin_url:
+            cands = await run_blended_search(
+                origin_url=origin_url,
+                modifier_query=text_query,
+                chat_id=ctx.get("chat_id"),
                 category=category,
                 fit=fit,
                 color_family=color_family,

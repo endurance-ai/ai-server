@@ -61,17 +61,25 @@ async def maybe_first_touch(
     user_key = user_key_for(state.from_user_id, state.chat_id)
     lang = getattr(sess, "lang", "en")
 
-    # 1. /reset -> clear taste profile + ack (any user).
+    # 1. /reset -> clear taste profile + origin image + ack (any user).
     if is_reset_keyword(msg.text):
         try:
             (taste_delete or get_taste_store().delete)(user_key)
         except Exception:  # noqa: BLE001
             logger.exception("🐱 [first_touch] taste delete failed")
+        # Also clear the stored origin image for multi-turn blending so the
+        # user genuinely starts fresh (no carry-over of previous outfit).
+        try:
+            from app.agents.origin_image import clear_origin
+
+            clear_origin(state.chat_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[first_touch] origin image clear best-effort", exc_info=True)
         try:
             await adapter.send_text(state.chat_id, _RESET_KO if lang == "ko" else _RESET_EN)
         except Exception:  # noqa: BLE001
             logger.debug("[first_touch] reset ack send best-effort", exc_info=True)
-        breadcrumbs.append("first_touch: reset taste cleared")
+        breadcrumbs.append("first_touch: reset taste + origin cleared")
         return
 
     is_new = getattr(sess, "onboarded_at", None) is None
