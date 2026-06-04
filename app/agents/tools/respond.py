@@ -661,9 +661,22 @@ async def send_hybrid_batch(
     delivered = 0
     used_fallback = False
     media = [{"image_url": str(_candidate_field(c, "image_url", "")), "caption": None} for c in batch]
-    # Telegram media groups require 2..10 items; a single eligible candidate
-    # cannot form a group → go straight to the per-card path for that one.
-    can_group = len(media) >= 2 and hasattr(adapter, "send_media_group")
+    # UX policy (2026-06-04, settings.INDIVIDUAL_CARD_DELIVERY): when True,
+    # always send cards individually instead of the sendMediaGroup album.
+    # Per-card delivery lets each result carry its own inline keyboard
+    # (♥ like / buy link) right next to the photo, which reads better in
+    # Telegram than a 5-photo bubble + separate summary text bubble. The
+    # summary + 더보기 footer is still sent below after the per-card loop
+    # completes so the pager / "different search" UI is preserved verbatim.
+    # Flag exists as a kill-switch for fast rollback to the album path.
+    from app.core.config import settings as _settings
+
+    if _settings.INDIVIDUAL_CARD_DELIVERY:
+        can_group = False
+    else:
+        # Telegram media groups require 2..10 items; a single eligible candidate
+        # cannot form a group → go straight to the per-card path for that one.
+        can_group = len(media) >= 2 and hasattr(adapter, "send_media_group")
     group_ok = False
     if can_group:
         try:
@@ -696,9 +709,35 @@ async def send_hybrid_batch(
         except Exception as exc:  # noqa: BLE001
             logger.debug("[tool.respond] summary send failed: %r", exc)
     else:
-        # Album unavailable or atomic-fail → per-card fallback for THIS batch.
+        # Per-card delivery path. Two distinct cases collapse here:
+        #   (a) INDIVIDUAL_CARD_DELIVERY=True — NEW primary path (intended
+        #       per-card mode); we want the summary + pager footer so the
+        #       "더보기" / "다르게 찾기" buttons remain available.
+        #   (b) INDIVIDUAL_CARD_DELIVERY=False — LEGACY safety net (album
+        #       atomic-fail). Old contract was "drop the summary too" so the
+        #       pre-existing fallback assertions keep holding.
         used_fallback = True
         delivered = await _fallback_send_cards(adapter, chat_id, batch, sent_ids, lang)
+        if _settings.INDIVIDUAL_CARD_DELIVERY and delivered > 0:
+            summary = _build_summary(batch[:delivered], lang)
+            keyboard = _build_keyboard(
+                batch[:delivered],
+                lang,
+                has_more=len(eligible_pos) > len(batch_pos),
+            )
+            try:
+                if hasattr(adapter, "send_text_with_keyboard"):
+                    await adapter.send_text_with_keyboard(
+                        chat_id,
+                        summary,
+                        keyboard,
+                        parse_mode="HTML",
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    await adapter.send_text(chat_id, summary)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[tool.respond] per-card summary send failed: %r", exc)
 
     if delivered > 0:
         _emit_card_sent(chat_id, sess, batch[:delivered])

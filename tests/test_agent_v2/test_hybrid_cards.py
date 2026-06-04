@@ -22,6 +22,17 @@ from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import Session, SessionState, set_store
 
 
+# UX flag override (2026-06-04, SPEC-CARD-DELIVERY-001):
+# settings.INDIVIDUAL_CARD_DELIVERY defaults to True (per-card delivery in
+# production), but this module's tests verify the LEGACY album path
+# (sendMediaGroup + atomic-fail → per-card fallback). Force the flag OFF for
+# every test in this file so album-mode assertions continue to hold. The
+# per-card primary path is exercised separately in new dedicated tests.
+@pytest.fixture(autouse=True)
+def _force_album_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.core.config.settings.INDIVIDUAL_CARD_DELIVERY", False)
+
+
 class _FakeStore:
     def __init__(self, sess: Session) -> None:
         self._sess = sess

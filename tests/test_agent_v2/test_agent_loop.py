@@ -525,6 +525,8 @@ def _cand(i: int):
 async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     """Slow 4-card carousel that would exceed AGENT_TOOL_TIMEOUT_S must NOT
     trigger a respond retry: text sent once, each card once, status=done."""
+    # Force album mode for this legacy assertion (SPEC-CARD-DELIVERY-001).
+    monkeypatch.setattr("app.core.config.settings.INDIVIDUAL_CARD_DELIVERY", False)
     from app.agents import react_loop as rl
     from app.infrastructure.memory.session import get_store
 
@@ -662,6 +664,8 @@ async def test_non_terminal_tool_still_retries_on_transient(monkeypatch):
 async def test_respond_self_idempotent_on_double_call(monkeypatch):
     """respond.dispatch is self-idempotent: a second call with the same ctx
     re-sends neither text nor already-sent cards."""
+    # Force album mode for this legacy assertion (SPEC-CARD-DELIVERY-001).
+    monkeypatch.setattr("app.core.config.settings.INDIVIDUAL_CARD_DELIVERY", False)
     from app.agents.tools.respond import dispatch as respond_dispatch
     from app.agents.tools.search_products import CARDS_READY_KEY
     from app.infrastructure.memory.session import get_store
