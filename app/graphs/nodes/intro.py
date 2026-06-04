@@ -39,14 +39,14 @@ _INTRO_KO = (
     "이렇게 보내주면 내가 찾아줄게:\n"
     "• 핀터레스트 링크 (pin.it / pinterest.com)\n"
     "• 이미지가 보이는 일반 웹 링크\n"
-    "• 원하는 스타일·아이템을 글로 설명 — 예: \"미니멀한 블랙 코트 찾아줘\"\n"
+    '• 원하는 스타일·아이템을 글로 설명 — 예: "미니멀한 블랙 코트 찾아줘"\n'
     "\n"
     "작은 팁! \U0001f4cc 사진은 파일로 직접 보내는 것보다 링크/URL로 보내주면 제일 잘 찾아. "
     "인스타그램 링크는 아직 못 읽어 — 핀터레스트나 이미지 링크가 좀아!\n"
     "\n"
     "이렇게 편하게 보내바:\n"
-    "• \"꺔끔한 화이트 셔츠 추천해줘\"\n"
-    "• \"가을에 입을 베이지 트렌치코트\"\n"
+    '• "꺔끔한 화이트 셔츠 추천해줘"\n'
+    '• "가을에 입을 베이지 트렌치코트"\n'
     "\n"
     "자, 이제 찾고 싶은 거 보내바. 첫 요청 기다릴게! ✨"
 )
@@ -69,14 +69,8 @@ _INTRO_EN = (
     "Go ahead and send me what you're looking for — I'm ready for your first request! ✨"
 )
 
-_GENDER_CARD_KO = (
-    "마지막으로, 누구 옷 찾아줄까? "
-    "한 번만 알려주면 다음부터 딸 맞게 골라줄게 \U0001f431"
-)
-_GENDER_CARD_EN = (
-    "One last thing — who are we shopping for? "
-    "Tell me once and I'll keep it in mind \U0001f431"
-)
+_GENDER_CARD_KO = "마지막으로, 누구 옷 찾아줄까? 한 번만 알려주면 다음부터 딸 맞게 골라줄게 \U0001f431"
+_GENDER_CARD_EN = "One last thing — who are we shopping for? Tell me once and I'll keep it in mind \U0001f431"
 
 _GENDER_BUTTONS_KO = [
     [("\U0001f454 남성", "clarify:gender:men")],

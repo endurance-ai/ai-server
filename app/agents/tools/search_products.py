@@ -536,8 +536,7 @@ async def run_blended_search(
     _div_ms = int((time.perf_counter() - _t_div0) * 1000)
 
     logger.info(
-        "🔍 [blended_search] modifier=%r alpha=%.1f cached_vec=%s → final=%d "
-        "· embed=%dms rpc=%dms divers=%dms",
+        "🔍 [blended_search] modifier=%r alpha=%.1f cached_vec=%s → final=%d · embed=%dms rpc=%dms divers=%dms",
         modifier_query[:80],
         alpha,
         origin_vec is not None,
