@@ -115,6 +115,11 @@ class Settings(BaseSettings):
     RESPONSE_SPLIT_ENABLED: bool = True
     RESPONSE_SPLIT_DELAY_MS: int = 350
     RESPONSE_SPLIT_MIN_CHARS: int = 8  # 너무 짧은 조각은 다음 청크와 병합
+
+    # UX 정책 (2026-06-04): sendMediaGroup 5장 묶음 대신 카드를 개별로 전송.
+    # 각 카드가 자체 인라인 키보드(♥ / 구매)를 가지므로 사용자 액션이 더 자연스러움.
+    # True → 개별 전송 (운영 권장), False → 기존 album 동작 (롤백용).
+    INDIVIDUAL_CARD_DELIVERY: bool = True
     # Vision 결과가 약할 때(짧은 description / ambiguous label) ask_clarify 분기 트리거 임계값
     ASK_CLARIFY_MIN_DESC_TOKENS: int = 3
     ASK_CLARIFY_AMBIGUOUS_LABELS: str = "item,clothing,thing,piece"
