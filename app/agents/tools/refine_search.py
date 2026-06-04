@@ -17,12 +17,13 @@ from typing import Any
 
 from app.agents.tool_registry import RefineSearchResult
 from app.agents.tools.search_products import (
-    _candidate_to_dict,
+    _candidate_to_dict,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     _is_real_image_url,
     apply_dislike_discount,
     apply_price_filter,
-    persist_last_results,
+    persist_last_results,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     pipeline_exc_detail,
+    run_blended_search,
     run_image_search,
     run_text_only_search,
 )
@@ -133,10 +134,34 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         category = ctx.get("vision_category")
         fit = ctx.get("fit")
         color_family = args.get("color") or ctx.get("color_family")
+
+        # Multi-turn image blending (Level 1): when no current image URL exists
+        # but the original image URL is stored from the Vision turn, blend the
+        # image vector with the text modifier so the original outfit identity
+        # is preserved across follow-up turns ("more casual", "different colour").
+        origin_url = None
+        if not has_image:
+            try:
+                from app.agents.origin_image import get_origin_url
+
+                origin_url = get_origin_url(ctx.get("chat_id"))
+            except Exception:  # noqa: BLE001
+                pass
+
         if has_image:
             cands = await run_image_search(
                 image_url=str(ctx_image),
                 text_query=text_query,
+                category=category,
+                fit=fit,
+                color_family=color_family,
+                top_k=15,
+            )
+        elif origin_url:
+            cands = await run_blended_search(
+                origin_url=origin_url,
+                modifier_query=text_query,
+                chat_id=ctx.get("chat_id"),
                 category=category,
                 fit=fit,
                 color_family=color_family,

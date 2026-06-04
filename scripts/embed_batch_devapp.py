@@ -1,6 +1,6 @@
 """FashionSigLIP 로컬 배치 임베딩 — dev-app Postgres 직접 접속 버전.
 
-기존 `kikoai/ai/scripts/embed_batch_local.py` 의 dev-app 대응판.
+기존 `portal/ai/scripts/embed_batch_local.py` 의 dev-app 대응판.
 Supabase REST 의존을 제거하고 psycopg 로 직접 SELECT + RPC 호출.
 
 DB 의 products 중 embedding 이 NULL 인 항목을 모아 로컬 머신에서 FashionSigLIP 으로
@@ -12,7 +12,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
   - x86 CPU only:  10~20 시간
 
 사용:
-    cd /Users/hansangho/Desktop/kikoai/ai
+    cd /Users/hansangho/Desktop/portal/ai
 
     # 1) embed 그룹 동기화 (psycopg 추가됨 — pyproject.toml 패치 후)
     uv sync --group embed
@@ -39,6 +39,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
 
 import argparse
 import io
+import json
 import os
 import sys
 import time
@@ -77,13 +78,18 @@ def load_model(device: str):
 
 def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
     """미임베딩 products 일괄 수집. 71,850 row 기준 ~2초."""
+    # pending = product_embeddings 에 row 가 없는 products (anti-join).
+    # 구 `products.embedding IS NULL` 센티넬은 migration 086 에서 컬럼 drop 됨 —
+    # product_embeddings(071) 가 임베딩 단일 출처라 그 부재로 pending 판별.
     sql = """
-        SELECT id, images
-        FROM products
-        WHERE embedding IS NULL
-          AND images IS NOT NULL
-          AND array_length(images, 1) > 0
-        ORDER BY id
+        SELECT p.id, p.images
+        FROM products p
+        WHERE NOT EXISTS (
+                SELECT 1 FROM product_embeddings pe WHERE pe.product_id = p.id
+              )
+          AND p.images IS NOT NULL
+          AND array_length(p.images, 1) > 0
+        ORDER BY p.id
     """
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
