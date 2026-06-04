@@ -39,7 +39,6 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
 
 import argparse
 import io
-import json
 import os
 import sys
 import time
