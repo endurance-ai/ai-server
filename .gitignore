@@ -45,3 +45,6 @@ htmlcov/
 .moai/evolution/
 .moai/docs/
 HANDOFF.md
+
+# Eval run results (generated locally, not shared)
+tests/eval/*_results.json
