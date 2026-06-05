@@ -77,11 +77,6 @@ def get_llm() -> Any:
             api_key=api_key,
             temperature=0.4,
             timeout=max(0.1, settings.AGENT_LLM_TIMEOUT_S),
-            # Bedrock (nova-lite) via LiteLLM rejects `tool_choice` with HTTP 400
-            # (litellm.UnsupportedParamsError). `drop_params` instructs the proxy
-            # to silently strip provider-unsupported params instead of erroring,
-            # keeping AGENT_LLM_MODEL swappable between nova-lite and gpt-4o-mini.
-            extra_body={"drop_params": True},
         )
         # Explicit `tool_choice=None` → langchain MUST NOT inject a tool_choice
         # field into the request body. The ReAct loop relies on the model

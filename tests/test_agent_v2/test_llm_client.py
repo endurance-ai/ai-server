@@ -1,8 +1,7 @@
-"""SPEC-AGENT-V2-REACT / OQ-1 + OQ-2 — Bedrock (nova-lite) compatibility.
+"""SPEC-AGENT-V2-REACT / OQ-1 + OQ-2 — Bedrock (claude-haiku-4-5) compatibility.
 
-`get_llm()` must build a tool-bound ChatOpenAI WITHOUT forcing `tool_choice`
-(Bedrock via LiteLLM rejects `tool_choice` with HTTP 400). These are
-mock-level assertions — no network call.
+`get_llm()` must build a tool-bound ChatOpenAI WITHOUT forcing `tool_choice`.
+These are mock-level assertions — no network call.
 """
 
 from __future__ import annotations
@@ -43,9 +42,9 @@ def test_get_llm_does_not_force_tool_choice(monkeypatch, _reset_singleton):
     # ChatOpenAI constructed once with the configured model.
     ctor_kwargs = fake_ctor.call_args.kwargs
     assert ctor_kwargs["model"] == "nova-lite"
-    # drop_params instructs LiteLLM to strip provider-unsupported params
-    # (e.g. tool_choice) instead of returning HTTP 400 for Bedrock.
-    assert ctor_kwargs.get("extra_body") == {"drop_params": True}
+    # extra_body must be absent — drop_params was removed so cache_control
+    # passes through to Bedrock Claude (tool_choice=None already prevents 400).
+    assert ctor_kwargs.get("extra_body") is None
 
     # bind_tools must NOT force a tool_choice. Either it is absent, or it is
     # explicitly None — never a truthy string/dict that langchain would inject.
