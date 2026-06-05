@@ -791,8 +791,14 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     system_content = f"{system_content}\n\n{_lang_directive}"
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
+    # cache_control marks the system block for Anthropic prompt caching (5-min TTL).
+    # System content (~4k+ tokens when memory is populated) is stable across
+    # iterations within the same turn → iter 2+ get cache reads at 0.1× input cost.
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": system_content},
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": system_content, "cache_control": {"type": "ephemeral"}}],
+        },
         {"role": "user", "content": _build_user_message(state, sess)},
     ]
 
