@@ -48,7 +48,11 @@ def _make_session(lang: str = "en") -> Session:
 def _system_content(captured: list[dict]) -> str:
     assert captured, "LLM was not invoked"
     assert captured[0]["role"] == "system"
-    return captured[0]["content"]
+    content = captured[0]["content"]
+    if isinstance(content, list):
+        # Anthropic prompt-caching format: [{type: text, text: ..., cache_control: ...}]
+        return content[0]["text"]
+    return content
 
 
 async def _run_and_capture(monkeypatch: pytest.MonkeyPatch, lang: str, text: str | None = "hello") -> str:

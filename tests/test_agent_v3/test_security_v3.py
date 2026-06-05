@@ -85,7 +85,8 @@ async def test_ac_s_1_dual_fence_and_truncation(monkeypatch):
 
     await rl.run_react_loop(state, sess)
 
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
 
     # 1. Past-turn user_text inside the memory block is 200-capped (the full

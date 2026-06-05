@@ -50,6 +50,11 @@ def _build_tools_schema() -> list[dict[str, Any]]:
                 },
             }
         )
+    # cache_control on the last tool signals Anthropic to cache the entire tools
+    # block (all definitions are stable across iterations). LiteLLM forwards this
+    # field to the Anthropic API unchanged.
+    if tools:
+        tools[-1]["cache_control"] = {"type": "ephemeral"}
     return tools
 
 

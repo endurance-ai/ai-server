@@ -107,7 +107,8 @@ async def test_ac_3_2_directive_in_system_prompt(_proactive_on, _adapter, monkey
     llm = _CapturingLLM([_FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "1"}])])
     monkeypatch.setattr(rl, "get_llm", lambda: llm)
     await rl.run_react_loop(_state(), _sess())
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     assert "Be proactive" in sys_msg
     assert "candidates_count < 3" in sys_msg
     assert "suggest_next_step" in sys_msg

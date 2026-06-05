@@ -94,7 +94,8 @@ async def test_ac_1_1_taste_and_recent_injected(monkeypatch, _mock_adapter):
 
     delta = await rl.run_react_loop(_state(), _sess())
 
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     assert "[MEMORY CONTEXT — SYSTEM DERIVED]" in sys_msg
     assert "[/MEMORY CONTEXT]" in sys_msg
     assert "ami" in sys_msg
@@ -123,7 +124,8 @@ async def test_ac_1_2_fail_soft_empty(monkeypatch, _mock_adapter):
 
     delta = await rl.run_react_loop(_state(), _sess())
     assert delta["agent_status"] == "done"
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     assert "(no taste history yet)" in sys_msg
 
 
@@ -149,7 +151,8 @@ async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
     monkeypatch.setattr(rl, "get_llm", lambda: llm)
 
     await rl.run_react_loop(_state(), _sess())
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     # Memory block sits between its own fence and the trailing LANG directive
     # (REQ-UX-002 appends [LANG=...] as last block — exclude it from the cap check).
     after_fence = sys_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
@@ -197,7 +200,8 @@ async def test_memory_injection_is_unconditional(monkeypatch, _mock_adapter):
     monkeypatch.setattr(rl, "get_llm", lambda: llm)
 
     await rl.run_react_loop(_state(), _sess())
-    sys_msg = next(m for m in llm.captured if m["role"] == "system")["content"]
+    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
+    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     assert sys_msg != rl._SYSTEM_PROMPT  # proactive + memory always appended
     assert rl._PROACTIVE_DIRECTIVE in sys_msg
     mc_spy.assert_awaited()  # memory builder always invoked
