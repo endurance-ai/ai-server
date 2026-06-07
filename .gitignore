@@ -47,3 +47,6 @@ htmlcov/
 HANDOFF.md
 tests/eval/multiturn_*.json
 !tests/eval/multiturn_dataset.json
+
+# Eval run results (generated locally, not shared)
+tests/eval/*_results.json
