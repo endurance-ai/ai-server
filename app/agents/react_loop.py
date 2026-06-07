@@ -362,7 +362,7 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     # contamination where other garments in the photo appear in results.
     selected_sq = _selected_vision_search_query(state, sess)
     if selected_sq:
-        ctx_image_url = None   # force text-only path in search_products
+        ctx_image_url = None  # force text-only path in search_products
         ctx_text_query = selected_sq
     else:
         ctx_image_url = state.image_url
