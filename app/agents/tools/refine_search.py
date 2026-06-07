@@ -23,8 +23,8 @@ from app.agents.tools.search_products import (
     apply_price_filter,
     persist_last_results,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     pipeline_exc_detail,
-    run_blended_search,
     run_image_search,
+    run_smart_blended_search,
     run_text_only_search,
 )
 
@@ -158,10 +158,21 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=15,
             )
         elif origin_url:
-            cands = await run_blended_search(
+            # Intent-aware Level 2 advanced blending — vector arithmetic for
+            # color_swap/fit_change, intent-tuned weighted-sum otherwise.
+            # Prior outfit context anchors the FROM-attribute extraction.
+            prior_ctx_parts = [
+                str(base_query or text_query or ""),
+                str(category or ""),
+                str(fit or ""),
+                str(color_family or ""),
+            ]
+            prior_ctx = " ".join(p for p in prior_ctx_parts if p).strip()
+            cands = await run_smart_blended_search(
                 origin_url=origin_url,
                 modifier_query=text_query,
                 chat_id=ctx.get("chat_id"),
+                prior_outfit_context=prior_ctx or None,
                 category=category,
                 fit=fit,
                 color_family=color_family,

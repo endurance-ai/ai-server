@@ -548,6 +548,161 @@ async def run_blended_search(
     return list(state.final_candidates or [])
 
 
+# --- Intent-aware blended search (Level 2 advanced, 2026-06-06) ----------
+
+# Per-intent strategy + tuning. Derived from the multi-turn eval
+# (tests/eval/multiturn_*.json + beta sweep on 2026-06-06):
+#
+#   color_swap            -> weighted_sum alpha=0.3  (harmonic 0.382)
+#                            ↳ weighted-sum beat vector_arith at every beta;
+#                              direct colour token in modifier matches catalog
+#                              name keywords (navy/blue/black) better.
+#   fit_change            -> vector_arith beta=1.0   (harmonic 0.156)
+#                            ↳ vector_arith preserves silhouette better than
+#                              any alpha for fit changes; explicit subtract
+#                              of the OLD fit token is what worked.
+#   mood_shift            -> weighted_sum alpha=0.3  (all modes ~weak; alpha=0.3
+#                                                    best harmonic)
+#   identity_preservation -> weighted_sum alpha=0.55 (eval sweet spot)
+#   free_form             -> weighted_sum alpha=0.5  (safe default)
+_STRATEGY_BY_INTENT: dict[str, dict[str, Any]] = {
+    "color_swap": {"strategy": "weighted_sum", "alpha": 0.3},
+    "fit_change": {"strategy": "vector_arith", "beta": 1.0},
+    "mood_shift": {"strategy": "weighted_sum", "alpha": 0.3},
+    "identity_preservation": {"strategy": "weighted_sum", "alpha": 0.55},
+    "free_form": {"strategy": "weighted_sum", "alpha": 0.5},
+}
+
+
+async def run_smart_blended_search(
+    *,
+    origin_url: str,
+    modifier_query: str,
+    chat_id: int | None = None,
+    prior_outfit_context: str | None = None,
+    category: str | None = None,
+    fit: str | None = None,
+    color_family: str | None = None,
+    top_k: int = 15,
+) -> list[Any]:
+    """Intent-aware multi-turn search (Level 2 advanced).
+
+    Routes the refine turn to one of two embedding strategies based on the
+    LLM-classified intent of `modifier_query`:
+
+      - color_swap / fit_change   -> VECTOR ARITHMETIC
+          query = normalize(origin - beta * from_vec + beta * to_vec)
+          Lets the caller explicitly drop the OLD attribute (colour or fit)
+          and inject the NEW one, which weighted-sum cannot do at 0.7 because
+          the original colour token dominates the embedding.
+
+      - mood_shift / identity_preservation / free_form -> WEIGHTED SUM
+          query = normalize(alpha * origin + (1-alpha) * modifier)
+          Per-intent alpha from the multi-turn eval baseline (mood=0.3,
+          identity_preservation=0.55, free_form=0.5).
+
+    Any failure (intent classifier, embed call, origin lookup) falls through
+    to plain text-only search so a refine turn NEVER returns nothing.
+
+    See `tests/eval/multiturn_*.json` for the baseline data behind the
+    routing decisions and per-intent alphas.
+    """
+    from app.agents.intent_classifier import classify_intent
+    from app.agents.origin_image import blend_vectors, get_origin_vector, set_origin_vector, vector_arithmetic
+    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.pipeline.diversify import diversify_step
+    from app.pipeline.embed import EmbedProvider
+    from app.pipeline.search import search_step
+    from app.pipeline.state import PipelineState
+
+    _t0 = time.perf_counter()
+    modifier_query = modifier_query.strip() or "fashion"
+
+    # 1) Origin vector (lazy embed + cache, mirrors run_blended_search).
+    origin_vec = get_origin_vector(chat_id) if chat_id is not None else None
+    if origin_vec is None:
+        try:
+            origin_vec = await EmbedProvider.embed_image_url(origin_url)
+        except Exception:  # noqa: BLE001
+            logger.debug("[smart_blended] origin embed failed; falling back to text-only", exc_info=True)
+            origin_vec = None
+        if origin_vec and chat_id is not None:
+            set_origin_vector(chat_id, origin_vec)
+
+    if not origin_vec:
+        return await run_text_only_search(
+            text_query=modifier_query,
+            category=category,
+            fit=fit,
+            color_family=color_family,
+            top_k=top_k,
+        )
+
+    # 2) Classify intent. On any failure → free_form (alpha=0.5 weighted sum).
+    intent = await classify_intent(modifier_query, prior_outfit_context)
+
+    # 3) Resolve strategy from the data-driven _STRATEGY_BY_INTENT table.
+    rule = _STRATEGY_BY_INTENT.get(intent.intent) or _STRATEGY_BY_INTENT["free_form"]
+    strategy_name = rule["strategy"]
+
+    # vector_arith requires the classifier to return both attributes; if either
+    # is missing, fall through to the safe weighted_sum default for this intent.
+    use_arith = strategy_name == "vector_arith" and bool(intent.from_attribute) and bool(intent.to_attribute)
+
+    if use_arith:
+        beta = float(rule.get("beta", 1.0))
+        try:
+            from_vec = await EmbedProvider.embed_text(intent.from_attribute)
+            to_vec = await EmbedProvider.embed_text(intent.to_attribute)
+            query_vec = vector_arithmetic(origin_vec, from_vec, to_vec, beta=beta)
+            strategy = f"vector_arith(β={beta}, {intent.from_attribute!r}→{intent.to_attribute!r})"
+        except Exception:  # noqa: BLE001
+            logger.debug("[smart_blended] arithmetic embed failed; falling back to weighted_sum", exc_info=True)
+            modifier_vec = await EmbedProvider.embed_text(modifier_query)
+            fallback_alpha = float(_STRATEGY_BY_INTENT["free_form"].get("alpha", 0.5))
+            query_vec = blend_vectors(origin_vec, modifier_vec, fallback_alpha)
+            strategy = f"weighted_sum(α={fallback_alpha}, arith_fallback)"
+    else:
+        alpha = float(rule.get("alpha", 0.5))
+        modifier_vec = await EmbedProvider.embed_text(modifier_query)
+        query_vec = blend_vectors(origin_vec, modifier_vec, alpha)
+        strategy = f"weighted_sum(α={alpha})"
+
+    _embed_ms = int((time.perf_counter() - _t0) * 1000)
+
+    # 4) RPC + diversify (same as run_blended_search).
+    item = AnalyzedItem(
+        id="agent-smart-blended",
+        category=category or "apparel",
+        subcategory=None,
+        fit=fit,
+        color_family=color_family,
+        search_query=modifier_query,
+    )
+    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
+    state = PipelineState(request=req)
+    state.embedding = query_vec
+
+    _t_rpc0 = time.perf_counter()
+    state = await search_step(state)
+    _rpc_ms = int((time.perf_counter() - _t_rpc0) * 1000)
+
+    _t_div0 = time.perf_counter()
+    state = await diversify_step(state)
+    _div_ms = int((time.perf_counter() - _t_div0) * 1000)
+
+    logger.info(
+        "🔍 [smart_blended] intent=%s strategy=%s → final=%d · embed=%dms rpc=%dms divers=%dms",
+        intent.intent,
+        strategy,
+        len(state.final_candidates or []),
+        _embed_ms,
+        _rpc_ms,
+        _div_ms,
+    )
+    return list(state.final_candidates or [])
+
+
 async def run_image_search(
     *,
     image_url: str,
@@ -721,10 +876,25 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
             )
         elif origin_url:
-            cands = await run_blended_search(
+            # Intent-aware Level 2 advanced blending (PR June 2026):
+            # vector arithmetic for color_swap/fit_change, weighted-sum with
+            # intent-tuned alpha otherwise. Falls through to text-only when
+            # any step fails.
+            # `prior_outfit_context` anchors `from_attribute` extraction — pass
+            # the most recent product query so the classifier can spot the OLD
+            # colour/fit token.
+            prior_ctx_parts = [
+                str(ctx.get("text_query") or ""),
+                str(category or ""),
+                str(fit or ""),
+                str(color_family or ""),
+            ]
+            prior_ctx = " ".join(p for p in prior_ctx_parts if p).strip()
+            cands = await run_smart_blended_search(
                 origin_url=origin_url,
                 modifier_query=text_query,
                 chat_id=ctx.get("chat_id"),
+                prior_outfit_context=prior_ctx or None,
                 category=category,
                 fit=fit,
                 color_family=color_family,

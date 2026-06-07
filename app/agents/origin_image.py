@@ -92,5 +92,40 @@ def blend_vectors(origin: list[float], modifier: list[float], alpha: float = 0.7
     return [v / norm for v in blended]
 
 
+def vector_arithmetic(
+    origin: list[float],
+    subtract: list[float],
+    add: list[float],
+    *,
+    beta: float = 0.5,
+) -> list[float]:
+    """Explicit attribute swap via vector arithmetic (Level 2 advanced).
+
+    Formula:
+        result = normalize(origin - beta * subtract + beta * add)
+
+    Rationale (multi-turn eval 2026-06-06):
+      Plain weighted-sum blending leaks too much of the original attribute
+      (e.g. "grey") into the blended vector, so a follow-up like "make it blue"
+      gets drowned out (modifier_score ~0.06 at alpha=0.7). Vector arithmetic
+      lets the caller explicitly subtract the OLD attribute and add the NEW
+      one, which is what FashionSigLIP's CLIP-style joint image+text space is
+      designed for. This is the standard analogy-style edit, e.g.
+      `image - "grey" + "blue navy"` keeps the silhouette and swaps only the
+      colour token.
+
+    Parameters:
+        origin   -- L2-normalised query vector (image or its text stand-in).
+        subtract -- L2-normalised vector for the attribute being removed.
+        add      -- L2-normalised vector for the attribute being added.
+        beta     -- swap strength (0.5 is the eval starting point — strong
+                    enough to flip a single colour/fit token without erasing
+                    the rest of the outfit).
+    """
+    result = [o - beta * s + beta * a for o, s, a in zip(origin, subtract, add)]
+    norm = math.sqrt(sum(v * v for v in result)) or 1.0
+    return [v / norm for v in result]
+
+
 def _reset_all_for_tests() -> None:
     _STORE.clear()
