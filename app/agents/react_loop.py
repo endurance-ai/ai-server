@@ -332,16 +332,50 @@ def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
     return None
 
 
+def _selected_vision_search_query(state: WorkingState, sess: Any) -> str:
+    """Return the English searchQuery for the selected Vision item.
+
+    When the user picked an item from the carousel, use that item's
+    Vision-extracted searchQuery (English) as the seed text_query so
+    search_products uses text embedding instead of the full outfit image.
+    This prevents outfit-contamination (other garments in the photo leaking
+    into results).
+    """
+    items = _detected_items(state, sess)
+    idx = state.selected_item_index
+    if idx is not None and isinstance(idx, int) and 0 <= idx < len(items):
+        sq = items[idx].get("searchQuery") or items[idx].get("searchQueryKo") or ""
+        return str(sq).strip()
+    vsi = state.vision_selected_item
+    if vsi is not None:
+        sq = getattr(vsi, "searchQuery", None) or getattr(vsi, "searchQueryKo", None) or ""
+        return str(sq).strip()
+    return ""
+
+
 def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Tool dispatch context — passed alongside args to every tool."""
+    # When an item has been selected from the picker, clear image_url and
+    # inject the selected item's Vision searchQuery as text_query.
+    # This switches search_products from full-image embedding (whole outfit)
+    # to text embedding (specific selected item), preventing outfit
+    # contamination where other garments in the photo appear in results.
+    selected_sq = _selected_vision_search_query(state, sess)
+    if selected_sq:
+        ctx_image_url = None   # force text-only path in search_products
+        ctx_text_query = selected_sq
+    else:
+        ctx_image_url = state.image_url
+        ctx_text_query = (state.message.text or "") if state.message else ""
+
     return {
         "chat_id": state.chat_id,
         "from_user_id": state.from_user_id,
         "user_key": user_key_for(state.from_user_id, state.chat_id),
-        "image_url": state.image_url,
+        "image_url": ctx_image_url,
         "thread_id": state.thread_id,
         "lang": session_lang(sess),
-        "text_query": (state.message.text or "") if state.message else "",
+        "text_query": ctx_text_query,
         "style_node_primary": state.vision_outfit_style_node_primary,
         # SPEC-SEARCH-V6-001 family gate: the REAL Vision garment category
         # (NOT the style-node letter). `search_products` passes THIS as the
