@@ -45,3 +45,5 @@ htmlcov/
 .moai/evolution/
 .moai/docs/
 HANDOFF.md
+tests/eval/multiturn_*.json
+!tests/eval/multiturn_dataset.json

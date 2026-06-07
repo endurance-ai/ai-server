@@ -1,0 +1,271 @@
+{
+  "version": "1.0",
+  "description": "Multi-turn blending evaluator. Each case represents an 'initial outfit context + modifier instruction'. The evaluator embeds the initial query as a stand-in for the origin image, blends it with the modifier (Level 2 weighted-sum), runs the v6 RPC, then scores the result candidates against `expected.outfit_preservation` (silhouette identity) and `expected.modifier_reflection` (intent uptake).",
+  "metrics": {
+    "identity_score": "fraction of top-k whose category matches expected.outfit_preservation.category",
+    "modifier_score": "fraction of top-k whose name contains ANY token from expected.modifier_reflection.keywords",
+    "harmonic_score": "2 * identity * modifier / (identity + modifier)"
+  },
+  "blending": {
+    "alpha_default": 0.7,
+    "note": "alpha is the weight on the initial vector; (1-alpha) on the modifier vector"
+  },
+  "cases": [
+    {
+      "id": "color_swap_001",
+      "type": "color_swap",
+      "initial_query": "grey oversized wool overcoat men",
+      "modifier_query": "navy blue",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["coat", "overcoat", "outer"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "grey",
+          "to_attribute": "navy blue",
+          "keywords_any": ["blue", "navy", "indigo"]
+        }
+      }
+    },
+    {
+      "id": "color_swap_002",
+      "type": "color_swap",
+      "initial_query": "black slim leather jacket men",
+      "modifier_query": "beige tan",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["jacket", "leather"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "black",
+          "to_attribute": "beige tan",
+          "keywords_any": ["beige", "tan", "camel", "cream"]
+        }
+      }
+    },
+    {
+      "id": "color_swap_003",
+      "type": "color_swap",
+      "initial_query": "white relaxed cotton t-shirt women",
+      "modifier_query": "black",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["t-shirt", "tee", "shirt"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "white",
+          "to_attribute": "black",
+          "keywords_any": ["black"]
+        }
+      }
+    },
+    {
+      "id": "color_swap_004",
+      "type": "color_swap",
+      "initial_query": "brown wide chino trousers men",
+      "modifier_query": "olive green khaki",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "bottoms",
+          "keywords_any": ["pants", "trousers", "chino"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "brown",
+          "to_attribute": "olive green khaki",
+          "keywords_any": ["olive", "green", "khaki"]
+        }
+      }
+    },
+    {
+      "id": "color_swap_005",
+      "type": "color_swap",
+      "initial_query": "오버사이즈 회색 울 오버코트 남성",
+      "modifier_query": "검정 블랙",
+      "lang": "ko",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["코트", "오버코트", "아우터", "coat"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "grey",
+          "to_attribute": "black",
+          "keywords_any": ["블랙", "검정", "black"]
+        }
+      }
+    },
+    {
+      "id": "mood_shift_001",
+      "type": "mood_shift",
+      "initial_query": "formal black tailored blazer men",
+      "modifier_query": "casual relaxed street",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["blazer", "jacket"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["casual", "relaxed", "street", "soft"]
+        }
+      }
+    },
+    {
+      "id": "mood_shift_002",
+      "type": "mood_shift",
+      "initial_query": "minimal beige knit sweater women",
+      "modifier_query": "vintage retro",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["sweater", "knit", "cardigan"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["vintage", "retro", "classic"]
+        }
+      }
+    },
+    {
+      "id": "mood_shift_003",
+      "type": "mood_shift",
+      "initial_query": "casual blue denim jeans men",
+      "modifier_query": "formal smart elegant",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "bottoms",
+          "keywords_any": ["pants", "trousers", "jeans"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["formal", "smart", "tailored", "slim"]
+        }
+      }
+    },
+    {
+      "id": "mood_shift_004",
+      "type": "mood_shift",
+      "initial_query": "trendy oversized graphic hoodie men",
+      "modifier_query": "minimal clean basic",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["hoodie", "sweatshirt", "pullover"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["minimal", "clean", "basic", "plain", "solid"]
+        }
+      }
+    },
+    {
+      "id": "mood_shift_005",
+      "type": "mood_shift",
+      "initial_query": "스트릿 오버사이즈 그래픽 후드 남성",
+      "modifier_query": "미니멀 베이직 클린",
+      "lang": "ko",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["후드", "후디", "hoodie", "맨투맨", "스웻"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["미니멀", "베이직", "기본", "minimal", "basic"]
+        }
+      }
+    },
+    {
+      "id": "fit_change_001",
+      "type": "fit_change",
+      "initial_query": "slim fit white shirt men",
+      "modifier_query": "oversized relaxed",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["shirt"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "slim",
+          "to_attribute": "oversized relaxed",
+          "keywords_any": ["oversized", "relaxed", "loose", "boxy"]
+        }
+      }
+    },
+    {
+      "id": "fit_change_002",
+      "type": "fit_change",
+      "initial_query": "skinny black jeans women",
+      "modifier_query": "wide leg straight",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "bottoms",
+          "keywords_any": ["jeans", "pants", "denim"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "skinny",
+          "to_attribute": "wide leg straight",
+          "keywords_any": ["wide", "straight", "loose"]
+        }
+      }
+    },
+    {
+      "id": "fit_change_003",
+      "type": "fit_change",
+      "initial_query": "슬림핏 화이트 셔츠 남성",
+      "modifier_query": "오버사이즈 박시",
+      "lang": "ko",
+      "expected": {
+        "outfit_preservation": {
+          "category": "tops",
+          "keywords_any": ["셔츠", "shirt"]
+        },
+        "modifier_reflection": {
+          "from_attribute": "slim",
+          "to_attribute": "oversized boxy",
+          "keywords_any": ["오버사이즈", "박시", "루즈", "oversized", "boxy"]
+        }
+      }
+    },
+    {
+      "id": "identity_preserve_001",
+      "type": "identity_preservation",
+      "initial_query": "charcoal grey wool double-breasted overcoat men",
+      "modifier_query": "more elegant",
+      "lang": "en",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["coat", "overcoat"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["elegant", "formal", "tailored", "premium", "wool"]
+        }
+      }
+    },
+    {
+      "id": "identity_preserve_002",
+      "type": "identity_preservation",
+      "initial_query": "navy blazer with peak lapel men",
+      "modifier_query": "더 캐주얼하게",
+      "lang": "ko",
+      "expected": {
+        "outfit_preservation": {
+          "category": "outerwear",
+          "keywords_any": ["블레이저", "자켓", "blazer", "jacket"]
+        },
+        "modifier_reflection": {
+          "keywords_any": ["캐주얼", "릴렉스", "라이트", "casual"]
+        }
+      }
+    }
+  ]
+}
