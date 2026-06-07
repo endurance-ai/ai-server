@@ -54,7 +54,14 @@ async def test_vision_category_outer_plumbs_to_canonical_outerwear(monkeypatch):
 
     # Pipeline edges stubbed so the search runs offline; build_params still
     # executes for real (that is the assertion subject).
+    # Outfit-contamination fix (2026-06-07): when selected_item_index is set,
+    # _build_ctx clears image_url and seeds text_query from the item's
+    # searchQuery so the text-only path is taken. Both embed_image_url and
+    # embed_text are stubbed to cover either path.
     async def fake_embed_image_url(image_url: str):
+        return [0.1] * 768
+
+    async def fake_embed_text(q: str):
         return [0.1] * 768
 
     async def fake_diversify_step(state):
@@ -62,6 +69,7 @@ async def test_vision_category_outer_plumbs_to_canonical_outerwear(monkeypatch):
         return state
 
     monkeypatch.setattr("app.pipeline.embed.EmbedProvider.embed_image_url", staticmethod(fake_embed_image_url))
+    monkeypatch.setattr("app.pipeline.embed.EmbedProvider.embed_text", staticmethod(fake_embed_text))
     monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
 
     async def fake_rpc(fn_name, params):
