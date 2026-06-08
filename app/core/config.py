@@ -237,9 +237,15 @@ class Settings(BaseSettings):
 
     # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
     # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
-    # After 1-2 weeks: set DAILY_TOKEN_CAP = p95_daily_tokens * 1.2, then enable.
+    # After 1-2 weeks: set CAP_TIER_FREE = p95_daily_tokens * 1.2, then enable.
     DAILY_TOKEN_CAP_ENABLED: bool = False
+    # Legacy alias kept for backward-compat: maps to CAP_TIER_FREE below.
     DAILY_TOKEN_CAP: int = 200_000
+    # Per-tier daily caps (tokens). 0 = unlimited.
+    CAP_TIER_FREE: int = 200_000
+    CAP_TIER_STANDARD: int = 500_000
+    CAP_TIER_PRO: int = 1_000_000
+    CAP_TIER_DEVELOPER: int = 0  # unlimited — for devs and internal testing
 
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
