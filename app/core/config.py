@@ -238,7 +238,7 @@ class Settings(BaseSettings):
     # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
     # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
     # After 1-2 weeks: set CAP_TIER_FREE = p95_daily_tokens * 1.2, then enable.
-    DAILY_TOKEN_CAP_ENABLED: bool = True
+    DAILY_TOKEN_CAP_ENABLED: bool = False
     # DAILY_TOKEN_CAP: deprecated alias for CAP_TIER_FREE. If set explicitly via
     # env var, it overrides CAP_TIER_FREE for the free tier. Use CAP_TIER_FREE directly.
     DAILY_TOKEN_CAP: int = 200_000
