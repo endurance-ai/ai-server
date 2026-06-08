@@ -815,6 +815,13 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         # Token budget guard (REQ-AGENT-PERF-TURN-BUDGET-001).
         if token_budget and cumulative_tokens >= token_budget:
             fb = await _fallback_respond(state, sess, "token_budget_exceeded", ctx=ctx)
+            if cumulative_tokens > 0:
+                try:
+                    from app.infrastructure.cache.token_cap import increment as _cap_increment
+
+                    await _cap_increment(state.chat_id, cumulative_tokens)
+                except Exception:  # noqa: BLE001
+                    pass
             return {
                 "agent_iterations": iterations,
                 "agent_status": "exhausted",

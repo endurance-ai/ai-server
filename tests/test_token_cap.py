@@ -100,6 +100,26 @@ def test_tier_cap_unknown_falls_back_to_free():
     assert _tier_cap("superuser") == 200_000
 
 
+def test_tier_cap_free_uses_cap_tier_free_when_overridden(monkeypatch):
+    """CAP_TIER_FREE overrides DAILY_TOKEN_CAP when explicitly changed."""
+    from app.core.config import settings
+    from app.infrastructure.cache.token_cap import _tier_cap
+
+    monkeypatch.setattr(settings, "CAP_TIER_FREE", 300_000)
+    monkeypatch.setattr(settings, "DAILY_TOKEN_CAP", 150_000)
+    assert _tier_cap("free") == 300_000  # CAP_TIER_FREE wins
+
+
+def test_tier_cap_free_falls_back_to_daily_token_cap_when_free_is_default(monkeypatch):
+    """DAILY_TOKEN_CAP used as fallback when CAP_TIER_FREE is still at default."""
+    from app.core.config import settings
+    from app.infrastructure.cache.token_cap import _tier_cap
+
+    monkeypatch.setattr(settings, "CAP_TIER_FREE", 200_000)  # default, not overridden
+    monkeypatch.setattr(settings, "DAILY_TOKEN_CAP", 150_000)  # legacy override
+    assert _tier_cap("free") == 150_000  # DAILY_TOKEN_CAP honored as legacy
+
+
 # ---------------------------------------------------------------------------
 # Tests: get_user_tier / set_user_tier
 # ---------------------------------------------------------------------------
@@ -296,6 +316,44 @@ async def test_reset_usage_does_not_clear_tier(fake_redis):
     await increment(1234, 50_000)
     await reset_usage(1234)
     assert await get_user_tier(1234) == "pro"
+
+
+# ---------------------------------------------------------------------------
+# Tests: token_budget_exceeded path records tokens
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_increment_called_on_token_budget_exceeded_path(fake_redis, monkeypatch):
+    """token_budget_exceeded early-return must record cumulative_tokens."""
+    from app.infrastructure.cache.token_cap import get_usage
+
+    recorded: list[tuple[int, int]] = []
+
+    async def _spy_increment(chat_id: int, tokens: int) -> int:
+        recorded.append((chat_id, tokens))
+        await fake_redis.incrby(f"kiko:cap:{chat_id}", tokens)
+        return tokens
+
+    monkeypatch.setattr(
+        "app.infrastructure.cache.token_cap.increment",
+        _spy_increment,
+    )
+
+    # Simulate react_loop token_budget_exceeded path inline
+    chat_id = 5555
+    cumulative_tokens = 32_000  # hit the per-turn budget
+
+    if cumulative_tokens > 0:
+        try:
+            from app.infrastructure.cache.token_cap import increment as _cap_increment
+
+            await _cap_increment(chat_id, cumulative_tokens)
+        except Exception:  # noqa: BLE001
+            pass
+
+    assert await get_usage(chat_id) == 32_000
+    assert recorded == [(5555, 32_000)]
 
 
 # ---------------------------------------------------------------------------

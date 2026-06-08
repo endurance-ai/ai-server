@@ -50,16 +50,17 @@ def _seconds_until_kst_midnight() -> int:
 
 
 def _tier_cap(tier: str) -> int:
-    """Return the daily token cap for `tier`. 0 means unlimited."""
-    if tier == "free":
-        return max(settings.CAP_TIER_FREE, settings.DAILY_TOKEN_CAP)
+    """Return the daily token cap for `tier`. 0 means unlimited.
+
+    CAP_TIER_* settings are canonical. Unknown tiers fall back to free.
+    """
     if tier == "standard":
         return settings.CAP_TIER_STANDARD
     if tier == "pro":
         return settings.CAP_TIER_PRO
     if tier == "developer":
         return settings.CAP_TIER_DEVELOPER
-    return max(settings.CAP_TIER_FREE, settings.DAILY_TOKEN_CAP)
+    return settings.effective_free_cap  # free + unknown tiers
 
 
 def _get_client():
