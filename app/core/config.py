@@ -235,6 +235,32 @@ class Settings(BaseSettings):
     # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
     REDIS_URL: str = "redis://localhost:6379/1"
 
+    # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
+    # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
+    # After 1-2 weeks: set CAP_TIER_FREE = p95_daily_tokens * 1.2, then enable.
+    DAILY_TOKEN_CAP_ENABLED: bool = True
+    # DAILY_TOKEN_CAP: deprecated alias for CAP_TIER_FREE. If set explicitly via
+    # env var, it overrides CAP_TIER_FREE for the free tier. Use CAP_TIER_FREE directly.
+    DAILY_TOKEN_CAP: int = 20_000
+    # Per-tier daily caps (tokens). 0 = unlimited.
+    # CAP_TIER_FREE takes precedence over DAILY_TOKEN_CAP when both are set.
+    CAP_TIER_FREE: int = 20_000
+    CAP_TIER_STANDARD: int = 500_000
+    CAP_TIER_PRO: int = 1_000_000
+    CAP_TIER_DEVELOPER: int = 0  # unlimited — for devs and internal testing
+
+    @property
+    def effective_free_cap(self) -> int:
+        """Free-tier cap, giving CAP_TIER_FREE precedence over DAILY_TOKEN_CAP.
+
+        If both differ from their defaults, CAP_TIER_FREE wins.
+        DAILY_TOKEN_CAP is preserved only when CAP_TIER_FREE is still at its
+        default (200_000), meaning the operator hasn't migrated yet.
+        """
+        if self.CAP_TIER_FREE != 200_000:
+            return self.CAP_TIER_FREE
+        return self.DAILY_TOKEN_CAP
+
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
         return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]

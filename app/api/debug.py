@@ -367,3 +367,108 @@ async def resolve_url(req: ResolveRequest) -> ResolveResponse:
         latency_ms=elapsed,
         images=list(images or []),
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 5) /debug/cap — 일별 토큰 캡 + 등급 관리
+# ──────────────────────────────────────────────────────────────────────
+
+_TIER_CAPS_LABEL = {
+    "free": "CAP_TIER_FREE",
+    "standard": "CAP_TIER_STANDARD",
+    "pro": "CAP_TIER_PRO",
+    "developer": "unlimited",
+}
+
+
+class CapStatusResponse(BaseModel):
+    chat_id: int
+    tier: str
+    daily_cap: int  # 0 = unlimited
+    used_today: int
+    remaining: int  # -1 = unlimited
+    cap_enabled: bool
+    over_limit: bool
+    seconds_until_reset: int
+
+
+class SetTierRequest(BaseModel):
+    chat_id: int
+    tier: str = Field(..., pattern="^(free|standard|pro|developer)$")
+
+
+class SetTierResponse(BaseModel):
+    ok: bool
+    chat_id: int
+    tier: str
+    daily_cap: int
+
+
+class ResetCapResponse(BaseModel):
+    ok: bool
+    chat_id: int
+
+
+@router.get(
+    "/cap/status/{chat_id}",
+    response_model=CapStatusResponse,
+    dependencies=[Depends(verify_internal_token)],
+)
+async def cap_status(chat_id: int) -> CapStatusResponse:
+    """유저 토큰 사용량 + 등급 + 잔여량 조회."""
+    from app.infrastructure.cache.token_cap import (
+        _seconds_until_kst_midnight,
+        _tier_cap,
+        get_usage,
+        get_user_tier,
+        is_over_limit,
+    )
+
+    tier = await get_user_tier(chat_id)
+    cap = _tier_cap(tier)
+    used = await get_usage(chat_id)
+    over = await is_over_limit(chat_id)
+    remaining = -1 if cap == 0 else max(0, cap - used)
+
+    return CapStatusResponse(
+        chat_id=chat_id,
+        tier=tier,
+        daily_cap=cap,
+        used_today=used,
+        remaining=remaining,
+        cap_enabled=settings.DAILY_TOKEN_CAP_ENABLED,
+        over_limit=over,
+        seconds_until_reset=_seconds_until_kst_midnight(),
+    )
+
+
+@router.post(
+    "/cap/tier",
+    response_model=SetTierResponse,
+    dependencies=[Depends(verify_internal_token)],
+)
+async def set_tier(req: SetTierRequest) -> SetTierResponse:
+    """유저 등급 설정. developer 등급은 캡 무제한."""
+    from app.infrastructure.cache.token_cap import _tier_cap, set_user_tier
+
+    ok = await set_user_tier(req.chat_id, req.tier)  # type: ignore[arg-type]
+    if not ok:
+        raise HTTPException(status_code=503, detail="redis unavailable")
+
+    cap = _tier_cap(req.tier)
+    logger.info("[debug.cap] set_tier chat=%s tier=%s cap=%s", req.chat_id, req.tier, cap or "unlimited")
+    return SetTierResponse(ok=True, chat_id=req.chat_id, tier=req.tier, daily_cap=cap)
+
+
+@router.delete(
+    "/cap/reset/{chat_id}",
+    response_model=ResetCapResponse,
+    dependencies=[Depends(verify_internal_token)],
+)
+async def reset_cap(chat_id: int) -> ResetCapResponse:
+    """유저 일별 카운터 초기화 (테스트 / 수동 복구용)."""
+    from app.infrastructure.cache.token_cap import reset_usage
+
+    ok = await reset_usage(chat_id)
+    logger.info("[debug.cap] reset_usage chat=%s ok=%s", chat_id, ok)
+    return ResetCapResponse(ok=ok, chat_id=chat_id)
