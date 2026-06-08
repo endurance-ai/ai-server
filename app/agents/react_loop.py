@@ -340,6 +340,13 @@ def _selected_vision_search_query(state: WorkingState, sess: Any) -> str:
     search_products uses text embedding instead of the full outfit image.
     This prevents outfit-contamination (other garments in the photo leaking
     into results).
+
+    Resolution order:
+      1. state.selected_item_index — fresh pick callback this turn.
+      2. state.vision_selected_item — same, structured object.
+      3. sess.vision_selected_item_index + follow-up reference — multi-turn
+         text follow-up ("다른 색상") where the user wants to keep refining
+         the previously selected item.
     """
     items = _detected_items(state, sess)
     idx = state.selected_item_index
@@ -350,6 +357,12 @@ def _selected_vision_search_query(state: WorkingState, sess: Any) -> str:
     if vsi is not None:
         sq = getattr(vsi, "searchQuery", None) or getattr(vsi, "searchQueryKo", None) or ""
         return str(sq).strip()
+    msg = state.message
+    if msg and _is_followup_reference(msg.text, sess):
+        sess_idx = getattr(sess, "vision_selected_item_index", None)
+        if sess_idx is not None and isinstance(sess_idx, int) and 0 <= sess_idx < len(items):
+            sq = items[sess_idx].get("searchQuery") or items[sess_idx].get("searchQueryKo") or ""
+            return str(sq).strip()
     return ""
 
 
@@ -494,6 +507,78 @@ def _is_short_affirmative(text: str | None) -> bool:
     return False
 
 
+# Follow-up reference markers — when the user's text contains one of these
+# AND the session is fresh (recent activity), surface stale Vision context
+# so multi-turn refinements ("다른 색상", "더 저렴하게") keep the original
+# item context without re-leaking on greetings (which carry no such marker).
+_FOLLOWUP_TOKENS_KO = (
+    "다른",
+    "더",
+    "이거",
+    "이미지",
+    "링크",
+    "사진",
+    "비슷",
+    "위에",
+    "방금",
+    "이미",
+    "다시",
+    "저렴",
+    "비싼",
+    "색상",
+    "색깔",
+    "스커트",
+    "셔츠",
+    "팬츠",
+    "바지",
+    "신발",
+    "가방",
+    "재킷",
+    "코트",
+)
+_FOLLOWUP_TOKENS_EN = (
+    "more",
+    "different",
+    "another",
+    "this",
+    "that",
+    "same",
+    "image",
+    "link",
+    "previous",
+    "above",
+    "cheaper",
+    "expensive",
+    "color",
+    "colour",
+)
+# Session must have been active within this window for follow-up surfacing
+# to apply (in seconds). Wider than chit-chat noise, narrower than session TTL.
+_FOLLOWUP_RECENT_WINDOW_S = 600.0
+
+
+def _is_followup_reference(text: str | None, sess: Any) -> bool:
+    """Detect a continuation reference to the prior outfit/item context.
+
+    True when the user text carries a follow-up marker (KO/EN) AND the
+    session was active within `_FOLLOWUP_RECENT_WINDOW_S`. Both checks are
+    required: tokens alone false-positive on accidental matches; recency
+    alone false-positives on greetings.
+    """
+    if not text:
+        return False
+    s = text.strip().lower()
+    if not s:
+        return False
+    has_marker = any(t in s for t in _FOLLOWUP_TOKENS_KO) or any(t in s.split() for t in _FOLLOWUP_TOKENS_EN)
+    if not has_marker:
+        return False
+    last_active = getattr(sess, "last_active", None)
+    if last_active is None:
+        return False
+    return (time.time() - float(last_active)) <= _FOLLOWUP_RECENT_WINDOW_S
+
+
 def _build_user_message(state: WorkingState, sess: Any) -> str:
     msg = state.message
     lang = session_lang(sess)
@@ -578,6 +663,22 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
         v_item = getattr(sess, "vision_item", None)
         if v_item:
             parts.append(f"previously_picked_item: {str(v_item)[:120]}")
+    elif items and _is_followup_reference(msg.text if msg else None, sess):
+        # Multi-turn follow-up ("다른 색상", "더 저렴하게") within the recency
+        # window — surface the prior picked item or detected_items so the LLM
+        # keeps the original context. Stale-leak guard: follow-up markers
+        # are required, so neutral chit-chat ("안녕") does NOT trigger this.
+        sess_pick_idx = getattr(sess, "vision_selected_item_index", None)
+        if sess_pick_idx is not None and isinstance(sess_pick_idx, int) and 0 <= sess_pick_idx < len(items):
+            label, subcat, fit, color, query = _item_attrs(items[sess_pick_idx], lang)
+            parts.append(f"previously_selected_item: {label}{_attr_tail(subcat, fit, color)}")
+            parts.append(f'suggested_query: "{query[:120]}"')
+        else:
+            summary = []
+            for it in items[:4]:
+                lbl, sc, ft, cl, _ = _item_attrs(it, lang)
+                summary.append(f"{lbl}{_attr_tail(sc, ft, cl)}")
+            parts.append(f"detected_items: {'; '.join(summary)}")
 
     if msg and msg.callback_data:
         if not callback_resolved:
