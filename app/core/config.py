@@ -235,6 +235,12 @@ class Settings(BaseSettings):
     # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
     REDIS_URL: str = "redis://localhost:6379/1"
 
+    # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
+    # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
+    # After 1-2 weeks: set DAILY_TOKEN_CAP = p95_daily_tokens * 1.2, then enable.
+    DAILY_TOKEN_CAP_ENABLED: bool = False
+    DAILY_TOKEN_CAP: int = 200_000
+
     @property
     def self_critique_fastpath_drop_filters(self) -> list[str]:
         return [s.strip().lower() for s in self.SELF_CRITIQUE_FASTPATH_DROP_FILTERS.split(",") if s.strip()]
