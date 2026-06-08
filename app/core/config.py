@@ -241,10 +241,10 @@ class Settings(BaseSettings):
     DAILY_TOKEN_CAP_ENABLED: bool = True
     # DAILY_TOKEN_CAP: deprecated alias for CAP_TIER_FREE. If set explicitly via
     # env var, it overrides CAP_TIER_FREE for the free tier. Use CAP_TIER_FREE directly.
-    DAILY_TOKEN_CAP: int = 20_000
+    DAILY_TOKEN_CAP: int = 200_000
     # Per-tier daily caps (tokens). 0 = unlimited.
     # CAP_TIER_FREE takes precedence over DAILY_TOKEN_CAP when both are set.
-    CAP_TIER_FREE: int = 20_000
+    CAP_TIER_FREE: int = 200_000
     CAP_TIER_STANDARD: int = 500_000
     CAP_TIER_PRO: int = 1_000_000
     CAP_TIER_DEVELOPER: int = 0  # unlimited — for devs and internal testing
