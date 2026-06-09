@@ -32,6 +32,7 @@ from app.graphs.state import InputState
 from app.infrastructure.cache import token_cap
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
+from app.observability.event_payloads import CapReachedPayload
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id
 
@@ -322,6 +323,14 @@ async def _invoke_graph(
                 await adapter.send_text(message.chat_id, cap_text)
             except Exception:  # noqa: BLE001 — fail-open
                 logger.debug("[webhook] cap message send failed chat=%s", message.chat_id)
+            emit(
+                event_type="cap_reached",
+                user_key=user_key_for(message.from_user_id, message.chat_id),
+                chat_id=message.chat_id,
+                thread_id=thread_id,
+                turn_no=turn_no,
+                payload=CapReachedPayload(lang=lang),
+            )
             return
 
         input_state = InputState(

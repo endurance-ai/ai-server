@@ -1,11 +1,12 @@
-"""SPEC-CONVERSATION-LOG-001 / REQ-LOG-CATALOG-001 — 20 TypedDict payload schemas.
+"""SPEC-CONVERSATION-LOG-001 / REQ-LOG-CATALOG-001 — 21 TypedDict payload schemas.
 
-각 TypedDict 는 SPEC §Event Type Catalog 의 항목 1-20 과 1:1 대응한다. `total=False`
+각 TypedDict 는 SPEC §Event Type Catalog 의 항목 1-21 과 1:1 대응한다. `total=False`
 를 채택해 호출자가 최소 키만 채워도 타입 검사를 통과하도록 두고, 카탈로그 evolution
 시 새 키를 한 단계 더 늘려도 호환된다. 20번째 `tool_call` (`ToolCallPayload`) 은
-v0.3.0 amendment (SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001) 로 추가됐다.
+v0.3.0 amendment (SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001) 로, 21번째
+`cap_reached` (`CapReachedPayload`) 는 SPEC-DAILY-TOKEN-CAP-001 로 추가됐다.
 
-`__all__` 의 길이(=20)는 CI smoke test (`test_20_event_types_smoke.py`) 에서 강제
+`__all__` 의 길이(=21)는 CI smoke test (`test_20_event_types_smoke.py`) 에서 강제
 검증된다.
 
 NOTE: 본 모듈은 *런타임 검증* 을 하지 않는다. 호출자가 잘못된 payload 를 넘기면 mypy /
@@ -13,7 +14,7 @@ pyright 단계에서만 잡힌다. payload sanitize / truncation 은 `conversati
 가 책임진다.
 """
 
-# @MX:NOTE: [AUTO] SPEC-CONVERSATION-LOG-001 — 19 event payload TypedDicts (REQ-LOG-CATALOG-001)
+# @MX:NOTE: [AUTO] SPEC-CONVERSATION-LOG-001 — 21 event payload TypedDicts (REQ-LOG-CATALOG-001)
 # @MX:SPEC: SPEC-CONVERSATION-LOG-001
 
 from __future__ import annotations
@@ -42,6 +43,8 @@ __all__ = [
     "NodeErrorPayload",
     # SPEC-AGENT-V2-REACT — REQ-AGENT-LOG-EVENT-001 (20th event type).
     "ToolCallPayload",
+    # SPEC-DAILY-TOKEN-CAP-001 (21st event type).
+    "CapReachedPayload",
 ]
 
 # REQ-LOG-CATALOG-001 — taste_update.source 7-value Literal (catalog #18).
@@ -228,3 +231,9 @@ class ToolCallPayload(TypedDict, total=False):
     error: str | None
     args_summary: dict
     result_summary: dict
+
+
+# 21. cap_reached — SPEC-DAILY-TOKEN-CAP-001.
+# Emitted by the webhook gate when a user exhausts their daily token quota.
+class CapReachedPayload(TypedDict, total=False):
+    lang: str  # "ko" | "en" — detected language at the time of the cap hit
