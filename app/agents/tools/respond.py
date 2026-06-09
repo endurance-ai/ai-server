@@ -449,10 +449,56 @@ def _format_price(price: Any) -> str | None:
     return f"₩{n:,}"
 
 
-def _build_summary(batch: list[Any], lang: str) -> str:
+async def _mint_click_tokens(batch: list[Any], chat_id: int) -> list[str | None]:
+    """Mint per-candidate CTR redirect URLs aligned with `batch` index.
+
+    Returns a list parallel to `batch`. Each slot is either `f"{base}/r/{token}"`
+    (success) or None (Redis down / PUBLIC_BASE_URL unset / no raw URL). The
+    `_build_summary` caller falls back to the raw `product_url` when an entry
+    is None — i.e., the feature degrades to current behavior on any failure.
+
+    `rec_id` = active Langfuse trace id (beta convention; aliased to rec_id at
+    analytics time). When Langfuse is off, `rec_id` is None — the click event
+    is still recorded by the redirect endpoint, just without trace correlation.
+    """
+    from app.core.config import settings as _s
+    from app.infrastructure.cache.click_token import mint_token
+    from app.observability.langfuse import current_langfuse_trace_id
+
+    base = (_s.PUBLIC_BASE_URL or "").rstrip("/")
+    if not base:
+        # Feature off — caller will use raw product_url for every slot.
+        return [None] * len(batch)
+
+    try:
+        rec_id = current_langfuse_trace_id()
+    except Exception:  # noqa: BLE001
+        rec_id = None
+
+    out: list[str | None] = []
+    for c in batch:
+        raw_url = str(_candidate_field(c, "product_url", "") or "").strip()
+        pid = str(_candidate_field(c, "id", "") or "").strip()
+        if not raw_url or not pid:
+            out.append(None)
+            continue
+        token = await mint_token(int(chat_id), rec_id, pid, raw_url)
+        if not token:
+            out.append(None)  # Redis-down → caller falls back to raw URL
+            continue
+        out.append(f"{base}/r/{token}")
+    return out
+
+
+def _build_summary(batch: list[Any], lang: str, urls_override: list[str | None] | None = None) -> str:
     """KO/EN header + numbered list. The item NAME is an HTML <a> link to the
     product URL (parse_mode HTML) so the buy path survives without per-card
     Shop buttons (Telegram media groups forbid per-photo keyboards).
+
+    `urls_override` (when supplied) is a per-index list of CTR-wrapped URLs
+    (`{PUBLIC_BASE_URL}/r/{token}`) minted by `send_hybrid_batch`. Falls back
+    to the raw candidate `product_url` when override is missing/None for an
+    index (e.g., Redis-down → mint returned None → use raw URL).
     """
     n = len(batch)
     if lang == "ko":
@@ -470,7 +516,9 @@ def _build_summary(batch: list[Any], lang: str) -> str:
     for i, c in enumerate(batch, start=1):
         brand = str(_candidate_field(c, "brand", "")).strip()
         name = str(_candidate_field(c, "name", "")).strip() or ("추천 아이템" if lang == "ko" else "item")
-        purl = str(_candidate_field(c, "product_url", "")).strip()
+        raw_purl = str(_candidate_field(c, "product_url", "")).strip()
+        wrapped = urls_override[i - 1] if urls_override and i - 1 < len(urls_override) else None
+        purl = wrapped or raw_purl
         price_str = _format_price(_candidate_field(c, "price", None))
         name_html = _esc(name)
         safe_url = _safe_http_url(purl) if purl else None
@@ -685,6 +733,13 @@ async def send_hybrid_batch(
             logger.debug("[tool.respond] send_media_group raised: %r", exc)
             group_ok = False
 
+    # Beta CTR — mint click tokens for the batch so summary HTML links route
+    # through `/r/{token}` redirect proxy. Fail-open: when Redis is down OR
+    # PUBLIC_BASE_URL is unset, `urls_override` falls back to raw product URLs
+    # entry-by-entry inside `_build_summary`. Computed BEFORE both delivery
+    # paths so the wrapper is consistent regardless of fallback.
+    urls_override = await _mint_click_tokens(batch, chat_id)
+
     if group_ok:
         delivered = len(batch)
         for c in batch:
@@ -693,7 +748,7 @@ async def send_hybrid_batch(
                 sent_ids.add(ident)
         # Summary text + inline keyboard (carries the buy links + actions the
         # media group cannot). HTML so the item names are tappable links.
-        summary = _build_summary(batch, lang)
+        summary = _build_summary(batch, lang, urls_override=urls_override)
         keyboard = _build_keyboard(batch, lang, has_more=len(eligible_pos) > len(batch_pos))
         try:
             if hasattr(adapter, "send_text_with_keyboard"):
@@ -719,7 +774,7 @@ async def send_hybrid_batch(
         used_fallback = True
         delivered = await _fallback_send_cards(adapter, chat_id, batch, sent_ids, lang)
         if _settings.INDIVIDUAL_CARD_DELIVERY and delivered > 0:
-            summary = _build_summary(batch[:delivered], lang)
+            summary = _build_summary(batch[:delivered], lang, urls_override=urls_override[:delivered])
             keyboard = _build_keyboard(
                 batch[:delivered],
                 lang,
