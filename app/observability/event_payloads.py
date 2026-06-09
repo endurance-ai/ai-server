@@ -42,6 +42,8 @@ __all__ = [
     "NodeErrorPayload",
     # SPEC-AGENT-V2-REACT — REQ-AGENT-LOG-EVENT-001 (20th event type).
     "ToolCallPayload",
+    # Beta observability — per-turn outcome summary (21st event type).
+    "TurnSummaryPayload",
 ]
 
 # REQ-LOG-CATALOG-001 — taste_update.source 7-value Literal (catalog #18).
@@ -228,3 +230,16 @@ class ToolCallPayload(TypedDict, total=False):
     error: str | None
     args_summary: dict
     result_summary: dict
+
+
+# 21. turn_summary — Beta observability. Emitted by react_loop on every exit
+# path (responded / exhausted / error). One row per user-turn — enables
+# `SELECT status, COUNT(*) GROUP BY status` analytics without joining raw
+# tool_call events.
+# `rec_id` is the langfuse trace id of the recommendation batch (alias —
+# beta-period convention; no separate column).
+class TurnSummaryPayload(TypedDict, total=False):
+    rec_id: str | None
+    iter_count: int
+    status: Literal["responded", "stuck", "error"]
+    exit_reason: str | None

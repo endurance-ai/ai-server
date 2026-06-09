@@ -850,7 +850,7 @@ def _append_skipped_parallel_tool_results(messages: list[Any], tool_calls: list[
     return appended
 
 
-async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
+async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Run the ReAct loop. Returns a state delta dict for the LangGraph node."""
     llm = get_llm()
     if llm is None:
@@ -1350,3 +1350,57 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         "tool_call_history": history,
         "response_text": None,
     }
+
+
+async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
+    """Public entry — wraps `_run_react_loop_impl` with `turn_summary` emission.
+
+    Emits one `turn_summary` conversation-log row per user-turn (one per call)
+    regardless of exit path. The inner impl preserves byte-identical return
+    shape; this wrapper only adds best-effort observability and re-raises any
+    exception unchanged.
+
+    `status` derivation:
+      - inner returns with `agent_status="exhausted"`     → "stuck"
+      - inner returns with any other agent_status          → "responded"
+      - inner raises                                       → "error"
+
+    `rec_id` is captured via `current_langfuse_trace_id()` from the active
+    Langfuse trace (beta convention: rec_id ≡ langfuse_trace).
+    """
+    iter_count = 0
+    status: str = "error"
+    exit_reason: str | None = None
+    try:
+        result = await _run_react_loop_impl(state, sess)
+        iter_count = int(result.get("agent_iterations", 0) or 0)
+        agent_status = result.get("agent_status")
+        if agent_status == "exhausted":
+            status = "stuck"
+            exit_reason = "exhausted"
+        else:
+            status = "responded"
+        return result
+    except Exception as exc:
+        exit_reason = type(exc).__name__
+        raise
+    finally:
+        try:
+            from app.observability.langfuse import current_langfuse_trace_id
+
+            rec_id = current_langfuse_trace_id()
+            emit(
+                event_type="turn_summary",
+                user_key=user_key_for(state.from_user_id, state.chat_id),
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=1,
+                payload={
+                    "rec_id": rec_id,
+                    "iter_count": iter_count,
+                    "status": status,
+                    "exit_reason": exit_reason,
+                },
+            )
+        except Exception:  # noqa: BLE001 — observability is best-effort
+            logger.debug("[react_loop] turn_summary emit best-effort skip", exc_info=True)
