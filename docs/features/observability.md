@@ -119,6 +119,14 @@ curl -X POST http://<EIP>:8000/recommend \
 
 > **`current_langfuse_trace_id()` v3 API 정정**: v2→v3 SDK 마이그레이션 때 이 헬퍼가 v3 에 없는 v2 API(`get_current_observation()` / `langfuse_context`)를 호출 → 광범위 except 에 삼켜져 **항상 None 반환**하던 결함이 있었다. 그 결과 `ai.card_impression.langfuse_trace` 뿐 아니라 `ai.log_conversation_event.langfuse_trace` 교차참조(SPEC-CONVERSATION-LOG-001)도 v3 이후 전부 NULL 이었음. v3 `client.get_current_trace_id()` 단일 경로로 정정 → 두 서브시스템 동시 복구. 회귀 방지: 실 SDK `@observe` span 안에서 non-None 단언하는 특성 테스트(`tests/test_observability/test_trace_id_v3_api.py`).
 
+## 베타 분석 컨벤션
+
+**rec_id ≡ langfuse_trace** (베타 한정). 추천 batch 단위 식별자는 별도 컬럼을 두지 않고, 이미 `ai.card_impression.langfuse_trace` / `ai.log_conversation_event.langfuse_trace` / `card_clicked.langfuse_trace`(redirect proxy) / `turn_summary.payload.rec_id`(react_loop wrapper) 에 박혀 있는 Langfuse trace id 를 그대로 `rec_id` 로 부른다. 분석 SQL 은 `SELECT langfuse_trace AS rec_id …` alias 로 통일.
+
+근거: trace 는 추천 batch 1회당 1개 발급되고 같은 batch 의 5장 카드가 동일 값을 공유한다(`@observe` 펜스 단위). 베타 종료 후 풀 분석이 필요하면 `ai.card_impression` 에 `rec_id uuid` 신설(migration 0009 후보) 로 옮길 수 있다 — 그 시점엔 lookup 키만 바뀌고 의미는 동일.
+
+분석 쿼리 모음: `scripts/beta_analysis.sql`.
+
 ## PII / 마스킹 (백로그)
 
 `@observe` 가 함수 인자를 자동 캡처 — `RecommendRequest.image_url`, `searchQuery` 등 사용자 행동 데이터 포함. 운영 단계 진입 시점에 다음 중 택 1:
