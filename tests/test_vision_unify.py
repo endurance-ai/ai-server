@@ -183,7 +183,10 @@ class TestExtractParameters:
         assert captured["max_tokens"] == 2500
         assert captured["temperature"] == 0.3
         # Verify the rich system prompt is used.
-        assert "isApparel" in captured["system"]
+        # system content is now a list of cache_control blocks — check the text value.
+        sys_content = captured["system"]
+        sys_text = sys_content[0]["text"] if isinstance(sys_content, list) else sys_content
+        assert "isApparel" in sys_text
 
 
 # ── REQ-VISION-COMPAT-005 — flag rollback to legacy schema ─────────────────
