@@ -62,12 +62,11 @@ async def test_stale_click_no_db_no_taste(pg_pool_with_impressions, in_memory_ta
     assert run_in_pool_loop(_count()) == 0
 
 
-def test_send_results_builds_three_critique_buttons():
-    """UX simplification 260610 v2 — 3 critique buttons: ❤️ love / ✨ more / 💰 cheaper.
-
-    The ❤️ love button migrated FROM the summary ❤️ 1..5 row TO each card.
-    Reuses the existing `card:like:{pid}` callback shape so
-    `ingest._handle_card_like` handles it inline.
+def test_send_results_builds_two_row_critique_keyboard():
+    """UX simplification 260610 v3 — 2-row layout:
+        Row 1: [👀 비슷한 거 더보기] [💰 더 저렴한 거]
+        Row 2: [♥️ 취향 저장하기]
+    The like button still reuses `card:like:{pid}` so ingest handles it inline.
     """
     from app.graphs.nodes.send_results import (
         CRIT_CHEAP_EN,
@@ -80,32 +79,33 @@ def test_send_results_builds_three_critique_buttons():
     )
 
     en = _critique_buttons_for(0, lang="en", product_id="p1")
-    assert len(en) == 3
-    assert en[0] == (CRIT_LIKE_EN, "card:like:p1")
-    assert en[1] == (CRIT_MORE_EN, "crit:more:0")
-    assert en[2] == (CRIT_CHEAP_EN, "crit:cheap:0")
+    assert len(en) == 2  # rows
+    assert en[0] == [(CRIT_MORE_EN, "crit:more:0"), (CRIT_CHEAP_EN, "crit:cheap:0")]
+    assert en[1] == [(CRIT_LIKE_EN, "card:like:p1")]
 
     ko = _critique_buttons_for(0, lang="ko", product_id="p1")
-    assert len(ko) == 3
-    assert ko[0] == (CRIT_LIKE_KO, "card:like:p1")
-    assert ko[1] == (CRIT_MORE_KO, "crit:more:0")
-    assert ko[2] == (CRIT_CHEAP_KO, "crit:cheap:0")
+    assert len(ko) == 2
+    assert ko[0] == [(CRIT_MORE_KO, "crit:more:0"), (CRIT_CHEAP_KO, "crit:cheap:0")]
+    assert ko[1] == [(CRIT_LIKE_KO, "card:like:p1")]
 
 
 def test_critique_like_falls_back_to_idx_when_pid_missing():
-    """When product_id is missing, ❤️ uses `card:like:{idx}` (matches the
+    """When product_id is missing, ♥️ uses `card:like:{idx}` (matches the
     summary keyboard's prior idx-fallback behavior so ingest._handle_card_like
     can resolve via sess.last_results[idx])."""
     from app.graphs.nodes.send_results import _critique_buttons_for
 
-    buttons = _critique_buttons_for(2, lang="en", product_id=None)
-    assert buttons[0][1] == "card:like:2"
+    rows = _critique_buttons_for(2, lang="en", product_id=None)
+    # Row 2 holds the lone like button — assert its callback.
+    assert rows[1][0][1] == "card:like:2"
 
 
 def test_critique_buttons_callback_within_64_bytes():
     from app.graphs.nodes.send_results import _critique_buttons_for
 
     long_id = "x" * 100
-    buttons = _critique_buttons_for(0, lang="en", product_id=long_id)
-    for _label, cb in buttons:
-        assert len(cb.encode("utf-8")) <= 64
+    rows = _critique_buttons_for(0, lang="en", product_id=long_id)
+    # Flatten across rows — every callback in every row must fit Telegram's 64-byte cap.
+    for row in rows:
+        for _label, cb in row:
+            assert len(cb.encode("utf-8")) <= 64
