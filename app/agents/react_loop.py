@@ -511,13 +511,17 @@ def _is_short_affirmative(text: str | None) -> bool:
 # AND the session is fresh (recent activity), surface stale Vision context
 # so multi-turn refinements ("다른 색상", "더 저렴하게") keep the original
 # item context without re-leaking on greetings (which carry no such marker).
+# NOTE 260610 — STALE-LEAK FIX: garment nouns ("셔츠", "코트" etc.) and bare
+# "사진/이미지/링크/색상/색깔" tokens were removed because a FRESH search like
+# "그레이 셔츠 추천해줘" was triggering the follow-up branch and leaking the
+# prior outfit context into the new search. Only true reference markers
+# ("다른", "더", "이거", "다시", "비슷", "방금", "위에", "저렴", "비싼") remain
+# — every retained token unambiguously signals a back-reference to the prior
+# turn, not a fresh garment query.
 _FOLLOWUP_TOKENS_KO = (
     "다른",
     "더",
     "이거",
-    "이미지",
-    "링크",
-    "사진",
     "비슷",
     "위에",
     "방금",
@@ -525,16 +529,6 @@ _FOLLOWUP_TOKENS_KO = (
     "다시",
     "저렴",
     "비싼",
-    "색상",
-    "색깔",
-    "스커트",
-    "셔츠",
-    "팬츠",
-    "바지",
-    "신발",
-    "가방",
-    "재킷",
-    "코트",
 )
 _FOLLOWUP_TOKENS_EN = (
     "more",
@@ -543,14 +537,10 @@ _FOLLOWUP_TOKENS_EN = (
     "this",
     "that",
     "same",
-    "image",
-    "link",
     "previous",
     "above",
     "cheaper",
     "expensive",
-    "color",
-    "colour",
 )
 # Session must have been active within this window for follow-up surfacing
 # to apply (in seconds). Wider than chit-chat noise, narrower than session TTL.
@@ -650,11 +640,15 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
         parts.append(f"user_selected_item: {label}{_attr_tail(subcat, fit, color)}")
         parts.append(f'suggested_query: "{query[:120]}"')
         callback_resolved = True
-    elif items and (state.image_url or state.detected_items):
-        # Vision ran THIS turn (state-level signal present). Stale session-only
-        # items are intentionally NOT surfaced here.
+    elif state.detected_items:
+        # Fresh image / Vision ran THIS turn — `state.detected_items` is
+        # populated by THIS turn's vision_node. STALE-LEAK FIX 260610: must
+        # use state.detected_items DIRECTLY (not the combined `items` view
+        # which falls back to sess on empty state). Otherwise a new-image
+        # turn whose Vision yielded no items (transient failure) would leak
+        # the prior turn's `sess.detected_items` as if they belonged here.
         summary = []
-        for it in items[:4]:
+        for it in state.detected_items[:4]:
             lbl, sc, ft, cl, _ = _item_attrs(it, lang)
             summary.append(f"{lbl}{_attr_tail(sc, ft, cl)}")
         parts.append(f"detected_items: {'; '.join(summary)}")
