@@ -560,13 +560,13 @@ def _like_callback_for(c: Any, idx: int) -> str:
 
 
 def _build_keyboard(batch: list[Any], lang: str, has_more: bool = True) -> list[list[tuple[str, str]]]:
-    """Row 1: number like-buttons 1️⃣..5️⃣ (card:like). Row 2: footer —
-    [더보기/More] (cards:more) ONLY when another batch exists, plus
-    [다르게 찾기/Refine] (cards:refine) always."""
-    like_row: list[tuple[str, str]] = []
-    for i, c in enumerate(batch):
-        emoji = _NUM_EMOJI[i] if i < len(_NUM_EMOJI) else str(i + 1)
-        like_row.append((emoji, _like_callback_for(c, i)))
+    """Summary-card keyboard — FOOTER ONLY (UX simplification 260610).
+
+    The per-item ❤️ 1..5 row was removed: each individual product card now
+    carries its OWN ❤️ button (see `send_results._critique_buttons_for`), so
+    the summary-level row was redundant and forced users to mentally map
+    number → card. `batch` is kept in the signature so callers do not change.
+    """
     footer: list[tuple[str, str]] = []
     if lang == "ko":
         if has_more:
@@ -576,7 +576,7 @@ def _build_keyboard(batch: list[Any], lang: str, has_more: bool = True) -> list[
         if has_more:
             footer.append(("➕ More", "cards:more"))
         footer.append(("🔄 Refine", "cards:refine"))
-    return [like_row, footer]
+    return [footer]
 
 
 async def _fallback_send_cards(

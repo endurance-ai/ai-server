@@ -62,22 +62,44 @@ async def test_stale_click_no_db_no_taste(pg_pool_with_impressions, in_memory_ta
     assert run_in_pool_loop(_count()) == 0
 
 
-def test_send_results_builds_four_critique_buttons():
-    """REQ-FB-UX-001 — 4th 👀 button added per card with KO/EN labels."""
+def test_send_results_builds_three_critique_buttons():
+    """UX simplification 260610 v2 — 3 critique buttons: ❤️ love / ✨ more / 💰 cheaper.
+
+    The ❤️ love button migrated FROM the summary ❤️ 1..5 row TO each card.
+    Reuses the existing `card:like:{pid}` callback shape so
+    `ingest._handle_card_like` handles it inline.
+    """
     from app.graphs.nodes.send_results import (
-        CRIT_CLICK_EN,
-        CRIT_CLICK_KO,
+        CRIT_CHEAP_EN,
+        CRIT_CHEAP_KO,
+        CRIT_LIKE_EN,
+        CRIT_LIKE_KO,
+        CRIT_MORE_EN,
+        CRIT_MORE_KO,
         _critique_buttons_for,
     )
 
     en = _critique_buttons_for(0, lang="en", product_id="p1")
-    assert len(en) == 4
-    assert en[3][0] == CRIT_CLICK_EN
-    assert en[3][1] == "crit:click:p1"
+    assert len(en) == 3
+    assert en[0] == (CRIT_LIKE_EN, "card:like:p1")
+    assert en[1] == (CRIT_MORE_EN, "crit:more:0")
+    assert en[2] == (CRIT_CHEAP_EN, "crit:cheap:0")
 
     ko = _critique_buttons_for(0, lang="ko", product_id="p1")
-    assert ko[3][0] == CRIT_CLICK_KO
-    assert ko[3][1] == "crit:click:p1"
+    assert len(ko) == 3
+    assert ko[0] == (CRIT_LIKE_KO, "card:like:p1")
+    assert ko[1] == (CRIT_MORE_KO, "crit:more:0")
+    assert ko[2] == (CRIT_CHEAP_KO, "crit:cheap:0")
+
+
+def test_critique_like_falls_back_to_idx_when_pid_missing():
+    """When product_id is missing, ❤️ uses `card:like:{idx}` (matches the
+    summary keyboard's prior idx-fallback behavior so ingest._handle_card_like
+    can resolve via sess.last_results[idx])."""
+    from app.graphs.nodes.send_results import _critique_buttons_for
+
+    buttons = _critique_buttons_for(2, lang="en", product_id=None)
+    assert buttons[0][1] == "card:like:2"
 
 
 def test_critique_buttons_callback_within_64_bytes():

@@ -39,13 +39,21 @@ CARD_RENDER_FAIL_EN = "Found some matches but couldn't render the cards — here
 CARD_RENDER_FAIL_KO = "괜찮은 후보들 찾았는데 카드로 못 보여줘서 링크로 줄게:"
 # Back-compat alias
 CARD_RENDER_FAIL = CARD_RENDER_FAIL_EN
-CRIT_MORE_EN = "♥ More like this"
+CRIT_MORE_EN = "✨ More like this"
 CRIT_LESS_EN = "✕ Less like this"
-CRIT_CHEAP_EN = "💰 Cheaper"
-CRIT_MORE_KO = "♥ 비슷한 거 더"
+CRIT_CHEAP_EN = "💰 Cheaper picks"
+CRIT_MORE_KO = "✨ 비슷한 거 더보기"
 CRIT_LESS_KO = "✕ 다른 느낌"
-CRIT_CHEAP_KO = "💰 더 저렴"
-# SPEC-IMPLICIT-FB-001 / REQ-FB-UX-001 — 4th critique button (click capture)
+CRIT_CHEAP_KO = "💰 더 저렴한 거"
+# Per-card taste-signal button (migrated from the summary ❤️ 1..5 row, UX
+# simplification 260610). Reuses the existing `card:like:{pid}` callback shape
+# handled inline by `ingest._handle_card_like` (record_click + card_clicked).
+CRIT_LIKE_KO = "❤️ 좋아!"
+CRIT_LIKE_EN = "❤️ Love it"
+# SPEC-IMPLICIT-FB-001 / REQ-FB-UX-001 — click-capture button retained as
+# constant for backward-compat tests but NOT rendered in the keyboard anymore
+# (UX simplification 260610 — 4 critique buttons → 2). CTR is captured via
+# the `/r/{token}` redirect proxy instead.
 CRIT_CLICK_KO = "👀 자세히"
 CRIT_CLICK_EN = "👀 View"
 # Back-compat aliases
@@ -55,21 +63,37 @@ CRIT_CHEAP = CRIT_CHEAP_EN
 
 
 def _critique_buttons_for(idx: int, lang: str = "en", product_id: str | None = None) -> list[tuple[str, str]]:
-    from app.channels.implicit_feedback import click_callback_for
+    """3 critique buttons per card: ❤️ love / ✨ more-like / 💰 cheaper.
 
-    click_cb = click_callback_for(product_id) if product_id else f"crit:click:{idx}"
+    UX simplification 260610:
+      - `less` (다른 느낌) + `click` (👀 자세히) removed to reduce keyboard noise.
+      - `like` (❤️) migrated FROM the summary ❤️ 1..5 row TO every card. Reuses
+        the existing `card:like:{pid}` callback shape so `ingest._handle_card_like`
+        handles it inline (record_click + card_clicked emit). When `product_id`
+        is missing we fall back to `card:like:{idx}` (resolved by index against
+        sess.last_results — same fallback the summary keyboard used).
+      - Click capture is now done by the `/r/{token}` redirect proxy on the
+        Shop URL, so the explicit click button is no longer needed.
+    """
+    # Telegram callback_data budget is 64 bytes. The "card:like:" prefix is 10
+    # bytes, so we tail-truncate long product_ids to 53 chars (matches the
+    # legacy `_like_callback_for` budget in respond.py so suffix-matching in
+    # ingest._handle_card_like keeps resolving). Fallback to idx when no pid.
+    if product_id:
+        pid_short = product_id if len(product_id) <= 53 else product_id[-53:]
+        like_cb = f"card:like:{pid_short}"
+    else:
+        like_cb = f"card:like:{idx}"
     if lang == "ko":
         return [
+            (CRIT_LIKE_KO, like_cb),
             (CRIT_MORE_KO, f"crit:more:{idx}"),
-            (CRIT_LESS_KO, f"crit:less:{idx}"),
             (CRIT_CHEAP_KO, f"crit:cheap:{idx}"),
-            (CRIT_CLICK_KO, click_cb),
         ]
     return [
+        (CRIT_LIKE_EN, like_cb),
         (CRIT_MORE_EN, f"crit:more:{idx}"),
-        (CRIT_LESS_EN, f"crit:less:{idx}"),
         (CRIT_CHEAP_EN, f"crit:cheap:{idx}"),
-        (CRIT_CLICK_EN, click_cb),
     ]
 
 
@@ -101,18 +125,22 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
     if not image_url or not product_url:
         return None
 
+    # Caption order (UX request 260610): brand → price → name → platform.
+    # The brand sits at the top in bold (so the user identifies the store
+    # first), price next for purchase-decision speed, then the product name
+    # in plain weight. Platform is the dim trailing line when distinct.
     lines: list[str] = []
-    if name:
-        lines.append(f"<b>{_html_escape(name)}</b>")
     meta_bits: list[str] = []
     if brand:
-        meta_bits.append(_html_escape(brand))
+        meta_bits.append(f"<b>{_html_escape(brand)}</b>")
     if subcategory:
         meta_bits.append(_html_escape(subcategory))
     if meta_bits:
         lines.append(" · ".join(meta_bits))
     if price_str:
         lines.append(f"💰 <b>{_html_escape(price_str)}</b>")
+    if name:
+        lines.append(_html_escape(name))
     if platform and platform.lower() != brand.lower():
         lines.append(f"🏬 {_html_escape(platform)}")
 

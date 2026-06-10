@@ -57,29 +57,45 @@ def _ko_label(it: dict) -> str:
 
 
 async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en") -> None:
+    """Send the multi-item picker — UX simplification 260610.
+
+    Previous design: long text body listing each item + a row of numeric
+    buttons [1️⃣][2️⃣][3️⃣][4️⃣]. Users had to mentally map number → item.
+
+    New design: minimal header + each item rendered as its OWN button (label
+    text in the button). One tap, no mapping. Label is truncated to 40 chars
+    to stay readable on mobile (Telegram's hard limit is 256 but practical UX
+    cap is ~40).
+    """
     n = len(items)
-    lines: list[str] = []
+    # Minimal header — the item names live in the buttons themselves now.
+    if lang == "ko":
+        body = f"사진에서 {n}개 아이템 발견했어 👀  어떤 게 마음에 들어?"
+    else:
+        plural = "" if n == 1 else "s"
+        body = f"Found {n} item{plural} in the photo 👀  Which one are you after?"
+
+    # Each item becomes its own row so the long Vision-generated labels don't
+    # collide horizontally. Truncate to 40 chars (mobile-friendly).
+    _LABEL_CAP = 40
+    buttons: list[list[tuple[str, str]]] = []
     for i, it in enumerate(items[:4]):
         num_em = NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}."
         if lang == "ko":
             label = _ko_label(it)
-            # description is English from the LLM. Skip it in KO mode rather
-            # than mixing languages in one card line.
-            lines.append(f"{num_em}  {label}")
         else:
             label = it.get("label") or "item"
-            desc = it.get("description") or ""
-            if desc:
-                lines.append(PICKER_LINE_EN.format(num=num_em, label=label, desc=desc))
-            else:
-                lines.append(f"{num_em}  {label}")
-    if lang == "ko":
-        body = PICKER_HEADER_KO.format(n=n, lines="\n".join(lines))
-    else:
-        body = PICKER_HEADER_EN.format(n=n, s="" if n == 1 else "s", lines="\n".join(lines))
-    buttons = [(NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}", f"item:{i}") for i in range(min(n, 4))]
-    if hasattr(adapter, "send_text_with_buttons"):
-        await adapter.send_text_with_buttons(chat_id, body, buttons)
+        text = f"{num_em} {label}"
+        if len(text) > _LABEL_CAP:
+            text = text[: _LABEL_CAP - 1].rstrip() + "…"
+        buttons.append([(text, f"item:{i}")])
+
+    if hasattr(adapter, "send_text_with_keyboard"):
+        await adapter.send_text_with_keyboard(chat_id, body, buttons)
+    elif hasattr(adapter, "send_text_with_buttons"):
+        # Flatten to single-row format if the adapter only supports buttons (legacy).
+        flat = [(row[0][0], row[0][1]) for row in buttons]
+        await adapter.send_text_with_buttons(chat_id, body, flat)
     else:
         await adapter.send_text(chat_id, body)
 
