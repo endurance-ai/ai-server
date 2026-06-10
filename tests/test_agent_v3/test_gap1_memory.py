@@ -262,9 +262,7 @@ async def test_build_memory_context_includes_last_query(monkeypatch):
         "app.agents.tools.get_recent_history.dispatch",
         AsyncMock(return_value={"ok": True, "events": []}),
     )
-    out = await mc.build_memory_context(
-        None, None, {"user_key": "u:42", "chat_id": 42}, max_tokens=1500
-    )
+    out = await mc.build_memory_context(None, None, {"user_key": "u:42", "chat_id": 42}, max_tokens=1500)
     assert "last_search_query: black sleeveless women" in out
 
 
@@ -281,9 +279,7 @@ async def test_build_memory_context_omits_last_query_when_empty(monkeypatch):
         "app.agents.tools.get_recent_history.dispatch",
         AsyncMock(return_value={"ok": True, "events": []}),
     )
-    out = await mc.build_memory_context(
-        None, None, {"user_key": "u:99", "chat_id": 99}, max_tokens=1500
-    )
+    out = await mc.build_memory_context(None, None, {"user_key": "u:99", "chat_id": 99}, max_tokens=1500)
     assert "last_search_query" not in out
 
 
