@@ -102,7 +102,12 @@ def build_graph() -> Any:
         # Hybrid result-card callbacks fully serviced by ingest — terminal.
         # SPEC-GENDER-PIN-001: clarify:gender:* is also fully serviced inline by
         # ingest (pins profile + re-runs the pending search + delivers) → END.
-        if cb.startswith("card:like:") or cb == "cards:more" or cb.startswith("clarify:gender:"):
+        if (
+            cb.startswith("card:like:")
+            or cb == "cards:more"
+            or cb.startswith("clarify:gender:")
+            or cb == "cap:membership_interest"
+        ):
             return "__end__"
         # Photo / URL → vision pre-step.
         if msg.photo_file_id or msg.urls:

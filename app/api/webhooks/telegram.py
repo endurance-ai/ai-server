@@ -14,7 +14,7 @@ correlation against `ai.log_conversation_event.card_sent` rows.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
@@ -284,10 +284,24 @@ async def _emit_intake_and_resolve_thread(
     return thread_id, turn_no
 
 
-_CAP_MSG: dict[str, str] = {
-    "ko": "오늘 사용량을 다 썼어 😿 자정에 초기화되니까 내일 또 와줘~",
-    "en": "You've hit today's limit 😿 Come back after midnight!",
+# SPEC-DAILY-TOKEN-CAP-001 — cap-reached UX (260610): 2 message boxes.
+# Box 1: 한도 도달 알림 (자정 리셋 안내).
+# Box 2: fake-door 멤버십 유도 + 인라인 콜백 버튼 → WTP 신호 수집.
+# 콜백 `cap:membership_interest` 는 ingest 가 인라인으로 흡수 (준비 중 멘트
+# + 토스트). 클릭 자체가 베타 목표 3 (WTP) 의 정량 신호.
+_CAP_BOX1: dict[str, str] = {
+    "ko": "앗, 오늘 골라줄 수 있는 양을 다 썼어 🐱 자정 지나면 다시 채워지니까 내일 또 와줘!",
+    "en": "Whoops — I've used up today's picks 🐱 The quota refills after midnight, so come back tomorrow!",
 }
+_CAP_BOX2: dict[str, str] = {
+    "ko": "근데 기다리기 아쉽지? 멤버십이면 하루 제한 없이 계속 이어서 볼 수 있어 ✨",
+    "en": "Hate the wait? Membership unlocks unlimited picks all day ✨",
+}
+_CAP_MEMBERSHIP_LABEL: dict[str, str] = {
+    "ko": "멤버십 보러가기 →",
+    "en": "See membership →",
+}
+_CAP_MEMBERSHIP_CALLBACK: Final[str] = "cap:membership_interest"
 
 
 @observe(name="webhook.telegram", as_type="span")
@@ -310,19 +324,46 @@ async def _invoke_graph(
     token = set_adapter(adapter)
     try:
         # SPEC-DAILY-TOKEN-CAP-001 — gate before invoking the graph.
-        # Callback taps (like / more) are cheap UI actions — skip the cap check.
+        # Callback taps (like / more / cap:membership_interest) are cheap UI
+        # actions — skip the cap check so they always reach the graph for
+        # inline handling (e.g. ingest absorbs the membership tap as a WTP
+        # signal even when the user is over-cap).
         if message.callback_data is None and await token_cap.is_over_limit(message.chat_id):
             lang = detect_lang(message.text)
-            cap_text = _CAP_MSG.get(lang, _CAP_MSG["en"])
+            box1 = _CAP_BOX1.get(lang, _CAP_BOX1["en"])
+            box2 = _CAP_BOX2.get(lang, _CAP_BOX2["en"])
+            membership_label = _CAP_MEMBERSHIP_LABEL.get(lang, _CAP_MEMBERSHIP_LABEL["en"])
             logger.info(
                 "🚫 [webhook] token cap exceeded chat=%s lang=%s",
                 hash_id(message.chat_id),
                 lang,
             )
+            # Box 1 — quota notice (plain text).
             try:
-                await adapter.send_text(message.chat_id, cap_text)
+                await adapter.send_text(message.chat_id, box1)
             except Exception:  # noqa: BLE001 — fail-open
-                logger.debug("[webhook] cap message send failed chat=%s", message.chat_id)
+                logger.debug("[webhook] cap box1 send failed chat=%s", message.chat_id)
+            # Box 2 — fake-door membership upsell with inline callback button.
+            # Tap → ingest._handle_cap_membership_interest (inline, no graph).
+            membership_buttons: list[list[tuple[str, str]]] = [[(membership_label, _CAP_MEMBERSHIP_CALLBACK)]]
+            try:
+                if hasattr(adapter, "send_text_with_keyboard"):
+                    await adapter.send_text_with_keyboard(
+                        message.chat_id,
+                        box2,
+                        membership_buttons,
+                    )
+                elif hasattr(adapter, "send_text_with_buttons"):
+                    # Flatten when only single-row adapter helper exists.
+                    await adapter.send_text_with_buttons(
+                        message.chat_id,
+                        box2,
+                        [membership_buttons[0][0]],
+                    )
+                else:
+                    await adapter.send_text(message.chat_id, box2)
+            except Exception:  # noqa: BLE001 — fail-open
+                logger.debug("[webhook] cap box2 send failed chat=%s", message.chat_id)
             emit(
                 event_type="cap_reached",
                 user_key=user_key_for(message.from_user_id, message.chat_id),

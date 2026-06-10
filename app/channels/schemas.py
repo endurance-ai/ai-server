@@ -66,13 +66,18 @@ class ChannelMessage(BaseModel):
 class BotCard(BaseModel):
     image_url: HttpUrl
     caption: str
-    button_text: str = "View"
-    button_url: HttpUrl
+    # 260610 — button_text/button_url are now Optional. When BOTH are None the
+    # adapter skips the explicit Shop URL row entirely (the navigation moves
+    # into the caption via an `<a href>` hyperlink wrap on the brand text).
+    # Passing one without the other is a caller bug — the adapter treats it
+    # as "skip" defensively.
+    button_text: str | None = None
+    button_url: HttpUrl | None = None
     parse_mode: str | None = None  # 예: "HTML" / "MarkdownV2"
-    # Critique row — one extra inline-keyboard row of callback buttons rendered
-    # below the Shop URL button. Each tuple is (label, callback_data).
-    # Empty list ⇒ no critique row (backward-compatible).
-    critique_buttons: list[tuple[str, str]] = Field(default_factory=list)
+    # Critique rows — additional inline-keyboard rows rendered below the
+    # (optional) URL row. Multi-row layout: each inner list is one row of
+    # (label, callback_data) tuples. Empty list ⇒ no critique rows.
+    critique_buttons: list[list[tuple[str, str]]] = Field(default_factory=list)
 
 
 class BotReply(BaseModel):

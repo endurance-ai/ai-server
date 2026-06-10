@@ -39,13 +39,21 @@ CARD_RENDER_FAIL_EN = "Found some matches but couldn't render the cards — here
 CARD_RENDER_FAIL_KO = "괜찮은 후보들 찾았는데 카드로 못 보여줘서 링크로 줄게:"
 # Back-compat alias
 CARD_RENDER_FAIL = CARD_RENDER_FAIL_EN
-CRIT_MORE_EN = "♥ More like this"
+CRIT_MORE_EN = "👀 More like this"
 CRIT_LESS_EN = "✕ Less like this"
-CRIT_CHEAP_EN = "💰 Cheaper"
-CRIT_MORE_KO = "♥ 비슷한 거 더"
+CRIT_CHEAP_EN = "💰 Cheaper picks"
+CRIT_MORE_KO = "👀 비슷한 거 더보기"
 CRIT_LESS_KO = "✕ 다른 느낌"
-CRIT_CHEAP_KO = "💰 더 저렴"
-# SPEC-IMPLICIT-FB-001 / REQ-FB-UX-001 — 4th critique button (click capture)
+CRIT_CHEAP_KO = "💰 더 저렴한 거"
+# Per-card taste-signal button (migrated from the summary ❤️ 1..5 row, UX
+# simplification 260610). Reuses the existing `card:like:{pid}` callback shape
+# handled inline by `ingest._handle_card_like` (record_click + card_clicked).
+CRIT_LIKE_KO = "♥️ 취향 저장하기"
+CRIT_LIKE_EN = "♥️ Save to taste"
+# SPEC-IMPLICIT-FB-001 / REQ-FB-UX-001 — click-capture button retained as
+# constant for backward-compat tests but NOT rendered in the keyboard anymore
+# (UX simplification 260610 — 4 critique buttons → 2). CTR is captured via
+# the `/r/{token}` redirect proxy instead.
 CRIT_CLICK_KO = "👀 자세히"
 CRIT_CLICK_EN = "👀 View"
 # Back-compat aliases
@@ -54,22 +62,39 @@ CRIT_LESS = CRIT_LESS_EN
 CRIT_CHEAP = CRIT_CHEAP_EN
 
 
-def _critique_buttons_for(idx: int, lang: str = "en", product_id: str | None = None) -> list[tuple[str, str]]:
-    from app.channels.implicit_feedback import click_callback_for
+def _critique_buttons_for(
+    idx: int,
+    lang: str = "en",
+    product_id: str | None = None,
+) -> list[list[tuple[str, str]]]:
+    """2-row keyboard layout per card (UX simplification 260610 v2):
 
-    click_cb = click_callback_for(product_id) if product_id else f"crit:click:{idx}"
+      Row 1: [👀 비슷한 거 더보기] [💰 더 저렴한 거]
+      Row 2: [❤️ 취향 저장하기]
+
+    The `like` button reuses the existing `card:like:{pid}` callback shape so
+    `ingest._handle_card_like` handles it inline (record_click + card_clicked
+    emit). When `product_id` is missing we fall back to `card:like:{idx}`
+    (resolved by index against `sess.last_results` — same fallback the legacy
+    summary keyboard used).
+    """
+    # Telegram callback_data budget is 64 bytes. The "card:like:" prefix is 10
+    # bytes, so we tail-truncate long product_ids to 53 chars (matches the
+    # legacy `_like_callback_for` budget in respond.py so suffix-matching in
+    # ingest._handle_card_like keeps resolving). Fallback to idx when no pid.
+    if product_id:
+        pid_short = product_id if len(product_id) <= 53 else product_id[-53:]
+        like_cb = f"card:like:{pid_short}"
+    else:
+        like_cb = f"card:like:{idx}"
     if lang == "ko":
         return [
-            (CRIT_MORE_KO, f"crit:more:{idx}"),
-            (CRIT_LESS_KO, f"crit:less:{idx}"),
-            (CRIT_CHEAP_KO, f"crit:cheap:{idx}"),
-            (CRIT_CLICK_KO, click_cb),
+            [(CRIT_MORE_KO, f"crit:more:{idx}"), (CRIT_CHEAP_KO, f"crit:cheap:{idx}")],
+            [(CRIT_LIKE_KO, like_cb)],
         ]
     return [
-        (CRIT_MORE_EN, f"crit:more:{idx}"),
-        (CRIT_LESS_EN, f"crit:less:{idx}"),
-        (CRIT_CHEAP_EN, f"crit:cheap:{idx}"),
-        (CRIT_CLICK_EN, click_cb),
+        [(CRIT_MORE_EN, f"crit:more:{idx}"), (CRIT_CHEAP_EN, f"crit:cheap:{idx}")],
+        [(CRIT_LIKE_EN, like_cb)],
     ]
 
 
@@ -101,41 +126,46 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
     if not image_url or not product_url:
         return None
 
+    # Caption order (UX request 260610): brand → price → name → platform.
+    # 260610 v2 — explicit Shop URL button row REMOVED (user request: fewer
+    # buttons). Navigation moves into the caption: the brand text (or "Shop"
+    # fallback when brand is missing) is wrapped in an `<a href="…">` tag
+    # pointing at the product URL. Telegram does not allow the photo itself
+    # to be tappable as a URL, but a hyperlinked caption text is, so this is
+    # the closest UX to "tap the card to go to the shop".
     lines: list[str] = []
-    if name:
-        lines.append(f"<b>{_html_escape(name)}</b>")
-    meta_bits: list[str] = []
+    safe_url = _html_escape(str(product_url))
     if brand:
-        meta_bits.append(_html_escape(brand))
+        brand_html = f'<a href="{safe_url}"><b>{_html_escape(brand)}</b></a>'
+    else:
+        brand_html = (
+            f'<a href="{safe_url}"><b>🛒  지금 보러가기  →</b></a>'
+            if lang == "ko"
+            else f'<a href="{safe_url}"><b>🛒  Shop now  →</b></a>'
+        )
+    meta_bits: list[str] = [brand_html]
     if subcategory:
         meta_bits.append(_html_escape(subcategory))
-    if meta_bits:
-        lines.append(" · ".join(meta_bits))
+    lines.append(" · ".join(meta_bits))
     if price_str:
         lines.append(f"💰 <b>{_html_escape(price_str)}</b>")
+    if name:
+        lines.append(_html_escape(name))
     if platform and platform.lower() != brand.lower():
         lines.append(f"🏬 {_html_escape(platform)}")
 
-    if lines:
-        caption = "\n".join(lines)
-    else:
-        caption = "추천 아이템" if lang == "ko" else "Recommended"
+    caption = "\n".join(lines)
     if len(caption) > 1024:
         caption = caption[:1020] + "…"
-
-    if lang == "ko":
-        button_label = f"🛒  {brand}에서 보기" if brand else "🛒  지금 보러가기  →"
-    else:
-        button_label = f"🛒  Shop on {brand}" if brand else "🛒  Shop now  →"
-    if len(button_label) > 64:
-        button_label = "🛒  지금 보러가기  →" if lang == "ko" else "🛒  Shop now  →"
 
     try:
         return BotCard(
             image_url=image_url,
             caption=caption,
-            button_text=button_label,
-            button_url=product_url,
+            # 260610 — no explicit URL button row; navigation is via the
+            # hyperlinked brand text in the caption above.
+            button_text=None,
+            button_url=None,
             parse_mode="HTML",
             critique_buttons=_critique_buttons_for(idx, lang=lang, product_id=str(getattr(c, "id", "") or "") or None),
         )

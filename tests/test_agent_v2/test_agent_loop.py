@@ -299,6 +299,108 @@ async def test_build_user_message_handles_out_of_range_index():
     assert "callback: item:5" in out
 
 
+# --- 260610 STALE-LEAK FIX — prior outfit context leaks into fresh turns ---
+
+
+def test_fresh_garment_search_does_not_trigger_followup_leak():
+    """REGRESSION 260610 — garment nouns ("셔츠", "코트" etc.) were in
+    `_FOLLOWUP_TOKENS_KO`, causing fresh searches like "그레이 셔츠 추천해줘"
+    to be misclassified as follow-up references. The prior outfit (e.g. a
+    red T-shirt searched earlier) would leak as `previously_selected_item`
+    / `detected_items` into the LLM context, contaminating the new search.
+    """
+    import time
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    prior_items = [
+        {"label": "red short sleeve t-shirt", "searchQuery": "red short sleeve t-shirt"},
+    ]
+    # Recent session with prior Vision items stashed at session level.
+    msg = ChannelMessage(chat_id=42, text="그레이 셔츠 추천해줘", received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+        # NO new image this turn, NO new detected_items — pure fresh text.
+    )
+    sess = Session(chat_id=42, state=SessionState.IDLE)
+    sess.lang = "ko"
+    sess.detected_items = prior_items
+    sess.vision_selected_item_index = 0
+    sess.last_active = time.time()  # within follow-up recency window
+
+    out = rl._build_user_message(state, sess)
+    # Fresh garment search must NOT carry the prior outfit context.
+    assert "red short sleeve t-shirt" not in out
+    assert "previously_selected_item" not in out
+    assert "detected_items" not in out
+
+
+def test_fresh_image_turn_does_not_fall_back_to_session_items():
+    """REGRESSION 260610 — when a NEW image arrives but vision_node yielded
+    no `state.detected_items` (e.g. transient Vision failure), the legacy
+    `_detected_items` combined view fell back to `sess.detected_items` from
+    the prior turn. With `state.image_url` set, the L653 branch then surfaced
+    the OLD items as if they belonged to the new image. Fresh image turn must
+    surface ONLY state-level items (None → no leak)."""
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    stale_items = [{"label": "navy baseball cap", "searchQuery": "navy baseball cap"}]
+    msg = ChannelMessage(chat_id=42, received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+        image_url="https://example.com/new-photo.jpg",
+        # Vision failed THIS turn — state.detected_items empty.
+    )
+    sess = Session(chat_id=42, state=SessionState.IDLE)
+    sess.lang = "ko"
+    sess.detected_items = stale_items
+
+    out = rl._build_user_message(state, sess)
+    # The OLD cap must NOT surface just because state.image_url is set.
+    assert "navy baseball cap" not in out
+
+
+def test_followup_marker_still_works_for_genuine_refinement():
+    """Positive guard — '더 저렴하게' / '다른 색상' WITH prior context still
+    trigger surfacing. Only the over-broad garment / pure-image markers were
+    removed; refinement intent must remain detectable."""
+    import time
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    prior_items = [
+        {
+            "label": "minimal beige trench coat",
+            "subcategory": "coat",
+            "searchQuery": "minimal beige trench coat",
+        },
+    ]
+    msg = ChannelMessage(chat_id=42, text="더 저렴한 거 있을까", received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+    )
+    sess = Session(chat_id=42, state=SessionState.IDLE)
+    sess.lang = "ko"
+    sess.detected_items = prior_items
+    sess.vision_selected_item_index = 0
+    sess.last_active = time.time()
+
+    out = rl._build_user_message(state, sess)
+    # Genuine refinement → prior context surfaced.
+    assert "minimal beige trench coat" in out
+    assert "previously_selected_item" in out
+
+
 # --- SPEC-AGENT-V2-REACT runtime hardening: Fix A + Fix B ---
 
 
@@ -491,7 +593,10 @@ class _SlowCardAdapter:
         self._per_card_s = per_card_s
         self.text_calls = 0
         self.card_calls = 0
-        self.card_urls: list[str] = []
+        # 260610 — Shop URL row was removed (button_url is now None); track
+        # `image_url` instead for uniqueness assertions (each candidate has a
+        # distinct product image).
+        self.card_image_urls: list[str | None] = []
 
     async def send_text(self, chat_id, text):
         self.text_calls += 1
@@ -502,7 +607,7 @@ class _SlowCardAdapter:
 
         await _a.sleep(self._per_card_s)
         self.card_calls += 1
-        self.card_urls.append(card.button_url)
+        self.card_image_urls.append(str(card.image_url) if card.image_url else None)
         return f"mid{self.card_calls}"
 
 
@@ -594,7 +699,10 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     assert delta["agent_status"] == "done"
     assert adapter.text_calls == 1  # text sent EXACTLY once (no retry resend)
     assert adapter.card_calls == 4  # each card sent EXACTLY once
-    assert len(set(adapter.card_urls)) == 4  # no duplicate cards
+    # No duplicate cards — distinct product image URLs (Shop URL row removed
+    # 260610 so button_url is None on every card; image_url is the new
+    # per-candidate uniqueness signal).
+    assert len(set(adapter.card_image_urls)) == 4
     respond_hist = [h for h in delta["tool_call_history"] if h["tool_name"] == "respond"]
     assert len(respond_hist) == 1  # respond dispatched once — NOT retried
 

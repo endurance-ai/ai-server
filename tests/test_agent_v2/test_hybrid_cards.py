@@ -188,12 +188,13 @@ async def test_respond_hybrid_album_plus_summary_en(monkeypatch):
         (_, summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
         assert "Here are 5 picks" in summary
         assert '<a href="https://shop.example.com/0">' in summary  # HTML buy link
-        # Keyboard: 5 like buttons + footer row.
-        assert len(keyboard[0]) == 5
-        assert keyboard[0][0][1] == "card:like:p0"
-        assert keyboard[-1][0][1] == "cards:more"
-        assert keyboard[-1][1][1] == "cards:refine"
-        assert "More" in keyboard[-1][0][0]
+        # UX simplification 260610 — the per-item ❤️ 1..5 row was removed.
+        # Each product card now carries its own ❤️ button. Summary keyboard
+        # is footer-only: [더보기 / More] + [다르게 찾기 / Refine].
+        assert len(keyboard) == 1
+        assert keyboard[0][0][1] == "cards:more"
+        assert keyboard[0][1][1] == "cards:refine"
+        assert "More" in keyboard[0][0][0]
         # NO per-card streaming.
         adapter.send_card.assert_not_awaited()
     finally:
@@ -419,13 +420,22 @@ async def test_cards_refine_excluded_from_fresh_query(monkeypatch):
 
 
 def test_routing_card_callbacks_terminal_vs_agent():
-    """card:like / cards:more are terminal post-ingest; cards:refine → agent."""
+    """card:like / cards:more / cap:membership_interest are terminal post-ingest;
+    cards:refine → agent.
+
+    260610 — the source check was loosened to substring matches because the
+    routing condition is now a multi-line `if (... or ... or ...):` block.
+    Asserting individual token substrings keeps the contract without coupling
+    to the exact formatting.
+    """
     import inspect
 
     from app.graphs import fashion_bot
 
     src = inspect.getsource(fashion_bot.build_graph)
-    assert 'cb.startswith("card:like:") or cb == "cards:more"' in src
+    assert 'cb.startswith("card:like:")' in src
+    assert 'cb == "cards:more"' in src
+    assert 'cb == "cap:membership_interest"' in src
     assert 'return "__end__"' in src
 
 
