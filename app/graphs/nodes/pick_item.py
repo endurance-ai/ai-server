@@ -42,6 +42,10 @@ PICK_INVALID_KO = "위 버튼 중 하나 골라줘 👆"
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
 
+# Picker button label cap — Telegram's hard limit is 256 chars but the
+# practical mobile-readable cap is ~40. Truncated labels get a trailing "…".
+_LABEL_CAP = 40
+
 
 def _ko_label(it: dict) -> str:
     """Korean-friendly label for a detected item.
@@ -76,8 +80,7 @@ async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en
         body = f"Found {n} item{plural} in the photo 👀  Which one are you after?"
 
     # Each item becomes its own row so the long Vision-generated labels don't
-    # collide horizontally. Truncate to 40 chars (mobile-friendly).
-    _LABEL_CAP = 40
+    # collide horizontally. Truncate via the module-level `_LABEL_CAP`.
     buttons: list[list[tuple[str, str]]] = []
     for i, it in enumerate(items[:4]):
         num_em = NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}."
