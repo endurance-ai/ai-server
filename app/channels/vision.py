@@ -218,7 +218,12 @@ def _build_messages(image_url_value: str, *, schema_v2: bool) -> list[dict[str, 
         user_text = "List every distinct fashion item in this photo as JSON only."
 
     return [
-        {"role": "system", "content": system_prompt},
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
+            ],
+        },
         {
             "role": "user",
             "content": [

@@ -1,11 +1,14 @@
-"""SPEC-CONVERSATION-LOG-001 / LOG-T02 smoke — 20 TypedDicts catalog enforcement.
+"""SPEC-CONVERSATION-LOG-001 / LOG-T02 smoke — 21 TypedDicts catalog enforcement.
 
-REQ-LOG-CATALOG-001 acceptance: `__all__` length == 20 (CI gate). Each TypedDict
+REQ-LOG-CATALOG-001 acceptance: `__all__` length == 21 (CI gate). Each TypedDict
 SHALL be instantiable with the minimum-required keys per SPEC §Event Type Catalog.
 
 Catalog count bumped 19 -> 20 by SPEC-CONVERSATION-LOG-001 v0.3.0 amendment
 (cross-SPEC, driven by SPEC-AGENT-V2-REACT REQ-AGENT-LOG-EVENT-001):
 `tool_call` is the 20th event type (`ToolCallPayload`).
+
+Catalog count bumped 20 -> 21 by SPEC-DAILY-TOKEN-CAP-001:
+`cap_reached` is the 21st event type (`CapReachedPayload`).
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ def _truncate_log_table():
 
 def test_all_exports_exactly_20_typeddicts():
     mod = importlib.import_module("app.observability.event_payloads")
-    assert len(mod.__all__) == 21, f"__all__ length must be 21, got {len(mod.__all__)}"
+    assert len(mod.__all__) == 22, f"__all__ length must be 22, got {len(mod.__all__)}"
 
 
 def test_star_import_publishes_20_names():
@@ -31,13 +34,14 @@ def test_star_import_publishes_20_names():
     ns: dict = {}
     exec("from app.observability.event_payloads import *", ns)  # noqa: S102
     public = {k for k in ns if not k.startswith("_")}
-    assert len(public) == 21, f"star-import exposed {len(public)} names, expected 21"
+    assert len(public) == 22, f"star-import exposed {len(public)} names, expected 22"
 
 
 def test_each_typeddict_instantiable_with_minimum_keys():
     from app.observability.event_payloads import (
         AskClarifySentPayload,
         BotTextPayload,
+        CapReachedPayload,
         CardClickedPayload,
         CardSentPayload,
         ClarifyAppliedPayload,
@@ -82,8 +86,9 @@ def test_each_typeddict_instantiable_with_minimum_keys():
         NodeErrorPayload(node_name="vision", exception_type="ValueError", message="boom", recovered=False),
         ToolCallPayload(tool_name="search_products", iteration_no=0, latency_ms=120, error=None),
         TurnSummaryPayload(rec_id=None, iter_count=3, status="responded", exit_reason=None),
+        CapReachedPayload(lang="ko"),
     ]
-    assert len(samples) == 21
+    assert len(samples) == 22
 
 
 def test_all_names_in_module():

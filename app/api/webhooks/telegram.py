@@ -29,8 +29,10 @@ from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.infrastructure.cache import token_cap
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
+from app.observability.event_payloads import CapReachedPayload
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id
 
@@ -282,6 +284,12 @@ async def _emit_intake_and_resolve_thread(
     return thread_id, turn_no
 
 
+_CAP_MSG: dict[str, str] = {
+    "ko": "오늘 사용량을 다 썼어 😿 자정에 초기화되니까 내일 또 와줘~",
+    "en": "You've hit today's limit 😿 Come back after midnight!",
+}
+
+
 @observe(name="webhook.telegram", as_type="span")
 async def _invoke_graph(
     adapter: MessengerAdapter,
@@ -301,6 +309,30 @@ async def _invoke_graph(
     """
     token = set_adapter(adapter)
     try:
+        # SPEC-DAILY-TOKEN-CAP-001 — gate before invoking the graph.
+        # Callback taps (like / more) are cheap UI actions — skip the cap check.
+        if message.callback_data is None and await token_cap.is_over_limit(message.chat_id):
+            lang = detect_lang(message.text)
+            cap_text = _CAP_MSG.get(lang, _CAP_MSG["en"])
+            logger.info(
+                "🚫 [webhook] token cap exceeded chat=%s lang=%s",
+                hash_id(message.chat_id),
+                lang,
+            )
+            try:
+                await adapter.send_text(message.chat_id, cap_text)
+            except Exception:  # noqa: BLE001 — fail-open
+                logger.debug("[webhook] cap message send failed chat=%s", message.chat_id)
+            emit(
+                event_type="cap_reached",
+                user_key=user_key_for(message.from_user_id, message.chat_id),
+                chat_id=message.chat_id,
+                thread_id=thread_id,
+                turn_no=turn_no,
+                payload=CapReachedPayload(lang=lang),
+            )
+            return
+
         input_state = InputState(
             message=message,
             chat_id=message.chat_id,

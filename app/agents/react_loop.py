@@ -950,6 +950,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         # Token budget guard (REQ-AGENT-PERF-TURN-BUDGET-001).
         if token_budget and cumulative_tokens >= token_budget:
             fb = await _fallback_respond(state, sess, "token_budget_exceeded", ctx=ctx)
+            if cumulative_tokens > 0:
+                try:
+                    from app.infrastructure.cache.token_cap import increment as _cap_increment
+
+                    await _cap_increment(state.chat_id, cumulative_tokens)
+                except Exception:  # noqa: BLE001
+                    pass
             return {
                 "agent_iterations": iterations,
                 "agent_status": "exhausted",
@@ -1333,6 +1340,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         # Strip args_full before persisting history (keep small).
         for h in history:
             h.pop("args_full", None)
+        if cumulative_tokens > 0:
+            try:
+                from app.infrastructure.cache.token_cap import increment as _cap_increment
+
+                await _cap_increment(state.chat_id, cumulative_tokens)
+            except Exception:  # noqa: BLE001
+                pass
         return {
             "agent_iterations": iterations,
             "agent_status": "exhausted",
@@ -1344,6 +1358,16 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
     for h in history:
         h.pop("args_full", None)
     logger.info("🏁 [agent] respond · iters=%d tokens≈%d", iterations, cumulative_tokens)
+
+    # SPEC-DAILY-TOKEN-CAP-001 — record actual token usage after each turn.
+    if cumulative_tokens > 0:
+        try:
+            from app.infrastructure.cache.token_cap import increment as _cap_increment
+
+            await _cap_increment(state.chat_id, cumulative_tokens)
+        except Exception:  # noqa: BLE001 — fail-open, never block respond
+            pass
+
     return {
         "agent_iterations": iterations,
         "agent_status": status,
