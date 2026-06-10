@@ -299,6 +299,58 @@ async def test_build_user_message_handles_out_of_range_index():
     assert "callback: item:5" in out
 
 
+# --- 260611 crit:{op}:{idx} anchor surfacing — preserve clicked card color/style ---
+
+
+def test_anchor_card_line_surfaces_brand_name_price_for_crit_cheap():
+    """REGRESSION 260611 — clicking `💰 더 저렴한 거` on a specific card surfaced
+    only the raw `callback: crit:cheap:3` to the LLM, so the LLM dropped the
+    anchor's distinctive color/style (e.g. white sleeveless → mixed colors).
+    Now the anchor's brand/name/price + a directive to preserve color/style
+    in `refine_search.boost_keywords` is appended.
+    """
+    from app.agents import react_loop as rl
+
+    sess = type(
+        "Sess",
+        (),
+        {
+            "last_results": [
+                type("C", (), {"name": "Slim Tee", "brand": "ZARA", "price": 39000})(),
+                type("C", (), {"name": "Linen Pants", "brand": "Acne", "price": 71000})(),
+                type("C", (), {"name": "Vintage Tank", "brand": "Versace", "price": 128000})(),
+                type("C", (), {"name": "WHITE SLEEVELESS BLOUSE", "brand": "DIVE IN", "price": 71357})(),
+            ],
+        },
+    )()
+    line = rl._anchor_card_line("crit:cheap:3", sess)
+    assert line is not None
+    assert "op=cheap" in line
+    assert "WHITE SLEEVELESS BLOUSE" in line
+    assert "DIVE IN" in line
+    assert "₩71,357" in line
+    # Directive must explicitly tell the LLM to preserve color/style words.
+    assert "boost_keywords" in line
+    assert "white" in line  # explicit color hint in directive
+
+
+def test_anchor_card_line_returns_none_for_non_crit_callbacks():
+    from app.agents import react_loop as rl
+
+    sess = type("Sess", (), {"last_results": [type("C", (), {"name": "x"})()]})()
+    assert rl._anchor_card_line("card:like:p1", sess) is None
+    assert rl._anchor_card_line("cards:more", sess) is None
+    assert rl._anchor_card_line("clarify:gender:women", sess) is None
+    assert rl._anchor_card_line(None, sess) is None
+
+
+def test_anchor_card_line_returns_none_when_idx_out_of_range():
+    from app.agents import react_loop as rl
+
+    sess = type("Sess", (), {"last_results": [type("C", (), {"name": "x"})()]})()
+    assert rl._anchor_card_line("crit:cheap:5", sess) is None
+
+
 # --- 260610 STALE-LEAK FIX — prior outfit context leaks into fresh turns ---
 
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from importlib import import_module
 from typing import Any
@@ -677,7 +678,69 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
     if msg and msg.callback_data:
         if not callback_resolved:
             parts.append(f"callback: {msg.callback_data[:64]}")
+            # 260611 — `crit:{op}:{idx}` callbacks (per-card refine buttons:
+            # 비슷한 거 더보기 / 더 저렴한 거 / etc.) MUST surface the anchor card
+            # so the LLM preserves the clicked card's distinctive attributes
+            # (color, style) in `refine_search` instead of dropping them.
+            # Without this, the LLM sees only `callback: crit:cheap:3` and
+            # refines on the broader `last_query` — e.g. clicking 더 저렴 on a
+            # WHITE sleeveless returns black/navy alternatives.
+            anchor_line = _anchor_card_line(msg.callback_data, sess)
+            if anchor_line:
+                parts.append(anchor_line)
     return "\n".join(parts)
+
+
+# 260611 — `crit:{op}:{idx}` anchor resolver. Surfaces brand/name/price of the
+# clicked card so the LLM can preserve color/style in refine_search.
+_CRIT_CALLBACK_RE = re.compile(r"^crit:(more|less|cheap):(\d+)$")
+
+
+def _anchor_card_line(callback_data: str | None, sess: Any) -> str | None:
+    """Return a one-line anchor summary when `callback_data` is `crit:{op}:{idx}`.
+
+    Format: `anchor_card: op=<op> name=<name> brand=<brand> price=<price>
+      → Preserve the anchor's distinctive style/color in refine_search
+        boost_keywords (e.g. white/black/navy/linen).`
+    """
+    if not callback_data:
+        return None
+    m = _CRIT_CALLBACK_RE.match(callback_data)
+    if not m:
+        return None
+    op = m.group(1)
+    try:
+        idx = int(m.group(2))
+    except ValueError:
+        return None
+    results = list(getattr(sess, "last_results", None) or [])
+    if not (0 <= idx < len(results)):
+        return None
+    anchor = results[idx]
+    name = str(getattr(anchor, "name", "") or "").strip()[:80]
+    brand = str(getattr(anchor, "brand", "") or "").strip()[:40]
+    price_val = getattr(anchor, "price", None)
+    price_str = ""
+    try:
+        if price_val is not None and int(price_val) > 0:
+            price_str = f"₩{int(price_val):,}"
+    except (TypeError, ValueError):
+        price_str = ""
+    bits = [f"op={op}"]
+    if name:
+        bits.append(f"name={name!r}")
+    if brand:
+        bits.append(f"brand={brand}")
+    if price_str:
+        bits.append(f"price={price_str}")
+    line = "anchor_card: " + " ".join(bits)
+    line += (
+        "\n→ Preserve the anchor's distinctive color/style words in "
+        "refine_search boost_keywords (extract from name: e.g. 'white', "
+        "'black', 'navy', 'linen', 'cropped'). For 'cheaper' set "
+        "max_price≈round(anchor_price*0.7)."
+    )
+    return line
 
 
 # SPEC-AGENT-V3-REACT Gap2 — per-turn Reflexion bound (REQ-AGENT-V3-REFLEX-BOUND-001).
