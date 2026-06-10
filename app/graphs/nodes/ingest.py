@@ -137,6 +137,37 @@ async def _handle_card_like(state: WorkingState, sess, cb_data: str, breadcrumbs
         logger.debug("[ingest] card_clicked emit best-effort")
 
 
+async def _handle_cap_membership_interest(state: WorkingState, sess, breadcrumbs: list[str]) -> None:
+    """SPEC-DAILY-TOKEN-CAP-001 fake-door (260610) — membership upsell tap.
+
+    Replies with a friendly "준비 중" message (KO/EN) plus a callback toast.
+    The tap itself is the WTP signal — captured upstream as `user_callback`
+    with `callback_data="cap:membership_interest"`. Best-effort; never raises
+    into the webhook.
+    """
+    from app.channels.lang import session_lang
+    from app.graphs.nodes._adapter_ctx import get_adapter
+
+    lang = session_lang(sess)
+    if lang == "ko":
+        reply = "고마워! 🐱 멤버십 페이지는 아직 준비 중이야 — 출시되면 제일 먼저 알려줄게!"
+        toast = "관심 받았어 🐱"
+    else:
+        reply = (
+            "Thanks for the interest! 🐱 The membership page is still in the works "
+            "— I'll ping you the moment it's live!"
+        )
+        toast = "Got it 🐱"
+    try:
+        adapter = get_adapter()
+        if adapter is not None and hasattr(adapter, "send_text"):
+            await adapter.send_text(state.chat_id, reply)
+        breadcrumbs.append("ingest: cap:membership_interest reply sent")
+    except Exception as exc:  # noqa: BLE001 — UX-only
+        logger.debug("[ingest] cap:membership_interest reply failed: %r", exc)
+    await _send_callback_toast(state, sess, text=toast)
+
+
 async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) -> None:
     """`cards:more` → deliver the NEXT album+summary batch from
     `sess.last_results`, reusing the exact hybrid sender the post-search reply
@@ -371,6 +402,14 @@ async def ingest(state: WorkingState) -> dict:
             await _handle_card_like(state, sess, cb_data, breadcrumbs)
         elif cb_data == "cards:more":
             await _handle_cards_more(state, sess, breadcrumbs)
+        elif cb_data == "cap:membership_interest":
+            # SPEC-DAILY-TOKEN-CAP-001 fake-door (260610) — membership upsell
+            # tap. Inline absorb: send the "준비 중" reply + answer-callback
+            # toast. The callback itself is captured as a `user_callback`
+            # event (catalog #3) by webhook intake — SQL filter on
+            # `payload->>'callback_data'='cap:membership_interest'` yields the
+            # WTP click count.
+            await _handle_cap_membership_interest(state, sess, breadcrumbs)
     except Exception as exc:  # noqa: BLE001 — never block webhook
         logger.debug("[ingest] hybrid card callback handling failed: %r", exc)
 
