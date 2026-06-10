@@ -593,7 +593,10 @@ class _SlowCardAdapter:
         self._per_card_s = per_card_s
         self.text_calls = 0
         self.card_calls = 0
-        self.card_urls: list[str] = []
+        # 260610 — Shop URL row was removed (button_url is now None); track
+        # `image_url` instead for uniqueness assertions (each candidate has a
+        # distinct product image).
+        self.card_image_urls: list[str | None] = []
 
     async def send_text(self, chat_id, text):
         self.text_calls += 1
@@ -604,7 +607,7 @@ class _SlowCardAdapter:
 
         await _a.sleep(self._per_card_s)
         self.card_calls += 1
-        self.card_urls.append(card.button_url)
+        self.card_image_urls.append(str(card.image_url) if card.image_url else None)
         return f"mid{self.card_calls}"
 
 
@@ -696,7 +699,10 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     assert delta["agent_status"] == "done"
     assert adapter.text_calls == 1  # text sent EXACTLY once (no retry resend)
     assert adapter.card_calls == 4  # each card sent EXACTLY once
-    assert len(set(adapter.card_urls)) == 4  # no duplicate cards
+    # No duplicate cards — distinct product image URLs (Shop URL row removed
+    # 260610 so button_url is None on every card; image_url is the new
+    # per-candidate uniqueness signal).
+    assert len(set(adapter.card_image_urls)) == 4
     respond_hist = [h for h in delta["tool_call_history"] if h["tool_name"] == "respond"]
     assert len(respond_hist) == 1  # respond dispatched once — NOT retried
 

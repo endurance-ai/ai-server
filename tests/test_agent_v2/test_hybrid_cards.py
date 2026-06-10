@@ -420,13 +420,22 @@ async def test_cards_refine_excluded_from_fresh_query(monkeypatch):
 
 
 def test_routing_card_callbacks_terminal_vs_agent():
-    """card:like / cards:more are terminal post-ingest; cards:refine → agent."""
+    """card:like / cards:more / cap:membership_interest are terminal post-ingest;
+    cards:refine → agent.
+
+    260610 — the source check was loosened to substring matches because the
+    routing condition is now a multi-line `if (... or ... or ...):` block.
+    Asserting individual token substrings keeps the contract without coupling
+    to the exact formatting.
+    """
     import inspect
 
     from app.graphs import fashion_bot
 
     src = inspect.getsource(fashion_bot.build_graph)
-    assert 'cb.startswith("card:like:") or cb == "cards:more"' in src
+    assert 'cb.startswith("card:like:")' in src
+    assert 'cb == "cards:more"' in src
+    assert 'cb == "cap:membership_interest"' in src
     assert 'return "__end__"' in src
 
 
