@@ -46,6 +46,19 @@ def _v3_isolation():
 
     _tp._store = None
 
+    # 260611 — process-global `last_query._LAST` leaks across tests when
+    # other suites (e.g. test_agent_v2) drive a `search_products` dispatch
+    # that calls `set_last_query`. `_build_memory_context` now surfaces
+    # `last_search_query: …`, so a leaked value contaminates the
+    # `(no taste history yet)` placeholder assertion in
+    # `test_ac_1_2_fail_soft_empty`. Reset before AND after.
+    try:
+        from app.agents import last_query as _lq
+
+        _lq._reset_all_for_tests()
+    except Exception:  # noqa: BLE001 — defensive (import path drift)
+        pass
+
     yield
 
     for a, v in snapshot.items():
@@ -54,3 +67,9 @@ def _v3_isolation():
         except Exception:  # noqa: BLE001 — pydantic v2 guard fallback
             object.__setattr__(live, a, v)
     _tp._store = None
+    try:
+        from app.agents import last_query as _lq
+
+        _lq._reset_all_for_tests()
+    except Exception:  # noqa: BLE001
+        pass
