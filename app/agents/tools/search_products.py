@@ -41,6 +41,67 @@ _TEXT_ONLY_SENTINEL = "https://text-only.invalid/none"
 _GENDER_TOKENS = ("men", "women", "unisex")
 
 
+def emit_search_done(
+    *,
+    ctx: dict[str, Any] | None = None,
+    chat_id: int | None = None,
+    user_key: str | None = None,
+    thread_id: Any = None,
+    turn_no: int | None = None,
+    text_query: str,
+    cands: list[Any],
+    category: str | None = None,
+    is_refine: bool = False,
+) -> None:
+    """Emit a `search_done` conversation-log event. Never raises.
+
+    260611 — `search_done` was defined in the event catalog but never actually
+    emitted, so `get_recent_history` (and the agent's memory injection that
+    wraps it) had no record of prior searches. The LLM then could not detect
+    that a refine (e.g. "더 저렴한 걸") had a target to refine — it called
+    `get_recent_history`, got nothing, and replied "기록이 없어서…".
+
+    `ctx` is used as the primary source (search_products / refine_search
+    dispatch path); explicit kwargs override (e.g. the inline
+    `_handle_gender_pick` path which has only `state`).
+    """
+    try:
+        from app.observability.conversation_log import emit
+
+        if ctx is not None:
+            chat_id = chat_id if chat_id is not None else ctx.get("chat_id")
+            user_key = user_key if user_key is not None else ctx.get("user_key")
+            thread_id = thread_id if thread_id is not None else ctx.get("thread_id")
+        if chat_id is None or user_key is None:
+            return  # missing minimal identity — skip silently
+        top_ids: list[str] = []
+        for c in (cands or [])[:5]:
+            try:
+                pid = getattr(c, "id", None)
+                if pid is None and isinstance(c, dict):
+                    pid = c.get("id")
+                if pid:
+                    top_ids.append(str(pid))
+            except Exception:  # noqa: BLE001 — best-effort projection
+                continue
+        emit(
+            event_type="search_done",
+            user_key=str(user_key),
+            chat_id=int(chat_id),
+            thread_id=thread_id,
+            turn_no=turn_no,
+            payload={
+                "query": {"text_query": (text_query or "")[:240]},
+                "top_k_product_ids": top_ids,
+                "dense_count": len(cands or []),
+                "filters": {"category": category} if category else {},
+                "is_refine": bool(is_refine),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 — observability is best-effort
+        logger.debug("[search_done emit] skip: %r", exc)
+
+
 def _query_gender(text_query: str) -> str | None:
     """Return the gender token present in `text_query` (whole-word), else None."""
     tokens = text_query.lower().split()
@@ -936,6 +997,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # internally (the LLM never hand-serializes cards). LLM context still gets
     # only the small `top_candidates` summary below.
     persist_last_results(ctx, cands)
+
+    # 260611 — emit `search_done` so subsequent turns' memory context surfaces
+    # the prior query (drives the LLM toward `refine_search` instead of a fresh
+    # `search_products` or a confused `get_recent_history`).
+    emit_search_done(
+        ctx=ctx,
+        text_query=text_query,
+        cands=cands,
+        category=category,
+        is_refine=False,
+    )
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
     return SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)

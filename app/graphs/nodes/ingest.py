@@ -277,6 +277,23 @@ async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumb
             set_last_query(state.chat_id, text_query)
         except Exception:  # noqa: BLE001
             pass
+        # 260611 — emit `search_done` so the next turn's memory context shows
+        # this inline-driven search (it doesn't go through the agent's tool
+        # dispatcher so the upstream emit sites don't fire).
+        try:
+            from app.agents.tools.search_products import emit_search_done
+
+            emit_search_done(
+                chat_id=state.chat_id,
+                user_key=user_key_for(state.from_user_id, state.chat_id),
+                thread_id=state.thread_id,
+                text_query=text_query,
+                cands=cands,
+                category=pending.get("category"),
+                is_refine=False,
+            )
+        except Exception:  # noqa: BLE001 — observability is best-effort
+            logger.debug("[gender_pick] search_done emit best-effort skip", exc_info=True)
         adapter = get_adapter()
         delivered = await send_hybrid_batch(adapter, state.chat_id, ctx=None, offset=0)
         breadcrumbs.append(f"ingest: gender resume search='{text_query}' delivered={delivered}")

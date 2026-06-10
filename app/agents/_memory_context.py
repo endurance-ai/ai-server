@@ -30,6 +30,26 @@ _EMPTY_PLACEHOLDER = "(no taste history yet)"
 _RECENT_N = 5
 
 
+def _last_query_line(chat_id: Any) -> list[str]:
+    """Surface the cross-turn `last_query` (the previous turn's final, gender-
+    pinned product query). Without this, the LLM cannot tell what to refine —
+    `_recent_lines` depends on the conversation-log `search_done` event which is
+    not always present (e.g. when the inline `_handle_gender_pick` path drove
+    the search instead of the agent's tool dispatcher). Surfacing `last_query`
+    directly gives the LLM the deterministic anchor for `refine_search`.
+    """
+    try:
+        from app.agents.last_query import get_last_query
+
+        q = get_last_query(chat_id)
+    except Exception as exc:  # noqa: BLE001 — fail-soft, never break the loop
+        logger.debug("[_memory_context] last_query read failed: %r", exc)
+        return []
+    if not q:
+        return []
+    return [f"last_search_query: {q}"]
+
+
 def _taste_lines(user_key: str) -> list[str]:
     """Taste summary via existing TasteProfile boost/exclude helpers only."""
     try:
@@ -93,12 +113,17 @@ async def build_memory_context(state: Any, sess: Any, ctx: dict[str, Any], *, ma
     char_cap = max(0, int(max_tokens)) * 4
 
     taste = _taste_lines(ctx.get("user_key") or "")
+    last_q = _last_query_line(ctx.get("chat_id"))
     recent = await _recent_lines(ctx)
 
     body_lines: list[str] = []
     if taste:
         body_lines.append("Taste profile:")
         body_lines.extend(taste)
+    if last_q:
+        # Cross-turn anchor for refine_search. Surfaced ABOVE recent turns so
+        # truncation (oldest-first) keeps it in the LLM's view.
+        body_lines.extend(last_q)
     if recent:
         body_lines.append("Recent turns (newest first):")
         body_lines.extend(recent)

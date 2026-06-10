@@ -245,6 +245,49 @@ async def test_build_memory_context_includes_disliked_brands(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_memory_context_includes_last_query(monkeypatch):
+    """260611 — last_query is surfaced as `last_search_query: <q>` so the LLM
+    has a cross-turn anchor for `refine_search` (without it, "더 저렴한 걸"
+    style follow-ups have nothing to refine and the LLM falls back to
+    `get_recent_history` or a fresh search).
+    """
+    import app.agents._memory_context as mc
+    from app.agents import last_query
+    from app.infrastructure.memory.taste_profile import get_taste_store
+
+    get_taste_store().get_or_create("u:42")
+    last_query._reset_all_for_tests()
+    last_query.set_last_query(42, "black sleeveless women")
+    monkeypatch.setattr(
+        "app.agents.tools.get_recent_history.dispatch",
+        AsyncMock(return_value={"ok": True, "events": []}),
+    )
+    out = await mc.build_memory_context(
+        None, None, {"user_key": "u:42", "chat_id": 42}, max_tokens=1500
+    )
+    assert "last_search_query: black sleeveless women" in out
+
+
+@pytest.mark.asyncio
+async def test_build_memory_context_omits_last_query_when_empty(monkeypatch):
+    """No prior search → no `last_search_query:` line (avoid noise)."""
+    import app.agents._memory_context as mc
+    from app.agents import last_query
+    from app.infrastructure.memory.taste_profile import get_taste_store
+
+    get_taste_store().get_or_create("u:99")
+    last_query._reset_all_for_tests()
+    monkeypatch.setattr(
+        "app.agents.tools.get_recent_history.dispatch",
+        AsyncMock(return_value={"ok": True, "events": []}),
+    )
+    out = await mc.build_memory_context(
+        None, None, {"user_key": "u:99", "chat_id": 99}, max_tokens=1500
+    )
+    assert "last_search_query" not in out
+
+
+@pytest.mark.asyncio
 async def test_build_memory_context_recent_history_failure_fail_soft(monkeypatch):
     """_memory_context L71-73 — get_recent_history raising → empty recent lines."""
     import app.agents._memory_context as mc
