@@ -235,6 +235,12 @@ class Settings(BaseSettings):
     # `REDIS_URL=redis://:${REDIS_AUTH}@redis:6379/1` (Langfuse uses DB 0).
     REDIS_URL: str = "redis://localhost:6379/1"
 
+    # Beta CTR — base URL for the outbound redirect proxy (`/r/{token}`).
+    # When empty, respond.send_hybrid_batch falls back to raw product URLs
+    # (feature OFF). Set to the public host of this AI server in prod.
+    # Example: `PUBLIC_BASE_URL=https://ai.kiko.fashion`
+    PUBLIC_BASE_URL: str = ""
+
     # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
     # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
     # After 1-2 weeks: set CAP_TIER_FREE = p95_daily_tokens * 1.2, then enable.

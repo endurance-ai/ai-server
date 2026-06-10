@@ -47,7 +47,7 @@ def _truncate_log_table():
 def test_event_payloads_all_length_is_19():
     """REQ-LOG-CATALOG-001 — 20 → 21 event types after SPEC-DAILY-TOKEN-CAP-001 (cap_reached added)."""
     mod = importlib.import_module("app.observability.event_payloads")
-    assert len(mod.__all__) == 21, f"__all__ length must be 21, got {len(mod.__all__)}"
+    assert len(mod.__all__) == 22, f"__all__ length must be 22, got {len(mod.__all__)}"
 
 
 def test_event_payloads_star_import_exposes_19_typeddicts():
@@ -55,7 +55,7 @@ def test_event_payloads_star_import_exposes_19_typeddicts():
     ns: dict = {}
     exec("from app.observability.event_payloads import *", ns)  # noqa: S102
     public = {k for k in ns if not k.startswith("_")}
-    assert len(public) == 21, f"star-import exposed {len(public)} names, expected 21"
+    assert len(public) == 22, f"star-import exposed {len(public)} names, expected 22"
 
 
 # ───────────────────── (b) taste_update.source AST scan ─────────────────
