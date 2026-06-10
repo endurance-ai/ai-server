@@ -221,5 +221,19 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # internally (parity with search_products; LLM never serializes cards).
     persist_last_results(ctx, cands)
 
+    # 260611 — emit `search_done` (is_refine=True) so the next turn's memory
+    # context still surfaces this as the active query for further refinement.
+    try:
+        from app.agents.tools.search_products import emit_search_done
+
+        emit_search_done(
+            ctx=ctx,
+            text_query=text_query,
+            cands=cands,
+            is_refine=True,
+        )
+    except Exception:  # noqa: BLE001 — observability is best-effort
+        logger.debug("[refine_search] search_done emit best-effort skip", exc_info=True)
+
     top = [_candidate_to_dict(c) for c in cands[:5]]
     return RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)

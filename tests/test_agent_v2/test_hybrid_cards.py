@@ -188,13 +188,17 @@ async def test_respond_hybrid_album_plus_summary_en(monkeypatch):
         (_, summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
         assert "Here are 5 picks" in summary
         assert '<a href="https://shop.example.com/0">' in summary  # HTML buy link
-        # UX simplification 260610 — the per-item ❤️ 1..5 row was removed.
-        # Each product card now carries its own ❤️ button. Summary keyboard
-        # is footer-only: [더보기 / More] + [다르게 찾기 / Refine].
+        # UX 260611 — the legacy `🔄 다르게 찾기` button was removed; the
+        # "다른 스타일로" affordance moved into the closing prompt
+        # ("What do you think of this style? Want me to try a different vibe?").
+        # Summary keyboard is now footer-only with ONLY the `➕ More` pager
+        # button (when a next batch exists).
         assert len(keyboard) == 1
+        assert len(keyboard[0]) == 1
         assert keyboard[0][0][1] == "cards:more"
-        assert keyboard[0][1][1] == "cards:refine"
         assert "More" in keyboard[0][0][0]
+        # Closing prompt copy is now in the summary text body.
+        assert "What do you think of this style?" in summary
         # NO per-card streaming.
         adapter.send_card.assert_not_awaited()
     finally:
@@ -220,15 +224,23 @@ async def test_respond_hybrid_summary_ko(monkeypatch):
         assert "추려봤어" in summary
         assert summary.splitlines()[2].startswith("1.")  # numbered "1." format
         assert kwargs.get("parse_mode") == "HTML"
+        # UX 260611 — footer now has ONLY `➕ 더보기` (when a next batch exists);
+        # `🔄 다르게 찾기` removed. The closing prompt invites a natural-language
+        # follow-up which the agent routes via refine_search / search_products.
         assert "더보기" in keyboard[-1][0][0]
-        assert "다르게 찾기" in keyboard[-1][1][0]
+        assert "이 스타일 어때?" in summary
     finally:
         set_store(None)
 
 
 @pytest.mark.asyncio
 async def test_respond_hybrid_no_more_button_when_single_batch(monkeypatch):
-    """≤5 results → no next batch → [더보기] suppressed, [다르게 찾기] kept."""
+    """≤5 results → no next batch → `➕ 더보기` suppressed → empty keyboard.
+
+    UX 260611 — `🔄 다르게 찾기` was removed, so a single-batch result has no
+    keyboard at all. The closing prompt in the summary text invites the
+    natural-language refinement instead.
+    """
     from app.agents.tools import respond as respond_tool
     from app.agents.tools.search_products import CARDS_READY_KEY
 
@@ -240,10 +252,11 @@ async def test_respond_hybrid_no_more_button_when_single_batch(monkeypatch):
         res = await respond_tool.dispatch({"text": "찾았어요!"}, {"chat_id": 42, CARDS_READY_KEY: True})
 
         assert res["cards_sent"] == 5
-        (_, _summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
-        footer_labels = [b[0] for b in keyboard[-1]]
-        assert not any("더보기" in lbl for lbl in footer_labels)
-        assert any("다르게 찾기" in lbl for lbl in footer_labels)
+        (_, summary, keyboard), _ = adapter.send_text_with_keyboard.await_args
+        # No keyboard rows at all when single batch.
+        assert keyboard == []
+        # Closing prompt still invites refinement via natural language.
+        assert "이 스타일 어때?" in summary
     finally:
         set_store(None)
 

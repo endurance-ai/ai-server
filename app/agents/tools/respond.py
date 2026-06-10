@@ -505,13 +505,16 @@ def _build_summary(batch: list[Any], lang: str, urls_override: list[str | None] 
         header = f"✨ 마음에 들 만한 {n}개 추려봤어"
     else:
         header = f"✨ Here are {n} picks I think you'll like"
-    # Footer help line (KO/EN) — explains the LIKE buttons' purpose so users
-    # understand the ❤️ taps are a taste signal, not just "card numbering".
-    # The line is rendered AFTER the numbered list (see end of function).
+    # 260611 — closing prompt that replaces the legacy "🔄 다르게 찾기" button.
+    # Invites a natural-language follow-up ("더 캐주얼", "다른 색", "더 저렴")
+    # which the agent absorbs via refine_search / search_products. The old
+    # "💡 ❤️ 1..5" help line is obsolete (per-item ❤️ row was removed in v3 —
+    # each card carries its own ♥️ 취향 저장하기 button), so this prompt
+    # supplants both the button and the legacy help copy.
     if lang == "ko":
-        help_line = "💡 마음에 든 번호의 ❤️ 를 눌러주면 취향에 반영해서 다음 추천을 더 잘 골라줄게!"
+        help_line = "이 스타일 어때? 다른 스타일도 추천해줄까? ✨"
     else:
-        help_line = "💡 Tap the ❤️ next to any pick — it tunes my taste model so the next batch fits you better!"
+        help_line = "What do you think of this style? Want me to try a different vibe? ✨"
     lines: list[str] = [header, ""]
     for i, c in enumerate(batch, start=1):
         brand = str(_candidate_field(c, "brand", "")).strip()
@@ -560,23 +563,24 @@ def _like_callback_for(c: Any, idx: int) -> str:
 
 
 def _build_keyboard(batch: list[Any], lang: str, has_more: bool = True) -> list[list[tuple[str, str]]]:
-    """Summary-card keyboard — FOOTER ONLY (UX simplification 260610).
+    """Summary-card keyboard — `➕ 더보기` (pager) only when a next batch exists.
 
-    The per-item ❤️ 1..5 row was removed: each individual product card now
-    carries its OWN ❤️ button (see `send_results._critique_buttons_for`), so
-    the summary-level row was redundant and forced users to mentally map
-    number → card. `batch` is kept in the signature so callers do not change.
+    260611 — `🔄 다르게 찾기` button was REMOVED. The "다른 스타일로" affordance
+    moves into the closing prompt in `_build_summary` ("이 스타일 어때? 다른
+    스타일도 추천해줄까?"), so users reply in natural language and the agent
+    routes via refine_search / search_products. This eliminates the label
+    collision between footer `🔄 다르게 찾기` and per-card `👀 비슷한 거 더보기`.
+
+    `batch` is kept in the signature so callers do not change. Returns an
+    empty list (no keyboard) when no next batch exists.
     """
     footer: list[tuple[str, str]] = []
-    if lang == "ko":
-        if has_more:
+    if has_more:
+        if lang == "ko":
             footer.append(("➕ 더보기", "cards:more"))
-        footer.append(("🔄 다르게 찾기", "cards:refine"))
-    else:
-        if has_more:
+        else:
             footer.append(("➕ More", "cards:more"))
-        footer.append(("🔄 Refine", "cards:refine"))
-    return [footer]
+    return [footer] if footer else []
 
 
 async def _fallback_send_cards(
