@@ -104,10 +104,16 @@ def _is_instagram(host: str) -> bool:
 
 
 def _img_index_from_url(url: str) -> int | None:
-    """Parse Instagram's `?img_index=N` query parameter into a 0-indexed slide
-    position. Instagram appends this to a post URL when the user navigates to
-    a specific slide in a carousel (1-indexed in the URL: `img_index=1` is the
-    first slide). Returns None when missing, malformed, or non-positive.
+    """Parse Instagram's `?img_index=N` query parameter into a slide position.
+
+    Instagram appends this to a post URL when the user navigates to a specific
+    slide in a carousel — and it is **0-indexed** (live verification 260612:
+    sharing the 3rd photo produces `?img_index=2`). The value returned here
+    is already a valid Python list index, no `n - 1` conversion needed.
+
+    Returns None when the parameter is missing, malformed, or negative.
+    Returns 0 for `img_index=0` (the first slide — the reorder helper then
+    short-circuits since position 0 is already at the front).
     """
     try:
         from urllib.parse import parse_qs, urlparse
@@ -116,9 +122,9 @@ def _img_index_from_url(url: str) -> int | None:
         n = int(raw)
     except (TypeError, ValueError):
         return None
-    if n < 1:
+    if n < 0:
         return None
-    return n - 1
+    return n
 
 
 def _reorder_by_img_index(url: str, images: list[str]) -> list[str]:
