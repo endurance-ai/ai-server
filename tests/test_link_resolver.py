@@ -110,3 +110,52 @@ async def test_cache_hit_skips_http(monkeypatch):
 
     assert first == second
     assert fake_client.get.await_count == 1
+
+
+# ── IG ?img_index=N honoring (260611) ──────────────────────────────────────
+
+
+def test_img_index_from_url_parses_positive_n():
+    from app.channels.link_resolver import _img_index_from_url
+
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=2") == 1
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=1") == 0
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=5") == 4
+
+
+def test_img_index_from_url_returns_none_when_absent_or_invalid():
+    from app.channels.link_resolver import _img_index_from_url
+
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/") is None
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?other=foo") is None
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=abc") is None
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=0") is None
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=-1") is None
+
+
+def test_reorder_by_img_index_hoists_target_slide_to_front():
+    from app.channels.link_resolver import _reorder_by_img_index
+
+    images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+    # img_index=2 (1-indexed) → 0-indexed 1 → b.jpg hoisted to position 0.
+    out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", images)
+    assert out == ["b.jpg", "a.jpg", "c.jpg", "d.jpg"]
+    # img_index=3 → 0-indexed 2 → c.jpg hoisted.
+    out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=3", images)
+    assert out == ["c.jpg", "a.jpg", "b.jpg", "d.jpg"]
+
+
+def test_reorder_by_img_index_passthrough_on_edge_cases():
+    from app.channels.link_resolver import _reorder_by_img_index
+
+    images = ["a.jpg", "b.jpg", "c.jpg"]
+    # No img_index → unchanged.
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/", images) == images
+    # img_index=1 (already at front) → unchanged.
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=1", images) == images
+    # Out-of-range index → fall back to the original order (do not crash).
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=99", images) == images
+    # Single image → unchanged.
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", ["only.jpg"]) == ["only.jpg"]
+    # Empty list → empty.
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", []) == []

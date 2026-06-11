@@ -103,6 +103,39 @@ def _is_instagram(host: str) -> bool:
     return host.endswith("instagram.com") or host == "instagram.com"
 
 
+def _img_index_from_url(url: str) -> int | None:
+    """Parse Instagram's `?img_index=N` query parameter into a 0-indexed slide
+    position. Instagram appends this to a post URL when the user navigates to
+    a specific slide in a carousel (1-indexed in the URL: `img_index=1` is the
+    first slide). Returns None when missing, malformed, or non-positive.
+    """
+    try:
+        from urllib.parse import parse_qs, urlparse
+
+        raw = parse_qs(urlparse(url).query).get("img_index", [""])[0]
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if n < 1:
+        return None
+    return n - 1
+
+
+def _reorder_by_img_index(url: str, images: list[str]) -> list[str]:
+    """Honor IG's `?img_index=N` by hoisting the indexed slide to position 0
+    so the downstream `images[0]` pick matches user intent (the slide they
+    were viewing when they shared the URL — not necessarily the post's first
+    photo). Other slides preserved in original order after the hoisted one.
+    Out-of-range / single-image / no-index → return the list unchanged.
+    """
+    if len(images) < 2:
+        return images
+    idx = _img_index_from_url(url)
+    if idx is None or idx == 0 or idx >= len(images):
+        return images
+    return [images[idx], *images[:idx], *images[idx + 1 :]]
+
+
 def _is_pinterest(host: str) -> bool:
     return host == "pin.it" or host.endswith("pinterest.com")
 
@@ -192,6 +225,11 @@ async def resolve(url: str) -> list[str]:
                 safe.append(u)
             except ValueError as e:
                 logger.warning("🔗 [LINK] 🛡️  IG slide SSRF 차단 url=%s err=%s", u, e)
+        # 260611 — honor IG's `?img_index=N` so a carousel URL like
+        # `…/p/<code>/?img_index=2` analyses slide #2 instead of always slide #1.
+        # Users typically share the URL while viewing the slide they want
+        # recommendations for (carousel with mixed outfits).
+        safe = _reorder_by_img_index(url, safe)
         _cache_put(url, safe)
         return safe
 
