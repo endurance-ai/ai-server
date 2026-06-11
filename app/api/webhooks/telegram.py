@@ -356,7 +356,7 @@ async def _invoke_graph(
             else:
                 # PUBLIC_BASE_URL unset → fall back to direct landing (no
                 # click-count tracking but the link still works).
-                membership_url = _settings_for_cap.MEMBERSHIP_LANDING_URL or "https://kikoai.me/domain"
+                membership_url = _settings_for_cap.MEMBERSHIP_LANDING_URL or "https://kikoai.me/price"
             try:
                 if hasattr(adapter, "send_text_with_url_button"):
                     await adapter.send_text_with_url_button(
