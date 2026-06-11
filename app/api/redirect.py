@@ -68,3 +68,38 @@ async def outbound_redirect(token: str):
 
     logger.info("🐱 [redirect] hit token=%s… product=%s", token[:6], product_id[:12])
     return RedirectResponse(url=product_url, status_code=302)
+
+
+# 260611 — cap fake-door membership click → kikoai.me landing page.
+# Bound at the cap-message URL button (see `_invoke_graph` in
+# `app/api/webhooks/telegram.py`). Each tap emits a `membership_click` event
+# with the optional `c` query parameter (Telegram bots can pass a per-user
+# tracking string via the button URL) so beta analytics can correlate clicks
+# to chat_id. No token / no Redis lookup — the destination is a single fixed
+# landing page configured via `settings.MEMBERSHIP_LANDING_URL`.
+@router.get("/m/membership", include_in_schema=False)
+async def membership_click(c: str = "", source: str = ""):
+    """Log a membership-page click and 302 to the configured landing URL.
+
+    `c` is the hashed chat_id (PII-safe) the cap-message URL button embeds
+    so analytics can correlate clicks back to chats without leaking raw IDs.
+    `source` is a free-form tag (default 'cap' when called from the cap UX).
+    """
+    from app.core.config import settings as _settings
+
+    landing = (_settings.MEMBERSHIP_LANDING_URL or "https://kikoai.me/").strip()
+
+    try:
+        emit(
+            event_type="membership_click",
+            user_key=str(c)[:64] if c else "-",
+            chat_id=0,  # raw chat_id never crosses the URL boundary (PII)
+            thread_id=None,
+            turn_no=None,
+            payload={"source": (source or "cap")[:32]},
+        )
+    except Exception:  # noqa: BLE001 — observability is best-effort
+        logger.debug("[membership_click] emit best-effort skip", exc_info=True)
+
+    logger.info("🐱 [membership] click c=%s source=%s → %s", str(c)[:8], source[:16], landing)
+    return RedirectResponse(url=landing, status_code=302)

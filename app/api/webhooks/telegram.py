@@ -14,7 +14,7 @@ correlation against `ai.log_conversation_event.card_sent` rows.
 from __future__ import annotations
 
 import logging
-from typing import Any, Final
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
@@ -284,11 +284,13 @@ async def _emit_intake_and_resolve_thread(
     return thread_id, turn_no
 
 
-# SPEC-DAILY-TOKEN-CAP-001 — cap-reached UX (260610): 2 message boxes.
+# SPEC-DAILY-TOKEN-CAP-001 — cap-reached UX (260611 v2): 2 message boxes.
 # Box 1: 한도 도달 알림 (자정 리셋 안내).
-# Box 2: fake-door 멤버십 유도 + 인라인 콜백 버튼 → WTP 신호 수집.
-# 콜백 `cap:membership_interest` 는 ingest 가 인라인으로 흡수 (준비 중 멘트
-# + 토스트). 클릭 자체가 베타 목표 3 (WTP) 의 정량 신호.
+# Box 2: 멤버십 랜딩 페이지 URL 버튼. 클릭 시 `/m/membership` redirect proxy
+# → emit `membership_click` 이벤트 → 302 to MEMBERSHIP_LANDING_URL. URL 버튼
+# 이라 텔레그램 자체로는 클릭 데이터가 안 오지만 redirect proxy 가 가운데
+# 끼어서 클릭 카운트 + chat_id_hash 캡처 가능. 베타 목표 3 (WTP / 결제
+# 전환률) 정량 신호.
 _CAP_BOX1: dict[str, str] = {
     "ko": "앗, 오늘 골라줄 수 있는 양을 다 썼어 🐱 자정 지나면 다시 채워지니까 내일 또 와줘!",
     "en": "Whoops — I've used up today's picks 🐱 The quota refills after midnight, so come back tomorrow!",
@@ -301,7 +303,6 @@ _CAP_MEMBERSHIP_LABEL: dict[str, str] = {
     "ko": "멤버십 보러가기 →",
     "en": "See membership →",
 }
-_CAP_MEMBERSHIP_CALLBACK: Final[str] = "cap:membership_interest"
 
 
 @observe(name="webhook.telegram", as_type="span")
@@ -343,25 +344,34 @@ async def _invoke_graph(
                 await adapter.send_text(message.chat_id, box1)
             except Exception:  # noqa: BLE001 — fail-open
                 logger.debug("[webhook] cap box1 send failed chat=%s", message.chat_id)
-            # Box 2 — fake-door membership upsell with inline callback button.
-            # Tap → ingest._handle_cap_membership_interest (inline, no graph).
-            membership_buttons: list[list[tuple[str, str]]] = [[(membership_label, _CAP_MEMBERSHIP_CALLBACK)]]
+            # Box 2 — membership URL button. Routes through `/m/membership`
+            # redirect proxy so clicks emit `membership_click` events
+            # (Telegram won't notify us about raw URL button taps directly).
+            from app.core.config import settings as _settings_for_cap
+
+            base = (_settings_for_cap.PUBLIC_BASE_URL or "").rstrip("/")
+            if base:
+                chat_hash = hash_id(message.chat_id) or ""
+                membership_url = f"{base}/m/membership?source=cap&c={chat_hash}"
+            else:
+                # PUBLIC_BASE_URL unset → fall back to direct landing (no
+                # click-count tracking but the link still works).
+                membership_url = _settings_for_cap.MEMBERSHIP_LANDING_URL or "https://kikoai.me/"
             try:
-                if hasattr(adapter, "send_text_with_keyboard"):
-                    await adapter.send_text_with_keyboard(
+                if hasattr(adapter, "send_text_with_url_button"):
+                    await adapter.send_text_with_url_button(
                         message.chat_id,
                         box2,
-                        membership_buttons,
-                    )
-                elif hasattr(adapter, "send_text_with_buttons"):
-                    # Flatten when only single-row adapter helper exists.
-                    await adapter.send_text_with_buttons(
-                        message.chat_id,
-                        box2,
-                        [membership_buttons[0][0]],
+                        membership_label,
+                        membership_url,
                     )
                 else:
-                    await adapter.send_text(message.chat_id, box2)
+                    # Adapter lacks URL-button helper → fall back to plain text
+                    # with the URL inline (still tappable in Telegram).
+                    await adapter.send_text(
+                        message.chat_id,
+                        f"{box2}\n\n{membership_label} {membership_url}",
+                    )
             except Exception:  # noqa: BLE001 — fail-open
                 logger.debug("[webhook] cap box2 send failed chat=%s", message.chat_id)
             emit(

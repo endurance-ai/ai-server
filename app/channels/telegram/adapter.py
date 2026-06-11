@@ -305,6 +305,41 @@ class TelegramAdapter(MessengerAdapter):
             return False
         return bool(body.get("ok"))
 
+    async def send_text_with_url_button(
+        self,
+        chat_id: int,
+        text: str,
+        button_label: str,
+        button_url: str,
+    ) -> None:
+        """Send a text message with a single inline URL button (NOT callback).
+
+        260611 — used by the cap-reached fake-door box 2: the button URL points
+        at the `/m/membership` redirect proxy so taps emit `membership_click`
+        events before 302-ing the user to the landing page. Telegram does NOT
+        notify the bot about URL-button taps directly, which is exactly why
+        the redirect proxy hop is necessary.
+        """
+        t0 = time.perf_counter()
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": {"inline_keyboard": [[{"text": button_label, "url": button_url}]]},
+        }
+        await self._post("sendMessage", payload)
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        text_preview = text.replace("\n", " ⏎ ")
+        if len(text_preview) > 120:
+            text_preview = text_preview[:120] + "…"
+        logger.info(
+            "🐱 [telegram] 🔗 send_url_button chat=%s elapsed_ms=%d msg=%r label=%r url=%s",
+            _hash_chat_id(chat_id),
+            elapsed,
+            text_preview,
+            button_label,
+            button_url,
+        )
+
     async def send_text_with_buttons(
         self,
         chat_id: int,

@@ -47,6 +47,8 @@ __all__ = [
     "TurnSummaryPayload",
     # SPEC-DAILY-TOKEN-CAP-001 (22nd event type).
     "CapReachedPayload",
+    # 260611 — membership URL button click (cap fake-door redirect proxy).
+    "MembershipClickPayload",
 ]
 
 # REQ-LOG-CATALOG-001 — taste_update.source 7-value Literal (catalog #18).
@@ -252,3 +254,13 @@ class TurnSummaryPayload(TypedDict, total=False):
 # Emitted by the webhook gate when a user exhausts their daily token quota.
 class CapReachedPayload(TypedDict, total=False):
     lang: str  # "ko" | "en" — detected language at the time of the cap hit
+
+
+# 23. membership_click — 260611. Emitted by the `/m/membership` redirect proxy
+# when a user taps the cap fake-door URL button. `source` carries the entry
+# point label (e.g. "cap") so the same endpoint can be reused for other
+# upsell surfaces (footer banner, etc.) without forking the event type.
+# The chat_id_hash arrives via the `?c=<hash>` query param so per-user
+# attribution is possible without leaking raw IDs across the URL boundary.
+class MembershipClickPayload(TypedDict, total=False):
+    source: str  # "cap" | future entry-point labels
