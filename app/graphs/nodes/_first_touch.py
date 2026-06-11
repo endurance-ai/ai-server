@@ -75,6 +75,22 @@ async def maybe_first_touch(
             clear_origin(state.chat_id)
         except Exception:  # noqa: BLE001
             logger.debug("[first_touch] origin image clear best-effort", exc_info=True)
+        # 260611 — clear the cross-turn impression dedup set so /reset truly
+        # starts the user "from scratch". Without this, a previously-shown
+        # product would still be filtered out of the next batch even though
+        # the user explicitly asked to reset. Pager cursor too — same reason.
+        try:
+            from app.infrastructure.cache import chat_state
+
+            await chat_state.clear_logged(state.chat_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[first_touch] impression dedup clear best-effort", exc_info=True)
+        try:
+            from app.infrastructure.cache import chat_state
+
+            await chat_state.set_cursor(state.chat_id, 0)
+        except Exception:  # noqa: BLE001
+            logger.debug("[first_touch] pager cursor reset best-effort", exc_info=True)
         try:
             await adapter.send_text(state.chat_id, _RESET_KO if lang == "ko" else _RESET_EN)
         except Exception:  # noqa: BLE001

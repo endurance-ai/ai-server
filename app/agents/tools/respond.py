@@ -114,10 +114,15 @@ async def _log_delivered_impressions(chat_id: int, sess: Any, batch: list[Any], 
         from app.channels.implicit_feedback import _product_id_of, log_impressions
 
         cid = int(chat_id)
-        if is_fresh_search:
-            # New search → drop the prior search's dedupe set so its products
-            # are re-logged against the NEW recommendation trace.
-            await chat_state.clear_logged(cid)
+        # 260611 — DO NOT clear the dedupe set on a fresh search anymore. The
+        # set is now ALSO the UX dedup source: `send_hybrid_batch` filters
+        # candidates against it BEFORE building the batch, so the same product
+        # never reappears across `crit:more` / `cards:more` / new searches.
+        # The dedupe set is cleared explicitly on `/reset` (see
+        # `_first_touch.py::maybe_first_touch`) and naturally by its 7-day
+        # Redis TTL. The original Langfuse re-attribution rationale becomes
+        # moot because re-recommendations are now suppressed upstream.
+        _ = is_fresh_search  # kept in signature; semantics moved to call site
         fresh: list[Any] = []
         for c in batch:
             pid = _product_id_of(c)
@@ -696,12 +701,39 @@ async def send_hybrid_batch(
     start = (await chat_state.get_cursor(int(chat_id))) if offset is None else int(offset)
     if start < 0:
         start = 0
+
+    # 260611 — UX dedup across turns: skip products already shown to this chat
+    # earlier in the session (impression dedupe set). Without this, a refine
+    # ("비슷한 거 더보기") or a fresh search that overlaps with prior results
+    # surfaces the same MUSED / Mardi / ZARA pieces repeatedly, which causes
+    # fatigue. The set is cleared on /reset and naturally by its 7-day TTL.
+    async def _is_already_shown(c: Any) -> bool:
+        try:
+            from app.channels.implicit_feedback import _product_id_of
+
+            pid = _product_id_of(c)
+        except Exception:  # noqa: BLE001
+            return False
+        if pid is None:
+            return False
+        try:
+            return await chat_state.is_logged(int(chat_id), str(pid))
+        except Exception:  # noqa: BLE001 — fail-open: don't suppress on lookup error
+            return False
+
     # Pre-filter to album-eligible candidates from `start` onward, take ≤5.
     # Track each item's ABSOLUTE index in `all_candidates` so the "더보기"
     # cursor advances past the real consumed slice — advancing by the eligible
     # count would skip/repeat items when broken-image candidates are
-    # interspersed (P1-2).
-    eligible_pos = [(start + i, c) for i, c in enumerate(all_candidates[start:]) if _has_plausible_image(c)]
+    # interspersed (P1-2). The cross-turn dedup happens BEFORE image gating so
+    # a stale-image previously-shown item still consumes a position.
+    eligible_pos: list[tuple[int, Any]] = []
+    for i, c in enumerate(all_candidates[start:]):
+        if not _has_plausible_image(c):
+            continue
+        if await _is_already_shown(c):
+            continue
+        eligible_pos.append((start + i, c))
     batch_pos = eligible_pos[:_ALBUM_SIZE]
     batch = [c for _, c in batch_pos]
     if not batch:
