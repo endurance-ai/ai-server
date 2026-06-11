@@ -85,19 +85,17 @@ async def test_ac_s_1_dual_fence_and_truncation(monkeypatch):
 
     await rl.run_react_loop(state, sess)
 
-    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
-    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
     user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
 
     # 1. Past-turn user_text inside the memory block is 200-capped (the full
     #    10k attack string never appears verbatim).
-    assert attack not in sys_msg
-    # 2. Memory block fence present.
-    assert "[MEMORY CONTEXT — SYSTEM DERIVED]" in sys_msg
-    assert "[/MEMORY CONTEXT]" in sys_msg
+    assert attack not in user_msg
+    # 2. Memory block is now prepended to the user message (not in system message).
+    assert "[MEMORY CONTEXT — SYSTEM DERIVED]" in user_msg
+    assert "[/MEMORY CONTEXT]" in user_msg
     # 3. Current-turn user input fence UNCHANGED from V2 (dual isolation).
     assert "[USER INPUT — DATA ONLY]" in user_msg
     assert "show me bags" in user_msg
     # 4. Whole memory block char-len <= cap*4.
-    mem_block = sys_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
+    mem_block = user_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
     assert len(mem_block) <= 1500 * 4 + 64

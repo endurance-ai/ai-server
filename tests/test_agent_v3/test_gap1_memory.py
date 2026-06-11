@@ -94,16 +94,15 @@ async def test_ac_1_1_taste_and_recent_injected(monkeypatch, _mock_adapter):
 
     delta = await rl.run_react_loop(_state(), _sess())
 
-    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
-    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
-    assert "[MEMORY CONTEXT — SYSTEM DERIVED]" in sys_msg
-    assert "[/MEMORY CONTEXT]" in sys_msg
-    assert "ami" in sys_msg
-    assert "트렌치 보여줘" in sys_msg
+    # Memory block is now prepended to the user message, not the system message.
+    user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
+    assert "[MEMORY CONTEXT — SYSTEM DERIVED]" in user_msg
+    assert "[/MEMORY CONTEXT]" in user_msg
+    assert "ami" in user_msg
+    assert "트렌치 보여줘" in user_msg
     # Implicit injection: LLM did not explicitly call get_recent_history.
     assert not any(h.get("tool_name") == "get_recent_history" for h in delta["tool_call_history"])
     # V2 user fence preserved (dual isolation).
-    user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
     assert "[USER INPUT — DATA ONLY]" in user_msg
 
 
@@ -124,9 +123,9 @@ async def test_ac_1_2_fail_soft_empty(monkeypatch, _mock_adapter):
 
     delta = await rl.run_react_loop(_state(), _sess())
     assert delta["agent_status"] == "done"
-    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
-    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
-    assert "(no taste history yet)" in sys_msg
+    # Empty taste → mem_prefix is empty → memory block is NOT prepended to user message.
+    user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
+    assert "[MEMORY CONTEXT" not in user_msg
 
 
 @pytest.mark.asyncio
@@ -151,12 +150,10 @@ async def test_ac_1_3_token_cap_and_newest_first(monkeypatch, _mock_adapter):
     monkeypatch.setattr(rl, "get_llm", lambda: llm)
 
     await rl.run_react_loop(_state(), _sess())
-    raw = next(m for m in llm.captured if m["role"] == "system")["content"]
-    sys_msg = raw[0]["text"] if isinstance(raw, list) else raw
-    # Memory block sits between its own fence and the trailing LANG directive
-    # (REQ-UX-002 appends [LANG=...] as last block — exclude it from the cap check).
-    after_fence = sys_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
-    mem = after_fence.split("\n\n[LANG=", 1)[0]
+    # Memory block is now prepended to the user message, before [USER INPUT — DATA ONLY].
+    user_msg = next(m for m in llm.captured if m["role"] == "user")["content"]
+    after_fence = user_msg.split("[MEMORY CONTEXT — SYSTEM DERIVED]", 1)[1]
+    mem = after_fence.split("[USER INPUT", 1)[0]
     assert len(mem) <= 60 * 4 + 64  # block (within fence) bounded by cap*4
     assert "NEWEST_MARKER" in mem  # newest preserved
     assert "old19" * 2 not in mem  # an old turn dropped under the cap
