@@ -299,6 +299,40 @@ async def test_build_user_message_handles_out_of_range_index():
     assert "callback: item:5" in out
 
 
+# --- 260612 direct photo upload surfacing — friendly link-nudge framing ---
+
+
+def test_direct_photo_upload_surfaces_link_nudge_to_llm():
+    """REGRESSION 260612 — a user-uploaded photo (Telegram `photo_file_id`
+    without a `urls` link) used to vanish into thin air: `resolve_image`
+    skipped the file path, leaving `state.image_url=None`, and the agent saw
+    an empty user_text so it greeted as if nothing was sent. Now the LLM is
+    given a friendly directive that frames link sharing as the BETTER
+    analysis path (not a "I can't see it" rejection).
+    """
+    from datetime import UTC, datetime
+
+    from app.agents import react_loop as rl
+
+    msg = ChannelMessage(chat_id=42, photo_file_id="AgACAgIAAxkBAAEB", received_at=datetime.now(UTC))
+    state = WorkingState(
+        message=msg,
+        chat_id=42,
+        from_user_id=99,
+        image_url=None,  # resolve_image left it empty (direct upload unsupported).
+    )
+    sess = Session(chat_id=42, state=SessionState.IDLE)
+    sess.lang = "ko"
+
+    out = rl._build_user_message(state, sess)
+    assert "user_uploaded_direct_photo" in out
+    # Tone guard — must NOT phrase it as a deficiency.
+    assert "cannot" in out  # the directive says "do NOT say you cannot" — text present in the directive
+    assert "more accurately" in out or "더 정확히" in out
+    # Acknowledgment cue present so the LLM doesn't ignore the photo.
+    assert "Acknowledge" in out
+
+
 # --- 260611 crit:{op}:{idx} anchor surfacing — preserve clicked card color/style ---
 
 

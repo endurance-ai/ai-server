@@ -688,6 +688,24 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
             anchor_line = _anchor_card_line(msg.callback_data, sess)
             if anchor_line:
                 parts.append(anchor_line)
+    # 260612 — direct photo upload (`photo_file_id` without a `urls` link).
+    # `resolve_image` skips the file path (we can't pull bytes through Vision
+    # right now). Without surfacing this, the LLM sees an empty user_text and
+    # responds with a generic greeting — the user feels ignored. Tell the LLM
+    # to ACKNOWLEDGE the photo warmly and nudge toward link sharing as the
+    # path that yields BETTER analysis (NOT framed as "I can't do it").
+    if msg and msg.photo_file_id and not state.image_url:
+        parts.append(
+            "user_uploaded_direct_photo: true "
+            "→ Acknowledge the photo warmly in kiko's voice. Frame Pinterest "
+            "or image links as the path that lets you read the details more "
+            "accurately — do NOT say you cannot see the photo. KO example "
+            "wording (paraphrase, don't copy verbatim): "
+            "'오 사진 보내준 거 봤어 😻 핀터레스트나 이미지 링크로 보내주면 "
+            "더 정확히 분석해서 찾아줄 수 있어!' EN example: 'Got your photo "
+            "😻 Sharing it as a Pinterest / image link lets me read the "
+            "details more clearly — wanna try?' Then end the turn."
+        )
     return "\n".join(parts)
 
 
