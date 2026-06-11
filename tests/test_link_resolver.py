@@ -112,15 +112,21 @@ async def test_cache_hit_skips_http(monkeypatch):
     assert fake_client.get.await_count == 1
 
 
-# ── IG ?img_index=N honoring (260611) ──────────────────────────────────────
+# ── IG ?img_index=N honoring (260612 — 0-indexed) ──────────────────────────
 
 
-def test_img_index_from_url_parses_positive_n():
+def test_img_index_from_url_parses_n_as_zero_indexed():
+    """260612 — Instagram uses 0-indexed `img_index` (verified live: sharing
+    the 3rd slide of a carousel produces `?img_index=2`). The returned value
+    is already a valid Python list index — no `n - 1` conversion needed.
+    """
     from app.channels.link_resolver import _img_index_from_url
 
-    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=2") == 1
-    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=1") == 0
-    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=5") == 4
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=2") == 2
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=1") == 1
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=5") == 5
+    # img_index=0 is the first slide — valid; reorder helper just no-ops it.
+    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=0") == 0
 
 
 def test_img_index_from_url_returns_none_when_absent_or_invalid():
@@ -129,20 +135,23 @@ def test_img_index_from_url_returns_none_when_absent_or_invalid():
     assert _img_index_from_url("https://www.instagram.com/p/ABC/") is None
     assert _img_index_from_url("https://www.instagram.com/p/ABC/?other=foo") is None
     assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=abc") is None
-    assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=0") is None
     assert _img_index_from_url("https://www.instagram.com/p/ABC/?img_index=-1") is None
 
 
 def test_reorder_by_img_index_hoists_target_slide_to_front():
+    """260612 — Instagram 0-indexed: `img_index=N` = (N+1)-th slide = images[N]."""
     from app.channels.link_resolver import _reorder_by_img_index
 
     images = ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
-    # img_index=2 (1-indexed) → 0-indexed 1 → b.jpg hoisted to position 0.
+    # img_index=2 → c.jpg (3rd slide) hoisted to position 0.
     out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", images)
-    assert out == ["b.jpg", "a.jpg", "c.jpg", "d.jpg"]
-    # img_index=3 → 0-indexed 2 → c.jpg hoisted.
-    out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=3", images)
     assert out == ["c.jpg", "a.jpg", "b.jpg", "d.jpg"]
+    # img_index=1 → b.jpg (2nd slide) hoisted.
+    out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=1", images)
+    assert out == ["b.jpg", "a.jpg", "c.jpg", "d.jpg"]
+    # img_index=3 → d.jpg (4th slide) hoisted.
+    out = _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=3", images)
+    assert out == ["d.jpg", "a.jpg", "b.jpg", "c.jpg"]
 
 
 def test_reorder_by_img_index_passthrough_on_edge_cases():
@@ -151,11 +160,11 @@ def test_reorder_by_img_index_passthrough_on_edge_cases():
     images = ["a.jpg", "b.jpg", "c.jpg"]
     # No img_index → unchanged.
     assert _reorder_by_img_index("https://www.instagram.com/p/X/", images) == images
-    # img_index=1 (already at front) → unchanged.
-    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=1", images) == images
+    # img_index=0 (already at front) → unchanged.
+    assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=0", images) == images
     # Out-of-range index → fall back to the original order (do not crash).
     assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=99", images) == images
-    # Single image → unchanged.
+    # Single image → unchanged regardless of index.
     assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", ["only.jpg"]) == ["only.jpg"]
     # Empty list → empty.
     assert _reorder_by_img_index("https://www.instagram.com/p/X/?img_index=2", []) == []
