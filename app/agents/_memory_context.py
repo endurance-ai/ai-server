@@ -37,6 +37,13 @@ def _last_query_line(chat_id: Any) -> list[str]:
     not always present (e.g. when the inline `_handle_gender_pick` path drove
     the search instead of the agent's tool dispatcher). Surfacing `last_query`
     directly gives the LLM the deterministic anchor for `refine_search`.
+
+    260611 follow-up — strict usage directive appended to prevent the LLM from
+    biasing FRESH search_products calls with the prior query. Without this
+    guard the LLM was seeing `last_search_query: grey ...` and dragging
+    'grey' / the previous garment into a brand-new category request like
+    "모자 추천해줘" (live trace: user asked for caps → LLM searched
+    "grey minimalist sweater women").
     """
     try:
         from app.agents.last_query import get_last_query
@@ -47,7 +54,14 @@ def _last_query_line(chat_id: Any) -> list[str]:
         return []
     if not q:
         return []
-    return [f"last_search_query: {q}"]
+    return [
+        f"last_search_query: {q}",
+        "  ↳ USE ONLY when calling `refine_search` to adjust the SAME items "
+        "(price/brand/color delta). For a NEW garment category or any fresh "
+        "`search_products` call, IGNORE this value and build text_query "
+        "entirely from the user's CURRENT message — do NOT carry over the "
+        "garment, color, or style words from the previous query.",
+    ]
 
 
 def _taste_lines(user_key: str) -> list[str]:

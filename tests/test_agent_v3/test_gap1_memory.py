@@ -264,6 +264,12 @@ async def test_build_memory_context_includes_last_query(monkeypatch):
     )
     out = await mc.build_memory_context(None, None, {"user_key": "u:42", "chat_id": 42}, max_tokens=1500)
     assert "last_search_query: black sleeveless women" in out
+    # 260611 follow-up — the line must carry a usage directive so the LLM
+    # only reuses last_query for refine_search, not as a seed for fresh
+    # search_products on a new garment category.
+    assert "USE ONLY" in out
+    assert "refine_search" in out
+    assert "NEW garment category" in out
 
 
 @pytest.mark.asyncio
