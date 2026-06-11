@@ -125,8 +125,8 @@ _SYSTEM_PROMPT = (
     "below — call `suggest_next_step` or `ask_user_clarification`, never apologize without offering a "
     "concrete next step.\n\n"
     "Conversation memory: a digest of recent turns (user/bot text, prior search filters and "
-    "results, taste profile) is auto-injected at the bottom of this system prompt inside a "
-    "system-derived memory block. When the user references something earlier "
+    "results, taste profile) is provided in a system-derived memory block prepended to "
+    "each user message. When the user references something earlier "
     '("방금 그거 말고", "다시 보여줘", "아까처럼") and the injected digest does not show '
     "enough detail to act on, call `get_recent_history` to pull more events from the "
     "conversation log before searching. Do NOT call it when the digest already answers "
