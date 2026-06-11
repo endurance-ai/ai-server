@@ -75,15 +75,37 @@ def emit_search_done(
         if chat_id is None or user_key is None:
             return  # missing minimal identity — skip silently
         top_ids: list[str] = []
-        for c in (cands or [])[:5]:
+        distances: list[float] = []
+        for c in cands or []:
             try:
-                pid = getattr(c, "id", None)
-                if pid is None and isinstance(c, dict):
-                    pid = c.get("id")
-                if pid:
-                    top_ids.append(str(pid))
+                # id projection — cap at top 5 (LLM context shape).
+                if len(top_ids) < 5:
+                    pid = getattr(c, "id", None)
+                    if pid is None and isinstance(c, dict):
+                        pid = c.get("id")
+                    if pid:
+                        top_ids.append(str(pid))
+                # distance projection — full set so the percentile is meaningful.
+                d = getattr(c, "distance", None)
+                if d is None and isinstance(c, dict):
+                    d = c.get("distance")
+                if d is not None:
+                    distances.append(float(d))
             except Exception:  # noqa: BLE001 — best-effort projection
                 continue
+        # 260611 — distance stats (cosine, ASC=better). The pipeline already
+        # logs min/median/max but the event payload didn't carry them, so beta
+        # analysis SQL couldn't surface "how strong was this match?" Adding
+        # them here makes `event_type='search_done'` rows self-sufficient for
+        # search-quality dashboards (low p50 ≈ strong cluster match).
+        dist_payload: dict[str, float] = {}
+        if distances:
+            dist_sorted = sorted(distances)
+            dist_payload = {
+                "min": round(dist_sorted[0], 4),
+                "median": round(dist_sorted[len(dist_sorted) // 2], 4),
+                "max": round(dist_sorted[-1], 4),
+            }
         emit(
             event_type="search_done",
             user_key=str(user_key),
@@ -94,6 +116,7 @@ def emit_search_done(
                 "query": {"text_query": (text_query or "")[:240]},
                 "top_k_product_ids": top_ids,
                 "dense_count": len(cands or []),
+                "distance": dist_payload,
                 "filters": {"category": category} if category else {},
                 "is_refine": bool(is_refine),
             },

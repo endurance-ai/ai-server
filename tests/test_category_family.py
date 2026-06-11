@@ -127,6 +127,43 @@ def test_every_alias_target_is_a_canonical_token():
         assert target in CANONICAL_FAMILIES, f"{src}→{target} target not in 20 canonical"
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # 260611 — LLM-emitted garment vocabulary expansion. Each entry below
+        # used to fall through to "other" → family gate skipped → cosine-only
+        # ranking. The expanded `_VISION_ALIAS` engages the gate for each.
+        ("shirt", "tops"),
+        ("hoodie", "tops"),
+        ("sleeveless", "tops"),
+        ("tee", "tops"),
+        ("sweater", "knitwear"),
+        ("knit", "knitwear"),
+        ("cardigan", "knitwear"),
+        ("skirt", "bottoms"),
+        ("jeans", "bottoms"),
+        ("pants", "bottoms"),
+        ("shorts", "bottoms"),
+        ("jacket", "outerwear"),
+        ("blazer", "outerwear"),
+        ("coat", "outerwear"),
+        ("trench", "outerwear"),
+        ("sneaker", "sneakers"),
+        ("boots", "shoes"),
+        ("loafers", "shoes"),
+        ("heels", "shoes"),
+        ("beanie", "headwear"),
+        ("bucket-hat", "headwear"),
+        ("backpack", "bags"),
+        ("tote", "bags"),
+        ("jumpsuit", "dresses"),
+        ("swimsuit", "swimwear"),
+    ],
+)
+def test_expanded_llm_vocabulary_engages_family_gate(raw, expected):
+    assert to_canonical_family(raw) == expected
+
+
 def test_never_returns_none():
     for raw in (None, "", "garbage", "Top", "shoes", "C", 0, "  "):
         assert to_canonical_family(raw if isinstance(raw, (str, type(None))) else str(raw)) is not None

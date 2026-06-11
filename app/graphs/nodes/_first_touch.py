@@ -91,6 +91,21 @@ async def maybe_first_touch(
             await chat_state.set_cursor(state.chat_id, 0)
         except Exception:  # noqa: BLE001
             logger.debug("[first_touch] pager cursor reset best-effort", exc_info=True)
+        # 260611 — in-process pending state: pending_gender (stashed search
+        # args), pending_question (bot Q + intent), last_query (cross-turn
+        # product query anchor). Without clearing, /reset leaves stale anchors
+        # that bias the next search session — e.g. a previously pinned gender
+        # carousel resumes after the user explicitly asked to reset.
+        try:
+            from app.agents.last_query import clear_last_query
+            from app.agents.pending_gender import clear_pending as _clear_pending_gender
+            from app.agents.pending_question import clear_pending as _clear_pending_question
+
+            _clear_pending_gender(state.chat_id)
+            _clear_pending_question(state.chat_id)
+            clear_last_query(state.chat_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("[first_touch] pending state clear best-effort", exc_info=True)
         try:
             await adapter.send_text(state.chat_id, _RESET_KO if lang == "ko" else _RESET_EN)
         except Exception:  # noqa: BLE001
