@@ -87,7 +87,7 @@ async def membership_click(c: str = "", source: str = ""):
     """
     from app.core.config import settings as _settings
 
-    landing = (_settings.MEMBERSHIP_LANDING_URL or "https://kikoai.me/").strip()
+    landing = (_settings.MEMBERSHIP_LANDING_URL or "https://kikoai.me/domain").strip()
 
     try:
         emit(
