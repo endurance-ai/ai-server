@@ -26,7 +26,7 @@ def _truncate_log_table():
 
 def test_all_exports_exactly_20_typeddicts():
     mod = importlib.import_module("app.observability.event_payloads")
-    assert len(mod.__all__) == 22, f"__all__ length must be 22, got {len(mod.__all__)}"
+    assert len(mod.__all__) == 23, f"__all__ length must be 23, got {len(mod.__all__)}"
 
 
 def test_star_import_publishes_20_names():
@@ -34,7 +34,7 @@ def test_star_import_publishes_20_names():
     ns: dict = {}
     exec("from app.observability.event_payloads import *", ns)  # noqa: S102
     public = {k for k in ns if not k.startswith("_")}
-    assert len(public) == 22, f"star-import exposed {len(public)} names, expected 22"
+    assert len(public) == 23, f"star-import exposed {len(public)} names, expected 23"
 
 
 def test_each_typeddict_instantiable_with_minimum_keys():
@@ -49,6 +49,7 @@ def test_each_typeddict_instantiable_with_minimum_keys():
         EvaluatorRunPayload,
         IntentRoutedPayload,
         LinkResolvedPayload,
+        MembershipClickPayload,
         NodeErrorPayload,
         OnboardSelectPayload,
         PickItemDonePayload,
@@ -87,8 +88,9 @@ def test_each_typeddict_instantiable_with_minimum_keys():
         ToolCallPayload(tool_name="search_products", iteration_no=0, latency_ms=120, error=None),
         TurnSummaryPayload(rec_id=None, iter_count=3, status="responded", exit_reason=None),
         CapReachedPayload(lang="ko"),
+        MembershipClickPayload(source="cap"),
     ]
-    assert len(samples) == 22
+    assert len(samples) == 23
 
 
 def test_all_names_in_module():

@@ -76,6 +76,33 @@ async def test_reset_keyword_clears_taste_and_acks():
 
 
 @pytest.mark.asyncio
+async def test_reset_clears_pending_gender_question_and_last_query():
+    """260611 — /reset must purge the in-process anchors that bias the next
+    search session: pending_gender / pending_question / last_query.
+    Without this, a previously stashed gender card or prior product query
+    leaks across the explicit reset boundary."""
+    from app.agents import last_query, pending_gender, pending_question
+
+    # Pre-load each store as if a prior search left state behind.
+    pending_gender._reset_all_for_tests()
+    pending_question._reset_all_for_tests()
+    last_query._reset_all_for_tests()
+    pending_gender.set_pending(1, {"text_query": "black sleeveless", "top_k": 15})
+    pending_question.set_pending(1, "cap or beanie?", "hat search")
+    last_query.set_last_query(1, "black sleeveless women")
+
+    adapter = _Adapter()
+    sess = _Sess(onboarded_at=datetime.now())
+    state = _State(_Msg(text="/reset"))
+    await maybe_first_touch(state, sess, adapter, taste_delete=lambda uk: None, breadcrumbs=[])
+
+    # All three stores must be empty for chat_id 1 after /reset.
+    assert pending_gender.pop_pending(1) is None
+    assert pending_question.peek_pending(1) == (None, None)
+    assert last_query.get_last_query(1) is None
+
+
+@pytest.mark.asyncio
 async def test_returning_user_actionable_no_greeting():
     adapter = _Adapter()
     sess = _Sess(onboarded_at=datetime.now())

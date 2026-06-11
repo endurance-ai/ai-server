@@ -241,6 +241,10 @@ class Settings(BaseSettings):
     # Example: `PUBLIC_BASE_URL=https://ai.kiko.fashion`
     PUBLIC_BASE_URL: str = ""
 
+    # 260611 — cap fake-door 멤버십 랜딩 페이지. `/m/membership` redirect 가
+    # 302 로 보내는 목적지. 비어 있을 때 `https://kikoai.me/` 로 폴백.
+    MEMBERSHIP_LANDING_URL: str = "https://kikoai.me/"
+
     # SPEC-DAILY-TOKEN-CAP-001 — per-user daily token cap (resets at KST midnight).
     # Deploy with DAILY_TOKEN_CAP_ENABLED=false first to collect Langfuse baseline.
     # After 1-2 weeks: set CAP_TIER_FREE = p95_daily_tokens * 1.2, then enable.

@@ -526,12 +526,18 @@ async def test_cards_more_logs_only_new_batch_no_double_log(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_new_search_relogs_product_shown_in_previous_search(monkeypatch):
-    """A product shown in search #1 and AGAIN in a SUBSEQUENT new search
-    (offset==0 again) must be impression-logged the second time too — a fresh
-    row bound to the NEW trace, NOT suppressed by the prior search's dedupe set.
-    Otherwise a click on the re-recommended product would attribute the wrong
-    (stale) trace, defeating the feature (critical review finding #1)."""
+async def test_new_search_suppresses_previously_shown_products(monkeypatch):
+    """260611 UX dedup — a product shown in search #1 MUST be suppressed when it
+    appears again in a SUBSEQUENT search (whether fresh or refine), to prevent
+    repeated MUSED/Mardi/ZARA fatigue across `crit:more` / new search turns.
+
+    Inverts the prior `test_new_search_relogs_product_shown_in_previous_search`
+    contract: cross-turn dedup now wins over Langfuse re-attribution, because
+    the re-attribution edge case (a click on a re-recommended product) is
+    suppressed upstream — re-recommendations no longer happen.
+
+    The dedupe set is cleared on `/reset` and naturally by its 7-day Redis TTL.
+    """
     from app.agents.tools import respond as respond_tool
     from app.agents.tools.search_products import CARDS_READY_KEY
 
@@ -546,28 +552,22 @@ async def test_new_search_relogs_product_shown_in_previous_search(monkeypatch):
         adapter = _adapter(group_ok=True)
         monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
 
-        # Search #1 → results [p0..p4] (3 results, all delivered).
+        # Search #1 → [p0, p1, p2] all delivered + impression-logged.
         set_store(_FakeStore(_session_with_results(3)))
         await respond_tool.dispatch({"text": "first"}, {"chat_id": 42, CARDS_READY_KEY: True})
+        assert logged_pids == [["p0", "p1", "p2"]]
 
-        # Search #2 (NEW search, fresh offset==0) → overlapping results that
-        # include p0, p1, p2 again. A real new search resets the pager cursor;
-        # the dedupe set MUST also be cleared (by is_fresh_search) so p0..p2
-        # re-log against the NEW trace.
+        # Search #2 (NEW search, fresh offset==0) with the SAME pids → must
+        # deliver 0 (all filtered as previously-shown) → log_impressions NOT
+        # called again because there's nothing to deliver.
         from app.infrastructure.cache import chat_state as _cs
 
-        # Mirror the prior `_CARD_BATCH_CURSOR.pop(42, None)`: ensure the
-        # pager cursor is back at 0 before the second NEW search begins.
-        # Dedupe-set clearing is now driven by `is_fresh_search=True` inside
-        # `_log_delivered_impressions` itself (SPEC-CHAT-STATE-REDIS-001).
         await _cs.set_cursor(42, 0)
         set_store(_FakeStore(_session_with_results(3)))
-        await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
-
-        assert logged_pids[0] == ["p0", "p1", "p2"]
-        # The KEY assertion: the SECOND search re-logs the same products
-        # (new impression rows bound to the new trace), not an empty list.
-        assert logged_pids[1] == ["p0", "p1", "p2"]
+        res = await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
+        assert res["cards_sent"] == 0
+        # No second logging — products were filtered upstream.
+        assert logged_pids == [["p0", "p1", "p2"]]
     finally:
         set_store(None)
 
