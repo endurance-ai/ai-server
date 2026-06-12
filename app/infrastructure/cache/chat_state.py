@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 _CURSOR_TTL_SECONDS: Final[int] = 86_400  # 24h
 _IMP_TTL_SECONDS: Final[int] = 604_800  # 7d
+_CAP_SHOWN_TTL_SECONDS: Final[int] = 21_600  # 6h — full-box cooldown
+_CAP_SILENCED_TTL_SECONDS: Final[int] = 86_400  # 24h — explicit-reject silence
+_CAP_SEEN_TTL_SECONDS: Final[int] = 129_600  # 36h — covers midnight reset for any hit-time
 
 # Module-level singleton client. Lazy: created on first helper call or via
 # `warm_pool()`. Reset to None by `close_pool()` (lifespan shutdown) or by
@@ -51,6 +54,18 @@ def _cursor_key(chat_id: int) -> str:
 
 def _imp_key(chat_id: int) -> str:
     return f"kiko:imp:{int(chat_id)}"
+
+
+def _cap_shown_key(chat_id: int) -> str:
+    return f"kiko:cap_shown:{int(chat_id)}"
+
+
+def _cap_silenced_key(chat_id: int) -> str:
+    return f"kiko:cap_silenced:{int(chat_id)}"
+
+
+def _cap_seen_key(chat_id: int) -> str:
+    return f"kiko:cap_seen:{int(chat_id)}"
 
 
 def _get_client() -> Redis | None:
@@ -218,3 +233,88 @@ async def clear_logged(chat_id: int) -> None:
         await client.delete(_imp_key(chat_id))
     except Exception as exc:  # noqa: BLE001 — fail-open
         logger.debug("clear_logged fail-open chat=%s: %s", chat_id, type(exc).__name__)
+
+
+# --- Cap-box cooldown (option A) + explicit-reject silence (option B) ---
+
+
+async def is_cap_shown(chat_id: int) -> bool:
+    """True iff full cap-box was sent within the last 6h. Fail-open → False."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        return bool(await client.exists(_cap_shown_key(chat_id)))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("is_cap_shown fail-open chat=%s: %s", chat_id, type(exc).__name__)
+        return False
+
+
+async def mark_cap_shown(chat_id: int) -> None:
+    """Mark full cap-box as sent — suppresses re-fire for 6h. Fail-open."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        await client.set(_cap_shown_key(chat_id), "1", ex=_CAP_SHOWN_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("mark_cap_shown fail-open chat=%s: %s", chat_id, type(exc).__name__)
+
+
+async def is_cap_silenced(chat_id: int) -> bool:
+    """True iff user explicitly rejected the membership prompt within 24h. Fail-open → False."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        return bool(await client.exists(_cap_silenced_key(chat_id)))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("is_cap_silenced fail-open chat=%s: %s", chat_id, type(exc).__name__)
+        return False
+
+
+async def mark_cap_silenced(chat_id: int) -> None:
+    """Silence all cap-related responses for 24h (explicit user rejection). Fail-open."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        await client.set(_cap_silenced_key(chat_id), "1", ex=_CAP_SILENCED_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("mark_cap_silenced fail-open chat=%s: %s", chat_id, type(exc).__name__)
+
+
+async def is_cap_seen(chat_id: int) -> bool:
+    """True iff this chat hit the cap within the last 36h (used to fire the
+    next-day welcome ack once they're back under the limit). Fail-open → False."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        return bool(await client.exists(_cap_seen_key(chat_id)))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("is_cap_seen fail-open chat=%s: %s", chat_id, type(exc).__name__)
+        return False
+
+
+async def mark_cap_seen(chat_id: int) -> None:
+    """Mark that this chat hit the cap — 36h TTL spans the midnight reset so
+    the next-day welcome message fires exactly once on return. Fail-open."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        await client.set(_cap_seen_key(chat_id), "1", ex=_CAP_SEEN_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("mark_cap_seen fail-open chat=%s: %s", chat_id, type(exc).__name__)
+
+
+async def clear_cap_seen(chat_id: int) -> None:
+    """Drop the cap-seen flag (welcome message fired). Fail-open."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        await client.delete(_cap_seen_key(chat_id))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.debug("clear_cap_seen fail-open chat=%s: %s", chat_id, type(exc).__name__)

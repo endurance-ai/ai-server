@@ -21,6 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, 
 from fastapi.responses import ORJSONResponse
 
 from app.channels.adapter import MessengerAdapter
+from app.channels.cap_rejection import is_rejection
 from app.channels.factory import get_adapter
 from app.channels.lang import detect_lang
 from app.channels.schemas import ChannelMessage, ChannelParseError
@@ -29,7 +30,7 @@ from app.core.config import settings
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
-from app.infrastructure.cache import token_cap
+from app.infrastructure.cache import chat_state, token_cap
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
 from app.observability.event_payloads import CapReachedPayload
@@ -296,12 +297,34 @@ _CAP_BOX1: dict[str, str] = {
     "en": "Whoops — I've used up today's picks 🐱 The quota refills after midnight, so come back tomorrow!",
 }
 _CAP_BOX2: dict[str, str] = {
-    "ko": "근데 기다리기 아쉽지? 멤버십이면 하루 제한 없이 계속 이어서 볼 수 있어 ✨",
-    "en": "Hate the wait? Membership unlocks unlimited picks all day ✨",
+    "ko": "근데 기다리기 아쉽지? 월 7,900원이면 하루 종일 같이 디깅할 수 있어 ✨",
+    "en": "Hate the wait? ₩7,900/month lets you keep digging all day with kiko ✨",
 }
 _CAP_MEMBERSHIP_LABEL: dict[str, str] = {
     "ko": "멤버십 보러가기 →",
     "en": "See membership →",
+}
+
+# Short reminder used when the user keeps messaging within the 6h cooldown
+# after the full 2-box prompt was already sent (option A — anti-fatigue).
+_CAP_SHORT_REMINDER: dict[str, str] = {
+    "ko": "오늘은 여기까지 🐱 자정 지나면 다시 채워줄게!",
+    "en": "That's it for today 🐱 I'll refill after midnight!",
+}
+
+# One-time ack when the user explicitly rejects the membership prompt
+# ("안 써", "관심 없어", "no thanks", ...) — flips chat into 24h silence
+# (option B). Kept warm so it doesn't feel like a slammed door.
+_CAP_REJECT_ACK: dict[str, str] = {
+    "ko": "알겠어, 더 안 보챌게 🐱 내일 또 보자!",
+    "en": "Got it — I'll stop nudging 🐱 See you tomorrow!",
+}
+
+# Welcome ack on first return after a cap-hit (fires once when user is back
+# under the limit; gated by `kiko:cap_seen:*` 36h flag).
+_CAP_WELCOME_BACK: dict[str, str] = {
+    "ko": "다시 왔구나 ✨",
+    "en": "You're back ✨",
 }
 
 
@@ -331,19 +354,84 @@ async def _invoke_graph(
         # signal even when the user is over-cap).
         if message.callback_data is None and await token_cap.is_over_limit(message.chat_id):
             lang = detect_lang(message.text)
+            chat_id = message.chat_id
+
+            # Option B: explicit rejection ("안 써", "관심 없어", ...) — flip
+            # 24h silence + one warm ack, then exit. Checked BEFORE silence
+            # gate so a fresh rejection refreshes the TTL.
+            if is_rejection(message.text):
+                ack = _CAP_REJECT_ACK.get(lang, _CAP_REJECT_ACK["en"])
+                await chat_state.mark_cap_silenced(chat_id)
+                await chat_state.mark_cap_seen(chat_id)
+                logger.info(
+                    "🚫 [webhook] cap rejection detected chat=%s lang=%s — 24h silence",
+                    hash_id(chat_id),
+                    lang,
+                )
+                try:
+                    await adapter.send_text(chat_id, ack)
+                except Exception:  # noqa: BLE001 — fail-open
+                    logger.debug("[webhook] cap reject ack send failed chat=%s", chat_id)
+                emit(
+                    event_type="cap_reached",
+                    user_key=user_key_for(message.from_user_id, chat_id),
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    turn_no=turn_no,
+                    payload=CapReachedPayload(lang=lang),
+                )
+                return
+
+            # Option B: already silenced within 24h — no response at all.
+            # Conversation-log event still emitted for analytics; UI stays quiet.
+            if await chat_state.is_cap_silenced(chat_id):
+                await chat_state.mark_cap_seen(chat_id)
+                logger.debug("[webhook] cap silenced chat=%s — skip send", hash_id(chat_id))
+                emit(
+                    event_type="cap_reached",
+                    user_key=user_key_for(message.from_user_id, chat_id),
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    turn_no=turn_no,
+                    payload=CapReachedPayload(lang=lang),
+                )
+                return
+
+            # Option A: full cap-box already shown within 6h — send only the
+            # short reminder. Prevents the 2-box prompt from spamming on every
+            # subsequent message while still acknowledging the user.
+            if await chat_state.is_cap_shown(chat_id):
+                await chat_state.mark_cap_seen(chat_id)
+                short = _CAP_SHORT_REMINDER.get(lang, _CAP_SHORT_REMINDER["en"])
+                logger.debug("[webhook] cap cooldown active chat=%s — short reminder", hash_id(chat_id))
+                try:
+                    await adapter.send_text(chat_id, short)
+                except Exception:  # noqa: BLE001 — fail-open
+                    logger.debug("[webhook] cap short reminder send failed chat=%s", chat_id)
+                emit(
+                    event_type="cap_reached",
+                    user_key=user_key_for(message.from_user_id, chat_id),
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    turn_no=turn_no,
+                    payload=CapReachedPayload(lang=lang),
+                )
+                return
+
+            # First cap hit (or post-cooldown re-hit) → full 2-box flow.
             box1 = _CAP_BOX1.get(lang, _CAP_BOX1["en"])
             box2 = _CAP_BOX2.get(lang, _CAP_BOX2["en"])
             membership_label = _CAP_MEMBERSHIP_LABEL.get(lang, _CAP_MEMBERSHIP_LABEL["en"])
             logger.info(
                 "🚫 [webhook] token cap exceeded chat=%s lang=%s",
-                hash_id(message.chat_id),
+                hash_id(chat_id),
                 lang,
             )
             # Box 1 — quota notice (plain text).
             try:
-                await adapter.send_text(message.chat_id, box1)
+                await adapter.send_text(chat_id, box1)
             except Exception:  # noqa: BLE001 — fail-open
-                logger.debug("[webhook] cap box1 send failed chat=%s", message.chat_id)
+                logger.debug("[webhook] cap box1 send failed chat=%s", chat_id)
             # Box 2 — membership URL button. Routes through `/m/membership`
             # redirect proxy so clicks emit `membership_click` events
             # (Telegram won't notify us about raw URL button taps directly).
@@ -351,7 +439,7 @@ async def _invoke_graph(
 
             base = (_settings_for_cap.PUBLIC_BASE_URL or "").rstrip("/")
             if base:
-                chat_hash = hash_id(message.chat_id) or ""
+                chat_hash = hash_id(chat_id) or ""
                 membership_url = f"{base}/m/membership?source=cap&c={chat_hash}"
             else:
                 # PUBLIC_BASE_URL unset → fall back to direct landing (no
@@ -360,7 +448,7 @@ async def _invoke_graph(
             try:
                 if hasattr(adapter, "send_text_with_url_button"):
                     await adapter.send_text_with_url_button(
-                        message.chat_id,
+                        chat_id,
                         box2,
                         membership_label,
                         membership_url,
@@ -369,20 +457,35 @@ async def _invoke_graph(
                     # Adapter lacks URL-button helper → fall back to plain text
                     # with the URL inline (still tappable in Telegram).
                     await adapter.send_text(
-                        message.chat_id,
+                        chat_id,
                         f"{box2}\n\n{membership_label} {membership_url}",
                     )
             except Exception:  # noqa: BLE001 — fail-open
-                logger.debug("[webhook] cap box2 send failed chat=%s", message.chat_id)
+                logger.debug("[webhook] cap box2 send failed chat=%s", chat_id)
+            await chat_state.mark_cap_shown(chat_id)
+            await chat_state.mark_cap_seen(chat_id)
             emit(
                 event_type="cap_reached",
-                user_key=user_key_for(message.from_user_id, message.chat_id),
-                chat_id=message.chat_id,
+                user_key=user_key_for(message.from_user_id, chat_id),
+                chat_id=chat_id,
                 thread_id=thread_id,
                 turn_no=turn_no,
                 payload=CapReachedPayload(lang=lang),
             )
             return
+
+        # Under-limit return path: if this chat hit the cap within the last
+        # 36h, fire a one-shot welcome-back ack and clear the flag. Skip for
+        # callback taps (UI actions are not a "fresh return"). Fail-open —
+        # welcome is best-effort; main graph proceeds regardless.
+        if message.callback_data is None and await chat_state.is_cap_seen(message.chat_id):
+            welcome_lang = detect_lang(message.text)
+            welcome = _CAP_WELCOME_BACK.get(welcome_lang, _CAP_WELCOME_BACK["en"])
+            try:
+                await adapter.send_text(message.chat_id, welcome)
+            except Exception:  # noqa: BLE001 — fail-open
+                logger.debug("[webhook] cap welcome send failed chat=%s", message.chat_id)
+            await chat_state.clear_cap_seen(message.chat_id)
 
         input_state = InputState(
             message=message,
