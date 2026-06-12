@@ -297,24 +297,8 @@ _CAP_BOX1: dict[str, str] = {
     "en": "Whoops — I've used up today's picks 🐱 The quota refills after midnight, so come back tomorrow!",
 }
 _CAP_BOX2: dict[str, str] = {
-    "ko": (
-        "근데 기다리기 아쉽지? 멤버십이면 하루 50회까지 디깅할 수 있어 ✨\n"
-        "월 ₩7,900\n"
-        "• 5,000+ 브랜드 기반 디깅\n"
-        "• 이미지·링크 기반 디깅\n"
-        "• 24시간 백그라운드 서칭\n"
-        "• 발매·드롭 알림\n"
-        "• 취향 저장으로 점점 더 정확하게"
-    ),
-    "en": (
-        "Hate the wait? Membership unlocks 50 picks per day ✨\n"
-        "₩7,900/month\n"
-        "• 5,000+ brand-powered digging\n"
-        "• Image & link-based digging\n"
-        "• 24/7 background search\n"
-        "• Drop & release alerts\n"
-        "• Taste memory — gets sharper over time"
-    ),
+    "ko": "근데 기다리기 아쉽지? 월 7,900원이면 하루 종일 같이 디깅할 수 있어 ✨",
+    "en": "Hate the wait? ₩7,900/month lets you keep digging all day with kiko ✨",
 }
 _CAP_MEMBERSHIP_LABEL: dict[str, str] = {
     "ko": "멤버십 보러가기 →",
