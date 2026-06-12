@@ -487,7 +487,6 @@ async def _invoke_graph(
                 logger.debug("[webhook] cap welcome send failed chat=%s", message.chat_id)
             await chat_state.clear_cap_seen(message.chat_id)
 
-
         input_state = InputState(
             message=message,
             chat_id=message.chat_id,
