@@ -205,6 +205,41 @@ async def _handle_cards_more(state: WorkingState, sess, breadcrumbs: list[str]) 
             logger.debug("[ingest] cards:more empty-notice send failed: %r", exc)
 
 
+async def _handle_lang_pick(state: WorkingState, sess, lang: str, breadcrumbs: list[str]) -> None:
+    """SPEC-ONBOARD-LITE-001 — `onboard:lang:{ko|en}` callback.
+
+    Pins `sess.lang` to the user's choice, then sends the short service intro
+    in that language. Deterministic terminal — does NOT route back through the
+    agent. Best-effort throughout; never raises into the webhook.
+    """
+    from app.graphs.nodes.intro import INTRO_EN, INTRO_KO
+
+    chosen = lang.strip().lower()
+    if chosen not in ("ko", "en"):
+        return
+
+    # 1) Pin language to session (sticky for subsequent turns).
+    try:
+        sess.lang = chosen
+        get_store().update(sess)
+        breadcrumbs.append(f"ingest: lang pinned={chosen}")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] lang pin failed: %r", exc)
+
+    # 2) Toast acknowledging the tap.
+    _ack = "✅ 좋아!" if chosen == "ko" else "✅ Got it!"
+    await _send_callback_toast(state, sess, text=_ack)
+
+    # 3) Send the short service intro in the chosen language.
+    try:
+        adapter = get_adapter()
+        text = INTRO_KO if chosen == "ko" else INTRO_EN
+        await adapter.send_text(state.chat_id, text)
+        breadcrumbs.append(f"ingest: intro sent lang={chosen}")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[ingest] intro send after lang pick failed: %r", exc)
+
+
 async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumbs: list[str]) -> None:
     """SPEC-GENDER-PIN-001 — `clarify:gender:{men|women|unisex}` callback.
 
@@ -367,7 +402,11 @@ async def ingest(state: WorkingState) -> dict:
         # SPEC-GENDER-PIN-001 — gender clarify is special: it pins to the taste
         # profile + re-runs the pending search inline (NOT boost_keywords).
         # Handled before the generic clarify path below.
-        if cb_data.startswith("clarify:gender:"):
+        if cb_data.startswith("onboard:lang:"):
+            # SPEC-ONBOARD-LITE-001 — language picker tap (new-user first-touch).
+            lang_val = cb_data.split(":", 2)[2] if len(cb_data.split(":", 2)) >= 3 else ""
+            await _handle_lang_pick(state, sess, lang_val, breadcrumbs)
+        elif cb_data.startswith("clarify:gender:"):
             gender_val = cb_data.split(":", 2)[2] if len(cb_data.split(":", 2)) >= 3 else ""
             await _handle_gender_pick(state, sess, gender_val, breadcrumbs)
         elif cb_data.startswith("clarify:"):

@@ -106,6 +106,7 @@ def build_graph() -> Any:
             cb.startswith("card:like:")
             or cb == "cards:more"
             or cb.startswith("clarify:gender:")
+            or cb.startswith("onboard:lang:")
             or cb == "cap:membership_interest"
         ):
             return "__end__"
