@@ -1464,11 +1464,7 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         result = await _run_react_loop_impl(state, sess)
         iter_count = int(result.get("agent_iterations", 0) or 0)
         total_tokens = int(result.get("total_tokens", 0) or 0)
-        tool_sequence = [
-            h["tool_name"]
-            for h in (result.get("tool_call_history") or [])
-            if h.get("tool_name")
-        ]
+        tool_sequence = [h["tool_name"] for h in (result.get("tool_call_history") or []) if h.get("tool_name")]
         agent_status = result.get("agent_status")
         if agent_status == "exhausted":
             status = "stuck"
