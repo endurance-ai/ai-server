@@ -67,6 +67,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # defaults so card delivery is never blocked by redis unavailability.
     await chat_state.warm_pool()
 
+    # SPEC-SEARCH-V6-STYLE-WIRING — populate the style_node code→id cache so
+    # search_service can resolve Vision letters to bigint ids without a
+    # per-search round-trip. Fail-open: keeps the hardcoded A..U=1..21 fallback.
+    from app.infrastructure.repositories.style_node import warm_cache as warm_style_node_cache
+
+    await warm_style_node_cache()
+
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()

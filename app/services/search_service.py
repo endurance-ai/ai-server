@@ -50,10 +50,12 @@ async def search_service(state: PipelineState) -> PipelineState:
     # REQ-AI-002: param mapping + RPC name owned solely by SearchRepository.
     # SPEC-SEARCH-V6-001 family gate: pass the real Vision/app item category;
     # SearchRepository normalizes it to one of the 20 canonical tokens.
+    style_node_code = req.style_node.primary if req.style_node else None
     params = SearchRepository.build_params(
         embedding=state.embedding,
         brand_filter=req.brand_filter,
         category=req.item.category,
+        style_node_code=style_node_code,
     )
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
@@ -63,10 +65,12 @@ async def search_service(state: PipelineState) -> PipelineState:
     # `degraded`. raw=Vision/app value, canonical=resolved 20-token.
     canonical = to_canonical_family(req.item.category)
     logger.info(
-        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s",
+        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s style_node=%s→id=%s",
         req.item.category,
         canonical,
         "active" if canonical != "other" else "skipped(other)",
+        style_node_code,
+        params.get("p_style_node_id"),
     )
 
     # RPC 입력 파라미터 — query_embedding 은 길어서 dim 만
