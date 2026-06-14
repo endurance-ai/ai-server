@@ -100,6 +100,32 @@ def _restore_store():
         set_store(_orig)
 
 
+@pytest.fixture(autouse=True)
+def _mock_chat_state_redis(monkeypatch):
+    """Isolate tests from real Redis state (cross-turn impression dedup).
+
+    The 260611 UX dedup feature gates send_hybrid_batch on chat_state.is_logged.
+    Without this fixture, products left in Redis from prior test runs are treated
+    as "already shown" and filtered out, causing cards_sent==0 instead of N.
+    """
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.is_logged",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.mark_logged",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.get_cursor",
+        AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.set_cursor",
+        AsyncMock(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_recommendation_turn_sets_trace_input_output(monkeypatch, _restore_store):
     """On the delivered recommendation path, the root trace gets a
