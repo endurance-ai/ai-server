@@ -301,6 +301,7 @@ async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumb
             category=pending.get("category"),
             top_k=int(pending.get("top_k") or 15),
             style_node_primary=getattr(state, "vision_outfit_style_node_primary", None),
+            user_key=user_key_for(state.from_user_id, state.chat_id),
         )
         # Persist to session so send_hybrid_batch (which reads sess.last_results)
         # and the pager cursor work exactly like the post-search reply path.

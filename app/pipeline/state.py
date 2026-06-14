@@ -15,6 +15,12 @@ class PipelineState:
 
     request: RecommendRequest
 
+    # SPEC-PERSONALIZE-RERANK — caller (search_products tool / refine_search)
+    # injects the per-turn user_key so search_service can look up TasteProfile
+    # and re-order raw_candidates before diversify. None on the public
+    # /recommend path (no per-user context) → rerank is a no-op.
+    user_key: str | None = None
+
     # 중간 산출물
     embedding: list[float] | None = None
     raw_candidates: list[dict[str, Any]] = field(default_factory=list)

@@ -138,6 +138,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # that the original search already established (kept in ctx for the
         # whole chat turn by react_loop._build_ctx).
         style_node_primary = ctx.get("style_node_primary")
+        # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
+        user_key = ctx.get("user_key")
 
         # Multi-turn image blending (Level 1): when no current image URL exists
         # but the original image URL is stored from the Vision turn, blend the
@@ -161,6 +163,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 color_family=color_family,
                 top_k=15,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         elif origin_url:
             # Intent-aware Level 2 advanced blending — vector arithmetic for
@@ -183,6 +186,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 color_family=color_family,
                 top_k=15,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         else:
             cands = await run_text_only_search(
@@ -192,6 +196,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 color_family=color_family,
                 top_k=15,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): shared enrichment helper. Host in log only (internal

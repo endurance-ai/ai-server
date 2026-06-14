@@ -103,6 +103,21 @@ class Settings(BaseSettings):
     TASTE_PROFILE_ENABLED: bool = True
     TASTE_PROFILE_TTL_SECONDS: int = 60 * 60 * 24 * 30  # 30 days
 
+    # SPEC-PERSONALIZE-RERANK — score-based re-ordering of v6 RPC raw rows
+    # using TasteProfile × brand_nodes.attributes (vibe / price_tier /
+    # gender_lean). Runs between search_step and diversify_step. Pure
+    # function; fail-open (no profile / no user_key / empty cache → no-op).
+    # Default weights are conservative — `1 - distance` typically sits in
+    # 0.6~0.8, so a +0.10 liked-brand bump shifts ordering for tied/close
+    # candidates without overpowering the embedding signal. All knobs are
+    # env-tunable so the live A/B can sweep them without code changes.
+    PERSONALIZE_RERANK_ENABLED: bool = True
+    PERSONALIZE_LIKED_BRAND_W: float = 0.10
+    PERSONALIZE_DISLIKED_BRAND_W: float = 0.20
+    PERSONALIZE_KEYWORD_W: float = 0.02
+    PERSONALIZE_PRICE_FIT_W: float = 0.05
+    PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
+
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
 

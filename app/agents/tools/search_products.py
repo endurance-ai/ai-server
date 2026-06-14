@@ -463,6 +463,7 @@ async def run_text_only_search(
     color_family: str | None = None,
     top_k: int = 15,
     style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -504,7 +505,7 @@ async def run_text_only_search(
         item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
-    state = PipelineState(request=req)
+    state = PipelineState(request=req, user_key=user_key)
     # Bypass embed_step (image path) — inject a REAL text embedding instead.
     # The sentinel URL never reaches Modal.
     # Invariant guard (review P1-1): both current callers already ensure a
@@ -563,6 +564,7 @@ async def run_blended_search(
     color_family: str | None = None,
     top_k: int = 15,
     style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Multi-turn blended search (Level 1 image-first refinement).
 
@@ -599,6 +601,7 @@ async def run_blended_search(
             color_family=color_family,
             top_k=top_k,
             style_node_primary=style_node_primary,
+            user_key=user_key,
         )
 
     modifier_vec = await EmbedProvider.embed_text(modifier_query)
@@ -619,7 +622,7 @@ async def run_blended_search(
         item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
-    state = PipelineState(request=req)
+    state = PipelineState(request=req, user_key=user_key)
     state.embedding = blended
 
     _t_rpc0 = time.perf_counter()
@@ -680,6 +683,7 @@ async def run_smart_blended_search(
     color_family: str | None = None,
     top_k: int = 15,
     style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Intent-aware multi-turn search (Level 2 advanced).
 
@@ -733,6 +737,7 @@ async def run_smart_blended_search(
             color_family=color_family,
             top_k=top_k,
             style_node_primary=style_node_primary,
+            user_key=user_key,
         )
 
     # 2) Classify intent. On any failure → free_form (alpha=0.5 weighted sum).
@@ -781,7 +786,7 @@ async def run_smart_blended_search(
         item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
-    state = PipelineState(request=req)
+    state = PipelineState(request=req, user_key=user_key)
     state.embedding = query_vec
 
     _t_rpc0 = time.perf_counter()
@@ -813,6 +818,7 @@ async def run_image_search(
     color_family: str | None = None,
     top_k: int = 15,
     style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Photo-pick path — full existing `run_pipeline` (image embedding → v6 RPC).
 
@@ -840,7 +846,7 @@ async def run_image_search(
         item=item, image_url=image_url, final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
-    resp = await run_pipeline(req)
+    resp = await run_pipeline(req, user_key=user_key)
     return list(getattr(resp, "results", None) or getattr(resp, "candidates", None) or [])
 
 
@@ -974,6 +980,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # engage instead of the previous always-degraded baseline. None → RPC
     # falls back to rung-2 cleanly.
     style_node_primary = ctx.get("style_node_primary")
+    # SPEC-PERSONALIZE-RERANK — forward the per-turn user_key so search_service
+    # can look up TasteProfile and re-order the v6 raw rows.
+    user_key = ctx.get("user_key")
 
     try:
         if has_image:
@@ -989,6 +998,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 color_family=color_family,
                 top_k=top_k,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         elif origin_url:
             # Intent-aware Level 2 advanced blending (PR June 2026):
@@ -1015,6 +1025,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 color_family=color_family,
                 top_k=top_k,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         else:
             cands = await run_text_only_search(
@@ -1024,6 +1035,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 color_family=color_family,
                 top_k=top_k,
                 style_node_primary=style_node_primary,
+                user_key=user_key,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /

@@ -74,6 +74,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await warm_style_node_cache()
 
+    # SPEC-PERSONALIZE-RERANK — populate brand_nodes.attributes cache so the
+    # rerank step can look up vibe / price_tier / gender_lean per candidate
+    # without a per-search SELECT. Fail-open: cache stays empty → rerank
+    # degrades to a no-op (RPC order preserved).
+    from app.infrastructure.repositories.brand_node_cache import warm_cache as warm_brand_cache
+
+    await warm_brand_cache()
+
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()

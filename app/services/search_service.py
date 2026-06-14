@@ -16,6 +16,7 @@ SearchRepository).
 
 import logging
 
+from app.core.config import settings
 from app.infrastructure.repositories.category_family import to_canonical_family
 from app.infrastructure.repositories.search_repository import SearchRepository
 from app.infrastructure.repositories.search_repository import (
@@ -26,6 +27,8 @@ from app.infrastructure.repositories.search_repository import (
 # module-top import is cycle-free -- no lazy/seam pattern needed here.
 from app.infrastructure.repositories.search_rpc_contract import RpcContractError
 from app.pipeline.state import PipelineState
+from app.scoring.personalize_rerank import RerankWeights
+from app.scoring.personalize_rerank import rerank as _personalize_rerank
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +103,36 @@ async def search_service(state: PipelineState) -> PipelineState:
         rows = []
     state.raw_candidates = rows
     state.counts["raw"] = len(rows)
+
+    # SPEC-PERSONALIZE-RERANK — reorder raw rows by TasteProfile × brand
+    # attributes BEFORE diversify_step so the brand/platform cap respects
+    # the personalized order. Skipped when (a) flag off, (b) no user_key
+    # (e.g., public /recommend), (c) no signal in the profile, (d) any
+    # unexpected error (fail-open: keep RPC order).
+    if settings.PERSONALIZE_RERANK_ENABLED and rows and state.user_key:
+        try:
+            from app.infrastructure.memory.taste_profile import get_taste_store
+
+            profile = get_taste_store().get_or_create(state.user_key)
+            weights = RerankWeights(
+                liked_brand=settings.PERSONALIZE_LIKED_BRAND_W,
+                disliked_brand=settings.PERSONALIZE_DISLIKED_BRAND_W,
+                keyword=settings.PERSONALIZE_KEYWORD_W,
+                price_fit=settings.PERSONALIZE_PRICE_FIT_W,
+                gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
+            )
+            before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
+            state.raw_candidates = _personalize_rerank(rows, profile, weights=weights)
+            after_top3 = [
+                (r.get("brand"), float(r.get("distance", 1.0)))
+                for r in state.raw_candidates[:3]
+            ]
+            if before_top3 != after_top3:
+                logger.info("[STEP 4.65][rerank] reorder applied before=%s after=%s", before_top3, after_top3)
+            else:
+                logger.info("[STEP 4.65][rerank] no reorder (top3 unchanged) user_key=%s", state.user_key)
+        except Exception as exc:  # noqa: BLE001 — never break search
+            logger.warning("[STEP 4.65][rerank] skipped due to %s: %r", type(exc).__name__, exc)
 
     # 결과 분포 — top-5 distance / degraded / 브랜드/플랫폼/subcategory (v6:
     # RPC 가 distance ASC 로 이미 정렬해 반환 — min=best).
