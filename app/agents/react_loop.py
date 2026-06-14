@@ -1431,6 +1431,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             "agent_status": "exhausted",
             "tool_call_history": history,
             "response_text": fb.get("response_text"),
+            "total_tokens": cumulative_tokens,
         }
 
     # Strip args_full before persisting.
@@ -1452,6 +1453,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         "agent_status": status,
         "tool_call_history": history,
         "response_text": None,
+        "total_tokens": cumulative_tokens,
     }
 
 
@@ -1472,11 +1474,15 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
     Langfuse trace (beta convention: rec_id ≡ langfuse_trace).
     """
     iter_count = 0
+    total_tokens = 0
+    tool_sequence: list[str] = []
     status: str = "error"
     exit_reason: str | None = None
     try:
         result = await _run_react_loop_impl(state, sess)
         iter_count = int(result.get("agent_iterations", 0) or 0)
+        total_tokens = int(result.get("total_tokens", 0) or 0)
+        tool_sequence = [h["tool_name"] for h in (result.get("tool_call_history") or []) if h.get("tool_name")]
         agent_status = result.get("agent_status")
         if agent_status == "exhausted":
             status = "stuck"
@@ -1489,9 +1495,30 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
         raise
     finally:
         try:
-            from app.observability.langfuse import current_langfuse_trace_id
+            from app.observability.langfuse import (
+                current_langfuse_trace_id,
+                update_current_span,
+                update_current_trace,
+            )
 
             rec_id = current_langfuse_trace_id()
+
+            # Attach ReAct loop summary to the active node.agent span so
+            # Langfuse shows per-turn iteration count, token usage, and tool
+            # sequence without drilling into server logs.
+            update_current_span(
+                metadata={
+                    "react.iterations": iter_count,
+                    "react.total_tokens": total_tokens,
+                    "react.tool_sequence": tool_sequence,
+                    "react.status": status,
+                }
+            )
+            # Bubble total_tokens to the root trace for dashboard-level
+            # cost filtering (no need to open individual node spans).
+            if total_tokens > 0:
+                update_current_trace(metadata={"total_tokens": total_tokens})
+
             emit(
                 event_type="turn_summary",
                 user_key=user_key_for(state.from_user_id, state.chat_id),
@@ -1501,6 +1528,8 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 payload={
                     "rec_id": rec_id,
                     "iter_count": iter_count,
+                    "total_tokens": total_tokens,
+                    "tool_sequence": tool_sequence,
                     "status": status,
                     "exit_reason": exit_reason,
                 },

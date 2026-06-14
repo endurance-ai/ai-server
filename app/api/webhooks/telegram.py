@@ -497,17 +497,32 @@ async def _invoke_graph(
         session_id = hash_id(message.chat_id)
         user_id = hash_id(message.from_user_id)
         flow = _classify_flow(message)
-        # Attach root-trace metadata via v3 client API. `lang` reflects what we
-        # will reply with; it's set by `ingest` and overwritten by `respond`
-        # before completion — at this entry we attach `flow` + `chat_id_hash`
-        # which are knowable from the inbound message alone.
+        # REQ-OBS-METADATA-001 — attach root-trace metadata + identity. `name`
+        # is set explicitly so the trace title never shows blank in the Langfuse
+        # UI even when CallbackHandler nesting is misaligned. `session_id` /
+        # `user_id` bind the trace to the user without leaking raw identifiers
+        # (pre-hashed via pii.hash_id). `input` records the inbound signal for
+        # ALL turn types (callback-only / Q&A / image) so every trace has
+        # non-null input; recommendation turns overwrite this with the richer
+        # search-query payload via `_set_trace_io` in the `respond` tool.
+        raw_input: dict = {"flow": flow}
+        if message.text:
+            raw_input["text"] = message.text[:200]
+        if message.photo_file_id:
+            raw_input["has_photo"] = True
+        if message.callback_data:
+            raw_input["callback"] = message.callback_data[:64]
         update_current_trace(
+            name="webhook.telegram",
+            session_id=session_id,
+            user_id=user_id,
+            input=raw_input,
             metadata={
                 "flow": flow,
                 "chat_id_hash": session_id,
                 "channel": "telegram",
                 "graph": "fashion_bot",
-            }
+            },
         )
         handler = build_callback_handler(
             session_id=session_id,
