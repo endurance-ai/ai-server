@@ -777,6 +777,18 @@ async def test_respond_not_retried_on_slow_card_timeout(monkeypatch):
     monkeypatch.setattr(rl.settings, "AGENT_TOOL_TIMEOUT_S", 0.01)
     monkeypatch.setattr(rl.settings, "AGENT_RESPOND_TIMEOUT_S", 30.0)
 
+    # Isolate from real Redis impression-dedup state (260611 cross-turn dedup).
+    # Without this, prior test-run products in kiko:imp:42 filter out all 4
+    # candidates as "already shown", delivering 0 cards instead of 4.
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.is_logged", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.mark_logged", AsyncMock())
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.get_cursor", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.set_cursor", AsyncMock())
+
     adapter = _SlowCardAdapter(per_card_s=0.05)
     monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
 
@@ -881,6 +893,15 @@ async def test_respond_self_idempotent_on_double_call(monkeypatch):
             return f"m{counts['card']}"
 
     monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: _A())
+    # Isolate from real Redis impression-dedup state (260611 cross-turn dedup).
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.is_logged", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.mark_logged", AsyncMock())
+    monkeypatch.setattr(
+        "app.infrastructure.cache.chat_state.get_cursor", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.set_cursor", AsyncMock())
 
     # A search ran this turn (marker set by persist_last_results); the same
     # ctx is reused across the defensive 2nd entry (react_loop contract).

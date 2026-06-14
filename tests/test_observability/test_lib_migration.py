@@ -3,21 +3,36 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 
+# langfuse uses pydantic.v1 internally, which is incompatible with Python 3.14+.
+# The tests that directly import langfuse are skipped on Python 3.14+ until
+# langfuse ships a pydantic-v1-free release.
+_langfuse_importable = sys.version_info < (3, 14)
+_skip_langfuse = pytest.mark.skipif(
+    not _langfuse_importable,
+    reason="langfuse pydantic.v1 internals incompatible with Python 3.14+",
+)
+
+
+@_skip_langfuse
 def test_langfuse_v3_observe_importable() -> None:
     from langfuse import observe
 
     assert callable(observe)
 
 
+@_skip_langfuse
 def test_langfuse_v3_callback_handler_importable() -> None:
     from langfuse.langchain import CallbackHandler
 
     assert CallbackHandler is not None
 
 
+@_skip_langfuse
 def test_langfuse_v3_get_client_and_flush() -> None:
     from langfuse import get_client
 

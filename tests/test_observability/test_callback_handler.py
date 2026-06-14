@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 import logging
+import sys
+
+import pytest
+
+# langfuse uses pydantic.v1 internally which crashes on Python 3.14+.
+_skip_langfuse = pytest.mark.skipif(
+    sys.version_info >= (3, 14),
+    reason="langfuse pydantic.v1 internals incompatible with Python 3.14+",
+)
 
 
 def test_build_callback_handler_returns_none_when_keys_absent(monkeypatch, caplog) -> None:
@@ -23,6 +32,7 @@ def test_build_callback_handler_returns_none_when_keys_absent(monkeypatch, caplo
     assert handler is None
 
 
+@_skip_langfuse
 def test_build_callback_handler_returns_v3_handler_when_keys_present(monkeypatch) -> None:
     from app.core.config import settings
 
