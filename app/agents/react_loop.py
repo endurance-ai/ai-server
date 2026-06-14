@@ -1017,10 +1017,11 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
     ]
 
     history: list[dict[str, Any]] = []
-    cumulative_tokens = 0
+    cumulative_tokens = 0  # react-loop-only; used for token budget guard + Redis cap
     iterations = 0
     json_malform_streak = 0
     status: str = "running"
+    _agent_model: str = (settings.AGENT_LLM_MODEL or "").strip()
 
     for it in range(1, max_iter + 1):
         iterations = it
@@ -1093,10 +1094,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 "response_text": fb.get("response_text"),
             }
 
-        # Approx token accounting — best-effort from usage_metadata.
+        # Token accounting — best-effort from usage_metadata.
         try:
             um = getattr(ai_msg, "usage_metadata", None) or {}
             cumulative_tokens += int(um.get("total_tokens", 0) or 0)
+            from app.observability.turn_cost import accumulate_lc
+
+            accumulate_lc(_agent_model, um)
         except Exception:  # noqa: BLE001
             pass
 
@@ -1500,39 +1504,53 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 update_current_span,
                 update_current_trace,
             )
+            from app.observability.turn_cost import get_turn_totals
+
+            # get_turn_totals() captures the full turn cost: Vision + Reflexion
+            # evaluator + all ReAct iterations — not just the ReAct loop.
+            turn = get_turn_totals()
+            cost_usd = turn["cost_usd"]
+            cache_read_tokens = turn["cache_read_tokens"]
+            turn_total_tokens = turn["total_tokens"]
 
             rec_id = current_langfuse_trace_id()
 
-            # Attach ReAct loop summary to the active node.agent span so
-            # Langfuse shows per-turn iteration count, token usage, and tool
-            # sequence without drilling into server logs.
-            update_current_span(
-                metadata={
-                    "react.iterations": iter_count,
-                    "react.total_tokens": total_tokens,
-                    "react.tool_sequence": tool_sequence,
-                    "react.status": status,
-                }
-            )
-            # Bubble total_tokens to the root trace for dashboard-level
-            # cost filtering (no need to open individual node spans).
-            if total_tokens > 0:
-                update_current_trace(metadata={"total_tokens": total_tokens})
+            span_meta: dict = {
+                "react.iterations": iter_count,
+                "react.react_tokens": total_tokens,
+                "react.turn_tokens": turn_total_tokens,
+                "react.tool_sequence": tool_sequence,
+                "react.status": status,
+            }
+            if cost_usd > 0:
+                span_meta["react.cost_usd"] = round(cost_usd, 8)
+                span_meta["react.cache_read_tokens"] = cache_read_tokens
+            update_current_span(metadata=span_meta)
 
+            trace_meta: dict = {"total_tokens": turn_total_tokens or total_tokens}
+            if cost_usd > 0:
+                trace_meta["cost_usd"] = round(cost_usd, 8)
+                trace_meta["cache_read_tokens"] = cache_read_tokens
+            update_current_trace(metadata=trace_meta)
+
+            payload: dict = {
+                "rec_id": rec_id,
+                "iter_count": iter_count,
+                "total_tokens": turn_total_tokens or total_tokens,
+                "tool_sequence": tool_sequence,
+                "status": status,
+                "exit_reason": exit_reason,
+            }
+            if cost_usd > 0:
+                payload["cost_usd"] = round(cost_usd, 8)
+                payload["cache_read_tokens"] = cache_read_tokens
             emit(
                 event_type="turn_summary",
                 user_key=user_key_for(state.from_user_id, state.chat_id),
                 chat_id=state.chat_id,
                 thread_id=state.thread_id,
                 turn_no=1,
-                payload={
-                    "rec_id": rec_id,
-                    "iter_count": iter_count,
-                    "total_tokens": total_tokens,
-                    "tool_sequence": tool_sequence,
-                    "status": status,
-                    "exit_reason": exit_reason,
-                },
+                payload=payload,
             )
         except Exception:  # noqa: BLE001 — observability is best-effort
             logger.debug("[react_loop] turn_summary emit best-effort skip", exc_info=True)

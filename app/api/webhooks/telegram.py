@@ -345,6 +345,9 @@ async def _invoke_graph(
     non-callback path seeds them fresh). Per-node emits read `state.thread_id`
     / `state.turn_no` to maintain a single conversation thread across Updates.
     """
+    from app.observability.turn_cost import reset_turn
+
+    reset_turn()
     token = set_adapter(adapter)
     try:
         # SPEC-DAILY-TOKEN-CAP-001 — gate before invoking the graph.

@@ -57,7 +57,14 @@ class LLMProvider:
             },
         )
         resp.raise_for_status()
-        return resp.json()
+        data: dict[str, Any] = resp.json()
+        try:
+            from app.observability.turn_cost import accumulate_raw
+
+            accumulate_raw(model, data.get("usage") or {})
+        except Exception:  # noqa: BLE001 — observability must never block
+            pass
+        return data
 
     @classmethod
     async def close(cls) -> None:
