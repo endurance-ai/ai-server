@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 import string
-from typing import Final
+from typing import Any, Final
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,13 @@ _FALLBACK: Final[dict[str, int]] = {
 }
 
 _cache: dict[str, int] = dict(_FALLBACK)
+# SPEC-SEARCH-V6-STYLE-WIRING follow-up: short prompt-ready digest of the
+# 21 active style nodes — fed to the search_products / refine_search tool
+# descriptions so the LLM has enough context to pick a letter on
+# text-only turns (where Vision didn't run). Built once at warm_cache()
+# from `name_en` + first three `keywords_en`. Empty list → tool description
+# falls back to its base text (the digest just isn't appended).
+_digest: list[str] = []
 _warmed: bool = False
 
 
@@ -75,13 +82,15 @@ async def warm_cache() -> None:
         return
 
     try:
-        async def _query() -> list[tuple[str, int]]:
+        async def _query() -> list[tuple[Any, ...]]:
             async with pool.connection() as conn, conn.cursor() as cur:
+                # Also pull name_en + keywords_en so the prompt digest is built
+                # from the SAME row set as the code↔id cache (no drift).
                 await cur.execute(
-                    "SELECT code, id FROM public.style_nodes WHERE is_active = true"
+                    "SELECT code, id, name_en, keywords_en "
+                    "FROM public.style_nodes WHERE is_active = true ORDER BY id"
                 )
-                rows = await cur.fetchall()
-                return [(str(r[0]).strip().upper(), int(r[1])) for r in rows]
+                return await cur.fetchall()
 
         rows = db_pool.run_in_pool_loop(_query())
     except Exception as exc:  # noqa: BLE001
@@ -98,9 +107,54 @@ async def warm_cache() -> None:
         return
 
     _cache.clear()
-    _cache.update(dict(rows))
+    _cache.update({str(r[0]).strip().upper(): int(r[1]) for r in rows})
+
+    _digest.clear()
+    for r in rows:
+        letter = str(r[0]).strip().upper()
+        name_en = str(r[2] or "").strip()
+        kw = r[3] or []
+        # First 3 keywords keep the prompt tight (~12 tokens per line × 21 = ~250
+        # tokens added to the tool description). Skip rows with no name to avoid
+        # noise lines.
+        kw_head = ", ".join(str(k).strip() for k in kw[:3] if k)
+        if not name_en:
+            continue
+        line = f"  - {letter}: {name_en}" + (f" — {kw_head}" if kw_head else "")
+        _digest.append(line)
+
     _warmed = True
-    logger.info("[STYLE_NODE][startup] cache warmed n=%d sample=%s", len(_cache), sorted(_cache.items())[:3])
+    logger.info(
+        "[STYLE_NODE][startup] cache warmed n=%d digest_lines=%d",
+        len(_cache),
+        len(_digest),
+    )
+
+    # SPEC-SEARCH-V6-STYLE-WIRING text-only follow-up: append the 21-letter
+    # digest to the search_products + refine_search tool descriptions so the
+    # ReAct LLM has enough context to pick a letter on text-only turns. The
+    # base description (single source) still owns the canonical-form rules;
+    # the digest is appended once and idempotently. Failing to mutate the
+    # REGISTRY is fail-open (logged warn, search keeps working).
+    try:
+        from app.agents import tool_registry as _reg
+
+        header = "\n\n[STYLE NODES — pick `style_node_primary` letter when text alone implies one]\n"
+        digest_block = header + "\n".join(_digest)
+        for tool_name in ("search_products", "refine_search"):
+            meta = _reg.REGISTRY.get(tool_name)
+            if meta is None:
+                continue
+            base = meta["description"]
+            # Idempotent: only append on first warm; subsequent warms (e.g. in
+            # tests) skip if the marker is already present.
+            if "[STYLE NODES —" not in base:
+                meta["description"] = base + digest_block
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[STYLE_NODE][startup] tool description mutate skipped (%s)",
+            type(exc).__name__,
+        )
 
 
 def is_warmed() -> bool:
@@ -111,3 +165,8 @@ def is_warmed() -> bool:
 def snapshot() -> dict[str, int]:
     """Return a copy of the current cache — for tests/observability only."""
     return dict(_cache)
+
+
+def digest_lines() -> list[str]:
+    """Return the prompt-ready 21-letter digest lines. Empty until warm_cache runs."""
+    return list(_digest)

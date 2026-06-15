@@ -979,7 +979,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # path so v6's FILTER1 rung-1 (`p_style_node_id` EXACT + family) can
     # engage instead of the previous always-degraded baseline. None → RPC
     # falls back to rung-2 cleanly.
-    style_node_primary = ctx.get("style_node_primary")
+    # Args > ctx > None. text-only turns have no Vision letter in ctx, so the
+    # LLM-supplied `args.style_node_primary` (chosen from the 21-letter digest
+    # in the tool description) is what activates v6 rung-1 on those turns.
+    # Vision turns still benefit: when the LLM also supplies a letter, args
+    # wins, but if it omits the field, ctx (Vision) takes over.
+    _args_sn = args.get("style_node_primary")
+    style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
     # SPEC-PERSONALIZE-RERANK — forward the per-turn user_key so search_service
     # can look up TasteProfile and re-order the v6 raw rows.
     user_key = ctx.get("user_key")

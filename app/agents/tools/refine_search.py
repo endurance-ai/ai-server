@@ -136,8 +136,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         color_family = args.get("color") or ctx.get("color_family")
         # SPEC-SEARCH-V6-STYLE-WIRING — refine turns reuse the Vision letter
         # that the original search already established (kept in ctx for the
-        # whole chat turn by react_loop._build_ctx).
-        style_node_primary = ctx.get("style_node_primary")
+        # whole chat turn by react_loop._build_ctx). text-only follow-up:
+        # the LLM may also supply an explicit override in args (text turns
+        # have no Vision letter); args wins when present.
+        _args_sn = args.get("style_node_primary")
+        style_node_primary = (
+            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip())
+            else ctx.get("style_node_primary")
+        )
         # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
         user_key = ctx.get("user_key")
 
