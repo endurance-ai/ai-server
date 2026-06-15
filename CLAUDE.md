@@ -82,6 +82,11 @@ uv run pytest                                        # 테스트
 docker compose up -d                                 # 로컬 스택 (AI 서버만)
 ```
 
+## Claude 작업 규칙
+
+- **커밋 전 필수**: `uv run ruff check . && uv run ruff format --check .` → `uv run pytest` 순서로 실행. 모두 통과한 뒤 커밋.
+- 기존부터 실패하던 테스트(Windows 인코딩/경로 이슈 등)는 별도 확인 후 PR 설명에 명시.
+
 ## 코딩 컨벤션
 
 - **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **영구 단일 토폴로지 (SPEC-AGENT-V2-CLEANUP-001)**: `agent` 단일 노드가 ReAct loop 실행. 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거 — 신규 유저 first-touch는 `ingest` 인라인(`maybe_first_touch`) + `/start`-only는 `intro` 노드. V3 4-Gap 강화(memory injection/Reflexion/proactive/dislike discount) 모두 unconditional — feature flag 없음. `evaluator.py` 는 Gap2 헬퍼 보존 목적으로 파일만 존재 (graph 미등록, `SELF_CRITIQUE_*`/`EVALUATOR_*` env 보존). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
