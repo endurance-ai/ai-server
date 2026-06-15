@@ -123,8 +123,11 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
     """Accumulate cost from a LangChain ``AIMessage.usage_metadata`` dict.
 
     LangChain normalises Bedrock/Anthropic responses to use
-    ``input_tokens`` / ``output_tokens`` / ``total_tokens`` plus the
-    Anthropic cache fields.
+    ``input_tokens`` / ``output_tokens`` / ``total_tokens`` plus cache fields.
+    Cache tokens appear in two locations depending on provider/version:
+    - Anthropic convention: ``cache_read_input_tokens`` (top-level)
+    - LangChain >=0.3 / Bedrock nova: ``input_token_details.cache_read``
+    Both are checked so neither is missed.
     """
     try:
         s = _state.get()
@@ -133,8 +136,9 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
 
     inp = int(usage_metadata.get("input_tokens") or 0)
     out = int(usage_metadata.get("output_tokens") or 0)
-    cr = int(usage_metadata.get("cache_read_input_tokens") or 0)
-    cc = int(usage_metadata.get("cache_creation_input_tokens") or 0)
+    details: dict = usage_metadata.get("input_token_details") or {}
+    cr = int(usage_metadata.get("cache_read_input_tokens") or details.get("cache_read") or 0)
+    cc = int(usage_metadata.get("cache_creation_input_tokens") or details.get("cache_creation") or 0)
     total = int(usage_metadata.get("total_tokens") or inp + out)
 
     s["input_tokens"] += inp

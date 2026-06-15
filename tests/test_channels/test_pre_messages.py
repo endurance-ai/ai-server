@@ -182,7 +182,7 @@ def test_pre_messages_import_sites_allow_list() -> None:
     root = pathlib.Path(__file__).resolve().parents[2]
     offenders: list[str] = []
     for path in (root / "app").rglob("*.py"):
-        rel = str(path.relative_to(root))
+        rel = path.relative_to(root).as_posix()
         src = path.read_text(encoding="utf-8")
         if "pre_messages" not in src:
             continue
