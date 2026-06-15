@@ -139,12 +139,8 @@ def _score_candidate(
     if attrs is not None:
         if attrs.vibe and (profile.liked_keywords or profile.disliked_keywords):
             vibe_set = set(attrs.vibe)
-            score += w.keyword * sum(
-                profile.liked_keywords.get(v, 0.0) for v in vibe_set
-            )
-            score -= w.keyword * sum(
-                profile.disliked_keywords.get(v, 0.0) for v in vibe_set
-            )
+            score += w.keyword * sum(profile.liked_keywords.get(v, 0.0) for v in vibe_set)
+            score -= w.keyword * sum(profile.disliked_keywords.get(v, 0.0) for v in vibe_set)
         score -= _gender_penalty(profile.gender or "", attrs.gender_lean, w.gender_mismatch)
 
     score += _price_fit_contribution(
@@ -177,9 +173,7 @@ def rerank(
     # Score once, then stable sort. Python's `sorted` is stable, so equal
     # scores fall back to original insertion order — preserves "RPC
     # distance ASC" as the deterministic tie-breaker.
-    scored: list[tuple[float, dict[str, Any]]] = [
-        (_score_candidate(c, profile, weights), c) for c in candidates
-    ]
+    scored: list[tuple[float, dict[str, Any]]] = [(_score_candidate(c, profile, weights), c) for c in candidates]
     reranked = [c for _, c in sorted(scored, key=lambda kv: -kv[0])]
 
     # Cheap observability — peek at the top-3 shuffle. Per-row scores are

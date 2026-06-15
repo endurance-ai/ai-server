@@ -99,8 +99,8 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         # via brand_node_cache; miss → bypass (the candidate cannot be
         # classified, never drop). Cap == 0 also bypasses (kill-switch).
         attrs = _brand_lookup(c.get("brand"))
-        vibe_key = (attrs.vibe[0] if (attrs and attrs.vibe) else "")
-        silhouette_key = (attrs.silhouette[0] if (attrs and attrs.silhouette) else "")
+        vibe_key = attrs.vibe[0] if (attrs and attrs.vibe) else ""
+        silhouette_key = attrs.silhouette[0] if (attrs and attrs.silhouette) else ""
         if vibe_cap > 0 and vibe_key and seen_vibe.get(vibe_key, 0) >= vibe_cap:
             drops_vibe += 1
             continue

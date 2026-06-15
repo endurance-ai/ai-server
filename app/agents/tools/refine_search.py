@@ -141,8 +141,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # have no Vision letter); args wins when present.
         _args_sn = args.get("style_node_primary")
         style_node_primary = (
-            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip())
-            else ctx.get("style_node_primary")
+            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
         )
         # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
         user_key = ctx.get("user_key")

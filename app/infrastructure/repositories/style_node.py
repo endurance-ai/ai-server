@@ -29,9 +29,7 @@ logger = logging.getLogger(__name__)
 
 # A=1, B=2, ... U=21 — matches current production seed (dev-app inspected
 # 2026-06-14). Replaced in-place by `warm_cache` when DB is reachable.
-_FALLBACK: Final[dict[str, int]] = {
-    letter: idx + 1 for idx, letter in enumerate(string.ascii_uppercase[:21])
-}
+_FALLBACK: Final[dict[str, int]] = {letter: idx + 1 for idx, letter in enumerate(string.ascii_uppercase[:21])}
 
 _cache: dict[str, int] = dict(_FALLBACK)
 # SPEC-SEARCH-V6-STYLE-WIRING follow-up: short prompt-ready digest of the
@@ -82,13 +80,13 @@ async def warm_cache() -> None:
         return
 
     try:
+
         async def _query() -> list[tuple[Any, ...]]:
             async with pool.connection() as conn, conn.cursor() as cur:
                 # Also pull name_en + keywords_en so the prompt digest is built
                 # from the SAME row set as the code↔id cache (no drift).
                 await cur.execute(
-                    "SELECT code, id, name_en, keywords_en "
-                    "FROM public.style_nodes WHERE is_active = true ORDER BY id"
+                    "SELECT code, id, name_en, keywords_en FROM public.style_nodes WHERE is_active = true ORDER BY id"
                 )
                 return await cur.fetchall()
 

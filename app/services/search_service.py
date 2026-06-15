@@ -116,9 +116,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     ):
         try:
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
-            rescored, stats = _brand_2tower_rescore(
-                rows, state.embedding, alpha=settings.BRAND_2TOWER_ALPHA
-            )
+            rescored, stats = _brand_2tower_rescore(rows, state.embedding, alpha=settings.BRAND_2TOWER_ALPHA)
             state.raw_candidates = rescored
             rows = rescored  # downstream personalize_rerank sees the rescored list
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rescored[:3]]
@@ -152,10 +150,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             )
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
             state.raw_candidates = _personalize_rerank(rows, profile, weights=weights)
-            after_top3 = [
-                (r.get("brand"), float(r.get("distance", 1.0)))
-                for r in state.raw_candidates[:3]
-            ]
+            after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:
                 logger.info("[STEP 4.65][rerank] reorder applied before=%s after=%s", before_top3, after_top3)
             else:

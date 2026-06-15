@@ -502,7 +502,9 @@ async def run_text_only_search(
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
-        item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
     state = PipelineState(request=req, user_key=user_key)
@@ -619,7 +621,9 @@ async def run_blended_search(
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
-        item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
     state = PipelineState(request=req, user_key=user_key)
@@ -783,7 +787,9 @@ async def run_smart_blended_search(
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
-        item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)),
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
     state = PipelineState(request=req, user_key=user_key)
@@ -843,7 +849,9 @@ async def run_image_search(
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
-        item=item, image_url=image_url, final_limit=max(1, int(top_k)),
+        item=item,
+        image_url=image_url,
+        final_limit=max(1, int(top_k)),
         style_node=style_node,
     )
     resp = await run_pipeline(req, user_key=user_key)

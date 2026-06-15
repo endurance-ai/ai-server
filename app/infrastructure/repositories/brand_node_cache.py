@@ -149,6 +149,7 @@ async def warm_cache() -> None:
     """
 
     try:
+
         async def _query() -> list[tuple[Any, ...]]:
             async with pool.connection() as conn, conn.cursor() as cur:
                 await cur.execute(sql)

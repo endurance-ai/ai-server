@@ -90,17 +90,13 @@ async def warm_cache() -> None:
     from app.providers import db_pool
 
     if not settings.DB_DSN:
-        logger.info(
-            "[BRAND_EMB_CACHE][startup] DB_DSN empty — cache stays empty (rescore no-op)"
-        )
+        logger.info("[BRAND_EMB_CACHE][startup] DB_DSN empty — cache stays empty (rescore no-op)")
         _warmed = True
         return
 
     pool = db_pool._pool  # noqa: SLF001
     if pool is None:
-        logger.info(
-            "[BRAND_EMB_CACHE][startup] db_pool not initialized — cache stays empty"
-        )
+        logger.info("[BRAND_EMB_CACHE][startup] db_pool not initialized — cache stays empty")
         _warmed = True
         return
 
@@ -111,6 +107,7 @@ async def warm_cache() -> None:
     """
 
     try:
+
         async def _query() -> list[tuple[int, str]]:
             async with pool.connection() as conn, conn.cursor() as cur:
                 await cur.execute(sql, (_EXPECTED_MODEL,))
