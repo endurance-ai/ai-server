@@ -137,16 +137,8 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
     inp = int(usage_metadata.get("input_tokens") or 0)
     out = int(usage_metadata.get("output_tokens") or 0)
     details: dict = usage_metadata.get("input_token_details") or {}
-    cr = int(
-        usage_metadata.get("cache_read_input_tokens")
-        or details.get("cache_read")
-        or 0
-    )
-    cc = int(
-        usage_metadata.get("cache_creation_input_tokens")
-        or details.get("cache_creation")
-        or 0
-    )
+    cr = int(usage_metadata.get("cache_read_input_tokens") or details.get("cache_read") or 0)
+    cc = int(usage_metadata.get("cache_creation_input_tokens") or details.get("cache_creation") or 0)
     total = int(usage_metadata.get("total_tokens") or inp + out)
 
     s["input_tokens"] += inp
