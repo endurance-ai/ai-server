@@ -44,16 +44,19 @@ def normalize_brand(brand: str | None) -> str:
 
 @dataclass(frozen=True)
 class BrandAttributes:
-    """Subset of brand_nodes columns needed by rerank scoring.
+    """Subset of brand_nodes columns needed by rerank scoring + diversity caps.
 
     All fields default to safe empties so missing JSONB keys never raise.
-    `vibe` is the most populous signal (75~91% coverage on dev-app),
-    `price_tier` / `gender_lean` are next.
+    `vibe` and `silhouette` are list-shaped (JSONB array of lowercase
+    tokens); the others are single tokens. Coverage on dev-app (2026-06):
+    vibe 78%, silhouette 91%, price_tier 75%, formality 75%,
+    gender_lean 75%, era_reference 75%.
     """
 
     brand_name: str = ""
     primary_style_node_id: int | None = None
     vibe: tuple[str, ...] = ()
+    silhouette: tuple[str, ...] = ()
     price_tier: str = ""
     formality: str = ""
     gender_lean: str = ""
@@ -134,6 +137,7 @@ async def warm_cache() -> None:
     sql = """
         SELECT brand_name, brand_name_normalized, primary_style_node_id,
                attributes->'vibe' AS vibe,
+               attributes->'silhouette' AS silhouette,
                attributes->>'price_tier' AS price_tier,
                attributes->>'formality' AS formality,
                attributes->>'gender_lean' AS gender_lean,
@@ -171,12 +175,13 @@ async def warm_cache() -> None:
             brand_name=brand_name,
             primary_style_node_id=int(r[2]) if r[2] is not None else None,
             vibe=_coerce_vibe(r[3]),
-            price_tier=str(r[4] or "").strip().lower(),
-            formality=str(r[5] or "").strip().lower(),
-            gender_lean=str(r[6] or "").strip().lower(),
-            era_reference=str(r[7] or "").strip().lower(),
-            price_min_usd=float(r[8]) if r[8] is not None else None,
-            price_max_usd=float(r[9]) if r[9] is not None else None,
+            silhouette=_coerce_vibe(r[4]),
+            price_tier=str(r[5] or "").strip().lower(),
+            formality=str(r[6] or "").strip().lower(),
+            gender_lean=str(r[7] or "").strip().lower(),
+            era_reference=str(r[8] or "").strip().lower(),
+            price_min_usd=float(r[9]) if r[9] is not None else None,
+            price_max_usd=float(r[10]) if r[10] is not None else None,
         )
         if db_norm:
             built[db_norm] = attrs
