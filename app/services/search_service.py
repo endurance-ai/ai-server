@@ -27,6 +27,7 @@ from app.infrastructure.repositories.search_repository import (
 # module-top import is cycle-free -- no lazy/seam pattern needed here.
 from app.infrastructure.repositories.search_rpc_contract import RpcContractError
 from app.pipeline.state import PipelineState
+from app.scoring.brand_2tower_rescore import rescore as _brand_2tower_rescore
 from app.scoring.personalize_rerank import RerankWeights
 from app.scoring.personalize_rerank import rerank as _personalize_rerank
 
@@ -103,6 +104,34 @@ async def search_service(state: PipelineState) -> PipelineState:
         rows = []
     state.raw_candidates = rows
     state.counts["raw"] = len(rows)
+
+    # SPEC-BRAND-2TOWER-RESCORE — blend brand_multimodal_embeddings into
+    # the product-distance ranking BEFORE personalize_rerank. Fail-open on
+    # any error (RPC order preserved). α=1.0 → no-op (equivalent to off).
+    if (
+        settings.BRAND_2TOWER_ENABLED
+        and rows
+        and state.embedding is not None
+        and 0.0 < settings.BRAND_2TOWER_ALPHA < 1.0
+    ):
+        try:
+            before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
+            rescored, stats = _brand_2tower_rescore(
+                rows, state.embedding, alpha=settings.BRAND_2TOWER_ALPHA
+            )
+            state.raw_candidates = rescored
+            rows = rescored  # downstream personalize_rerank sees the rescored list
+            after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rescored[:3]]
+            logger.info(
+                "[STEP 4.62][2tower] α=%.2f hit=%d miss=%d before=%s after=%s",
+                settings.BRAND_2TOWER_ALPHA,
+                stats["hit"],
+                stats["miss"],
+                before_top3,
+                after_top3,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[STEP 4.62][2tower] skipped due to %s: %r", type(exc).__name__, exc)
 
     # SPEC-PERSONALIZE-RERANK — reorder raw rows by TasteProfile × brand
     # attributes BEFORE diversify_step so the brand/platform cap respects

@@ -82,6 +82,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await warm_brand_cache()
 
+    # SPEC-BRAND-2TOWER-RESCORE — populate brand_multimodal_embeddings cache
+    # (~6.7 MB for 2,180 brands @ 768 dim). Used by the 2-tower rescore step
+    # in search_service. Fail-open: cache empty → rescore is a no-op.
+    from app.infrastructure.repositories.brand_embedding_cache import warm_cache as warm_brand_emb_cache
+
+    await warm_brand_emb_cache()
+
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()

@@ -54,6 +54,7 @@ class BrandAttributes:
     """
 
     brand_name: str = ""
+    brand_id: int | None = None
     primary_style_node_id: int | None = None
     vibe: tuple[str, ...] = ()
     silhouette: tuple[str, ...] = ()
@@ -142,7 +143,7 @@ async def warm_cache() -> None:
                attributes->>'formality' AS formality,
                attributes->>'gender_lean' AS gender_lean,
                attributes->>'era_reference' AS era_reference,
-               price_min_usd, price_max_usd
+               price_min_usd, price_max_usd, id
         FROM public.brand_nodes
         WHERE brand_name_normalized IS NOT NULL AND brand_name_normalized <> ''
     """
@@ -173,6 +174,7 @@ async def warm_cache() -> None:
         regex_norm = normalize_brand(brand_name)
         attrs = BrandAttributes(
             brand_name=brand_name,
+            brand_id=int(r[11]) if r[11] is not None else None,
             primary_style_node_id=int(r[2]) if r[2] is not None else None,
             vibe=_coerce_vibe(r[3]),
             silhouette=_coerce_vibe(r[4]),

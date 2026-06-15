@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     # so 5 forces ≥3 distinct groups per page without starving results.
     SEARCH_VIBE_CAP: int = 5
     SEARCH_SILHOUETTE_CAP: int = 5
+
+    # SPEC-BRAND-2TOWER-RESCORE — blend brand_multimodal_embeddings into
+    # the product-distance ranking. α weights product distance vs brand
+    # distance; α=1.0 disables (equivalent to baseline). Default 0.8 keeps
+    # product visual signal dominant but lets brand identity break ties on
+    # close matches.
+    BRAND_2TOWER_ENABLED: bool = True
+    BRAND_2TOWER_ALPHA: float = 0.8
     SEARCH_FINAL_LIMIT: int = 15  # 최종 응답 개수
 
     # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
