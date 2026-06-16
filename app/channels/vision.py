@@ -209,13 +209,34 @@ def _parse_json_relaxed(content: str) -> dict | None:
     return None
 
 
-def _build_messages(image_url_value: str, *, schema_v2: bool) -> list[dict[str, Any]]:
+def _build_messages(image_url_value: str, *, schema_v2: bool, multi_look_retry: bool = False) -> list[dict[str, Any]]:
     if schema_v2:
         system_prompt = ANALYZE_SYSTEM_PROMPT
         user_text = ANALYZE_USER_PROMPT
     else:
         system_prompt = _LEGACY_SYSTEM_PROMPT
         user_text = "List every distinct fashion item in this photo as JSON only."
+
+    # B8 — Pinterest boards often show multi-person / multi-look composites.
+    # The base prompt assumes single-subject and the model returns empty
+    # items[] on these. Override the user text on the retry pass: focus on
+    # the most prominent single look, and forbid the empty-items giveup.
+    if multi_look_retry and schema_v2:
+        user_text = (
+            "This image MAY contain multiple people, multiple separate looks, "
+            "or a collage of styling references — that is COMMON for Pinterest "
+            "fashion boards. Do NOT give up with an empty items list.\n\n"
+            "Procedure:\n"
+            "1. If you see ANY garment, shoe, bag, hat, jewelry, or eyewear anywhere "
+            "   in the image, set isApparel=true.\n"
+            "2. If multiple people / looks appear, FOCUS on the single most "
+            "   prominent one — pick by: largest in frame, foreground, centered, "
+            "   or the clearest/best-lit. Ignore the others.\n"
+            "3. Extract items from that chosen subject following the same schema "
+            "   and enum rules as the system instructions. Always return at least "
+            "   one item when any garment is visible.\n"
+            "Return valid JSON only, no commentary."
+        )
 
     return [
         {
@@ -366,6 +387,46 @@ async def extract(image: str | bytes) -> VisionResult:
     if schema_v2:
         result = _validate_v2(parsed)
         _log_v2(result, elapsed_ms)
+        # B8 — empty-items rescue. Pinterest multi-look / multi-person photos
+        # commonly trigger the model's "give up with empty items[]" path. One
+        # bounded retry with a multi-look-aware user prompt costs ~1 LLM call
+        # but recovers the entire turn that would otherwise hit the "사진이
+        # 안 보이네" fallback. Only retry when the first pass yielded zero
+        # items — successful extractions are kept as-is.
+        if not result.items:
+            logger.info("👁️  [VISION] 🔁 items=0 → multi-look retry")
+            retry_messages = _build_messages(image_url_value, schema_v2=True, multi_look_retry=True)
+            t1 = time.perf_counter()
+            try:
+                resp2 = await asyncio.wait_for(
+                    LLMProvider.chat(
+                        model=_model(),
+                        messages=retry_messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    ),
+                    timeout=timeout_s,
+                )
+            except (TimeoutError, Exception) as exc:  # noqa: BLE001
+                logger.warning("👁️  [VISION] multi-look retry failed: %r", exc)
+                return result
+            elapsed2_ms = int((time.perf_counter() - t1) * 1000)
+            try:
+                content2 = resp2["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                return result
+            parsed2 = _parse_json_relaxed(content2 or "")
+            if parsed2 is None:
+                return result
+            retry_result = _validate_v2(parsed2)
+            if retry_result.items:
+                logger.info(
+                    "👁️  [VISION] ✅ multi-look retry recovered items=%d (elapsed=%dms)",
+                    len(retry_result.items),
+                    elapsed2_ms,
+                )
+                _log_v2(retry_result, elapsed2_ms)
+                return retry_result
     else:
         result = _legacy_to_vision_result(parsed)
         _log_legacy(result, elapsed_ms)
