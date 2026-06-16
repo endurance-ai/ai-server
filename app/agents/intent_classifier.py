@@ -235,19 +235,8 @@ async def _default_litellm_call(*, model: str, messages: list[dict[str, Any]]) -
     """Production LiteLLM call. Kept thin so tests can swap it out."""
     from app.providers.llm import LLMProvider
 
-    client = LLMProvider.get_client()
-    resp = await client.post(
-        "/chat/completions",
-        json={
-            "model": model,
-            "messages": messages,
-            "temperature": 0.0,
-            "max_tokens": 200,
-        },
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-    return payload["choices"][0]["message"]["content"]
+    data = await LLMProvider.chat(model=model, messages=messages, temperature=0.0, max_tokens=200)
+    return data["choices"][0]["message"]["content"]
 
 
 __all__ = ["IntentResult", "classify_intent"]

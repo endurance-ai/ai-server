@@ -186,6 +186,13 @@ async def _legacy_text_path(state: WorkingState) -> dict:
             ]
         )
         result = await asyncio.wait_for(coro, timeout=max(0.1, settings.RESPONSE_TIMEOUT_MS / 1000.0))
+        try:
+            from app.observability.turn_cost import accumulate_lc
+
+            if getattr(result, "usage_metadata", None):
+                accumulate_lc(settings.RESPONSE_MODEL, result.usage_metadata)
+        except Exception:  # noqa: BLE001
+            pass
         content = getattr(result, "content", None)
         if isinstance(content, str) and content.strip():
             text = content.strip()[:600]
