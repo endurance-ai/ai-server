@@ -106,5 +106,12 @@ def rescore(
         out.append({**c, "distance": new_distance})
         stats["hit"] += 1
 
+    # When no candidate received a brand-side correction (empty cache in tests
+    # / dev or full miss in prod), preserve the RPC's original ordering — it
+    # already carries `created_at DESC` as the cosine-tie-breaker which a
+    # bare `distance ASC` sort here would silently drop.
+    if stats["hit"] == 0:
+        return candidates, stats
+
     out.sort(key=lambda r: float(r.get("distance", 1.0)))
     return out, stats
