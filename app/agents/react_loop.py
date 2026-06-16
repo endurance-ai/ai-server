@@ -1402,6 +1402,23 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                     _score = quality.get("score")
                     _decision = "refine" if quality.get("retry_suggested") else "accept"
                     logger.info("🔬 [v3:reflexion] eval score=%s → %s", _score, _decision)
+                    # B7 — when search returned 0 results and reflexion confirms
+                    # retry, the LLM has been observed to drop the `_quality`
+                    # signal and produce no visible action (silent turn → user
+                    # feels ignored). Force one of two visible actions on the
+                    # next step. This is a directive only — the LLM still picks
+                    # which path; we just forbid silence.
+                    if quality.get("retry_suggested") and not quality.get("skipped"):
+                        result["_directive"] = (
+                            "Search returned 0 results. On the next step you MUST take ONE of "
+                            "these actions — silence is forbidden:\n"
+                            "(A) Call refine_search with BROADER terms: drop subcategory and "
+                            "brand filters, keep only the core garment + color; OR\n"
+                            "(B) Call respond with a brief apology in the user's language "
+                            "explaining no matches were found, and ask them to share a "
+                            "different reference (color, occasion, or another photo).\n"
+                            "Do NOT repeat the same query verbatim."
+                        )
             else:
                 logger.info("🔬 [v3:reflexion] skip · cap/error")
 

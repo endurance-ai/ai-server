@@ -229,3 +229,62 @@ async def test_reflexion_skipped_on_nonempty_results(monkeypatch, _adapter):
 
     tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
     assert "_quality" not in tool_msgs[-1].content
+
+
+@pytest.mark.asyncio
+async def test_b7_directive_injected_when_retry_suggested(monkeypatch, _adapter):
+    """B7 — empty search + retry_suggested → ToolMessage MUST carry an explicit
+    `_directive` forbidding silence (LLM was observed ignoring `_quality` alone).
+    """
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.dispatch",
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
+    )
+    monkeypatch.setattr(
+        "app.agents._reflexion.evaluate_search_quality",
+        AsyncMock(return_value={"score": 0.0, "retry_suggested": True, "reason": "empty"}),
+    )
+
+    llm = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "x"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "sorry"}, "id": "2"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    await rl.run_react_loop(_state(), _sess())
+    from langchain_core.messages import ToolMessage
+
+    tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
+    content = tool_msgs[-1].content
+    assert "_directive" in content
+    assert "silence is forbidden" in content
+
+
+@pytest.mark.asyncio
+async def test_b7_no_directive_when_retry_not_suggested(monkeypatch, _adapter):
+    """Negative guard — when reflexion says no retry, do NOT inject the
+    directive (avoid pushing the LLM toward an unnecessary refine)."""
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.dispatch",
+        AsyncMock(return_value={"ok": True, "candidates_count": 0, "top_candidates": []}),
+    )
+    monkeypatch.setattr(
+        "app.agents._reflexion.evaluate_search_quality",
+        AsyncMock(return_value={"score": 0.9, "retry_suggested": False, "reason": "fine"}),
+    )
+
+    llm = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "x"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "2"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    await rl.run_react_loop(_state(), _sess())
+    from langchain_core.messages import ToolMessage
+
+    tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
+    assert "_directive" not in tool_msgs[-1].content
