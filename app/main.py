@@ -67,6 +67,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # defaults so card delivery is never blocked by redis unavailability.
     await chat_state.warm_pool()
 
+    # SPEC-SEARCH-V6-STYLE-WIRING — populate the style_node code→id cache so
+    # search_service can resolve Vision letters to bigint ids without a
+    # per-search round-trip. Fail-open: keeps the hardcoded A..U=1..21 fallback.
+    from app.infrastructure.repositories.style_node import warm_cache as warm_style_node_cache
+
+    await warm_style_node_cache()
+
+    # SPEC-PERSONALIZE-RERANK — populate brand_nodes.attributes cache so the
+    # rerank step can look up vibe / price_tier / gender_lean per candidate
+    # without a per-search SELECT. Fail-open: cache stays empty → rerank
+    # degrades to a no-op (RPC order preserved).
+    from app.infrastructure.repositories.brand_node_cache import warm_cache as warm_brand_cache
+
+    await warm_brand_cache()
+
+    # SPEC-BRAND-2TOWER-RESCORE — populate brand_multimodal_embeddings cache
+    # (~6.7 MB for 2,180 brands @ 768 dim). Used by the 2-tower rescore step
+    # in search_service. Fail-open: cache empty → rescore is a no-op.
+    from app.infrastructure.repositories.brand_embedding_cache import warm_cache as warm_brand_emb_cache
+
+    await warm_brand_emb_cache()
+
     adapter = get_adapter()
 
     public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()

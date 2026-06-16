@@ -155,7 +155,10 @@ async def test_photo_pick_uses_real_ctx_image(monkeypatch):
     class FakeResp:
         results = [type("C", (), {"id": "p9", "name": "Jacket", "brand": "Z", "price": 100})()]
 
-    async def fake_run_pipeline(req):
+    # `**_` swallows the new keyword `user_key=` that search_products now
+    # forwards to run_pipeline (SPEC-PERSONALIZE-RERANK); the test doesn't
+    # care about its value, only that the dispatch path still resolves.
+    async def fake_run_pipeline(req, **_):
         seen["image_url"] = req.image_url
         seen["search_query"] = req.item.search_query
         return FakeResp()
@@ -276,7 +279,7 @@ async def test_image_path_unaffected_by_v6_text_path(monkeypatch):
             type("C", (), {"id": "img2", "name": "Wool Scarf", "brand": "A", "price": 50})(),
         ]
 
-    async def fake_run_pipeline(req):
+    async def fake_run_pipeline(req, **_):
         captured["image_url"] = req.image_url
         return FakeResp()
 

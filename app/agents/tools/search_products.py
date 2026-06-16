@@ -462,6 +462,8 @@ async def run_text_only_search(
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -475,7 +477,7 @@ async def run_text_only_search(
 
     Returns the diversified candidate dicts (pipeline `final_candidates`).
     """
-    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.models.request import AnalyzedItem, RecommendRequest, StyleNode
     from app.pipeline.diversify import diversify_step
 
     # EmbedProvider is re-exported by app.pipeline.embed (the same monkeypatch
@@ -498,8 +500,14 @@ async def run_text_only_search(
         color_family=color_family,
         search_query=text_query,
     )
-    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
-    state = PipelineState(request=req)
+    style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
+    req = RecommendRequest(
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
+        style_node=style_node,
+    )
+    state = PipelineState(request=req, user_key=user_key)
     # Bypass embed_step (image path) — inject a REAL text embedding instead.
     # The sentinel URL never reaches Modal.
     # Invariant guard (review P1-1): both current callers already ensure a
@@ -557,6 +565,8 @@ async def run_blended_search(
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Multi-turn blended search (Level 1 image-first refinement).
 
@@ -570,7 +580,7 @@ async def run_blended_search(
     query_vec = normalize(alpha * origin_image_vec + (1-alpha) * modifier_text_vec)
     """
     from app.agents.origin_image import blend_vectors, get_origin_vector, set_origin_vector
-    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.models.request import AnalyzedItem, RecommendRequest, StyleNode
     from app.pipeline.diversify import diversify_step
     from app.pipeline.embed import EmbedProvider
     from app.pipeline.search import search_step
@@ -592,6 +602,8 @@ async def run_blended_search(
             fit=fit,
             color_family=color_family,
             top_k=top_k,
+            style_node_primary=style_node_primary,
+            user_key=user_key,
         )
 
     modifier_vec = await EmbedProvider.embed_text(modifier_query)
@@ -607,8 +619,14 @@ async def run_blended_search(
         color_family=color_family,
         search_query=modifier_query,
     )
-    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
-    state = PipelineState(request=req)
+    style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
+    req = RecommendRequest(
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
+        style_node=style_node,
+    )
+    state = PipelineState(request=req, user_key=user_key)
     state.embedding = blended
 
     _t_rpc0 = time.perf_counter()
@@ -668,6 +686,8 @@ async def run_smart_blended_search(
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Intent-aware multi-turn search (Level 2 advanced).
 
@@ -693,7 +713,7 @@ async def run_smart_blended_search(
     """
     from app.agents.intent_classifier import classify_intent
     from app.agents.origin_image import blend_vectors, get_origin_vector, set_origin_vector, vector_arithmetic
-    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.models.request import AnalyzedItem, RecommendRequest, StyleNode
     from app.pipeline.diversify import diversify_step
     from app.pipeline.embed import EmbedProvider
     from app.pipeline.search import search_step
@@ -720,6 +740,8 @@ async def run_smart_blended_search(
             fit=fit,
             color_family=color_family,
             top_k=top_k,
+            style_node_primary=style_node_primary,
+            user_key=user_key,
         )
 
     # 2) Classify intent. On any failure → free_form (alpha=0.5 weighted sum).
@@ -763,8 +785,14 @@ async def run_smart_blended_search(
         color_family=color_family,
         search_query=modifier_query,
     )
-    req = RecommendRequest(item=item, image_url=_TEXT_ONLY_SENTINEL, final_limit=max(1, int(top_k)))
-    state = PipelineState(request=req)
+    style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
+    req = RecommendRequest(
+        item=item,
+        image_url=_TEXT_ONLY_SENTINEL,
+        final_limit=max(1, int(top_k)),
+        style_node=style_node,
+    )
+    state = PipelineState(request=req, user_key=user_key)
     state.embedding = query_vec
 
     _t_rpc0 = time.perf_counter()
@@ -795,13 +823,15 @@ async def run_image_search(
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
 ) -> list[Any]:
     """Photo-pick path — full existing `run_pipeline` (image embedding → v6 RPC).
 
     `image_url` MUST be an externally-resolved URL sourced from ctx (never an
     LLM arg, never a placeholder).
     """
-    from app.models.request import AnalyzedItem, RecommendRequest
+    from app.models.request import AnalyzedItem, RecommendRequest, StyleNode
     from app.pipeline.runner import run_pipeline
 
     # SPEC-SEARCH-V6-001: `category` is the REAL Vision garment category
@@ -817,8 +847,14 @@ async def run_image_search(
         color_family=color_family,
         search_query=text_query,
     )
-    req = RecommendRequest(item=item, image_url=image_url, final_limit=max(1, int(top_k)))
-    resp = await run_pipeline(req)
+    style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
+    req = RecommendRequest(
+        item=item,
+        image_url=image_url,
+        final_limit=max(1, int(top_k)),
+        style_node=style_node,
+    )
+    resp = await run_pipeline(req, user_key=user_key)
     return list(getattr(resp, "results", None) or getattr(resp, "candidates", None) or [])
 
 
@@ -945,6 +981,23 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         except Exception:  # noqa: BLE001
             pass
 
+    # SPEC-SEARCH-V6-STYLE-WIRING — Vision-derived style letter (A..U) that
+    # react_loop._build_ctx parks in ctx (sourced from
+    # state.vision_outfit_style_node_primary). Forwarded to every search
+    # path so v6's FILTER1 rung-1 (`p_style_node_id` EXACT + family) can
+    # engage instead of the previous always-degraded baseline. None → RPC
+    # falls back to rung-2 cleanly.
+    # Args > ctx > None. text-only turns have no Vision letter in ctx, so the
+    # LLM-supplied `args.style_node_primary` (chosen from the 21-letter digest
+    # in the tool description) is what activates v6 rung-1 on those turns.
+    # Vision turns still benefit: when the LLM also supplies a letter, args
+    # wins, but if it omits the field, ctx (Vision) takes over.
+    _args_sn = args.get("style_node_primary")
+    style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
+    # SPEC-PERSONALIZE-RERANK — forward the per-turn user_key so search_service
+    # can look up TasteProfile and re-order the v6 raw rows.
+    user_key = ctx.get("user_key")
+
     try:
         if has_image:
             # Photo-pick: real resolved image drives the v6 query embedding.
@@ -958,6 +1011,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         elif origin_url:
             # Intent-aware Level 2 advanced blending (PR June 2026):
@@ -983,6 +1038,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
             )
         else:
             cands = await run_text_only_search(
@@ -991,6 +1048,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /

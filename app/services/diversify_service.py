@@ -10,6 +10,7 @@ preserved exactly. app/pipeline/diversify.py is now a thin re-export shim.
 import logging
 
 from app.core.config import settings
+from app.infrastructure.repositories.brand_node_cache import lookup as _brand_lookup
 from app.pipeline.state import PipelineState
 
 logger = logging.getLogger(__name__)
@@ -31,19 +32,30 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     # brandFilter 활성 시 브랜드 캡 완화 (v4와 동일 정책)
     brand_cap = settings.SEARCH_BRAND_CAP * 3 if req.brand_filter else settings.SEARCH_BRAND_CAP
     platform_cap = settings.SEARCH_PLATFORM_CAP
+    # SPEC-DIVERSIFY-ATTR-CAP — vibe / silhouette diversity (0 disables).
+    vibe_cap = int(settings.SEARCH_VIBE_CAP or 0)
+    silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)
 
     # 입력 / 캡 설정
     logger.info(
-        "[STEP 4.7][diversify] 시작 — input=%d target=%d brand_cap=%d platform_cap=%d tolerance=%.2f",
+        "[STEP 4.7][diversify] 시작 — input=%d target=%d brand_cap=%d platform_cap=%d "
+        "vibe_cap=%d silhouette_cap=%d tolerance=%.2f",
         len(state.raw_candidates),
         target,
         brand_cap,
         platform_cap,
+        vibe_cap,
+        silhouette_cap,
         req.tolerance,
     )
 
     seen_brand: dict[str, int] = {}
     seen_platform: dict[str, int] = {}
+    # SPEC-DIVERSIFY-ATTR-CAP — first-token counters. brand_node_cache miss →
+    # candidate bypasses these caps (fail-open: never drop a candidate we
+    # can't classify). Empty list / no first token → also bypass.
+    seen_vibe: dict[str, int] = {}
+    seen_silhouette: dict[str, int] = {}
     # @MX:NOTE: [AUTO] SPEC-AGENT-UX-P0-001 REQ-UX-001 — product_id 레벨 dedup.
     # v6 RPC distance-tie 또는 refine cumulative merge 에서 동일 id 가 두 번
     # 들어와도 사용자에게 한 번만 노출. falsy id 는 bypass (graceful fallback).
@@ -59,6 +71,8 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     drops_brand = 0
     drops_platform = 0
     drops_dup = 0
+    drops_vibe = 0
+    drops_silhouette = 0
 
     for c in state.raw_candidates:
         pid = c.get("id")
@@ -81,6 +95,18 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         if seen_platform.get(platform, 0) >= platform_cap:
             drops_platform += 1
             continue
+        # SPEC-DIVERSIFY-ATTR-CAP — vibe / silhouette first-token caps. Lookup
+        # via brand_node_cache; miss → bypass (the candidate cannot be
+        # classified, never drop). Cap == 0 also bypasses (kill-switch).
+        attrs = _brand_lookup(c.get("brand"))
+        vibe_key = attrs.vibe[0] if (attrs and attrs.vibe) else ""
+        silhouette_key = attrs.silhouette[0] if (attrs and attrs.silhouette) else ""
+        if vibe_cap > 0 and vibe_key and seen_vibe.get(vibe_key, 0) >= vibe_cap:
+            drops_vibe += 1
+            continue
+        if silhouette_cap > 0 and silhouette_key and seen_silhouette.get(silhouette_key, 0) >= silhouette_cap:
+            drops_silhouette += 1
+            continue
         out.append(c)
         if pid:
             seen_ids.add(pid)
@@ -88,21 +114,31 @@ async def diversify_service(state: PipelineState) -> PipelineState:
             seen_content.add(content_key)
         seen_brand[brand] = seen_brand.get(brand, 0) + 1
         seen_platform[platform] = seen_platform.get(platform, 0) + 1
+        if vibe_key:
+            seen_vibe[vibe_key] = seen_vibe.get(vibe_key, 0) + 1
+        if silhouette_key:
+            seen_silhouette[silhouette_key] = seen_silhouette.get(silhouette_key, 0) + 1
         if len(out) >= target:
             break
 
-    # 출력 / 캡 통계 / 브랜드·플랫폼 분포
+    # 출력 / 캡 통계 / 브랜드·플랫폼·vibe·silhouette 분포
     brand_dist = sorted(seen_brand.items(), key=lambda x: -x[1])[:5]
     platform_dist = sorted(seen_platform.items(), key=lambda x: -x[1])[:5]
+    vibe_dist = sorted(seen_vibe.items(), key=lambda x: -x[1])[:5]
+    silhouette_dist = sorted(seen_silhouette.items(), key=lambda x: -x[1])[:5]
     logger.info(
-        "[STEP 4.8][diversify] 끝 — out=%d drops_brand=%d drops_platform=%d drops_dup=%d",
+        "[STEP 4.8][diversify] 끝 — out=%d drops_brand=%d drops_platform=%d drops_dup=%d "
+        "drops_vibe=%d drops_silhouette=%d",
         len(out),
         drops_brand,
         drops_platform,
         drops_dup,
+        drops_vibe,
+        drops_silhouette,
     )
     logger.info("[STEP 4.8][diversify] brand_top5=%s", brand_dist)
     logger.info("[STEP 4.8][diversify] platform_top5=%s", platform_dist)
+    logger.info("[STEP 4.8][diversify] vibe_top5=%s silhouette_top5=%s", vibe_dist, silhouette_dist)
 
     state.final_candidates = out
     state.counts["after_diversify"] = len(out)

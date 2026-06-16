@@ -100,6 +100,10 @@ class RefineSearchArgs(TypedDict, total=False):
     max_price: float | None
     min_price: float | None
     drop_min_price: bool
+    # SPEC-SEARCH-V6-STYLE-WIRING text-only follow-up: optional 1-letter style
+    # node override. Same digest is appended to the refine_search tool
+    # description by style_node.warm_cache().
+    style_node_primary: str | None
 
 
 class UpdateTasteArgs(TypedDict, total=False):

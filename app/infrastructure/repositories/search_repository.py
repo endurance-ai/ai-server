@@ -30,6 +30,7 @@ from typing import Any
 from app.core.config import settings
 from app.infrastructure.repositories.category_family import to_canonical_family
 from app.infrastructure.repositories.search_rpc_contract import validate_rpc_rows
+from app.infrastructure.repositories.style_node import code_to_id as _style_code_to_id
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class SearchRepository:
         embedding: list[float],
         brand_filter: list[str] | None,
         category: str | None = None,
+        style_node_code: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -76,16 +78,20 @@ class SearchRepository:
             (req #3). Never attempt subcategory narrowing.
           - There is no v6 RPC price param and no client-side price filter
             (user-confirmed) → price_min/price_max retired.
-          - `style_node` concept does not exist in this repo → p_style_node_id
-            is always NULL → v6 takes its `degraded` category-only fallback
-            (acceptable; observability-only flag on the rows).
+          - `p_style_node_id` is the v6 RPC's FILTER 1 — a brand-level
+            taxonomy filter (`brand_nodes.primary_style_node_id`). Callers
+            supply the Vision-derived letter (`A`..`U`) via `style_node_code`;
+            resolution to the bigint id is delegated to the single-source
+            `style_node.code_to_id` cache. None / unknown letter → None →
+            v6 takes its rung-2 `degraded` category-only fallback (the
+            previous always-degraded baseline; never worse than today).
           - Brand narrowing is the only legit optional filter preserved →
             p_brand_names.
         This mapping exists ONLY here (single source — REQ-AI-002).
         """
         return {
             "query_embedding": embedding_to_pgvector(embedding),
-            "p_style_node_id": None,
+            "p_style_node_id": _style_code_to_id(style_node_code),
             # v6 family gate: always exactly one of the 20 canonical lowercase
             # tokens (`other` when no apparel match → gate intentionally
             # skipped). Single-source map: category_family.to_canonical_family.

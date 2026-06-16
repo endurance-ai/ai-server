@@ -43,6 +43,22 @@ class Settings(BaseSettings):
     SEARCH_DEFAULT_K: int = 50  # RPC top-k
     SEARCH_BRAND_CAP: int = 2  # 다양성: 브랜드당 최대
     SEARCH_PLATFORM_CAP: int = 3  # 다양성: 플랫폼당 최대
+    # SPEC-DIVERSIFY-ATTR-CAP — attribute-level diversity caps applied
+    # alongside brand/platform. Keyed off `brand_nodes.attributes` first
+    # token (vibe[0] / silhouette[0]) — lookup is via brand_node_cache.
+    # Cache miss → cap skipped for that candidate (fail-open). Cap > 0
+    # enables, 0 disables that dimension. Final_limit is typically 15,
+    # so 5 forces ≥3 distinct groups per page without starving results.
+    SEARCH_VIBE_CAP: int = 5
+    SEARCH_SILHOUETTE_CAP: int = 5
+
+    # SPEC-BRAND-2TOWER-RESCORE — blend brand_multimodal_embeddings into
+    # the product-distance ranking. α weights product distance vs brand
+    # distance; α=1.0 disables (equivalent to baseline). Default 0.8 keeps
+    # product visual signal dominant but lets brand identity break ties on
+    # close matches.
+    BRAND_2TOWER_ENABLED: bool = True
+    BRAND_2TOWER_ALPHA: float = 0.8
     SEARCH_FINAL_LIMIT: int = 15  # 최종 응답 개수
 
     # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
@@ -102,6 +118,21 @@ class Settings(BaseSettings):
     # When false, scenario behaves as before (no profile read/write).
     TASTE_PROFILE_ENABLED: bool = True
     TASTE_PROFILE_TTL_SECONDS: int = 60 * 60 * 24 * 30  # 30 days
+
+    # SPEC-PERSONALIZE-RERANK — score-based re-ordering of v6 RPC raw rows
+    # using TasteProfile × brand_nodes.attributes (vibe / price_tier /
+    # gender_lean). Runs between search_step and diversify_step. Pure
+    # function; fail-open (no profile / no user_key / empty cache → no-op).
+    # Default weights are conservative — `1 - distance` typically sits in
+    # 0.6~0.8, so a +0.10 liked-brand bump shifts ordering for tied/close
+    # candidates without overpowering the embedding signal. All knobs are
+    # env-tunable so the live A/B can sweep them without code changes.
+    PERSONALIZE_RERANK_ENABLED: bool = True
+    PERSONALIZE_LIKED_BRAND_W: float = 0.10
+    PERSONALIZE_DISLIKED_BRAND_W: float = 0.20
+    PERSONALIZE_KEYWORD_W: float = 0.02
+    PERSONALIZE_PRICE_FIT_W: float = 0.05
+    PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
 
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7

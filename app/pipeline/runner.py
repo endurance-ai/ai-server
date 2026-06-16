@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @observe(name="recommend_pipeline")
-async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
+async def run_pipeline(req: RecommendRequest, *, user_key: str | None = None) -> RecommendResponse:
     # 요청 요약 — 어떤 item / 필터로 들어왔는지
     logger.info(
         "[STEP 4.2]🎨 [pipeline] === START === item_id=%s search_query=%r search_query_ko=%r "
@@ -30,7 +30,7 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
         req.final_limit,
     )
 
-    state = PipelineState(request=req)
+    state = PipelineState(request=req, user_key=user_key)
 
     # @MX:WARN: [AUTO] embed_step 과 enhance_query_step 을 asyncio.gather 로 병렬 실행.
     # @MX:REASON: 두 단계는 동일 state 인스턴스를 공유하지만 갱신 필드가 분리(embedding vs enhanced_*)되어 race 없음.
