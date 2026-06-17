@@ -4,9 +4,9 @@ No mocks: diversify_step is pure over state.raw_candidates + settings, so we
 construct PipelineState + RecommendRequest directly and lock the exact output
 `id` order plus the full counts dict.
 
-Settings defaults exercised (app/core/config.py):
-    SEARCH_BRAND_CAP    = 2   (brand_filter active -> *3 = 6)
-    SEARCH_PLATFORM_CAP = 3
+Settings defaults exercised (app/core/config.py, 2026-06-17 relax v2):
+    SEARCH_BRAND_CAP    = 5   (brand_filter active -> *3 = 15)
+    SEARCH_PLATFORM_CAP = 8
 tolerance -> target_count = int(round(10 + clamp(t,0,1)*10))  [banker's round]
 """
 
@@ -52,7 +52,7 @@ def _row(i: int, brand: str | None, platform: str = "p1") -> dict:
     return d
 
 
-# ── Case 1: brand_cap (default 2) — 5 of brand "A" -> only first 2 survive ──
+# ── Case 1: brand_cap (default 5) — 5 of brand "A" all survive ─────────────
 async def test_characterize_diversify_brand_cap_default():
     raw = [
         _row(0, "A"),
@@ -64,25 +64,25 @@ async def test_characterize_diversify_brand_cap_default():
         _row(6, "A"),
         _row(7, "B"),
     ]
-    # platform all "p1" -> platform_cap 3 also bites. Lock the ACTUAL output.
+    # platform all "p1", platform_cap=8 → not hit. brand "A" cap=5 → A x5 all
+    # survive; B x2, C x1 are well under. All 8 kept.
     out = await diversify_step(_state(raw, tolerance=0.5))
     ids = [c["id"] for c in out.final_candidates]
-    # r0,r1 (A x2), r3 (B, platform p1 -> 3rd kept), then platform cap hit.
-    assert ids == ["r0", "r1", "r3"]
-    assert out.counts == {"after_diversify": 3, "final": 3}
+    assert ids == ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"]
+    assert out.counts == {"after_diversify": 8, "final": 8}
 
 
-# ── Case 2: brand_filter widening — cap 6, more "A" survive ─────────────────
+# ── Case 2: brand_filter widening — cap 15, all 8 "A" survive ───────────────
 async def test_characterize_diversify_brand_filter_widens_cap():
     raw = [_row(i, "A", platform=f"pf{i}") for i in range(8)]
-    # distinct platforms so only the brand cap matters; brand_filter -> cap 6.
+    # distinct platforms so only the brand cap matters; brand_filter -> cap 15.
     out = await diversify_step(_state(raw, tolerance=0.5, brand_filter=["A"]))
     ids = [c["id"] for c in out.final_candidates]
-    assert ids == ["r0", "r1", "r2", "r3", "r4", "r5"]
-    assert out.counts == {"after_diversify": 6, "final": 6}
+    assert ids == ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"]
+    assert out.counts == {"after_diversify": 8, "final": 8}
 
 
-# ── Case 3: platform_cap (default 3) — skew one platform ───────────────────
+# ── Case 3: platform_cap (default 8) — skew one platform, cap not hit ──────
 async def test_characterize_diversify_platform_cap():
     raw = [
         _row(0, "B0", platform="X"),
@@ -94,9 +94,9 @@ async def test_characterize_diversify_platform_cap():
     ]
     out = await diversify_step(_state(raw, tolerance=0.5))
     ids = [c["id"] for c in out.final_candidates]
-    # platform X capped at 3 -> r0,r1,r2 ; r3,r4 dropped ; r5 (Y) kept.
-    assert ids == ["r0", "r1", "r2", "r5"]
-    assert out.counts == {"after_diversify": 4, "final": 4}
+    # platform X count 5 < cap 8 → no drops. All 6 kept.
+    assert ids == ["r0", "r1", "r2", "r3", "r4", "r5"]
+    assert out.counts == {"after_diversify": 6, "final": 6}
 
 
 # ── Case 4: tolerance -> target_count (incl. banker's rounding) ────────────
@@ -141,9 +141,9 @@ async def test_characterize_diversify_blank_brand_shares_bucket():
     ]
     out = await diversify_step(_state(raw, tolerance=0.5))
     ids = [c["id"] for c in out.final_candidates]
-    # All four collapse to brand "" -> brand_cap 2 keeps only first 2.
-    assert ids == ["r0", "r1"]
-    assert out.counts == {"after_diversify": 2, "final": 2}
+    # All four collapse to brand "" -> brand_cap 5 → 4 < 5, all keep.
+    assert ids == ["r0", "r1", "r2", "r3"]
+    assert out.counts == {"after_diversify": 4, "final": 4}
 
 
 # ── Case 7: break mid-iteration — tail rows absent once target reached ─────
