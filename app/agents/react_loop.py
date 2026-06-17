@@ -1057,10 +1057,12 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 try:
                     from app.observability.turn_cost import langfuse_metadata
 
-                    llm_config = {"metadata": langfuse_metadata()}
+                    _meta = langfuse_metadata()
+                    llm_config = {"metadata": _meta} if _meta else None
                 except Exception:  # noqa: BLE001
                     llm_config = None
-                ai_msg = await asyncio.wait_for(llm.ainvoke(messages, config=llm_config), timeout=llm_timeout)
+                _ainvoke_kw = {"config": llm_config} if llm_config is not None else {}
+                ai_msg = await asyncio.wait_for(llm.ainvoke(messages, **_ainvoke_kw), timeout=llm_timeout)
                 break
             except (TimeoutError, Exception) as exc:  # noqa: BLE001
                 last_exc = exc
