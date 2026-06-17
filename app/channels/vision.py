@@ -110,6 +110,11 @@ class VisionItem(BaseModel):
     colorHex: str = ""
     colorFamily: str = ""
     fit: str = ""
+    # Concrete, observable garment details (3-5 short tokens) that the model
+    # picked up from THIS specific image — silhouette, neckline/sleeve,
+    # hardware/closure, length, distinctive construction. Drives a richer
+    # `searchQuery` and lets downstream code compose better refine boosts.
+    distinctiveDetails: list[str] = Field(default_factory=list)
     searchQuery: str = ""
     searchQueryKo: str = ""
     position: VisionPosition = Field(default_factory=VisionPosition)

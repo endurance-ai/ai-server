@@ -74,6 +74,18 @@ class TestPromptModule:
         assert "고프코어" in SENSITIVITY_TAGS
         assert len(SENSITIVITY_TAGS) == 12
 
+    def test_prompt_teaches_distinctive_details(self):
+        """detail-extraction PR — the prompt MUST require distinctiveDetails
+        and show concrete BAD vs GOOD examples so the model stops defaulting
+        to category stereotypes (e.g. labelling a side-button blazer as
+        double-breasted)."""
+        assert "distinctiveDetails" in ANALYZE_SYSTEM_PROMPT
+        assert "side-button" in ANALYZE_SYSTEM_PROMPT
+        assert "crew-neck" in ANALYZE_SYSTEM_PROMPT
+        # BAD/GOOD framing must be present so the model treats it as a
+        # contrast study, not a single isolated example.
+        assert "BAD vs GOOD" in ANALYZE_SYSTEM_PROMPT or "❌" in ANALYZE_SYSTEM_PROMPT
+
 
 # ── REQ-VISION-UNIFY-002 — VisionResult Pydantic model + safe fallback ────
 
@@ -121,6 +133,20 @@ class TestVisionResultModel:
         assert r.items == []
         assert r.styleNode.primary == "C"
         assert r.style.detectedGender == "unisex"
+
+    def test_vision_item_accepts_distinctive_details(self):
+        """detail-extraction PR — VisionItem must round-trip the new
+        distinctiveDetails list; default is empty list (backwards-compatible
+        when the model omits the field)."""
+        item = VisionItem(
+            subcategory="blazer",
+            distinctiveDetails=["side-button", "notched lapel", "cropped"],
+            searchQuery="fitted cropped notched-lapel side-button black wool blazer women",
+        )
+        assert item.distinctiveDetails == ["side-button", "notched lapel", "cropped"]
+
+        item_default = VisionItem(subcategory="t-shirt")
+        assert item_default.distinctiveDetails == []  # legacy payloads still validate
 
 
 class TestExtractFallback:
