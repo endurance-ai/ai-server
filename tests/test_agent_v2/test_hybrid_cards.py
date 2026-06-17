@@ -573,6 +573,54 @@ async def test_new_search_suppresses_previously_shown_products(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_b3_backfills_from_dedup_when_fresh_too_few(monkeypatch):
+    """B3 — when cross-turn dedup leaves only 1 fresh item out of 5 search
+    results, backfill from the previously-shown pool up to album size so the
+    user sees ~5 cards instead of a lonely 1-card response. The strict
+    "all dedup'd → 0 cards" contract still holds (covered by the prior test).
+    """
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    try:
+        delivered_pids: list[list[str]] = []
+
+        async def _capture(chat_id, from_user_id, products):
+            delivered_pids.append([c.id for c in products])
+            return len(products)
+
+        monkeypatch.setattr("app.channels.implicit_feedback.log_impressions", AsyncMock(side_effect=_capture))
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        from app.infrastructure.cache import chat_state as _cs
+
+        # Search #1: 5 products [p0..p4] → all delivered + logged.
+        await _cs.set_cursor(42, 0)
+        set_store(_FakeStore(_session_with_results(5)))
+        await respond_tool.dispatch({"text": "first"}, {"chat_id": 42, CARDS_READY_KEY: True})
+        assert delivered_pids == [["p0", "p1", "p2", "p3", "p4"]]
+
+        # Search #2: same 4 + 1 NEW. Old behavior: only "p5" delivered (1 card).
+        # B3 backfill: top up to album size from previously-shown pool.
+        await _cs.set_cursor(42, 0)
+        s2 = Session(chat_id=42, state=SessionState.IDLE, from_user_id=99)
+        s2.last_results = [_candidate(i) for i in (5, 0, 1, 2, 3)]  # p5 fresh, p0-p3 dedup'd
+        s2.lang = "en"
+        set_store(_FakeStore(s2))
+
+        res = await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
+        # 1 fresh (p5) + 4 dedup'd (p0..p3) backfilled up to album size → 5 cards.
+        # Pre-fix this turn would deliver only 1 (the fresh p5).
+        assert res["cards_sent"] == 5
+        # `log_impressions` only records the freshly-marked p5 — backfilled
+        # ids are already logged from search #1, so re-logging is skipped.
+        assert "p5" in delivered_pids[-1]
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
 async def test_impression_logging_failure_does_not_break_delivery(monkeypatch):
     """A raising log_impressions MUST NOT undo or fail the card delivery."""
     from app.agents.tools import respond as respond_tool

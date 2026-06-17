@@ -728,12 +728,26 @@ async def send_hybrid_batch(
     # interspersed (P1-2). The cross-turn dedup happens BEFORE image gating so
     # a stale-image previously-shown item still consumes a position.
     eligible_pos: list[tuple[int, Any]] = []
+    dedup_pos: list[tuple[int, Any]] = []  # B3 — previously-shown image-eligible fallback pool
     for i, c in enumerate(all_candidates[start:]):
         if not _has_plausible_image(c):
             continue
         if await _is_already_shown(c):
+            dedup_pos.append((start + i, c))
             continue
         eligible_pos.append((start + i, c))
+
+    # B3 — When the cross-turn dedup leaves SOME fresh items but too few for
+    # a meaningful carousel (e.g. only 1 card delivered out of 5 candidates),
+    # backfill from the previously-shown pool up to the album size. Skipped
+    # entirely when fresh=0 so the strict "no repeats on identical re-search"
+    # contract (260611) still holds — that case is genuine "saw it all
+    # already" and a 0-card no-op is the right signal upstream.
+    min_fresh = 3
+    if 0 < len(eligible_pos) < min_fresh and dedup_pos:
+        needed = _ALBUM_SIZE - len(eligible_pos)
+        eligible_pos.extend(dedup_pos[:needed])
+
     batch_pos = eligible_pos[:_ALBUM_SIZE]
     batch = [c for _, c in batch_pos]
     if not batch:
