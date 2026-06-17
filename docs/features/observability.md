@@ -134,9 +134,22 @@ curl -X POST http://<EIP>:8000/recommend \
 - `@observe(capture_input=False)` 로 입력 캡처 비활성 + 명시적 `langfuse_context.update_current_trace(input={...})` 로 비식별 필드만 기록
 - Langfuse 측 데이터 보존 정책 단축 (예: 30일)
 
+## LLM 비용 원장 (llm_call 이벤트)
+
+`accumulate_raw` / `accumulate_lc` 가 LLM 호출마다 `llm_call` 이벤트를 `ai.log_conversation_event` 에 기록한다.
+
+- **비용 SoT**: `event_type = 'llm_call'` 행의 `payload.cost_usd` 합계. Langfuse 글로벌 Total cost 는 `litellm-acomp` / `Unknown` trace 까지 합산하므로 높게 나오는 것이 정상.
+- `payload.turn_id = '{thread_id}:{turn_no}'` — 한 턴의 모든 LLM 콜 join 키.
+- `payload.cost_source`: `'litellm'` = LiteLLM `response_cost` 직접 사용 / `'fallback_rates'` = 로컬 요율 추정.
+- `turn_summary.cost_usd` 는 턴 단위 롤업 — `llm_call` 합계와 일치해야 함.
+
+Langfuse trace 메타데이터: `turn_id`, `cost_usd`, `llm_call_count`, `conversation_flow` (대화 흐름 breadcrumb).
+
+분석 쿼리: `scripts/beta_analysis.sql` 비용 원장 섹션 (일별 요약 / 턴 분포 / 모델별 breakdown / llm_call ↔ turn_summary 대조).
+
 ## 향후
 
 - ~~사용자 암묵 피드백 → trace score~~ **구현됨** (P0, 위 "User feedback scores" 절 참조)
-- LLM 호출 비용 트래킹 (Langfuse 가 token usage 자동 집계)
+- ~~LLM 호출 비용 트래킹~~ **구현됨** (위 "LLM 비용 원장" 절 참조)
 - 검색 품질 점수와 trace 연결 (`search_quality_logs` 테이블 조인)
 - A/B 실험 (v5a vs v5b) trace 분리 — `langfuse_context.update_current_trace(metadata={"variant": "v5a"})`
