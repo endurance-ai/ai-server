@@ -9,9 +9,9 @@ fallback cases (REQ-OBS-FALLBACK-001 / REQ-OBS-FALLBACK-002).
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
-import contextvars
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar
