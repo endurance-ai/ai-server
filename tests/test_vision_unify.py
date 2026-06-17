@@ -74,6 +74,18 @@ class TestPromptModule:
         assert "고프코어" in SENSITIVITY_TAGS
         assert len(SENSITIVITY_TAGS) == 12
 
+    def test_prompt_teaches_distinctive_details(self):
+        """detail-extraction PR — the prompt MUST require distinctiveDetails
+        and show concrete BAD vs GOOD examples so the model stops defaulting
+        to category stereotypes (e.g. labelling a side-button blazer as
+        double-breasted)."""
+        assert "distinctiveDetails" in ANALYZE_SYSTEM_PROMPT
+        assert "side-button" in ANALYZE_SYSTEM_PROMPT
+        assert "crew-neck" in ANALYZE_SYSTEM_PROMPT
+        # BAD/GOOD framing must be present so the model treats it as a
+        # contrast study, not a single isolated example.
+        assert "BAD vs GOOD" in ANALYZE_SYSTEM_PROMPT or "❌" in ANALYZE_SYSTEM_PROMPT
+
 
 # ── REQ-VISION-UNIFY-002 — VisionResult Pydantic model + safe fallback ────
 
@@ -122,6 +134,20 @@ class TestVisionResultModel:
         assert r.styleNode.primary == "C"
         assert r.style.detectedGender == "unisex"
 
+    def test_vision_item_accepts_distinctive_details(self):
+        """detail-extraction PR — VisionItem must round-trip the new
+        distinctiveDetails list; default is empty list (backwards-compatible
+        when the model omits the field)."""
+        item = VisionItem(
+            subcategory="blazer",
+            distinctiveDetails=["side-button", "notched lapel", "cropped"],
+            searchQuery="fitted cropped notched-lapel side-button black wool blazer women",
+        )
+        assert item.distinctiveDetails == ["side-button", "notched lapel", "cropped"]
+
+        item_default = VisionItem(subcategory="t-shirt")
+        assert item_default.distinctiveDetails == []  # legacy payloads still validate
+
 
 class TestExtractFallback:
     @pytest.mark.asyncio
@@ -157,6 +183,75 @@ class TestExtractFallback:
         result = await extract("https://example.com/x.jpg")
         assert isinstance(result, VisionResult)
         assert result.isApparel is False
+
+
+class TestMultiLookRetry:
+    """B8 — Pinterest multi-look / multi-person photos commonly trigger the
+    model's empty-items giveup path. One bounded retry with a multi-look-aware
+    user prompt recovers the turn instead of dropping to the hard fallback."""
+
+    @pytest.mark.asyncio
+    async def test_empty_items_triggers_multi_look_retry(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        calls = []
+        retry_payload = (
+            '{"isApparel": true, "styleNode": {"primary": "C", "secondary": "D"}, '
+            '"sensitivityTags": [], "mood": {"tags": [], "summary": "", "vibe": "", '
+            '"season": "", "occasion": ""}, "palette": [], '
+            '"style": {"fit": "regular", "aesthetic": "", "detectedGender": "female"}, '
+            '"items": [{"id": "top", "category": "Top", "subcategory": "t-shirt", '
+            '"name": "x", "detail": "", "fabric": "jersey", "color": "black", '
+            '"colorHex": "#000", "fit": "regular", "colorFamily": "BLACK", '
+            '"searchQuery": "black t-shirt women", "searchQueryKo": "", '
+            '"position": {"top": 30, "left": 50}}]}'
+        )
+
+        async def _chat(*, model, messages, temperature, max_tokens):
+            calls.append(messages[1]["content"][0]["text"])
+            if len(calls) == 1:
+                return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+            return {"choices": [{"message": {"content": retry_payload}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        result = await extract("https://example.com/multilook.jpg")
+        assert len(calls) == 2, "retry must fire on empty items"
+        assert "multiple people" in calls[1].lower() or "multi" in calls[1].lower()
+        assert result.isApparel is True
+        assert len(result.items) == 1
+        assert result.items[0].subcategory == "t-shirt"
+
+    @pytest.mark.asyncio
+    async def test_non_empty_first_pass_does_not_retry(self, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        calls = []
+        good_payload = (
+            '{"isApparel": true, "styleNode": {"primary": "C", "secondary": "D"}, '
+            '"sensitivityTags": [], "mood": {"tags": [], "summary": "", "vibe": "", '
+            '"season": "", "occasion": ""}, "palette": [], '
+            '"style": {"fit": "regular", "aesthetic": "", "detectedGender": "male"}, '
+            '"items": [{"id": "outer", "category": "Outer", "subcategory": "overcoat", '
+            '"name": "y", "detail": "", "fabric": "wool", "color": "grey", '
+            '"colorHex": "#888", "fit": "oversized", "colorFamily": "GREY", '
+            '"searchQuery": "oversized grey wool overcoat men", "searchQueryKo": "", '
+            '"position": {"top": 30, "left": 50}}]}'
+        )
+
+        async def _chat(*, model, messages, temperature, max_tokens):
+            calls.append(1)
+            return {"choices": [{"message": {"content": good_payload}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        result = await extract("https://example.com/good.jpg")
+        assert len(calls) == 1, "no retry when first pass already has items"
+        assert len(result.items) == 1
 
 
 # ── REQ-VISION-UNIFY-003 — parity max_tokens / temperature / timeout ──────

@@ -175,6 +175,12 @@ _TAG_LIST_JOINED = ", ".join(SENSITIVITY_TAGS)
 # ── ANALYZE_SYSTEM_PROMPT (verbatim from analyze.ts, with template literals
 # resolved). Do not edit unless kikoai/app/src/lib/prompts/analyze.ts changes.
 ANALYZE_SYSTEM_PROMPT = f"""You are an expert AI fashion analyst with deep knowledge of brands, fabrics, and silhouettes.
+
+=== MISSION (highest priority — overrides any later text on conflict) ===
+For each garment in the photo, FIRST enumerate 3-5 short, observable `distinctiveDetails` (silhouette, neckline/sleeve, length, hardware/closure, construction, prints). ONLY THEN compose `searchQuery` from those details + color + fabric + subcategory + gender.
+NEVER default to category stereotypes. Common trap: writing "double-breasted" for a blazer that actually has a side-button or asymmetric closure. Describe what you SEE in this exact photo, not what blazers usually look like.
+If a distinctive detail differs from the category norm (asymmetric closure, side-button, off-shoulder, raw-hem, contrast piping, etc.), it MUST appear in both `distinctiveDetails` and `searchQuery`.
+
 Given an outfit photo, analyze every visible clothing item and the overall mood.
 You MUST also classify the outfit into our internal style taxonomy (Style Nodes) for brand matching.
 
@@ -236,8 +242,9 @@ Respond in this exact JSON format (no markdown, no code fences):
       "colorHex": "#2E3336",
       "fit": "oversized",
       "colorFamily": "GREY",
-      "searchQuery": "oversized charcoal grey wool long coat men",
-      "searchQueryKo": "오버사이즈 차콜 그레이 울 롱 코트 남성",
+      "distinctiveDetails": ["dropped shoulder", "mid-thigh length", "single-breasted", "notched lapel", "side pockets"],
+      "searchQuery": "oversized charcoal grey wool single-breasted notched-lapel mid-thigh overcoat men",
+      "searchQueryKo": "오버사이즈 차콜 그레이 울 싱글 브레스티드 노치드 라펠 미디 롱 코트 남성",
       "position": {{"top": 30, "left": 50}}
     }},
     {{
@@ -251,8 +258,9 @@ Respond in this exact JSON format (no markdown, no code fences):
       "colorHex": "#1A1A1A",
       "fit": "boxy",
       "colorFamily": "BLACK",
-      "searchQuery": "boxy black graphic print jersey t-shirt men",
-      "searchQueryKo": "박시 블랙 그래픽 프린트 저지 티셔츠 남성",
+      "distinctiveDetails": ["boxy crop", "crew-neck", "short-sleeve", "front graphic print", "ribbed neckline"],
+      "searchQuery": "boxy cropped crew-neck short-sleeve black graphic-print ribbed-neck jersey t-shirt men",
+      "searchQueryKo": "박시 크롭 크루넥 반팔 블랙 그래픽 프린트 립넥 저지 티셔츠 남성",
       "position": {{"top": 42, "left": 48}}
     }}
   ]
@@ -293,22 +301,59 @@ Rules:
   - left% should reflect the actual horizontal position of the garment center in the image (usually 45-55% for centered photos, but adjust based on pose and framing)
 - Be specific about silhouette, fabric, and fit in item names
 
+distinctiveDetails rules (NEW — CRITICAL: this drives searchQuery quality):
+- MUST extract 3-5 short, concrete, OBSERVABLE details from THIS specific photo. Look at the actual garment, do not default to category stereotypes.
+- Categories to cover (pick what applies to this item):
+  - Silhouette: boxy / fitted / a-line / pleated / draped / structured / cable-knit / ribbed / quilted / chunky / fluted
+  - Neckline / sleeve: crew-neck / v-neck / scoop / turtleneck / mock-neck / square-neck / off-shoulder / halter · short-sleeve / long-sleeve / sleeveless / cap-sleeve / puff-sleeve / 3/4-sleeve
+  - Length: cropped / midi / longline / mini / floor-length / above-knee / mid-thigh
+  - Hardware / closure: double-breasted / single-breasted / side-button / asymmetric closure / zip-front / button-front / drawstring / belted / snap-front
+  - Construction: side-slit / raw-hem / cuffed / pleated / patch pockets / chest pocket / contrast stitching / piping
+  - Prints / texture: graphic print / floral / stripe / checkered / colorblock / tie-dye / washed
+- AVOID generic words ("nice", "stylish", "trendy") and color/fabric/subcategory words (those have their own fields).
+- Each detail SHOULD be 1-3 words; tokens are joined with hyphens when concatenated into searchQuery (crew-neck, side-button, off-shoulder).
+- If genuinely no distinctive detail is visible (e.g. plain product shot from far away), it is OK to return fewer than 3 — never invent details that aren't in the image.
+
 searchQuery rules (CRITICAL for accurate product matching):
+- MUST be DERIVED from the fields above: fit + 2-3 top distinctiveDetails + color + fabric + subcategory + gender.
 - MUST include: fit (from enum), color (specific: "charcoal grey" not just "grey"), fabric (from enum), subcategory (from enum)
 - MUST include gender keyword: use "men" / "women" / "unisex" based on detectedGender. This prevents cross-gender results.
-- SHOULD include: length (long/cropped/midi), style detail (pleated/ribbed/distressed/raw hem)
-- Format: "[fit] [color] [fabric] [subcategory] [men/women]"
-- Example good: "oversized charcoal grey wool overcoat men"
-- Example bad: "blue jeans"
-- Think like someone searching on Google Shopping for this exact item
+- MUST include at least 2 distinctive detail tokens from distinctiveDetails (silhouette + neckline/sleeve OR hardware/length).
+- Format guidance: "[fit] [length] [silhouette] [neckline-or-sleeve] [color] [fabric] [hardware] [subcategory] [men/women]"
+  — skip slots that don't apply; never pad with generic filler.
+- DO NOT default to stereotypes when distinctive detail differs from the norm. Common trap: writing "double-breasted blazer" when the photo shows a side-button or asymmetric closure. Always describe what you actually SEE.
+
+Examples (BAD vs GOOD — study the GOOD column):
+  ❌ "blue jeans"
+  ✅ "low-rise distressed straight-leg dark-indigo washed denim jeans women"
+
+  ❌ "boxy black cotton t-shirt women"   (lost the cropped + ribbed + side-slit details)
+  ✅ "boxy cropped ribbed crew-neck short-sleeve black cotton t-shirt side-slit women"
+
+  ❌ "double-breasted black wool blazer cropped women"   (photo was actually SIDE-BUTTON asymmetric — model defaulted to category stereotype)
+  ✅ "fitted cropped notched-lapel side-button asymmetric black wool blazer women"
+
+  ❌ "wide-leg jeans women"
+  ✅ "high-rise wide-leg cuffed mid-blue raw-hem denim jeans women"
+
+  ❌ "white sneakers women"
+  ✅ "low-top chunky-sole lace-up white leather sneakers contrast-stitch women"
+
+  ❌ "leather bag women"
+  ✅ "structured top-handle medium black smooth-leather tote bag gold-hardware women"
+- Think like someone searching on Google Shopping for THIS EXACT item, with enough adjectives that only the same silhouette comes back.
 
 searchQueryKo rules (CRITICAL for Korean product DB matching):
-- MUST be a Korean translation of searchQuery, using fashion industry Korean terms
+- MUST be a Korean translation of searchQuery, preserving the SAME distinctive details.
 - MUST include: 핏(오버사이즈/레귤러/슬림/박시 등), 색상(차콜/블랙/네이비 등), 소재(울/코튼/데님/저지 등), 아이템명(코트/티셔츠/팬츠 등)
 - MUST include gender: 남성/여성/유니섹스
+- MUST include the Korean form of at least 2 distinctive details (e.g. 크롭/하이라이즈/와이드/사이드버튼/노치드라펠/크루넥/반팔/롱슬리브/오프숄더/러플/플리츠/체크/스트라이프/디스트로이드/워싱/로우라이즈 ...)
 - Use Korean fashion shopping terms (how Korean shoppers would search)
-- Format: "[핏] [색상] [소재] [아이템] [성별]"
-- Example: "오버사이즈 차콜 그레이 울 롱 코트 남성"
+- Format: "[핏] [길이/실루엣] [디테일] [색상] [소재] [아이템] [성별]"
+- Examples:
+    "오버사이즈 차콜 그레이 싱글 브레스티드 노치드 라펠 미디 울 코트 남성"
+    "박시 크롭 크루넥 반팔 블랙 립넥 사이드 슬릿 코튼 티셔츠 여성"
+    "피티드 크롭 노치드 라펠 사이드 버튼 비대칭 블랙 울 블레이저 여성"
 - Return valid JSON only"""
 
 
