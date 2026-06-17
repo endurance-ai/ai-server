@@ -491,18 +491,26 @@ def test_followup_marker_still_works_for_genuine_refinement():
 
 
 def test_system_prompt_contains_redundancy_rules():
-    """Fix A — react_loop _SYSTEM_PROMPT must carry the new anti-redundancy rules."""
+    """Fix A + B13 — react_loop _SYSTEM_PROMPT must carry the redundancy rules
+    AND the B13 exception/anti-lie guards (new signal → refine, never promise
+    new results in respond text without actually calling search/refine)."""
     from app.agents import react_loop as rl
 
     p = rl._SYSTEM_PROMPT
     assert "Avoid redundant tool calls" in p
-    # search-then-respond rule
-    assert "your NEXT action MUST be `respond`" in p
-    assert "do NOT call `analyze_image`" in p
+    # search-then-respond default
+    assert "your NEXT action is `respond`" in p
+    assert "Do NOT call `analyze_image`" in p
     # vision-context guard
     assert "`detected_items:`" in p and "`user_selected_item:`" in p and "`style_node:`" in p
     # fewest-calls rule
     assert "Prefer the fewest tool calls" in p
+    # B13: new-signal exception forces refine_search rather than respond-only
+    assert "EXCEPTION" in p and "refine_search" in p
+    assert "Sportmax" in p or "사이드" in p or "new signal" in p  # concrete trigger example
+    # B13: anti-lie rule
+    assert "ANTI-LIE RULE" in p
+    assert "골라봤어" in p or "찾아봤어" in p or "found some" in p  # promise-keyword example
     # additive — original persona / fence rules still present
     assert "You are kiko" in p
     assert "ReAct agent" in p
