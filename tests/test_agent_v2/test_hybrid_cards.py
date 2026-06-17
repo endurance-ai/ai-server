@@ -597,3 +597,63 @@ async def test_impression_logging_failure_does_not_break_delivery(monkeypatch):
         adapter.send_text_with_keyboard.assert_awaited_once()
     finally:
         set_store(None)
+
+
+# ── B6 — multi-select follow-up after card delivery ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_b6_pending_pick_followup_after_cards(monkeypatch):
+    """When `pick_item` stashed remaining indices for a multi-select reply
+    ("2,4번"), respond MUST send a one-tap follow-up after the cards land:
+    '4번도 이어서 보여줄까?' with an `item:N` button."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    sess = _session_with_results(5, lang="ko")
+    sess.detected_items = [{"label": f"item-{i}", "name": f"name-{i}"} for i in range(4)]
+    sess.pending_pick_indices = [3]  # the user said "2,4번" — 4번 is pending
+    set_store(_FakeStore(sess))
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
+        res = await respond_tool.dispatch({"text": "골라봤어"}, ctx)
+        assert res["ok"] is True and res["cards_sent"] == 5
+
+        # send_text_with_keyboard should have been called TWICE:
+        #   (1) the summary keyboard with the `cards:more` pager
+        #   (2) the B6 follow-up with the `item:3` button
+        assert adapter.send_text_with_keyboard.await_count >= 2
+        followup_call = adapter.send_text_with_keyboard.await_args_list[-1]
+        (_, body, keyboard), _ = followup_call
+        assert "4번" in body and "이어서" in body
+        # First keyboard button should be the `item:3` callback so the user
+        # advances with one tap.
+        assert keyboard[0][0][1] == "item:3"
+        # Pending list cleared so a `cards:more` pager tap doesn't re-ask.
+        assert sess.pending_pick_indices == []
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_b6_no_followup_when_pending_empty(monkeypatch):
+    """Regression guard — single-index picks must NOT trigger the follow-up."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    sess = _session_with_results(5, lang="ko")
+    sess.pending_pick_indices = []  # single-index pick — nothing pending
+    set_store(_FakeStore(sess))
+    try:
+        adapter = _adapter(group_ok=True)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        ctx = {"chat_id": 42, CARDS_READY_KEY: True}
+        await respond_tool.dispatch({"text": "ok"}, ctx)
+        # Only the summary keyboard — no follow-up.
+        assert adapter.send_text_with_keyboard.await_count == 1
+    finally:
+        set_store(None)
