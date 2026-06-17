@@ -1238,6 +1238,61 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                     "response_text": fb.get("response_text"),
                 }
 
+        # B9 — 2-strike soft guard for expensive search tools. Beta logs show
+        # the LLM firing identical search/refine queries 3-4 times per turn
+        # (Modal embed + DB RPC every time, ~5s each). The 3-strike guard
+        # above only kicks in AFTER the second wasteful dispatch. Here we
+        # short-circuit the SECOND identical call: skip dispatch, return a
+        # synthetic "duplicate_call" result with a directive nudging the LLM
+        # to vary the args or call respond. The 3-strike exhaust fallback
+        # still fires if the LLM ignores the directive and tries a third time.
+        if (
+            tool_name in ("search_products", "refine_search")
+            and history
+            and history[-1].get("tool_name") == tool_name
+            and _is_identical(history[-1].get("args_full", {}), raw_args)
+        ):
+            dup_result = {
+                "ok": False,
+                "error": "duplicate_call",
+                "_directive": (
+                    "You just called this tool with identical args on the previous "
+                    "iteration. Re-running it returns the same results — do NOT "
+                    "dispatch again. On the next step you MUST either:\n"
+                    "(A) Modify at least one arg (different boost_keywords, "
+                    "action, price clamp, color); OR\n"
+                    "(B) Call respond using the results already in the conversation."
+                ),
+            }
+            history_entry = {
+                "iter": it,
+                "tool_name": tool_name,
+                "args": _args_summary(raw_args),
+                "args_full": raw_args,
+                "error": "duplicate_call_blocked",
+                "latency_ms": 0,
+            }
+            history.append(history_entry)
+            messages.append(ai_msg)
+            messages.append(ToolMessage(content=json.dumps(dup_result), tool_call_id=tc_id))
+            _append_skipped_parallel_tool_results(messages, tool_calls)
+            emit(
+                event_type="tool_call",
+                user_key=user_key,
+                chat_id=state.chat_id,
+                thread_id=state.thread_id,
+                turn_no=state.turn_no or 1,
+                payload={
+                    "tool_name": tool_name,
+                    "iteration_no": it,
+                    "latency_ms": 0,
+                    "error": "duplicate_call_blocked",
+                    "args_summary": _args_summary(raw_args),
+                },
+            )
+            logger.info("🔁 [v3:dup_guard] blocked duplicate %s call at iter=%d", tool_name, it)
+            continue
+
         # Dispatch — with transient-error retry (tools internally call the
         # same throttled proxy: analyze_image / search both hit Bedrock via
         # LiteLLM). On a transient 5xx/timeout we retry the dispatch up to

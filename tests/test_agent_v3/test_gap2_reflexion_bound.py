@@ -288,3 +288,68 @@ async def test_b7_no_directive_when_retry_not_suggested(monkeypatch, _adapter):
 
     tool_msgs = [m for m in llm.seen[1] if isinstance(m, ToolMessage)]
     assert "_directive" not in tool_msgs[-1].content
+
+
+@pytest.mark.asyncio
+async def test_b9_second_identical_search_blocked_without_dispatch(monkeypatch, _adapter):
+    """B9 — 2nd identical search call must NOT dispatch the pipeline. The LLM
+    receives a `duplicate_call` synthetic result with a `_directive` nudging
+    it to vary args or respond."""
+    dispatch_spy = AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": [{"brand": "x"}]})
+    monkeypatch.setattr("app.agents.tools.search_products.dispatch", dispatch_spy)
+
+    llm = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "grey jeans"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "grey jeans"}, "id": "2"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "3"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    await rl.run_react_loop(_state(), _sess())
+    assert dispatch_spy.await_count == 1  # only the 1st identical call dispatched
+
+    from langchain_core.messages import ToolMessage
+
+    tool_msgs = [m for m in llm.seen[-1] if isinstance(m, ToolMessage)]
+    dup_msgs = [m for m in tool_msgs if "duplicate_call" in m.content]
+    assert dup_msgs, "expected a duplicate_call synthetic ToolMessage"
+    assert "_directive" in dup_msgs[-1].content
+
+
+@pytest.mark.asyncio
+async def test_b9_three_identical_still_exhausts(monkeypatch, _adapter):
+    """The 2-strike soft guard must NOT defang the existing 3-strike exhaust
+    safety net. Three identical calls still trip the infinite-loop guard."""
+    monkeypatch.setattr(
+        "app.agents.tools.search_products.dispatch",
+        AsyncMock(return_value={"ok": True, "candidates_count": 3, "top_candidates": []}),
+    )
+
+    same = {"name": "search_products", "args": {"text_query": "same"}, "id": "z"}
+    llm = _FakeLLM([_FakeAIMessage([same]) for _ in range(6)])
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    delta = await rl.run_react_loop(_state(), _sess())
+    assert delta["agent_status"] == "exhausted"
+
+
+@pytest.mark.asyncio
+async def test_b9_different_args_not_blocked(monkeypatch, _adapter):
+    """The 2-strike soft guard only fires on IDENTICAL args. Different args
+    must still dispatch normally."""
+    dispatch_spy = AsyncMock(return_value={"ok": True, "candidates_count": 5, "top_candidates": [{"brand": "x"}]})
+    monkeypatch.setattr("app.agents.tools.search_products.dispatch", dispatch_spy)
+
+    llm = _FakeLLM(
+        [
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "q1"}, "id": "1"}]),
+            _FakeAIMessage([{"name": "search_products", "args": {"text_query": "q2"}, "id": "2"}]),
+            _FakeAIMessage([{"name": "respond", "args": {"text": "ok"}, "id": "3"}]),
+        ]
+    )
+    monkeypatch.setattr(rl, "get_llm", lambda: llm)
+
+    await rl.run_react_loop(_state(), _sess())
+    assert dispatch_spy.await_count == 2  # both dispatched, no soft block
