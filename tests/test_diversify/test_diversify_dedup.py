@@ -80,10 +80,10 @@ async def test_byte_identical_on_unique_ids() -> None:
     state = _state(raw, final_limit=10)
     out = await diversify_service(state)
     ids = [c["id"] for c in out.final_candidates]
-    # 5 unique id × unique brand → platform cap (3) 만 작동.
-    # SEARCH_PLATFORM_CAP=3 이므로 first 3 entries 만 통과.
-    assert len(out.final_candidates) == 3
-    assert ids == ["r0", "r1", "r2"]
+    # 5 unique id × unique brand → platform cap (8, 2026-06-17 relax) 미발동.
+    # 모두 통과.
+    assert len(out.final_candidates) == 5
+    assert ids == ["r0", "r1", "r2", "r3", "r4"]
 
 
 async def test_drops_dup_in_log_line(caplog: pytest.LogCaptureFixture) -> None:

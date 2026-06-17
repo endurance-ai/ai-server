@@ -95,45 +95,49 @@ def _tuples(resp):
     return [(c.id, c.brand, c.score, c.dense_rank, c.sparse_rank) for c in resp.results]
 
 
-# Expected diversify trace (brand_cap=2, platform_cap=3, target by tolerance):
-#  p0 uniqlo/shop  keep (u=1, shop=1)
-#  p1 uniqlo/shop  keep (u=2, shop=2)
-#  p2 uniqlo/shop  DROP brand cap (uniqlo>=2)
-#  p3 cos/shop     keep (cos=1, shop=3)
-#  p4 cos/market   keep (cos=2, market=1)
-#  p5 zara/market  keep (zara=1, market=2)
-#  p6 zara/web     keep (zara=2, web=1)
-#  p7 musinsa/web  keep (musinsa=1, web=2)  score->0.0
-#  p8 musinsa/web  keep (musinsa=2, web=3)
-#  p9 ""/shop      DROP platform cap (shop>=3)
-#  p10 cos/market  DROP brand cap (cos>=2)
-#  p11 zara/web    DROP brand cap (zara>=2) AND web>=3
-#  p12 uniqlo/mkt  DROP brand cap (uniqlo>=2)
-#  p13 musinsa/shp DROP brand cap (musinsa>=2)
-#  -> survivors: p0,p1,p3,p4,p5,p6,p7,p8  (8 rows; target 15 not reached)
-# v6: dense_rank/sparse_rank are always None (runner sets them None); score
-# is preserved (distance = 1.0 - score round-trips exactly).
-_EXPECTED_BASE = [
+# Expected diversify trace (2026-06-17 relaxed caps v2: brand_cap=5, platform_cap=8):
+# All 14 raw rows survive — no brand or platform cap bites at these levels.
+# tolerance only drives where we break (target=10 stops at p9; target=15+ runs through).
+_EXPECTED_T0_10 = [
     ("p0", "uniqlo", 0.95, None, None),
     ("p1", "uniqlo", 0.94, None, None),
+    ("p2", "uniqlo", 0.93, None, None),
     ("p3", "cos", 0.92, None, None),
     ("p4", "cos", 0.91, None, None),
     ("p5", "zara", 0.90, None, None),
     ("p6", "zara", 0.89, None, None),
     ("p7", "musinsa", 0.0, None, None),
     ("p8", "musinsa", 0.87, None, None),
+    ("p9", "", 0.86, None, None),
 ]
-_EXPECTED_COUNTS_BASE = {"raw": 14, "after_diversify": 8, "final": 8}
+_EXPECTED_T0_COUNTS = {"raw": 14, "after_diversify": 10, "final": 10}
+
+_EXPECTED_FULL_14 = _EXPECTED_T0_10 + [
+    ("p10", "cos", 0.85, None, None),
+    ("p11", "zara", 0.84, None, None),
+    ("p12", "uniqlo", 0.83, None, None),
+    ("p13", "musinsa", 0.82, None, None),
+]
+_EXPECTED_FULL_COUNTS = {"raw": 14, "after_diversify": 14, "final": 14}
+
+
+_TOLERANCE_EXPECTATIONS = {
+    # tolerance → (expected_tuples, expected_counts)
+    0.0: (_EXPECTED_T0_10, _EXPECTED_T0_COUNTS),  # target=10 — break at p9
+    0.5: (_EXPECTED_FULL_14, _EXPECTED_FULL_COUNTS),  # target=15 — process all, no drops
+    1.0: (_EXPECTED_FULL_14, _EXPECTED_FULL_COUNTS),  # target=20 — same as 0.5
+}
 
 
 @pytest.mark.parametrize("tolerance", [0.0, 0.5, 1.0])
 async def test_characterize_run_pipeline_tolerance(fixed_embed, patch_rpc, tolerance):
-    """Caps bite before any tolerance target (8 < 10) -> output invariant."""
+    """Tolerance now drives target_count past brand cap drops (post-relax)."""
     patch_rpc(_rows())
     resp = await run_pipeline(_req(tolerance=tolerance))
+    expected_tuples, expected_counts = _TOLERANCE_EXPECTATIONS[tolerance]
     assert resp.item_id == "item-42"
-    assert _tuples(resp) == _EXPECTED_BASE
-    assert resp.counts == _EXPECTED_COUNTS_BASE
+    assert _tuples(resp) == expected_tuples
+    assert resp.counts == expected_counts
     # latency_ms: keys present, values non-deterministic -> assert key set only.
     assert set(resp.latency_ms.keys()) == {"embed", "enhance_query", "search", "diversify"}
 
@@ -143,11 +147,11 @@ async def test_characterize_run_pipeline_final_limit(fixed_embed, patch_rpc, fin
     patch_rpc(_rows())
     resp = await run_pipeline(_req(tolerance=1.0, final_limit=final_limit))
     if final_limit is None:
-        assert _tuples(resp) == _EXPECTED_BASE
-        assert resp.counts == _EXPECTED_COUNTS_BASE
+        assert _tuples(resp) == _EXPECTED_FULL_14
+        assert resp.counts == _EXPECTED_FULL_COUNTS
     else:
         # final_limit=5 truncates diversify before caps exhaust the list.
-        assert _tuples(resp) == _EXPECTED_BASE[:5]
+        assert _tuples(resp) == _EXPECTED_FULL_14[:5]
         assert resp.counts == {"raw": 14, "after_diversify": 5, "final": 5}
 
 
@@ -156,32 +160,15 @@ async def test_characterize_run_pipeline_brand_filter(fixed_embed, patch_rpc, br
     patch_rpc(_rows())
     resp = await run_pipeline(_req(tolerance=0.5, brand_filter=brand_filter))
     if brand_filter is None:
-        assert _tuples(resp) == _EXPECTED_BASE
-        assert resp.counts == _EXPECTED_COUNTS_BASE
+        assert _tuples(resp) == _EXPECTED_FULL_14
+        assert resp.counts == _EXPECTED_FULL_COUNTS
     else:
-        # brand_filter active -> brand_cap 2*3=6, so uniqlo is NOT brand-capped
-        # (p0,p1,p2 all survive). Platform cap 3 then drives all drops:
-        #   shop:   p0,p1,p2 fill it -> p3,p9,p13 dropped (shop>=3)
-        #   market: p4,p5,p10 fill it -> p12 dropped (market>=3)
-        #   web:    p6,p7,p8 fill it -> p11 dropped (web>=3)
-        # Observed-and-locked ACTUAL survivor order (p10 NOT p12 -- the market
-        # cap fills at p10 before p12 is reached; this ordering asymmetry is
-        # exactly the arithmetic the IMPROVE extraction must keep byte-identical).
+        # brand_filter active → brand_cap 3*3=9, platform_cap=8. No cap bites
+        # in the 14-row input → all survive.
         tuples = _tuples(resp)
         ids = [t[0] for t in tuples]
-        assert ids == ["p0", "p1", "p2", "p4", "p5", "p6", "p7", "p8", "p10"]
-        assert tuples == [
-            ("p0", "uniqlo", 0.95, None, None),
-            ("p1", "uniqlo", 0.94, None, None),
-            ("p2", "uniqlo", 0.93, None, None),
-            ("p4", "cos", 0.91, None, None),
-            ("p5", "zara", 0.90, None, None),
-            ("p6", "zara", 0.89, None, None),
-            ("p7", "musinsa", 0.0, None, None),
-            ("p8", "musinsa", 0.87, None, None),
-            ("p10", "cos", 0.85, None, None),
-        ]
-        assert resp.counts == {"raw": 14, "after_diversify": 9, "final": 9}
+        assert ids == [f"p{i}" for i in range(14)]
+        assert resp.counts == {"raw": 14, "after_diversify": 14, "final": 14}
 
 
 async def test_characterize_run_pipeline_parallel_equivalence(fixed_embed, patch_rpc, monkeypatch):
@@ -199,6 +186,6 @@ async def test_characterize_run_pipeline_parallel_equivalence(fixed_embed, patch
     assert resp_par.item_id == resp_seq.item_id
     assert _tuples(resp_par) == _tuples(resp_seq)
     assert resp_par.counts == resp_seq.counts
-    # And both equal the locked golden.
-    assert _tuples(resp_par) == _EXPECTED_BASE
-    assert resp_par.counts == _EXPECTED_COUNTS_BASE
+    # And both equal the locked golden (tolerance=0.5 → full 13).
+    assert _tuples(resp_par) == _EXPECTED_FULL_14
+    assert resp_par.counts == _EXPECTED_FULL_COUNTS

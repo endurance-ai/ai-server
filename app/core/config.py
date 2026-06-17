@@ -41,8 +41,15 @@ class Settings(BaseSettings):
 
     # 검색 파라미터 기본값
     SEARCH_DEFAULT_K: int = 50  # RPC top-k
-    SEARCH_BRAND_CAP: int = 2  # 다양성: 브랜드당 최대
-    SEARCH_PLATFORM_CAP: int = 3  # 다양성: 플랫폼당 최대
+    # 다양성 cap — 2026-06-17 완화 (이전: brand=2, platform=3).
+    # Langfuse 트레이스 분석에서 raw 50개 후보 중 45개가 cap 으로 잘려
+    # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만
+    # 통제할 뿐 옷의 본질과 무관 → 정확도만 깎고 다양성 이득은 미미.
+    # brand_cap=5: 첫 album(5장) 이 단일 브랜드여도 OK (진짜 매치면 그게 정답).
+    # 15개 final 안엔 최소 3 brand 보장 (15/5) — 모노컬쳐 완전 차단까진 아니어도
+    # "ZARA 광고같다" 까진 안 감.
+    SEARCH_BRAND_CAP: int = 5  # 브랜드당 최대 (첫 album 단일 브랜드 허용)
+    SEARCH_PLATFORM_CAP: int = 8  # 플랫폼당 최대 (사실상 비활성)
     # SPEC-DIVERSIFY-ATTR-CAP — attribute-level diversity caps applied
     # alongside brand/platform. Keyed off `brand_nodes.attributes` first
     # token (vibe[0] / silhouette[0]) — lookup is via brand_node_cache.

@@ -8,8 +8,8 @@ def test_settings_defaults():
     assert s.ENVIRONMENT == "development"
     assert s.LITELLM_BASE_URL == "http://localhost:4000"
     assert s.SEARCH_DEFAULT_K == 50
-    assert s.SEARCH_BRAND_CAP == 2
-    assert s.SEARCH_PLATFORM_CAP == 3
+    assert s.SEARCH_BRAND_CAP == 5
+    assert s.SEARCH_PLATFORM_CAP == 8
 
 
 def test_settings_overrides():
