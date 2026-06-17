@@ -204,3 +204,108 @@ FROM ai.log_conversation_event
 WHERE created_at >= NOW() - INTERVAL '30 days'
 GROUP BY 1
 ORDER BY 1 DESC;
+
+
+-- ===========================================================================
+-- 비용 원장 — llm_call 이벤트 기반 LLM 비용 추적
+--
+-- 소스: event_type = 'llm_call' (콜 단위), 'turn_summary' (턴 단위 롤업)
+-- turn_id = '{thread_id}:{turn_no}' 로 한 턴의 모든 LLM 콜을 묶음.
+-- payload.cost_source: 'litellm' = LiteLLM response_cost 직접 사용,
+--                      'fallback_rates' = 로컬 요율 추정.
+-- Langfuse 글로벌 Total cost 는 litellm-acomp / Unknown trace 까지 합산하므로
+-- 이 쿼리보다 높게 나오는 것이 정상 — 비용 SoT 는 이 쿼리.
+-- ===========================================================================
+
+-- 일별 LLM 비용 요약
+SELECT
+    date_trunc('day', created_at)::date AS day,
+    COUNT(*) AS llm_calls,
+    COUNT(DISTINCT payload->>'turn_id') AS turns,
+    ROUND(SUM((payload->>'cost_usd')::float)::numeric, 6) AS cost_usd,
+    SUM((payload->>'total_tokens')::int) AS total_tokens
+FROM ai.log_conversation_event
+WHERE event_type = 'llm_call'
+  AND created_at >= NOW() - INTERVAL '14 days'
+GROUP BY 1
+ORDER BY 1 DESC;
+
+
+-- 턴 단위 비용 분포 (avg / p50 / p95)
+WITH turn_costs AS (
+    SELECT
+        payload->>'turn_id' AS turn_id,
+        COUNT(*) AS llm_calls,
+        SUM((payload->>'total_tokens')::int) AS total_tokens,
+        SUM((payload->>'cost_usd')::float) AS cost_usd
+    FROM ai.log_conversation_event
+    WHERE event_type = 'llm_call'
+      AND created_at >= NOW() - INTERVAL '7 days'
+      AND payload->>'turn_id' IS NOT NULL
+    GROUP BY 1
+)
+SELECT
+    COUNT(*) AS turns,
+    ROUND(AVG(total_tokens)) AS avg_tokens,
+    ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY total_tokens)) AS p50_tokens,
+    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY total_tokens)) AS p95_tokens,
+    ROUND(AVG(cost_usd)::numeric, 6) AS avg_cost_usd,
+    ROUND(SUM(cost_usd)::numeric, 6) AS total_cost_usd,
+    ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY cost_usd)::numeric, 6) AS p95_cost_usd,
+    ROUND(AVG(llm_calls)::numeric, 2) AS avg_llm_calls
+FROM turn_costs;
+
+
+-- 모델별 비용 분포
+SELECT
+    payload->>'model' AS model,
+    payload->>'cost_source' AS cost_source,
+    COUNT(*) AS llm_calls,
+    COUNT(DISTINCT payload->>'turn_id') AS turns,
+    SUM((payload->>'total_tokens')::int) AS total_tokens,
+    SUM((payload->>'cache_read_tokens')::int) AS cache_read_tokens,
+    ROUND(SUM((payload->>'cost_usd')::float)::numeric, 6) AS cost_usd
+FROM ai.log_conversation_event
+WHERE event_type = 'llm_call'
+  AND created_at >= NOW() - INTERVAL '7 days'
+GROUP BY 1, 2
+ORDER BY cost_usd DESC;
+
+
+-- llm_call vs turn_summary 대조 (불일치 탐지)
+WITH calls AS (
+    SELECT
+        payload->>'turn_id' AS turn_id,
+        COUNT(*) AS llm_call_count,
+        SUM((payload->>'total_tokens')::int) AS call_tokens,
+        SUM((payload->>'cost_usd')::float) AS call_cost
+    FROM ai.log_conversation_event
+    WHERE event_type = 'llm_call'
+      AND created_at >= NOW() - INTERVAL '7 days'
+      AND payload->>'turn_id' IS NOT NULL
+    GROUP BY 1
+),
+summaries AS (
+    SELECT
+        payload->>'turn_id' AS turn_id,
+        (payload->>'llm_call_count')::int AS summary_llm_calls,
+        (payload->>'total_tokens')::int AS summary_tokens,
+        (payload->>'cost_usd')::float AS summary_cost
+    FROM ai.log_conversation_event
+    WHERE event_type = 'turn_summary'
+      AND created_at >= NOW() - INTERVAL '7 days'
+      AND payload->>'turn_id' IS NOT NULL
+)
+SELECT
+    COALESCE(c.turn_id, s.turn_id) AS turn_id,
+    c.llm_call_count,
+    s.summary_llm_calls,
+    ROUND(c.call_cost::numeric, 8) AS call_cost,
+    ROUND(s.summary_cost::numeric, 8) AS summary_cost,
+    ROUND((COALESCE(c.call_cost, 0) - COALESCE(s.summary_cost, 0))::numeric, 8) AS cost_delta
+FROM calls c
+FULL OUTER JOIN summaries s ON s.turn_id = c.turn_id
+WHERE ABS(COALESCE(c.call_cost, 0) - COALESCE(s.summary_cost, 0)) > 0.000001
+   OR COALESCE(c.llm_call_count, -1) <> COALESCE(s.summary_llm_calls, -1)
+ORDER BY ABS(COALESCE(c.call_cost, 0) - COALESCE(s.summary_cost, 0)) DESC
+LIMIT 50;

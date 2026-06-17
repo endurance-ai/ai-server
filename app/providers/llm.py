@@ -46,6 +46,14 @@ class LLMProvider:
     ) -> dict[str, Any]:
         """OpenAI-호환 chat completion."""
         client = cls.get_client()
+        try:
+            from app.observability.turn_cost import langfuse_metadata
+
+            metadata = {**langfuse_metadata(), **(kwargs.get("metadata") or {})}
+            if metadata:
+                kwargs["metadata"] = metadata
+        except Exception:  # noqa: BLE001 ??observability must never block
+            pass
         resp = await client.post(
             "/v1/chat/completions",
             json={
@@ -61,7 +69,7 @@ class LLMProvider:
         try:
             from app.observability.turn_cost import accumulate_raw
 
-            accumulate_raw(model, data.get("usage") or {})
+            accumulate_raw(model, data.get("usage") or {}, response=data)
         except Exception:  # noqa: BLE001 — observability must never block
             pass
         return data

@@ -9,6 +9,7 @@ fallback cases (REQ-OBS-FALLBACK-001 / REQ-OBS-FALLBACK-002).
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 from collections.abc import Awaitable, Callable
@@ -31,6 +32,11 @@ R = TypeVar("R")
 
 _ENABLED = bool(settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY)
 _SELECTIVE_MODE = bool(getattr(settings, "LANGFUSE_SELECTIVE_MODE", False))
+_TRACE_EVENTS: contextvars.ContextVar[list[dict[str, Any]]] = contextvars.ContextVar(
+    "kiko_langfuse_trace_events",
+    default=[],
+)
+_TRACE_EVENT_LIMIT = 80
 
 # REQ-OBS-COST-002 — when selective mode is on, decoration of these nodes
 # collapses to no-op even when Langfuse is enabled.
@@ -119,6 +125,137 @@ def update_current_trace(metadata: dict[str, Any] | None = None, **kwargs: Any) 
     try:
         client = _lf_get_client()
         client.update_current_trace(metadata=metadata, **kwargs)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def reset_trace_story() -> None:
+    """Clear per-turn conversation breadcrumbs for the current async context."""
+    _TRACE_EVENTS.set([])
+
+
+def _safe_preview(text: Any, *, limit: int = 160) -> str | None:
+    if text is None:
+        return None
+    value = str(text).replace("\n", " ").strip()
+    if not value:
+        return None
+    return value[:limit]
+
+
+def _summarize_trace_payload(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Build a compact, Langfuse-friendly event summary.
+
+    The conversation event table remains the full analytics log. Langfuse gets
+    only operator-facing breadcrumbs so a trace is readable without opening DB
+    rows. Keep this intentionally small to avoid metadata bloat.
+    """
+    if event_type == "user_text":
+        return {
+            "text": _safe_preview(payload.get("text")),
+            "lang": payload.get("lang_detected"),
+        }
+    if event_type == "user_photo":
+        return {
+            "has_image": bool(payload.get("attachment_id") or payload.get("image_url")),
+            "caption": _safe_preview(payload.get("caption"), limit=100),
+        }
+    if event_type == "user_callback":
+        return {"callback": _safe_preview(payload.get("callback_data"), limit=80)}
+    if event_type == "intent_routed":
+        return {
+            "intent": payload.get("intent"),
+            "critique": _safe_preview(payload.get("critique_delta_summary"), limit=100),
+        }
+    if event_type == "vision_done":
+        items = payload.get("items") or []
+        return {
+            "style": payload.get("style") or payload.get("style_node_primary"),
+            "mood": (payload.get("mood") or [])[:3],
+            "palette": (payload.get("palette") or [])[:3],
+            "items": len(items) if isinstance(items, list) else None,
+            "error": _safe_preview(payload.get("error"), limit=80),
+        }
+    if event_type == "pick_item_done":
+        candidates = payload.get("candidate_items") or []
+        return {
+            "picked_index": payload.get("picked_index"),
+            "auto": payload.get("auto_picked"),
+            "candidates": len(candidates) if isinstance(candidates, list) else None,
+        }
+    if event_type == "search_done":
+        return {
+            "query_keys": sorted((payload.get("query") or {}).keys())[:12]
+            if isinstance(payload.get("query"), dict)
+            else None,
+            "products": len(payload.get("top_k_product_ids") or []),
+            "dense": payload.get("dense_count"),
+            "sparse": payload.get("sparse_count"),
+        }
+    if event_type == "card_sent":
+        return {
+            "product_id": payload.get("product_id"),
+            "position": payload.get("position"),
+            "ok": payload.get("send_ok"),
+        }
+    if event_type == "bot_text":
+        return {
+            "text": _safe_preview(payload.get("chunk_text")),
+            "chunk": payload.get("chunk_index"),
+            "chunks": payload.get("total_chunks"),
+            "flow": payload.get("flow"),
+        }
+    if event_type == "tool_call":
+        return {
+            "tool": payload.get("tool_name"),
+            "iter": payload.get("iteration_no"),
+            "latency_ms": payload.get("latency_ms"),
+            "error": _safe_preview(payload.get("error"), limit=80),
+        }
+    if event_type == "llm_call":
+        return {
+            "model": payload.get("model"),
+            "tokens": payload.get("total_tokens"),
+            "cost_usd": payload.get("cost_usd"),
+            "cost_source": payload.get("cost_source"),
+        }
+    if event_type == "turn_summary":
+        return {
+            "status": payload.get("status"),
+            "exit": payload.get("exit_reason"),
+            "tokens": payload.get("total_tokens"),
+            "cost_usd": payload.get("cost_usd"),
+            "llm_calls": payload.get("llm_call_count"),
+        }
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            out[key] = _safe_preview(value, limit=100) if isinstance(value, str) else value
+        if len(out) >= 6:
+            break
+    return out
+
+
+def add_trace_event(event_type: str, payload: dict[str, Any]) -> None:
+    """Append one compact conversation breadcrumb to the active Langfuse trace."""
+    try:
+        current = list(_TRACE_EVENTS.get())
+        event = {
+            "idx": len(current) + 1,
+            "type": event_type,
+            **{k: v for k, v in _summarize_trace_payload(event_type, payload).items() if v is not None},
+        }
+        current.append(event)
+        if len(current) > _TRACE_EVENT_LIMIT:
+            current = current[-_TRACE_EVENT_LIMIT:]
+        _TRACE_EVENTS.set(current)
+        update_current_trace(
+            metadata={
+                "conversation_flow": current,
+                "conversation_last_event": event,
+                "conversation_event_count": len(current),
+            }
+        )
     except Exception:  # noqa: BLE001
         pass
 

@@ -40,7 +40,7 @@ from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
 
 from app.channels._jsonable import to_jsonable
-from app.observability.langfuse import current_langfuse_trace_id
+from app.observability.langfuse import add_trace_event, current_langfuse_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -402,6 +402,11 @@ def emit(
             exc=exc,
         )
         return
+
+    try:
+        add_trace_event(event_type, truncated)
+    except Exception:  # noqa: BLE001
+        pass
 
     try:
         loop = asyncio.get_running_loop()
