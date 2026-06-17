@@ -1054,7 +1054,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         last_reason = "llm_timeout"
         for attempt in range(llm_max_retries + 1):
             try:
-                ai_msg = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout)
+                try:
+                    from app.observability.turn_cost import langfuse_metadata
+
+                    llm_config = {"metadata": langfuse_metadata()}
+                except Exception:  # noqa: BLE001
+                    llm_config = None
+                ai_msg = await asyncio.wait_for(llm.ainvoke(messages, config=llm_config), timeout=llm_timeout)
                 break
             except (TimeoutError, Exception) as exc:  # noqa: BLE001
                 last_exc = exc
@@ -1512,6 +1518,8 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             cost_usd = turn["cost_usd"]
             cache_read_tokens = turn["cache_read_tokens"]
             turn_total_tokens = turn["total_tokens"]
+            turn_id = turn.get("turn_id")
+            llm_calls = turn.get("calls") or []
 
             rec_id = current_langfuse_trace_id()
 
@@ -1528,15 +1536,20 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             update_current_span(metadata=span_meta)
 
             trace_meta: dict = {"total_tokens": turn_total_tokens or total_tokens}
+            if turn_id:
+                trace_meta["turn_id"] = turn_id
             if cost_usd > 0:
                 trace_meta["cost_usd"] = round(cost_usd, 8)
                 trace_meta["cache_read_tokens"] = cache_read_tokens
+                trace_meta["llm_call_count"] = len(llm_calls)
             update_current_trace(metadata=trace_meta)
 
             payload: dict = {
                 "rec_id": rec_id,
+                "turn_id": turn_id,
                 "iter_count": iter_count,
                 "total_tokens": turn_total_tokens or total_tokens,
+                "llm_call_count": len(llm_calls),
                 "tool_sequence": tool_sequence,
                 "status": status,
                 "exit_reason": exit_reason,

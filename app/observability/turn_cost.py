@@ -21,7 +21,9 @@ parallel requests cannot cross-contaminate each other.
 from __future__ import annotations
 
 import contextvars
+from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 # keys: input_tokens, output_tokens, cache_read_tokens, total_tokens, cost_usd
 _TurnState = dict
@@ -34,6 +36,12 @@ _ZERO: _TurnState = {
     "cache_read_tokens": 0,
     "total_tokens": 0,
     "cost_usd": 0.0,
+    "calls": [],
+    "turn_id": None,
+    "user_key": None,
+    "chat_id": None,
+    "thread_id": None,
+    "turn_no": None,
 }
 
 # Cost per million tokens (USD).  First substring match wins — order matters.
@@ -67,15 +75,95 @@ def _calc(inp: int, out: int, cr: int, cc: int, r: dict[str, float]) -> float:
     return (plain_inp * r["input"] + out * r["output"] + cr * r["cache_read"] + cc * r["cache_creation"]) / 1_000_000
 
 
+def _extract_response_cost(data: Mapping[str, Any]) -> float | None:
+    """Return provider/proxy supplied USD cost when LiteLLM includes it."""
+    candidates = [
+        data.get("response_cost"),
+        data.get("cost"),
+        (data.get("_hidden_params") or {}).get("response_cost"),
+        (data.get("_hidden_params") or {}).get("cost"),
+    ]
+    for value in candidates:
+        try:
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _record_call(
+    *,
+    source: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_creation_tokens: int,
+    total_tokens: int,
+    cost_usd: float,
+    cost_source: str,
+) -> None:
+    s = _state.get()
+    call = {
+        "turn_id": s.get("turn_id"),
+        "source": source,
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_creation_tokens": cache_creation_tokens,
+        "total_tokens": total_tokens,
+        "cost_usd": round(cost_usd, 10),
+        "cost_source": cost_source,
+    }
+    s["calls"].append(call)
+
+    if not s.get("user_key") or not s.get("chat_id"):
+        return
+    try:
+        from app.observability.conversation_log import emit
+        from app.observability.langfuse import current_langfuse_trace_id
+
+        trace_id = current_langfuse_trace_id()
+        if trace_id:
+            call["langfuse_trace"] = trace_id
+        emit(
+            event_type="llm_call",
+            user_key=str(s["user_key"]),
+            chat_id=int(s["chat_id"]),
+            thread_id=s.get("thread_id"),
+            turn_no=s.get("turn_no"),
+            payload=call,
+            langfuse_trace=trace_id,
+        )
+    except Exception:
+        pass
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def reset_turn() -> None:
+def reset_turn(
+    *,
+    turn_id: str | None = None,
+    user_key: str | None = None,
+    chat_id: int | None = None,
+    thread_id: UUID | None = None,
+    turn_no: int | None = None,
+) -> None:
     """Initialize a fresh accumulator for the current async context.
 
     Must be called once per webhook turn before any LLM calls.
     """
-    _state.set(dict(_ZERO))
+    state = dict(_ZERO)
+    state["calls"] = []
+    state["turn_id"] = turn_id
+    state["user_key"] = user_key
+    state["chat_id"] = chat_id
+    state["thread_id"] = thread_id
+    state["turn_no"] = turn_no
+    _state.set(state)
 
 
 def get_turn_totals() -> _TurnState:
@@ -89,7 +177,28 @@ def get_turn_totals() -> _TurnState:
         return dict(_ZERO)
 
 
-def accumulate_raw(model: str, usage: dict[str, Any]) -> None:
+def get_turn_context() -> dict[str, Any]:
+    """Return identifiers attached to the current turn accumulator."""
+    try:
+        s = _state.get()
+    except LookupError:
+        return {}
+    return {
+        "turn_id": s.get("turn_id"),
+        "user_key": s.get("user_key"),
+        "chat_id": s.get("chat_id"),
+        "thread_id": s.get("thread_id"),
+        "turn_no": s.get("turn_no"),
+    }
+
+
+def langfuse_metadata() -> dict[str, Any]:
+    """Small metadata dict safe to attach to LiteLLM/Langfuse calls."""
+    ctx = get_turn_context()
+    return {k: v for k, v in ctx.items() if k in {"turn_id"} and v is not None}
+
+
+def accumulate_raw(model: str, usage: dict[str, Any], *, response: dict[str, Any] | None = None) -> None:
     """Accumulate cost from a raw LiteLLM/OpenAI response ``usage`` dict.
 
     Handles both naming conventions:
@@ -114,9 +223,26 @@ def accumulate_raw(model: str, usage: dict[str, Any]) -> None:
     s["cache_read_tokens"] += cr
     s["total_tokens"] += inp + out
 
+    response_cost = _extract_response_cost(response or {})
+    cost_source = "litellm" if response_cost is not None else "fallback_rates"
+    cost = response_cost or 0.0
     r = _rates(model)
-    if r:
-        s["cost_usd"] += _calc(inp, out, cr, cc, r)
+    if response_cost is None and r:
+        cost = _calc(inp, out, cr, cc, r)
+    if response_cost is None and r is None:
+        cost_source = "unknown_model"
+    s["cost_usd"] += cost
+    _record_call(
+        source="raw",
+        model=model,
+        input_tokens=inp,
+        output_tokens=out,
+        cache_read_tokens=cr,
+        cache_creation_tokens=cc,
+        total_tokens=inp + out,
+        cost_usd=cost,
+        cost_source=cost_source,
+    )
 
 
 def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
@@ -147,5 +273,16 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
     s["total_tokens"] += total
 
     r = _rates(model)
-    if r:
-        s["cost_usd"] += _calc(inp, out, cr, cc, r)
+    cost = _calc(inp, out, cr, cc, r) if r else 0.0
+    s["cost_usd"] += cost
+    _record_call(
+        source="langchain",
+        model=model,
+        input_tokens=inp,
+        output_tokens=out,
+        cache_read_tokens=cr,
+        cache_creation_tokens=cc,
+        total_tokens=total,
+        cost_usd=cost,
+        cost_source="fallback_rates" if r else "unknown_model",
+    )

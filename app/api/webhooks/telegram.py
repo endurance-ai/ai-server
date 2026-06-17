@@ -345,9 +345,18 @@ async def _invoke_graph(
     non-callback path seeds them fresh). Per-node emits read `state.thread_id`
     / `state.turn_no` to maintain a single conversation thread across Updates.
     """
+    from app.observability.langfuse import reset_trace_story
     from app.observability.turn_cost import reset_turn
 
-    reset_turn()
+    turn_id = f"{thread_id}:{turn_no}"
+    reset_trace_story()
+    reset_turn(
+        turn_id=turn_id,
+        user_key=user_key_for(message.from_user_id, message.chat_id),
+        chat_id=message.chat_id,
+        thread_id=thread_id,
+        turn_no=turn_no,
+    )
     token = set_adapter(adapter)
     try:
         # SPEC-DAILY-TOKEN-CAP-001 — gate before invoking the graph.
@@ -525,6 +534,7 @@ async def _invoke_graph(
                 "chat_id_hash": session_id,
                 "channel": "telegram",
                 "graph": "fashion_bot",
+                "turn_id": turn_id,
             },
         )
         handler = build_callback_handler(
@@ -534,12 +544,15 @@ async def _invoke_graph(
                 "channel": "telegram",
                 "graph": "fashion_bot",
                 "flow": flow,
+                "turn_id": turn_id,
             },
         )
         callbacks = [handler] if handler is not None else []
         await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
     finally:
         reset_adapter(token)
+        reset_turn()
+        reset_trace_story()
 
 
 async def _run_graph_safe(
