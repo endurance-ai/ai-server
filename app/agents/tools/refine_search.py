@@ -63,6 +63,38 @@ def _as_keyword_list(v: object) -> list[str]:
 _as_keyword_list_for_test = _as_keyword_list
 
 
+def _dedup_join(base_query: str, boost: list[str]) -> str:
+    """B15 — join `base_query` + `boost` keywords with case-insensitive
+    token dedup. Order from base_query is preserved (it's the canonical
+    product query); new boost tokens are appended only when not already
+    present. Whitespace-normalised.
+
+    Examples:
+      base="wide jeans women roomy", boost=["roomy"]
+        → "wide jeans women roomy"           (no dup)
+      base="black blazer", boost=["cropped", "side-button"]
+        → "black blazer cropped side-button"
+      base="", boost=["red", "dress"]
+        → "red dress"
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for tok in (base_query or "").split():
+        key = tok.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tok)
+    for kw in boost:
+        for tok in str(kw).split():
+            key = tok.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(tok)
+    return " ".join(out).strip()
+
+
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
     # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — refine 도 같은 "search" 멘트
     # ("잠시만요, …찾아볼게요"). search_products 와 동일 ctx marker 키
@@ -108,7 +140,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
-    text_query = " ".join([base_query, *boost]).strip() or "fashion"
+    # B15 — dedup tokens (case-insensitive, order-preserving). Without this,
+    # chained refines accumulate the same token over and over (Langfuse trace
+    # 66e78b7e: "wide jeans women roomy roomy roomy"). base_query order is
+    # semantically meaningful so we walk it first, then append only
+    # boost tokens not already present.
+    text_query = _dedup_join(base_query, boost) or "fashion"
 
     # 260522: persist the refined query so a CHAINED refine reuses it (and
     # ctx so an in-turn respond/refine sees it). Mirrors search_products.
