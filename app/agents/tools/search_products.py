@@ -882,6 +882,23 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)
 
+    # B22 — wire `boost_keywords` / `exclude_keywords` into the dispatch.
+    # Both fields are advertised in the SearchProductsArgs schema since the
+    # 2026-05-16 V2 ReAct rollout (e21f746) but `search_products` never
+    # actually read them — silently dropping the LLM's signal. Beta trace
+    # 499840bb (09:22 73e5c867): LLM correctly extracted boost=["stomper
+    # chunky heavy"] from the user's "발렌시아가 스톰퍼" reference, and the
+    # dispatch threw it away → the embedding lost the brand cue entirely and
+    # results felt generic. Now the boost is merged into text_query using
+    # the same dedup-join helper `refine_search` uses (B15) so chained
+    # signals don't accumulate the same token.
+    from app.agents.tools._keyword_utils import as_keyword_list, dedup_join
+
+    boost = as_keyword_list(args.get("boost_keywords"))
+    if boost:
+        text_query = dedup_join(text_query, boost)
+    exclude_kw = as_keyword_list(args.get("exclude_keywords"))
+
     # A non-empty text_query alone is sufficient. Only a turn with neither a
     # query nor a usable image is unanswerable.
     if not text_query and not has_image:
@@ -1070,6 +1087,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting
     # (flag-gated; OFF → cands unchanged → V2 byte-identical).
     cands = apply_dislike_discount(ctx, cands)
+
+    # B22 — `exclude_keywords` (LLM-supplied) thin client-side filter, parity
+    # with refine_search. Drops candidates whose `title` or `name` contains
+    # any excluded token (case-insensitive). Handles both Candidate objects
+    # and raw dicts so it works across the pipeline shapes.
+    if exclude_kw:
+        ek = {k.lower() for k in exclude_kw}
+
+        def _title_of(c: Any) -> str:
+            if isinstance(c, dict):
+                return str(c.get("title") or c.get("name") or "")
+            return str(getattr(c, "title", None) or getattr(c, "name", "") or "")
+
+        cands = [c for c in cands if not any(k in _title_of(c).lower() for k in ek)]
 
     # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
     # ranking + dislike discount so cosine ordering is preserved.
