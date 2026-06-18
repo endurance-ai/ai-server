@@ -134,6 +134,80 @@ def _query_gender(text_query: str) -> str | None:
     return None
 
 
+# B23 — explicit gender signals in the user's raw message (KO + EN). Covers
+# direct words ("여자/남자/men/women") AND the "silent inference" pronouns
+# already documented in the system prompt ("남편/아빠/엄마/for him/for her").
+# When the LLM's text_query carries a gender token but the user's current
+# message has NONE of these signals, the LLM likely hallucinated and the
+# pinned `taste_profile.gender` (set on a prior turn via the gender card)
+# should win.
+_USER_MEN_SIGNALS = (
+    "남자",
+    "남성",
+    "아빠",
+    "남편",
+    "남친",
+    "남자친구",
+    "men ",
+    " men",
+    "men's",
+    "man ",
+    " man",
+    "male",
+    "boyfriend",
+    "for him",
+    "for my dad",
+    "for my husband",
+)
+_USER_WOMEN_SIGNALS = (
+    "여자",
+    "여성",
+    "엄마",
+    "와이프",
+    "여친",
+    "여자친구",
+    "아내",
+    "women ",
+    " women",
+    "women's",
+    "woman ",
+    " woman",
+    "female",
+    "girlfriend",
+    "for her",
+    "for my mom",
+)
+
+
+def _user_text_gender_signal(raw_text: str | None) -> str | None:
+    """Detect an EXPLICIT gender signal in the user's raw message.
+
+    Mirrors the "Silent gender inference" rules in the system prompt so the
+    runtime auto-correct stays aligned with what the LLM is taught.
+    """
+    if not raw_text:
+        return None
+    t = f" {raw_text.lower()} "  # pad for whole-word boundaries
+    for s in _USER_MEN_SIGNALS:
+        if s in t:
+            return "men"
+    for s in _USER_WOMEN_SIGNALS:
+        if s in t:
+            return "women"
+    return None
+
+
+def _swap_gender_token(text_query: str, old: str, new: str) -> str:
+    """Replace the gender token in `text_query` (case-insensitive, whole-word)
+    without touching incidental substring matches. Trailing/leading spaces
+    normalised."""
+    if not text_query or not old or old == new:
+        return text_query
+    parts = text_query.split()
+    out = [new if p.lower() == old.lower() else p for p in parts]
+    return " ".join(out)
+
+
 def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
     """Render a `pipeline_failed:` suffix from an exception (review P1-C 260522).
 
@@ -897,6 +971,25 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # one falls back to 'unisex' so the pick flow is not interrupted.
     if text_query:
         explicit_gender = _query_gender(text_query)
+        # B23 — guard against LLM hallucinating a gender that contradicts the
+        # user's pinned profile when the CURRENT user message gave no signal.
+        # Beta trace 499840bb: female user → LLM injected "men" on a follow-up
+        # turn that had no gender word. The pinned taste_profile MUST win in
+        # that exact shape (silent user + LLM gender + contradicting pin).
+        if explicit_gender is not None:
+            user_signal = _user_text_gender_signal(ctx.get("text_query"))
+            if user_signal is None:
+                pinned = _lookup_profile_gender(ctx)
+                if pinned and pinned != explicit_gender:
+                    logger.info(
+                        "🎭 [gender] override LLM=%s → pinned=%s (no user signal in raw msg)",
+                        explicit_gender,
+                        pinned,
+                    )
+                    text_query = _swap_gender_token(text_query, explicit_gender, pinned)
+                    explicit_gender = pinned
+            # else: user explicitly signalled gender → trust LLM verbatim
+            #       (per-request override semantics preserved).
         if explicit_gender is None:
             pinned = _lookup_profile_gender(ctx)
             if pinned:
