@@ -326,6 +326,52 @@ def _log_legacy(result: VisionResult, elapsed_ms: int) -> None:
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
+async def _predownload_image(url: str) -> bytes | None:
+    """B26 — pre-download an image URL to bytes so the Vision LLM never has
+    to fetch it server-side.
+
+    Pinterest's CDN (pinimg.com) returns 403 to many cloud-egress IPs (incl.
+    AWS Bedrock servers), so when we pass a pinimg URL straight through to
+    Sonnet 4.5, every Vision call dies with `BedrockException - Client
+    error '403 Forbidden' for url 'https://i.pinimg.com/...'` and falls
+    through to `_fallback_result()` (isApparel=False, items=[]). With Haiku
+    we previously got away with it because LiteLLM pre-downloaded for that
+    model — this helper makes the behaviour explicit and model-independent.
+
+    Returns `None` on any failure (timeout / 4xx / 5xx / non-image content)
+    so the caller can fall back to URL passthrough.
+    """
+    try:
+        import httpx
+    except Exception:  # noqa: BLE001
+        return None
+    # Browser-like UA so the CDN treats us as a normal client rather than a
+    # cloud egress bot. Referer scoping kept blank — Pinterest CDN doesn't
+    # require it for image fetches and a wrong referer can backfire.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            logger.info("👁️  [VISION] predownload %d for %s", resp.status_code, url[:80])
+            return None
+        ct = (resp.headers.get("content-type") or "").lower()
+        if not ct.startswith("image/"):
+            logger.info("👁️  [VISION] predownload non-image ct=%s url=%s", ct, url[:80])
+            return None
+        return resp.content
+    except Exception as exc:  # noqa: BLE001 — best-effort: never block Vision
+        logger.info("👁️  [VISION] predownload failed: %s", exc)
+        return None
+
+
 @observe(name="vision_extract")
 async def extract(image: str | bytes) -> VisionResult:
     """Run the Vision LLM and return a `VisionResult`.
@@ -334,6 +380,17 @@ async def extract(image: str | bytes) -> VisionResult:
     (REQ-VISION-COMPAT-004). Schema is selected by `VISION_SCHEMA_V2`
     (REQ-VISION-COMPAT-005).
     """
+    # B26 — when the caller passes an http(s) URL, pre-download to bytes so
+    # the Vision LLM (esp. Bedrock Sonnet) doesn't have to fetch the URL
+    # itself. Pinterest CDN 403s many cloud-egress IPs → without this every
+    # Pinterest Vision call silently fell to `_fallback_result()`.
+    if isinstance(image, str) and image.startswith(("http://", "https://")):
+        downloaded = await _predownload_image(image)
+        if downloaded is not None:
+            image = downloaded
+        # else: pre-download failed → fall through with the URL, let the LLM
+        # try (cheaper than blocking the whole turn on our outbound HTTP).
+
     if isinstance(image, bytes):
         b64 = base64.b64encode(image).decode("ascii")
         image_url_value = f"data:image/jpeg;base64,{b64}"
