@@ -323,8 +323,80 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
     # per turn on whichever entry completes the turn.
     _set_trace_io(ctx, text, cards_sent)
 
+    # B6 — when the user's pick was multi-select ("2,4번"), pick_item
+    # processed the first index and stashed the rest in
+    # `sess.pending_pick_indices`. Now that the active item's cards are
+    # delivered, offer a follow-up: "4번도 이어서 보여줄까?" with a one-tap
+    # `item:N` button so the user doesn't have to retype.
+    if cards_sent > 0:
+        try:
+            await _maybe_send_pending_pick_followup(adapter, chat_id)
+        except Exception:  # noqa: BLE001 — never fail the dispatch on follow-up issues
+            logger.debug("[tool.respond] pending pick follow-up best-effort skip")
+
     ctx[_DONE_KEY] = True
     return RespondResult(ok=True, error=None, text_sent=text_sent, cards_sent=cards_sent)
+
+
+async def _maybe_send_pending_pick_followup(adapter: Any, chat_id: int) -> None:
+    """B6 — offer a one-tap follow-up for the leftover indices the user
+    mentioned in a multi-select reply. No-op when there's nothing pending.
+    Clears the pending list so we don't ask again on the next `cards:more`
+    pager tap."""
+    from app.channels.lang import session_lang
+    from app.infrastructure.memory.session import get_store
+
+    store = get_store()
+    sess = store.get_or_create(int(chat_id))
+    pending = list(getattr(sess, "pending_pick_indices", None) or [])
+    if not pending:
+        return
+
+    items = list(sess.detected_items or [])
+    lang = session_lang(sess)
+    # Build "4번 / 4번이랑 5번 / #4 / #4 and #5" depending on count.
+    labels = [str(p + 1) for p in pending]
+    if lang == "ko":
+        if len(labels) == 1:
+            phrase = f"{labels[0]}번"
+        elif len(labels) == 2:
+            phrase = f"{labels[0]}번이랑 {labels[1]}번"
+        else:
+            phrase = ", ".join(f"{n}번" for n in labels[:-1]) + f"이랑 {labels[-1]}번"
+        body = f"{phrase}도 이어서 보여줄까? 🐱"
+    else:
+        if len(labels) == 1:
+            phrase = f"#{labels[0]}"
+        elif len(labels) == 2:
+            phrase = f"#{labels[0]} and #{labels[1]}"
+        else:
+            phrase = ", ".join(f"#{n}" for n in labels[:-1]) + f" and #{labels[-1]}"
+        body = f"Want me to do {phrase} too? 🐱"
+
+    # Inline keyboard: one button per pending index (item:N callback reuses
+    # the existing pick_item path). Cap at 3 rows for mobile readability.
+    buttons: list[list[tuple[str, str]]] = []
+    for n in pending[:3]:
+        if 0 <= n < len(items):
+            label_src = items[n].get("label") or items[n].get("name") or f"item-{n + 1}"
+        else:
+            label_src = f"item-{n + 1}"
+        if lang == "ko":
+            label = f"👀 {n + 1}번 — {label_src}"
+        else:
+            label = f"👀 #{n + 1} — {label_src}"
+        if len(label) > 40:
+            label = label[:39].rstrip() + "…"
+        buttons.append([(label, f"item:{n}")])
+
+    try:
+        if hasattr(adapter, "send_text_with_keyboard") and buttons:
+            await adapter.send_text_with_keyboard(chat_id, body, buttons)
+        else:
+            await adapter.send_text(chat_id, body)
+    finally:
+        sess.pending_pick_indices = []
+        store.update(sess)
 
 
 def _candidate_field(c: Any, key: str, default: Any = "") -> Any:

@@ -16,6 +16,7 @@ the existing scenario.py behavior (REQ-COMPAT-*).
 from __future__ import annotations
 
 import logging
+import re
 
 from app.channels.lang import session_lang
 from app.channels.vision import derive_legacy_keywords, derive_legacy_label
@@ -45,6 +46,80 @@ NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
 # Picker button label cap — Telegram's hard limit is 256 chars but the
 # practical mobile-readable cap is ~40. Truncated labels get a trailing "…".
 _LABEL_CAP = 40
+
+# B6 — KO ordinal words mapped to 1-based positions ("첫번째" / "둘째" / etc).
+_KO_ORDINALS = {
+    "첫": 1,
+    "첫번째": 1,
+    "첫째": 1,
+    "일": 1,
+    "두번째": 2,
+    "둘째": 2,
+    "이": 2,
+    "세번째": 3,
+    "셋째": 3,
+    "삼": 3,
+    "네번째": 4,
+    "넷째": 4,
+    "사": 4,
+    "다섯번째": 5,
+    "다섯째": 5,
+    "오": 5,
+}
+_EN_ORDINALS = {
+    "first": 1,
+    "1st": 1,
+    "second": 2,
+    "2nd": 2,
+    "third": 3,
+    "3rd": 3,
+    "fourth": 4,
+    "4th": 4,
+    "fifth": 5,
+    "5th": 5,
+}
+
+
+def _parse_indices_from_text(text: str, max_index: int) -> list[int]:
+    """B6 — extract 0-based item indices from a natural-language reply.
+
+    Accepts:
+      "2"             → [1]
+      "2번"           → [1]
+      "2, 4번"        → [1, 3]
+      "1과 3"         → [0, 2]
+      "1번이랑 3번"    → [0, 2]
+      "두번째"        → [1]
+      "first one"     → [0]
+
+    Returns an EMPTY list when nothing parseable is found. Callers decide
+    whether to re-send the picker or auto-pick the first parsed index.
+    """
+    if not text:
+        return []
+    t = text.strip().lower()
+    # 1-based positions to dedupe while preserving order.
+    found: list[int] = []
+    # (1) explicit digits — also catches "2,4번", "1번이랑 3번", "1 and 3".
+    for m in re.finditer(r"\d+", t):
+        try:
+            n = int(m.group(0))
+        except ValueError:
+            continue
+        if 1 <= n <= max_index and n not in found:
+            found.append(n)
+    # (2) ordinal words (only when no digit was found — otherwise digits win).
+    if not found:
+        for word, n in _KO_ORDINALS.items():
+            if word in t and 1 <= n <= max_index and n not in found:
+                found.append(n)
+                break
+        for word, n in _EN_ORDINALS.items():
+            if word in t and 1 <= n <= max_index and n not in found:
+                found.append(n)
+                break
+    # 1-based → 0-based.
+    return [i - 1 for i in found]
 
 
 def _ko_label(it: dict) -> str:
@@ -202,6 +277,68 @@ async def pick_item(state: WorkingState) -> dict:
             "log_events": breadcrumbs,
             "turn_no": 4,
         }
+
+    # ── B6: Text-digit pick path (e.g. "2", "2번", "2,4번", "두번째") ──────
+    # Triggered when state is AWAITING_ITEM_PICK and the user typed a textual
+    # answer instead of tapping the inline keyboard. Pre-fix this fell through
+    # to the carousel-send path and re-displayed the picker, ignoring the
+    # user's reply entirely.
+    items_for_text = sess.detected_items or state.detected_items
+    if msg.text and sess.state == SessionState.AWAITING_ITEM_PICK and items_for_text:
+        parsed = _parse_indices_from_text(msg.text, max_index=len(items_for_text))
+        if parsed:
+            idx = parsed[0]
+            multi_select = len(parsed) > 1
+            # Apply the same selection bookkeeping the callback path does.
+            item = items_for_text[idx]
+            sess.selected_item_index = idx
+            rich_item = None
+            if sess.vision_result is not None:
+                try:
+                    rich_items = list(sess.vision_result.items)
+                    if 0 <= idx < len(rich_items):
+                        rich_item = rich_items[idx]
+                except Exception:  # noqa: BLE001
+                    rich_item = None
+            if rich_item is not None:
+                sess.vision_selected_item_index = idx
+                sess.vision_item = derive_legacy_label(rich_item) or "item"
+                sess.vision_keywords = derive_legacy_keywords(rich_item)
+            else:
+                sess.vision_item = item.get("label") or "item"
+                sess.vision_keywords = list(item.get("keywords") or [])
+            sess.state = SessionState.AWAITING_INTENT
+            # B6 — stash the remaining indices so `respond` can offer a
+            # follow-up button AFTER the active item's cards are delivered.
+            # New flow: ack "찾는 중" → cards → "4번도 이어서 보여줄까?".
+            sess.pending_pick_indices = list(parsed[1:]) if multi_select else []
+            get_store().update(sess)
+
+            # Pre-search ack — short status, no question. The question moves
+            # to AFTER card delivery (respond tool) so the user isn't asked
+            # something while cards are still loading.
+            if multi_select:
+                try:
+                    adapter = get_adapter()
+                    lang = session_lang(sess)
+                    note = f"{idx + 1}번 먼저 찾는 중 🐱" if lang == "ko" else f"Looking for #{idx + 1} first 🐱"
+                    await adapter.send_text(state.chat_id, note)
+                except Exception:  # noqa: BLE001
+                    logger.debug("[pick_item] multi-select ack send best-effort skip")
+
+            breadcrumbs.append(f"pick_item: text-picked idx={idx} parsed={parsed} multi={multi_select}")
+            _emit_pick_item_done(state, items=items_for_text, picked_index=idx, auto_picked=False)
+            node_done("pick_item", picked_idx=idx, label=sess.vision_item, source="text")
+            return {
+                "selected_item_index": idx,
+                "detected_items": items_for_text,
+                "vision_selected_item": rich_item,
+                "log_events": breadcrumbs,
+                "turn_no": 4,
+            }
+        # No parseable digit/ordinal → fall through to re-send the picker
+        # with a gentle nudge.
+        breadcrumbs.append("pick_item: text reply didn't match any index → re-prompt")
 
     # ── Carousel-send path ─────────────────────────────────────────────────
     items = state.detected_items or sess.detected_items

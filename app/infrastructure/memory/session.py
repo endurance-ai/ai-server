@@ -90,6 +90,11 @@ class Session:
     # removed with the onboarding subgraph; their PG columns are kept
     # physically (no destructive migration) and simply no longer read/written.
     onboarded_at: datetime | None = None
+    # B6 — leftover indices from a multi-select text reply (e.g. user typed
+    # "2,4번"). The first index is processed normally; the rest live here so
+    # `respond` can offer a follow-up button ("4번도 이어서 보여줄까?") AFTER
+    # the cards land. Cleared once the follow-up is sent (or on a new turn).
+    pending_pick_indices: list[int] = field(default_factory=list)
 
 
 class SessionStore(Protocol):
