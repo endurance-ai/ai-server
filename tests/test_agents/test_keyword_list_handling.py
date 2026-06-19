@@ -13,7 +13,7 @@ C. search_products writes LLM-supplied (English) text_query into ctx so a
 from __future__ import annotations
 
 from app.agents.tool_registry import validate_args
-from app.agents.tools.refine_search import _as_keyword_list_for_test  # type: ignore[attr-defined]
+from app.agents.tools.refine_search import _as_keyword_list_for_test, _dedup_join  # type: ignore[attr-defined]
 
 # ─── A: defensive cast — _as_keyword_list ─────────────────────────────────
 
@@ -85,3 +85,35 @@ def test_validate_passes_when_keyword_fields_absent():
     ok, err = validate_args("refine_search", {})
     assert ok is True
     assert err is None
+
+
+# ─── B15: token dedup on refine ───────────────────────────────────────────
+
+
+def test_dedup_join_drops_duplicate_boost_token():
+    """Beta trace 66e78b7e — last_query already contained 'roomy', LLM
+    added boost=['roomy'] and the next refine appended again. Three
+    'roomy' tokens ended up in the embedded query."""
+    assert _dedup_join("wide jeans women roomy", ["roomy"]) == "wide jeans women roomy"
+
+
+def test_dedup_join_case_insensitive():
+    assert _dedup_join("Black Blazer", ["black", "BLAZER", "cropped"]) == "Black Blazer cropped"
+
+
+def test_dedup_join_multi_word_boost_split_and_dedup():
+    # Each boost entry is whitespace-split; tokens already in base drop.
+    assert _dedup_join("black wool blazer", ["wool oversized"]) == "black wool blazer oversized"
+
+
+def test_dedup_join_empty_base_uses_boost_only():
+    assert _dedup_join("", ["red", "dress"]) == "red dress"
+
+
+def test_dedup_join_preserves_base_order():
+    assert _dedup_join("a b c d", ["b", "e", "c"]) == "a b c d e"
+
+
+def test_dedup_join_all_empty_returns_empty_string():
+    assert _dedup_join("", []) == ""
+    assert _dedup_join("   ", []) == ""

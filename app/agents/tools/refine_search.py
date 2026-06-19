@@ -16,6 +16,8 @@ import logging
 from typing import Any
 
 from app.agents.tool_registry import RefineSearchResult
+from app.agents.tools._keyword_utils import as_keyword_list as _as_keyword_list
+from app.agents.tools._keyword_utils import dedup_join as _dedup_join
 from app.agents.tools.search_products import (
     _candidate_to_dict,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     _is_real_image_url,
@@ -29,34 +31,6 @@ from app.agents.tools.search_products import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _as_keyword_list(v: object) -> list[str]:
-    """Defensive cast for refine_search list args.
-
-    `validate_args` already rejects non-list `boost_keywords` /
-    `exclude_keywords` upstream (B), but if anything slips through (test
-    monkeypatch, future tool added with a different shape), naive
-    `list(some_string)` explodes a single keyword string into per-character
-    tokens (["t","-","s","h","i","r","t"]) that then contaminate the
-    embedded query. This belt-and-suspenders cast keeps the embed input
-    well-formed regardless of upstream validation state.
-
-    Mapping:
-      None / empty / whitespace-only → []
-      single string → [string.strip()]
-      list/tuple → [str(x) for each truthy x]
-      anything else → []
-    """
-    if v is None:
-        return []
-    if isinstance(v, str):
-        s = v.strip()
-        return [s] if s else []
-    if isinstance(v, (list, tuple)):
-        return [str(x) for x in v if x]
-    return []
-
 
 # Test seam — import alias so tests can reference the helper without a
 # module-internal underscore prefix concern.
@@ -108,7 +82,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
-    text_query = " ".join([base_query, *boost]).strip() or "fashion"
+    # B15 — dedup tokens (case-insensitive, order-preserving). Without this,
+    # chained refines accumulate the same token over and over (Langfuse trace
+    # 66e78b7e: "wide jeans women roomy roomy roomy"). base_query order is
+    # semantically meaningful so we walk it first, then append only
+    # boost tokens not already present.
+    text_query = _dedup_join(base_query, boost) or "fashion"
 
     # 260522: persist the refined query so a CHAINED refine reuses it (and
     # ctx so an in-turn respond/refine sees it). Mirrors search_products.
