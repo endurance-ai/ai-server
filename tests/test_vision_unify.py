@@ -254,6 +254,134 @@ class TestMultiLookRetry:
         assert len(result.items) == 1
 
 
+# ── B26 — image pre-download to bypass cloud-egress 403 (pinimg) ────────────
+
+
+class TestImagePreDownload:
+    """When the LLM is hosted on a cloud platform (Bedrock) whose IPs are
+    blocked by Pinterest CDN, the Vision call dies with 403. Pre-downloading
+    the image to bytes from THIS server gives the LLM a data URL it can
+    process inline — no server-side fetch from the LLM host."""
+
+    @pytest.mark.asyncio
+    async def test_url_input_is_predownloaded_to_bytes(self, monkeypatch):
+        """The Vision LLM receives a `data:image/jpeg;base64,…` URL (not the
+        original pinimg URL) when pre-download succeeds — proves the URL
+        never reaches the model's outbound fetcher."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        # Stub the HTTP client used by `_predownload_image` to return image
+        # bytes for the pinimg URL.
+        class _FakeResp:
+            status_code = 200
+            headers = {"content-type": "image/jpeg"}
+            content = b"\xff\xd8\xffFAKEJPEG"
+
+        class _FakeClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                return _FakeResp()
+
+        monkeypatch.setattr("httpx.AsyncClient", _FakeClient)
+
+        captured = {}
+
+        async def _chat(*, model, messages, temperature, max_tokens):
+            # `messages[1]["content"][1]["image_url"]["url"]` is what the
+            # Vision LLM actually sees as the image input.
+            captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
+            return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        await extract("https://i.pinimg.com/originals/ab/61/68/ab61682114846b266ed1a982f9ed5422.jpg")
+        # The Vision LLM saw a base64 data URL, NOT the original pinimg URL.
+        assert captured["image_url"].startswith("data:image/jpeg;base64,")
+        assert "i.pinimg.com" not in captured["image_url"]
+
+    @pytest.mark.asyncio
+    async def test_predownload_failure_falls_through_to_url(self, monkeypatch):
+        """When pre-download fails (timeout / non-image / network error), the
+        original URL falls through so the Vision call still gets a shot — the
+        fail-open contract is preserved."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        class _RaisingClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                raise RuntimeError("network down")
+
+        monkeypatch.setattr("httpx.AsyncClient", _RaisingClient)
+
+        captured = {}
+
+        async def _chat(*, model, messages, temperature, max_tokens):
+            captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
+            return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        url = "https://i.pinimg.com/originals/ab/61/68/something.jpg"
+        await extract(url)
+        # Pre-download blew up → the original URL was passed through.
+        assert captured["image_url"] == url
+
+    @pytest.mark.asyncio
+    async def test_predownload_skipped_for_data_url(self, monkeypatch):
+        """Data URLs (already inline bytes from direct uploads) MUST NOT be
+        re-fetched — the URL itself is the payload."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        get_calls = []
+
+        class _Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                get_calls.append(url)
+                raise RuntimeError("should not be called")
+
+        monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+        async def _chat(*, model, messages, temperature, max_tokens):
+            return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        data_url = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASA=="
+        await extract(data_url)
+        assert get_calls == []  # no HTTP fetch attempted
+
+
 # ── REQ-VISION-UNIFY-003 — parity max_tokens / temperature / timeout ──────
 
 
