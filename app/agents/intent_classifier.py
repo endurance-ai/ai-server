@@ -235,7 +235,9 @@ async def _default_litellm_call(*, model: str, messages: list[dict[str, Any]]) -
     """Production LiteLLM call. Kept thin so tests can swap it out."""
     from app.providers.llm import LLMProvider
 
-    data = await LLMProvider.chat(model=model, messages=messages, temperature=0.0, max_tokens=200)
+    data = await LLMProvider.chat(
+        model=model, messages=messages, temperature=0.0, max_tokens=200, source="intent_classifier"
+    )
     return data["choices"][0]["message"]["content"]
 
 

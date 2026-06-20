@@ -42,9 +42,15 @@ class LLMProvider:
         messages: list[dict[str, Any]],
         temperature: float = 0.3,
         max_tokens: int = 1000,
+        *,
+        source: str = "raw",
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """OpenAI-호환 chat completion."""
+        """OpenAI-호환 chat completion.
+
+        ``source`` labels the call-site (vision / evaluator / router / ...) for
+        the per-call-site cost attribution in turn_cost (`llm_call` rows).
+        """
         client = cls.get_client()
         try:
             from app.observability.turn_cost import langfuse_metadata
@@ -69,7 +75,7 @@ class LLMProvider:
         try:
             from app.observability.turn_cost import accumulate_raw
 
-            accumulate_raw(model, data.get("usage") or {}, response=data)
+            accumulate_raw(model, data.get("usage") or {}, response=data, source=source)
         except Exception:  # noqa: BLE001 — observability must never block
             pass
         return data

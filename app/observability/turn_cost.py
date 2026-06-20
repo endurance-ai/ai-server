@@ -95,6 +95,7 @@ def _extract_response_cost(data: Mapping[str, Any]) -> float | None:
 def _record_call(
     *,
     source: str,
+    transport: str,
     model: str,
     input_tokens: int,
     output_tokens: int,
@@ -107,7 +108,11 @@ def _record_call(
     s = _state.get()
     call = {
         "turn_id": s.get("turn_id"),
+        # `source` = the call-site (vision / evaluator / intent_classifier / ...)
+        # so each `llm_call` row is attributable to where the spend originated.
+        # `transport` = raw HTTP vs LangChain (kept for debugging).
         "source": source,
+        "transport": transport,
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -198,7 +203,9 @@ def langfuse_metadata() -> dict[str, Any]:
     return {k: v for k, v in ctx.items() if k in {"turn_id"} and v is not None}
 
 
-def accumulate_raw(model: str, usage: dict[str, Any], *, response: dict[str, Any] | None = None) -> None:
+def accumulate_raw(
+    model: str, usage: dict[str, Any], *, response: dict[str, Any] | None = None, source: str = "raw"
+) -> None:
     """Accumulate cost from a raw LiteLLM/OpenAI response ``usage`` dict.
 
     Handles both naming conventions:
@@ -206,6 +213,10 @@ def accumulate_raw(model: str, usage: dict[str, Any], *, response: dict[str, Any
     - Anthropic: input_tokens / output_tokens
     - OpenAI cached: prompt_tokens_details.cached_tokens
     - Anthropic cached: cache_read_input_tokens / cache_creation_input_tokens
+
+    ``source`` labels the call-site (e.g. "vision", "intent_classifier") so the
+    emitted ``llm_call`` row identifies where the spend came from. Defaults to
+    the transport name when a caller does not specify one.
     """
     try:
         s = _state.get()
@@ -233,7 +244,8 @@ def accumulate_raw(model: str, usage: dict[str, Any], *, response: dict[str, Any
         cost_source = "unknown_model"
     s["cost_usd"] += cost
     _record_call(
-        source="raw",
+        source=source,
+        transport="raw",
         model=model,
         input_tokens=inp,
         output_tokens=out,
@@ -245,7 +257,7 @@ def accumulate_raw(model: str, usage: dict[str, Any], *, response: dict[str, Any
     )
 
 
-def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
+def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "langchain") -> None:
     """Accumulate cost from a LangChain ``AIMessage.usage_metadata`` dict.
 
     LangChain normalises Bedrock/Anthropic responses to use
@@ -254,6 +266,8 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
     - Anthropic convention: ``cache_read_input_tokens`` (top-level)
     - LangChain >=0.3 / Bedrock nova: ``input_token_details.cache_read``
     Both are checked so neither is missed.
+
+    ``source`` labels the call-site (e.g. "react_loop", "ask_clarify").
     """
     try:
         s = _state.get()
@@ -276,7 +290,8 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any]) -> None:
     cost = _calc(inp, out, cr, cc, r) if r else 0.0
     s["cost_usd"] += cost
     _record_call(
-        source="langchain",
+        source=source,
+        transport="langchain",
         model=model,
         input_tokens=inp,
         output_tokens=out,

@@ -190,7 +190,7 @@ async def _legacy_text_path(state: WorkingState) -> dict:
             from app.observability.turn_cost import accumulate_lc
 
             if getattr(result, "usage_metadata", None):
-                accumulate_lc(settings.RESPONSE_MODEL, result.usage_metadata)
+                accumulate_lc(settings.RESPONSE_MODEL, result.usage_metadata, source="ask_clarify")
         except Exception:  # noqa: BLE001
             pass
         content = getattr(result, "content", None)

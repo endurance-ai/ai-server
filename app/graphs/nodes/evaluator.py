@@ -112,6 +112,7 @@ async def _call_llm(prompt_user: str) -> CritiqueScore:
                 temperature=settings.EVALUATOR_TEMPERATURE,
                 max_tokens=settings.EVALUATOR_MAX_TOKENS,
                 response_format={"type": "json_object"},
+                source="evaluator",
             ),
             timeout=timeout_s,
         )
