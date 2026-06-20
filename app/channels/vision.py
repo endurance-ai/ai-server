@@ -326,39 +326,48 @@ def _log_legacy(result: VisionResult, elapsed_ms: int) -> None:
 # ── Public API ──────────────────────────────────────────────────────────────
 
 
-async def _predownload_image(url: str) -> bytes | None:
-    """B26 — pre-download an image URL to bytes so the Vision LLM never has
-    to fetch it server-side.
+_PREDOWNLOAD_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+}
 
-    Pinterest's CDN (pinimg.com) returns 403 to many cloud-egress IPs (incl.
-    AWS Bedrock servers), so when we pass a pinimg URL straight through to
-    Sonnet 4.5, every Vision call dies with `BedrockException - Client
-    error '403 Forbidden' for url 'https://i.pinimg.com/...'` and falls
-    through to `_fallback_result()` (isApparel=False, items=[]). With Haiku
-    we previously got away with it because LiteLLM pre-downloaded for that
-    model — this helper makes the behaviour explicit and model-independent.
 
-    Returns `None` on any failure (timeout / 4xx / 5xx / non-image content)
-    so the caller can fall back to URL passthrough.
+def _pinimg_resolution_fallbacks(url: str) -> list[str]:
+    """Return progressively-smaller pinimg variants when the originals URL is gone.
+
+    Pinterest stores pre-rendered resolution variants (`/736x/`, `/236x/`,
+    etc.) as separate S3 objects. The originals master is sometimes missing
+    or revoked (retention/takedown/permission change) while the smaller
+    variants the web/app actually displays remain live — leading to a 403 on
+    `/originals/<hash>.jpg` that `_predownload_image` would otherwise give
+    up on. `_pinterest_originals()` in `link_resolver.py` rewrites every
+    pinimg URL to `/originals/`, so we have to undo that here on miss.
+
+    Returns the variant URLs to try in order (largest → smallest). Empty list
+    when `url` isn't a pinimg /originals/ URL — non-pinimg URLs and already-
+    sized variants pass through unchanged.
     """
+    if "i.pinimg.com/originals/" not in url and "pinimg.com/originals/" not in url:
+        return []
+    return [
+        url.replace("/originals/", "/736x/"),
+        url.replace("/originals/", "/236x/"),
+    ]
+
+
+async def _fetch_image_bytes(url: str) -> bytes | None:
+    """Single HTTP attempt — returns bytes on 200 image/*, else None (logged)."""
     try:
         import httpx
     except Exception:  # noqa: BLE001
         return None
-    # Browser-like UA so the CDN treats us as a normal client rather than a
-    # cloud egress bot. Referer scoping kept blank — Pinterest CDN doesn't
-    # require it for image fetches and a wrong referer can backfire.
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/123.0.0.0 Safari/537.36"
-        ),
-        "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
-    }
     try:
         async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
+            resp = await client.get(url, headers=_PREDOWNLOAD_HEADERS)
         if resp.status_code != 200:
             logger.info("👁️  [VISION] predownload %d for %s", resp.status_code, url[:80])
             return None
@@ -370,6 +379,33 @@ async def _predownload_image(url: str) -> bytes | None:
     except Exception as exc:  # noqa: BLE001 — best-effort: never block Vision
         logger.info("👁️  [VISION] predownload failed: %s", exc)
         return None
+
+
+async def _predownload_image(url: str) -> bytes | None:
+    """B26 — pre-download an image URL to bytes so the Vision LLM never has
+    to fetch it server-side.
+
+    Browser-like UA so the CDN treats us as a normal client rather than a
+    cloud egress bot. Referer scoping kept blank — Pinterest CDN doesn't
+    require it for image fetches and a wrong referer can backfire.
+
+    On failure, retries pinimg `/originals/` URLs with `/736x/` → `/236x/`
+    variants (B26 follow-up): originals frequently 403 at the Akamai origin
+    while the pre-rendered variants — the ones Pinterest's own web/app
+    serve users — stay live. 736px is plenty for Vision LLM analysis.
+
+    Returns `None` only after exhausting fallbacks, so the caller can fall
+    back to URL passthrough.
+    """
+    bytes_ = await _fetch_image_bytes(url)
+    if bytes_ is not None:
+        return bytes_
+    for fallback in _pinimg_resolution_fallbacks(url):
+        bytes_ = await _fetch_image_bytes(fallback)
+        if bytes_ is not None:
+            logger.info("👁️  [VISION] predownload fallback ok: %s", fallback[:80])
+            return bytes_
+    return None
 
 
 @observe(name="vision_extract")

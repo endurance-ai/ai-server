@@ -381,6 +381,108 @@ class TestImagePreDownload:
         await extract(data_url)
         assert get_calls == []  # no HTTP fetch attempted
 
+    @pytest.mark.asyncio
+    async def test_pinimg_originals_403_falls_back_to_736x(self, monkeypatch):
+        """B26 follow-up — when the pinimg `/originals/` master is gone (S3
+        403 at Akamai cache miss), retry with the pre-rendered `/736x/`
+        variant (the one Pinterest's own web/app serve users). Real-world
+        regression: pin hash 04ea953da... had originals=403 but 736x=200,
+        178KB, content-type image/jpeg."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        class _Resp403:
+            status_code = 403
+            headers = {"content-type": "application/xml"}
+            content = b""
+
+        class _Resp200:
+            status_code = 200
+            headers = {"content-type": "image/jpeg"}
+            content = b"\xff\xd8\xffFAKEJPEG736X"
+
+        requested: list[str] = []
+
+        class _Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                requested.append(url)
+                return _Resp200() if "/736x/" in url else _Resp403()
+
+        monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+        captured = {}
+
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
+            captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
+            return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        await extract("https://i.pinimg.com/originals/04/ea/95/04ea953da5f67e51f57debe4dfb7b375.jpg")
+
+        # The originals URL was tried first, then /736x/ on 403.
+        assert any("/originals/" in u for u in requested)
+        assert any("/736x/" in u for u in requested)
+        # The LLM received the 736x bytes inline as base64.
+        assert captured["image_url"].startswith("data:image/jpeg;base64,")
+        assert "i.pinimg.com" not in captured["image_url"]
+
+    @pytest.mark.asyncio
+    async def test_non_pinimg_url_does_not_attempt_fallbacks(self, monkeypatch):
+        """The fallback chain MUST only apply to pinimg URLs — generic URLs
+        that 403 should fall through to URL passthrough immediately, not
+        thrash with `/736x/` rewrites that make no sense for other hosts."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "VISION_SCHEMA_V2", True)
+
+        requested: list[str] = []
+
+        class _Resp403:
+            status_code = 403
+            headers = {"content-type": "text/plain"}
+            content = b""
+
+        class _Client:
+            def __init__(self, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                requested.append(url)
+                return _Resp403()
+
+        monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+        captured = {}
+
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
+            captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
+            return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
+
+        monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
+
+        url = "https://example.com/photo.jpg"
+        await extract(url)
+
+        assert requested == [url]  # exactly one attempt, no fallback rewrites
+        assert captured["image_url"] == url  # URL passthrough preserved
+
 
 # ── REQ-VISION-UNIFY-003 — parity max_tokens / temperature / timeout ──────
 
