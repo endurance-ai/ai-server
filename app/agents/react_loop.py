@@ -1100,7 +1100,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             cumulative_tokens += int(um.get("total_tokens", 0) or 0)
             from app.observability.turn_cost import accumulate_lc
 
-            accumulate_lc(_agent_model, um)
+            accumulate_lc(_agent_model, um, source="react_loop")
         except Exception:  # noqa: BLE001
             pass
 
@@ -1504,14 +1504,17 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 update_current_span,
                 update_current_trace,
             )
-            from app.observability.turn_cost import get_turn_totals
+            from app.observability.turn_cost import get_turn_totals, mark_summary_emitted
 
             # get_turn_totals() captures the full turn cost: Vision + Reflexion
-            # evaluator + all ReAct iterations — not just the ReAct loop.
+            # evaluator + intent classifier + all ReAct iterations — not just the
+            # ReAct loop. by_source gives the per-call-site breakdown.
             turn = get_turn_totals()
             cost_usd = turn["cost_usd"]
             cache_read_tokens = turn["cache_read_tokens"]
+            cache_creation_tokens = turn.get("cache_creation_tokens", 0)
             turn_total_tokens = turn["total_tokens"]
+            by_source = turn.get("by_source") or {}
 
             rec_id = current_langfuse_trace_id()
 
@@ -1544,6 +1547,8 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
             if cost_usd > 0:
                 payload["cost_usd"] = round(cost_usd, 8)
                 payload["cache_read_tokens"] = cache_read_tokens
+                payload["cache_creation_tokens"] = cache_creation_tokens
+                payload["by_source"] = by_source
             emit(
                 event_type="turn_summary",
                 user_key=user_key_for(state.from_user_id, state.chat_id),
@@ -1552,5 +1557,8 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 turn_no=1,
                 payload=payload,
             )
+            # Mark so the webhook-level fallback emit does not write a 2nd cost
+            # row for this (agent-path) turn (audit finding #2).
+            mark_summary_emitted()
         except Exception:  # noqa: BLE001 — observability is best-effort
             logger.debug("[react_loop] turn_summary emit best-effort skip", exc_info=True)

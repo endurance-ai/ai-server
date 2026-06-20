@@ -141,6 +141,13 @@ async def rewrite_query(req: RewriteRequest) -> RewriteResponse:
     usage = getattr(ai_msg, "usage_metadata", None) or {}
     response_meta = getattr(ai_msg, "response_metadata", None) or {}
     finish_reason = response_meta.get("finish_reason") if isinstance(response_meta, dict) else None
+    # Attribute admin-endpoint LLM usage too (no-op unless a turn frame exists).
+    try:
+        from app.observability.turn_cost import accumulate_lc
+
+        accumulate_lc(chosen_model, usage, source="debug")
+    except Exception:  # noqa: BLE001 — observability must never block
+        pass
 
     return RewriteResponse(
         ok=True,

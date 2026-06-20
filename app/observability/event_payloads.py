@@ -19,7 +19,7 @@ pyright 단계에서만 잡힌다. payload sanitize / truncation 은 `conversati
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 __all__ = [
     "UserTextPayload",
@@ -248,6 +248,18 @@ class TurnSummaryPayload(TypedDict, total=False):
     iter_count: int
     status: Literal["responded", "stuck", "error"]
     exit_reason: str | None
+    # Cost accounting (audit: total-cost tracking). `cost_usd` is the full-turn
+    # USD cost across every LLM call (vision + intent + evaluator + react + ...).
+    # `by_source` carries the per-call-site breakdown so each expenditure is
+    # individually identifiable. `total_tokens` / `cache_read_tokens` /
+    # `cache_creation_tokens` are turn-wide token counts. `tool_sequence` is the
+    # ordered tool names for ReAct turns (absent on non-agent paths).
+    total_tokens: int
+    tool_sequence: list[str]
+    cost_usd: float
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    by_source: dict[str, Any]
 
 
 # 22. cap_reached — SPEC-DAILY-TOKEN-CAP-001.

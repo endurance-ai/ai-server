@@ -222,6 +222,7 @@ async def route_text(text: str, state: SessionState, last_results: list[Any]) ->
                 temperature=0.1,
                 max_tokens=settings.ROUTER_MAX_TOKENS,
                 response_format={"type": "json_object"},
+                source="router",
             ),
             timeout=timeout_s,
         )

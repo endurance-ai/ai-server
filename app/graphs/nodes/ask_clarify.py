@@ -186,6 +186,13 @@ async def _legacy_text_path(state: WorkingState) -> dict:
             ]
         )
         result = await asyncio.wait_for(coro, timeout=max(0.1, settings.RESPONSE_TIMEOUT_MS / 1000.0))
+        # Audit finding #3: this direct ChatOpenAI call bypassed the accumulator.
+        try:
+            from app.observability.turn_cost import accumulate_lc
+
+            accumulate_lc(settings.RESPONSE_MODEL, getattr(result, "usage_metadata", None) or {}, source="ask_clarify")
+        except Exception:  # noqa: BLE001 — observability must never block
+            pass
         content = getattr(result, "content", None)
         if isinstance(content, str) and content.strip():
             text = content.strip()[:600]

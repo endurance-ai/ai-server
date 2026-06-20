@@ -42,9 +42,15 @@ class LLMProvider:
         messages: list[dict[str, Any]],
         temperature: float = 0.3,
         max_tokens: int = 1000,
+        *,
+        source: str = "unknown",
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """OpenAI-호환 chat completion."""
+        """OpenAI-호환 chat completion.
+
+        ``source`` labels the call-site (vision / evaluator / router / ...) for
+        the per-source cost breakdown in turn_cost.
+        """
         client = cls.get_client()
         resp = await client.post(
             "/v1/chat/completions",
@@ -61,7 +67,10 @@ class LLMProvider:
         try:
             from app.observability.turn_cost import accumulate_raw
 
-            accumulate_raw(model, data.get("usage") or {})
+            # Prefer the actually-routed model from the response (LiteLLM may map
+            # an alias to a different model) — fall back to the requested name.
+            actual_model = data.get("model") or model
+            accumulate_raw(actual_model, data.get("usage") or {}, source=source)
         except Exception:  # noqa: BLE001 — observability must never block
             pass
         return data

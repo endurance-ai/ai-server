@@ -247,6 +247,14 @@ async def _default_litellm_call(*, model: str, messages: list[dict[str, Any]]) -
     )
     resp.raise_for_status()
     payload = resp.json()
+    # Audit finding #1: this raw-httpx path bypassed the turn cost accumulator.
+    # Attribute its usage so refine-turn intent classification is not dropped.
+    try:
+        from app.observability.turn_cost import accumulate_raw
+
+        accumulate_raw(payload.get("model") or model, payload.get("usage") or {}, source="intent_classifier")
+    except Exception:  # noqa: BLE001 — observability must never block
+        pass
     return payload["choices"][0]["message"]["content"]
 
 

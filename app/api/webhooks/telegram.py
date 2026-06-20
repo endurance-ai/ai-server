@@ -539,6 +539,36 @@ async def _invoke_graph(
         callbacks = [handler] if handler is not None else []
         await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
     finally:
+        # Audit finding #2: cost is persisted in run_react_loop's finally, but
+        # non-agent terminal paths (pick_item → __end__, ask_clarify → END, …)
+        # never reach it — their accrued LLM cost (e.g. Vision) would be lost.
+        # Emit a turn_summary fallback here for any turn that spent money but
+        # whose react loop did not already write a row.
+        try:
+            from app.observability.turn_cost import get_turn_totals
+
+            turn = get_turn_totals()
+            if turn["cost_usd"] > 0 and not turn.get("summary_emitted"):
+                payload: dict = {
+                    "rec_id": None,
+                    "status": "responded",
+                    "exit_reason": "no_agent_path",
+                    "total_tokens": turn["total_tokens"],
+                    "cost_usd": round(turn["cost_usd"], 8),
+                    "cache_read_tokens": turn["cache_read_tokens"],
+                    "cache_creation_tokens": turn.get("cache_creation_tokens", 0),
+                    "by_source": turn.get("by_source") or {},
+                }
+                emit(
+                    event_type="turn_summary",
+                    user_key=user_key_for(message.from_user_id, message.chat_id),
+                    chat_id=message.chat_id,
+                    thread_id=thread_id,
+                    turn_no=turn_no,
+                    payload=payload,
+                )
+        except Exception:  # noqa: BLE001 — observability must never block
+            logger.debug("[webhook] turn_summary fallback emit best-effort skip", exc_info=True)
         reset_adapter(token)
 
 
