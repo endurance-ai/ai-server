@@ -63,7 +63,7 @@ if _ENABLED:
 
         _lf_observe = _lf_observe_v3
         _lf_get_client = _lf_get_client_v3
-    except ImportError:
+    except Exception:  # noqa: BLE001 — covers ImportError + pydantic.v1 ConfigError on Py3.14+
         logger.error(
             "🐱 [langfuse] v3 SDK import failed — tracing disabled (install `langfuse>=3,<4`)",
             exc_info=True,

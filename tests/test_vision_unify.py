@@ -209,7 +209,7 @@ class TestMultiLookRetry:
             '"position": {"top": 30, "left": 50}}]}'
         )
 
-        async def _chat(*, model, messages, temperature, max_tokens):
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
             calls.append(messages[1]["content"][0]["text"])
             if len(calls) == 1:
                 return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
@@ -243,7 +243,7 @@ class TestMultiLookRetry:
             '"position": {"top": 30, "left": 50}}]}'
         )
 
-        async def _chat(*, model, messages, temperature, max_tokens):
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
             calls.append(1)
             return {"choices": [{"message": {"content": good_payload}}]}
 
@@ -296,7 +296,7 @@ class TestImagePreDownload:
 
         captured = {}
 
-        async def _chat(*, model, messages, temperature, max_tokens):
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
             # `messages[1]["content"][1]["image_url"]["url"]` is what the
             # Vision LLM actually sees as the image input.
             captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
@@ -335,7 +335,7 @@ class TestImagePreDownload:
 
         captured = {}
 
-        async def _chat(*, model, messages, temperature, max_tokens):
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
             captured["image_url"] = messages[1]["content"][1]["image_url"]["url"]
             return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
 
@@ -372,7 +372,7 @@ class TestImagePreDownload:
 
         monkeypatch.setattr("httpx.AsyncClient", _Client)
 
-        async def _chat(*, model, messages, temperature, max_tokens):
+        async def _chat(*, model, messages, temperature, max_tokens, **kwargs):
             return {"choices": [{"message": {"content": '{"isApparel": false, "items": []}'}}]}
 
         monkeypatch.setattr("app.channels.vision.LLMProvider.chat", _chat)
@@ -390,7 +390,7 @@ class TestExtractParameters:
     async def test_v2_uses_2500_max_tokens_and_temp_0_3(self, monkeypatch):
         captured = {}
 
-        async def _capture(*, model, messages, temperature, max_tokens):
+        async def _capture(*, model, messages, temperature, max_tokens, **kwargs):
             captured["model"] = model
             captured["temperature"] = temperature
             captured["max_tokens"] = max_tokens
@@ -420,7 +420,7 @@ class TestSchemaV2Flag:
     async def test_v2_off_uses_legacy_prompt_and_params(self, monkeypatch):
         captured = {}
 
-        async def _capture(*, model, messages, temperature, max_tokens):
+        async def _capture(*, model, messages, temperature, max_tokens, **kwargs):
             captured["temperature"] = temperature
             captured["max_tokens"] = max_tokens
             captured["system"] = messages[0]["content"]

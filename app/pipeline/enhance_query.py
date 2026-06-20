@@ -146,6 +146,7 @@ async def enhance_query_step(state: PipelineState) -> PipelineState:
                     temperature=settings.ENHANCE_QUERY_TEMPERATURE,
                     max_tokens=settings.ENHANCE_QUERY_MAX_TOKENS,
                     response_format={"type": "json_object"},
+                    source="enhance_query",
                 ),
                 timeout=timeout_s,
             )

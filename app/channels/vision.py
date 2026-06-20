@@ -419,6 +419,7 @@ async def extract(image: str | bytes) -> VisionResult:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                source="vision",
             ),
             timeout=timeout_s,
         )
@@ -466,6 +467,7 @@ async def extract(image: str | bytes) -> VisionResult:
                         messages=retry_messages,
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        source="vision",
                     ),
                     timeout=timeout_s,
                 )

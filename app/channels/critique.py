@@ -152,6 +152,7 @@ async def parse_text(text: str, last_results: list[Any]) -> CritiqueDelta:
                 temperature=0.1,
                 max_tokens=settings.ROUTER_MAX_TOKENS,
                 response_format={"type": "json_object"},
+                source="critique",
             ),
             timeout=timeout_s,
         )
