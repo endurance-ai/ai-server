@@ -86,8 +86,15 @@ async def test_emit_never_raises_on_bad_payload():
     await asyncio.sleep(0)
 
 
-def test_emit_no_running_loop_falls_back_to_stderr(capsys):
-    """When called from sync context with no running loop → stderr JSON line."""
+def test_emit_no_running_loop_falls_back_to_stderr(capsys, monkeypatch):
+    """When called from sync context with no running loop AND no pool loop → stderr JSON line.
+
+    pool_loop 이 있으면 run_coroutine_threadsafe 경로로 처리되므로 stderr 출력이 없다.
+    pool 미초기화 상태를 강제해 no_event_loop 분기를 검증한다.
+    """
+    import app.providers.db_pool as _db_pool
+
+    monkeypatch.setattr(_db_pool, "_loop", None)
     emit(
         event_type="user_text",
         user_key="u:99",

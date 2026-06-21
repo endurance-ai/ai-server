@@ -85,6 +85,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 ## Claude 작업 규칙
 
 - **커밋 전 필수**: `uv run ruff check . && uv run ruff format --check .` → `uv run pytest` 순서로 실행. 모두 통과한 뒤 커밋.
+- **PR 올리기 전 필수**: 커밋 후에도 반드시 `uv run pytest` 를 실행해 전체 테스트가 통과하는지 확인한 뒤 PR 생성. 테스트 미확인 상태로 PR 올리지 않는다.
 - 기존부터 실패하던 테스트(Windows 인코딩/경로 이슈 등)는 별도 확인 후 PR 설명에 명시.
 
 ## 코딩 컨벤션
