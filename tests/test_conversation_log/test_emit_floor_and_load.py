@@ -142,10 +142,7 @@ async def test_synthetic_800_emits_lands_in_log_table(
         pending = [t for t in list(_IN_FLIGHT) if not t.done()]
         if not pending:
             break
-        awaitables = [
-            t if isinstance(t, (asyncio.Task, asyncio.Future)) else asyncio.wrap_future(t)
-            for t in pending
-        ]
+        awaitables = [t if isinstance(t, (asyncio.Task, asyncio.Future)) else asyncio.wrap_future(t) for t in pending]
         await asyncio.gather(*awaitables, return_exceptions=True)
         await asyncio.sleep(0.05)
 
