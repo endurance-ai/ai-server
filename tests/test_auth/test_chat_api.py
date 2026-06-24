@@ -22,9 +22,14 @@ async def _login(client: AsyncClient) -> str:
     return f"Bearer {resp.json()['access_token']}"
 
 
-def _parse_sse(text: str) -> dict[str, dict]:
-    """Parse SSE stream text into {event_type: last_payload} dict."""
-    events: dict[str, dict] = {}
+def _parse_sse(text: str) -> dict[str, object]:
+    """Parse SSE stream into {event_type: last_payload}.
+
+    text_delta events are accumulated into events["_text"] (str).
+    All other event types store the last seen payload dict.
+    """
+    events: dict[str, object] = {}
+    accumulated_text = ""
     for block in text.strip().split("\n\n"):
         block = block.strip()
         if not block:
@@ -37,7 +42,11 @@ def _parse_sse(text: str) -> dict[str, dict]:
             elif line.startswith("data: "):
                 data = json.loads(line[6:])
         if event_type and data is not None:
-            events[event_type] = data
+            if event_type == "text_delta":
+                accumulated_text += data.get("delta", "")
+            else:
+                events[event_type] = data
+    events["_text"] = accumulated_text
     return events
 
 
@@ -70,7 +79,7 @@ async def test_create_session_returns_reply(client: AsyncClient):
     events = _parse_sse(resp.text)
     assert "session" in events
     UUID(events["session"]["session_id"])  # valid UUID
-    assert events.get("text", {}).get("text") == "Here are some picks!"
+    assert events["_text"] == "Here are some picks!"
     assert "done" in events
 
 

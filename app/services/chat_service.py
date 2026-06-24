@@ -100,7 +100,14 @@ class CaptureAdapter(MessengerAdapter):
 
 
 class StreamingAdapter(MessengerAdapter):
-    """Puts graph outputs into an asyncio.Queue for SSE streaming."""
+    """Puts graph outputs into an asyncio.Queue for SSE streaming.
+
+    send_text streams text in small chunks with a delay to produce a typing effect.
+    Event type `text_delta` carries {"delta": "<chunk>"} — clients accumulate deltas.
+    """
+
+    _CHUNK_SIZE = 3  # characters per text_delta event
+    _CHUNK_DELAY = 0.030  # seconds between chunks (~100 chars/s typing speed)
 
     def __init__(self) -> None:
         self._queue: asyncio.Queue[tuple[str, dict] | object] = asyncio.Queue()
@@ -112,7 +119,11 @@ class StreamingAdapter(MessengerAdapter):
 
     async def send_text(self, chat_id: int, text: str) -> None:
         self._texts.append(text)
-        await self._queue.put(("text", {"text": text}))
+        for i in range(0, len(text), self._CHUNK_SIZE):
+            chunk = text[i : i + self._CHUNK_SIZE]
+            await self._queue.put(("text_delta", {"delta": chunk}))
+            if i + self._CHUNK_SIZE < len(text):
+                await asyncio.sleep(self._CHUNK_DELAY)
 
     async def send_card(self, chat_id: int, card: BotCard) -> int | None:
         self._cards.append(card)
