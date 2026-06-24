@@ -29,6 +29,9 @@ dependencies = [
     "alembic>=1.18.4",
     # SPEC-CHAT-STATE-REDIS-001 — externalize chat-state (pager cursor + impression dedupe) to Redis.
     "redis>=5.0",
+    # SPEC-AUTH-SOCIAL-001 — Google/Apple social login verification
+    "google-auth>=2.29",
+    "python-jose[cryptography]>=3.3",
 ]
 
 [dependency-groups]
