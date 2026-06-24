@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
     SESSION_CLEANUP_INTERVAL_S: int = 300
 
+    # 소비자 소셜 로그인 (SPEC-AUTH-SOCIAL-001)
+    GOOGLE_CLIENT_ID: str = ""  # Google Cloud Console > OAuth 2.0 (iOS type)
+    APPLE_CLIENT_ID: str = ""  # iOS Bundle ID (e.g. com.kiko.app)
+    JWT_SECRET: str = ""  # HS256 signing key (32+ chars). Empty = dev skip.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
     # 보안
     # Next.js → AI 서버 shared secret. 비어있으면 인증 skip (dev). 운영에선 반드시 설정.
     INTERNAL_API_TOKEN: str = ""
