@@ -47,12 +47,21 @@ def _bootstrap(dsn: str) -> None:
 
 
 def _migrate(dsn: str) -> None:
+    import logging
+
     from alembic import command
     from alembic.config import Config
 
     cfg = Config("alembic.ini")
     cfg.set_main_option("sqlalchemy.url", dsn.replace("postgresql://", "postgresql+psycopg://", 1))
     command.upgrade(cfg, "head")
+
+    # alembic.ini's fileConfig runs with disable_existing_loggers=True (the default),
+    # which individually disables every existing logger not listed in alembic.ini.
+    # Re-enable all app.* loggers so caplog-based tests in other modules still work.
+    for name, logger in logging.Logger.manager.loggerDict.items():
+        if name.startswith("app") and isinstance(logger, logging.Logger):
+            logger.disabled = False
 
 
 @pytest_asyncio.fixture
