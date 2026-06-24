@@ -1,7 +1,8 @@
 """FashionSigLIP 로컬 배치 임베딩.
 
-DB의 products 중 embedding이 NULL 인 항목을 모아 로컬 머신에서 FashionSigLIP 으로
-인코딩한 뒤 `bulk_update_product_embeddings` RPC 로 일괄 upsert.
+DB의 products 중 product_embeddings row 가 없는 항목을 모아 로컬 머신에서
+FashionSigLIP 으로 인코딩한 뒤 `bulk_update_product_embeddings` RPC 로 일괄 upsert.
+(v6: product_embeddings 별도 테이블 — products.embedding 컬럼 없음)
 
 Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
 80k 기준 예상 소요:
@@ -23,7 +24,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
 
 환경변수: `.env` 의 `DB_URL` / `DB_TOKEN` 자동 로드.
 
-재실행 안전 — `embedding IS NULL` 만 가져오므로 중단되어도 다음 실행 시 이어서 진행.
+재실행 안전 — product_embeddings anti-join 으로 미임베딩만 조회 (중단 후 이어서 진행 가능).
 """
 
 import argparse
@@ -69,14 +70,18 @@ def load_model(device: str):
 
 
 def fetch_pending(sb, limit: int | None = None) -> list[dict]:
-    """미임베딩 products 페이지네이션 수집."""
+    """미임베딩 products 페이지네이션 수집.
+
+    v6: product_embeddings LEFT JOIN anti-join — products.embedding 컬럼 없음.
+    PostgREST left join: product_embeddings!left(product_id) + is.null 필터.
+    """
     rows: list[dict] = []
     offset = 0
     while True:
         q = (
             sb.table("products")
-            .select("id, images")
-            .is_("embedding", "null")
+            .select("id, images, product_embeddings!left(product_id)")
+            .is_("product_embeddings.product_id", "null")
             .not_.is_("images", "null")
             .range(offset, offset + PAGE_SIZE - 1)
         )
@@ -84,6 +89,9 @@ def fetch_pending(sb, limit: int | None = None) -> list[dict]:
         page = res.data or []
         if not page:
             break
+        # product_embeddings 키 제거 — 이후 로직은 id/images 만 사용
+        for row in page:
+            row.pop("product_embeddings", None)
         rows.extend(page)
         offset += PAGE_SIZE
         if limit and len(rows) >= limit:
