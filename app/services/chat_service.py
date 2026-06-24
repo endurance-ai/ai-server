@@ -1,10 +1,9 @@
 """Consumer chat service — bridges UUID-based user identity to the LangGraph fashion bot.
 
-Strategy: CaptureAdapter
+Strategy: CaptureAdapter (batch) / StreamingAdapter (SSE)
   The existing graph sends responses via MessengerAdapter.send_text / send_card.
-  CaptureAdapter implements the interface but collects responses in-process
-  instead of sending to Telegram. After graph invocation, collected responses
-  are returned to the REST API caller and persisted to ai.chat_messages.
+  CaptureAdapter collects responses in-process for batch return.
+  StreamingAdapter puts events into an asyncio.Queue for SSE streaming.
 
 User identity bridge:
   The graph uses `chat_id: int` for session/taste-profile lookups.
@@ -14,7 +13,9 @@ User identity bridge:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -28,6 +29,8 @@ from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
 
 logger = logging.getLogger(__name__)
+
+_SENTINEL = object()  # signals StreamingAdapter queue is closed
 
 
 def _user_id_to_chat_id(user_id: UUID) -> int:
@@ -84,6 +87,47 @@ class CaptureAdapter(MessengerAdapter):
     async def send_card(self, chat_id: int, card: BotCard) -> int | None:
         self._cards.append(card)
         return 0  # non-None signals success to send_results (no text fallback)
+
+    def get_reply(self) -> BotReply:
+        texts = self._texts[:]
+        closing = texts[-1] if len(texts) > 1 else None
+        main_text = texts[0] if texts else None
+        return BotReply(
+            text=main_text,
+            cards=list(self._cards),
+            closing_text=closing if closing != main_text else None,
+        )
+
+
+class StreamingAdapter(MessengerAdapter):
+    """Puts graph outputs into an asyncio.Queue for SSE streaming."""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[tuple[str, dict] | object] = asyncio.Queue()
+        self._texts: list[str] = []
+        self._cards: list[BotCard] = []
+
+    async def parse_inbound(self, payload: dict) -> ChannelMessage:
+        raise NotImplementedError("StreamingAdapter is send-only")
+
+    async def send_text(self, chat_id: int, text: str) -> None:
+        self._texts.append(text)
+        await self._queue.put(("text", {"text": text}))
+
+    async def send_card(self, chat_id: int, card: BotCard) -> int | None:
+        self._cards.append(card)
+        await self._queue.put(("product", {"image_url": str(card.image_url), "caption": card.caption}))
+        return 0
+
+    def close(self) -> None:
+        self._queue.put_nowait(_SENTINEL)
+
+    async def iter_events(self) -> AsyncGenerator[tuple[str, dict]]:
+        while True:
+            item = await self._queue.get()
+            if item is _SENTINEL:
+                return
+            yield item  # type: ignore[misc]
 
     def get_reply(self) -> BotReply:
         texts = self._texts[:]
@@ -213,3 +257,74 @@ async def invoke(
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
 
     return resolved_session_id, reply
+
+
+async def invoke_streaming(
+    user_id: UUID,
+    text: str,
+    pool: AsyncConnectionPool,
+    session_id: UUID | None = None,
+) -> AsyncGenerator[tuple[str, dict]]:
+    """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
+
+    Event sequence: session → text* → product* → done   (or error on failure)
+    """
+    resolved_session_id = await get_or_create_session(pool, user_id, session_id)
+    await _sync_gender_to_taste_profile(pool, user_id, _user_id_to_chat_id(user_id))
+    await append_message(pool, resolved_session_id, "user", text)
+    await set_session_title(pool, resolved_session_id, text)
+
+    yield "session", {"session_id": str(resolved_session_id)}
+
+    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    message = ChannelMessage(
+        chat_id=synthetic_chat_id,
+        text=text,
+        received_at=datetime.now(UTC),
+    )
+    input_state = InputState(
+        message=message,
+        chat_id=synthetic_chat_id,
+        thread_id=uuid4(),
+        turn_no=0,
+    )
+
+    streaming = StreamingAdapter()
+    graph_exc: BaseException | None = None
+
+    async def _run_graph() -> None:
+        nonlocal graph_exc
+        # set_adapter/reset_adapter must run in the same context (task's own copy).
+        # asyncio.create_task copies the context at creation time; the Token from the
+        # parent context cannot be used to reset a ContextVar inside the task.
+        token = set_adapter(streaming)
+        try:
+            await GRAPH.ainvoke(input_state)
+        except Exception as exc:
+            logger.exception("[chat_service] graph invocation failed user=%s", user_id)
+            graph_exc = exc
+        finally:
+            streaming.close()
+            reset_adapter(token)
+
+    graph_task = asyncio.create_task(_run_graph())
+
+    async for event_type, payload in streaming.iter_events():
+        yield event_type, payload
+
+    await graph_task
+
+    if graph_exc is not None:
+        yield "error", {"detail": "AI response failed"}
+        return
+
+    reply = streaming.get_reply()
+    product_refs = None
+    if reply.cards:
+        product_refs = [{"image_url": str(c.image_url), "caption": c.caption} for c in reply.cards]
+    assistant_content = reply.text or ""
+    if reply.closing_text:
+        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
+    await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
+
+    yield "done", {}

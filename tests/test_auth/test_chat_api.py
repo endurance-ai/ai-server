@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
 
-from app.channels.schemas import BotReply
 from app.core.social_auth.google import GoogleClaims
 
 
@@ -22,21 +22,23 @@ async def _login(client: AsyncClient) -> str:
     return f"Bearer {resp.json()['access_token']}"
 
 
-def _mock_reply(text: str = "Here are some picks!", cards: int = 2) -> BotReply:
-    from pydantic import HttpUrl
-
-    from app.channels.schemas import BotCard
-
-    return BotReply(
-        text=text,
-        cards=[
-            BotCard(
-                image_url=HttpUrl("https://img.kiko.fashion/p1.jpg"),
-                caption=f"Product {i}",
-            )
-            for i in range(cards)
-        ],
-    )
+def _parse_sse(text: str) -> dict[str, dict]:
+    """Parse SSE stream text into {event_type: last_payload} dict."""
+    events: dict[str, dict] = {}
+    for block in text.strip().split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        event_type: str | None = None
+        data: dict | None = None
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                event_type = line[7:]
+            elif line.startswith("data: "):
+                data = json.loads(line[6:])
+        if event_type and data is not None:
+            events[event_type] = data
+    return events
 
 
 # ── POST /chat/sessions ───────────────────────────────────────────────────────
@@ -47,9 +49,7 @@ async def test_create_session_returns_reply(client: AsyncClient):
     auth = await _login(client)
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
-        mock_graph.ainvoke = AsyncMock(return_value=None)
 
-        # CaptureAdapter collects what the "graph" sends — patch send_text via graph side-effect
         async def _fake_invoke(state, **_):
             from app.graphs.nodes._adapter_ctx import get_adapter
 
@@ -57,7 +57,7 @@ async def test_create_session_returns_reply(client: AsyncClient):
             if adapter:
                 await adapter.send_text(state.chat_id, "Here are some picks!")
 
-        mock_graph.ainvoke.side_effect = _fake_invoke
+        mock_graph.ainvoke = AsyncMock(side_effect=_fake_invoke)
 
         resp = await client.post(
             "/chat/sessions",
@@ -66,11 +66,12 @@ async def test_create_session_returns_reply(client: AsyncClient):
         )
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert "session_id" in body
-    assert body["reply_text"] == "Here are some picks!"
-    # Validate session_id is a valid UUID
-    UUID(body["session_id"])
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse(resp.text)
+    assert "session" in events
+    UUID(events["session"]["session_id"])  # valid UUID
+    assert events.get("text", {}).get("text") == "Here are some picks!"
+    assert "done" in events
 
 
 @pytest.mark.asyncio
@@ -106,8 +107,10 @@ async def test_list_sessions_returns_created_sessions(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        await client.post("/chat/sessions", json={"message": "msg 1"}, headers={"Authorization": auth})
-        await client.post("/chat/sessions", json={"message": "msg 2"}, headers={"Authorization": auth})
+        # consume SSE streams fully so sessions are persisted before listing
+        r1 = await client.post("/chat/sessions", json={"message": "msg 1"}, headers={"Authorization": auth})
+        r2 = await client.post("/chat/sessions", json={"message": "msg 2"}, headers={"Authorization": auth})
+    _ = r1.text, r2.text  # ensure streams are fully read
 
     resp = await client.get("/chat/sessions", headers={"Authorization": auth})
     assert resp.status_code == 200
@@ -128,7 +131,8 @@ async def test_get_messages_for_own_session(client: AsyncClient):
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
         create_resp = await client.post("/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth})
 
-    session_id = create_resp.json()["session_id"]
+    events = _parse_sse(create_resp.text)
+    session_id = events["session"]["session_id"]
     resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
 
     assert resp.status_code == 200
@@ -149,7 +153,8 @@ async def test_get_messages_other_user_session_returns_404(client: AsyncClient):
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
         create_resp = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth1})
 
-    session_id = create_resp.json()["session_id"]
+    events = _parse_sse(create_resp.text)
+    session_id = events["session"]["session_id"]
     resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth2})
     assert resp.status_code == 404
 
@@ -169,7 +174,7 @@ async def test_append_message_returns_reply(client: AsyncClient):
         create_resp = await client.post(
             "/chat/sessions", json={"message": "첫 번째 메시지"}, headers={"Authorization": auth}
         )
-        session_id = create_resp.json()["session_id"]
+        session_id = _parse_sse(create_resp.text)["session"]["session_id"]
 
         resp = await client.post(
             f"/chat/sessions/{session_id}/messages",
@@ -178,10 +183,10 @@ async def test_append_message_returns_reply(client: AsyncClient):
         )
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["session_id"] == session_id
-    assert "reply_text" in body
-    assert "products" in body
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse(resp.text)
+    assert events["session"]["session_id"] == session_id
+    assert "done" in events
 
 
 @pytest.mark.asyncio
