@@ -133,13 +133,16 @@ async def social_login(
     if body.provider == "google":
         claims: GoogleClaims | AppleClaims = verify_google_token(body.id_token)
         user_id = await _upsert_user(
-            pool, "google", claims.sub, claims.email, claims.name, claims.picture  # type: ignore[attr-defined]
+            pool,
+            "google",
+            claims.sub,
+            claims.email,
+            claims.name,
+            claims.picture,  # type: ignore[attr-defined]
         )
     elif body.provider == "apple":
         claims = verify_apple_token(body.id_token)
-        user_id = await _upsert_user(
-            pool, "apple", claims.sub, claims.email, None, None
-        )
+        user_id = await _upsert_user(pool, "apple", claims.sub, claims.email, None, None)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

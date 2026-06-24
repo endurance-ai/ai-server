@@ -14,16 +14,18 @@ from app.core.social_auth.google import GoogleClaims
 
 async def _login(client: AsyncClient) -> str:
     """Helper: log in as a Google user, return Authorization header value."""
-    with patch("app.api.auth.verify_google_token", return_value=GoogleClaims(
-        sub=f"sub-{uuid4()}", email="u@test.com", name="User", picture=None
-    )):
+    with patch(
+        "app.api.auth.verify_google_token",
+        return_value=GoogleClaims(sub=f"sub-{uuid4()}", email="u@test.com", name="User", picture=None),
+    ):
         resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
     return f"Bearer {resp.json()['access_token']}"
 
 
 def _mock_reply(text: str = "Here are some picks!", cards: int = 2) -> BotReply:
-    from app.channels.schemas import BotCard
     from pydantic import HttpUrl
+
+    from app.channels.schemas import BotCard
 
     return BotReply(
         text=text,
@@ -46,12 +48,15 @@ async def test_create_session_returns_reply(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(return_value=None)
+
         # CaptureAdapter collects what the "graph" sends — patch send_text via graph side-effect
         async def _fake_invoke(state, **_):
             from app.graphs.nodes._adapter_ctx import get_adapter
+
             adapter = get_adapter()
             if adapter:
                 await adapter.send_text(state.chat_id, "Here are some picks!")
+
         mock_graph.ainvoke.side_effect = _fake_invoke
 
         resp = await client.post(
@@ -121,9 +126,7 @@ async def test_get_messages_for_own_session(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create_resp = await client.post(
-            "/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth}
-        )
+        create_resp = await client.post("/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth})
 
     session_id = create_resp.json()["session_id"]
     resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
@@ -144,9 +147,7 @@ async def test_get_messages_other_user_session_returns_404(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create_resp = await client.post(
-            "/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth1}
-        )
+        create_resp = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth1})
 
     session_id = create_resp.json()["session_id"]
     resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth2})

@@ -91,10 +91,7 @@ async def create_session(
 
     session_id, reply = await chat_service.invoke(user_id, body.message, pool)
 
-    products = [
-        ProductRef(image_url=str(c.image_url), caption=c.caption)
-        for c in reply.cards
-    ]
+    products = [ProductRef(image_url=str(c.image_url), caption=c.caption) for c in reply.cards]
     return ChatResponse(
         session_id=str(session_id),
         reply_text=reply.text,
@@ -123,10 +120,7 @@ async def continue_session(
 
     resolved_id, reply = await chat_service.invoke(user_id, body.message, pool, session_id=session_id)
 
-    products = [
-        ProductRef(image_url=str(c.image_url), caption=c.caption)
-        for c in reply.cards
-    ]
+    products = [ProductRef(image_url=str(c.image_url), caption=c.caption) for c in reply.cards]
     return ChatResponse(
         session_id=str(resolved_id),
         reply_text=reply.text,

@@ -93,9 +93,7 @@ def upgrade() -> None:
     op.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON ai.chat_messages(session_id)")
 
     # Gradual migration: link existing session/profile rows to new user identity
-    op.execute(
-        "ALTER TABLE ai.user_session ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES ai.user_profiles(user_id)"
-    )
+    op.execute("ALTER TABLE ai.user_session ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES ai.user_profiles(user_id)")
     op.execute(
         "ALTER TABLE ai.user_taste_profile ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES ai.user_profiles(user_id)"
     )

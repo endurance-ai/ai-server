@@ -206,10 +206,7 @@ async def invoke(
     # Persist assistant reply
     product_refs = None
     if reply.cards:
-        product_refs = [
-            {"image_url": str(c.image_url), "caption": c.caption}
-            for c in reply.cards
-        ]
+        product_refs = [{"image_url": str(c.image_url), "caption": c.caption} for c in reply.cards]
     assistant_content = reply.text or ""
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
