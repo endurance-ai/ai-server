@@ -1,16 +1,26 @@
 """Consumer chat API (SPEC-AUTH-SOCIAL-001 Phase 1-C).
 
-POST /chat/sessions                        — start new session with first message
-POST /chat/sessions/{session_id}/messages  — continue existing session
+POST /chat/sessions                        — start new session (SSE stream)
+POST /chat/sessions/{session_id}/messages  — continue existing session (SSE stream)
 GET  /chat/sessions                        — list user's sessions
 GET  /chat/sessions/{session_id}/messages  — paginated message history
+
+SSE event sequence for POST endpoints:
+  event: session  data: {"session_id": "<uuid>"}
+  event: text     data: {"text": "<reply text>"}      # 0-N times
+  event: product  data: {"image_url": "...", "caption": "..."}  # 0-N times
+  event: done     data: {}
+  event: error    data: {"detail": "..."}             # on failure
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
@@ -21,6 +31,13 @@ from app.services import chat_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 _bearer = HTTPBearer(auto_error=True)
+
+_SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+async def _to_sse(gen: AsyncGenerator[tuple[str, dict]]) -> AsyncGenerator[str]:
+    async for event_type, payload in gen:
+        yield f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
@@ -79,34 +96,28 @@ class MessageListResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
-@router.post("/sessions", response_model=ChatResponse, status_code=status.HTTP_200_OK)
+@router.post("/sessions", status_code=status.HTTP_200_OK)
 async def create_session(
     body: ChatRequest,
     user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
-) -> ChatResponse:
-    """Start a new chat session with the first message."""
+) -> StreamingResponse:
+    """Start a new chat session. Returns an SSE stream."""
     if not body.message.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="message cannot be empty")
 
-    session_id, reply = await chat_service.invoke(user_id, body.message, pool)
-
-    products = [ProductRef(image_url=str(c.image_url), caption=c.caption) for c in reply.cards]
-    return ChatResponse(
-        session_id=str(session_id),
-        reply_text=reply.text,
-        products=products,
-    )
+    gen = chat_service.invoke_streaming(user_id, body.message, pool)
+    return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
-@router.post("/sessions/{session_id}/messages", response_model=ChatResponse, status_code=status.HTTP_200_OK)
+@router.post("/sessions/{session_id}/messages", status_code=status.HTTP_200_OK)
 async def continue_session(
     session_id: UUID,
     body: ChatRequest,
     user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
-) -> ChatResponse:
-    """Continue an existing chat session."""
+) -> StreamingResponse:
+    """Continue an existing chat session. Returns an SSE stream."""
     if not body.message.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="message cannot be empty")
 
@@ -118,14 +129,8 @@ async def continue_session(
         if not await cur.fetchone():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    resolved_id, reply = await chat_service.invoke(user_id, body.message, pool, session_id=session_id)
-
-    products = [ProductRef(image_url=str(c.image_url), caption=c.caption) for c in reply.cards]
-    return ChatResponse(
-        session_id=str(resolved_id),
-        reply_text=reply.text,
-        products=products,
-    )
+    gen = chat_service.invoke_streaming(user_id, body.message, pool, session_id=session_id)
+    return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 @router.get("/sessions", response_model=list[SessionSummary], status_code=status.HTTP_200_OK)
