@@ -80,14 +80,22 @@ def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
     # pending = product_embeddings 에 row 가 없는 products (anti-join).
     # 구 `products.embedding IS NULL` 센티넬은 migration 086 에서 컬럼 drop 됨 —
     # product_embeddings(071) 가 임베딩 단일 출처라 그 부재로 pending 판별.
+    # 대표 이미지는 image_url == images[0] (전 데이터셋에서 동일 확인). images 배열이
+    # 비어있어도(예: Zara 엔진은 image_url 만 채움) image_url 로 폴백해 임베딩 대상에 포함.
     sql = """
-        SELECT p.id, p.images
+        SELECT p.id,
+               CASE WHEN p.images IS NOT NULL AND array_length(p.images, 1) > 0
+                    THEN p.images
+                    ELSE ARRAY[p.image_url]
+               END AS images
         FROM products p
         WHERE NOT EXISTS (
                 SELECT 1 FROM product_embeddings pe WHERE pe.product_id = p.id
               )
-          AND p.images IS NOT NULL
-          AND array_length(p.images, 1) > 0
+          AND (
+                (p.images IS NOT NULL AND array_length(p.images, 1) > 0)
+                OR p.image_url ~ '^https?://'
+              )
         ORDER BY p.id
     """
     if limit is not None:
