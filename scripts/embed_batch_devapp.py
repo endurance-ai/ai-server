@@ -115,7 +115,12 @@ def download_image(client: httpx.Client, url: str) -> Image.Image:
 
 def download_batch(rows: list[dict], workers: int) -> dict[str, Image.Image]:
     out: dict[str, Image.Image] = {}
-    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+    # 일부 CDN(예: static.zara.net)은 브라우저 User-Agent 없는 요청을 403 차단한다.
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+    with httpx.Client(timeout=15.0, follow_redirects=True, headers=headers) as client:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures: dict = {}
             for r in rows:
