@@ -85,7 +85,12 @@ def test_emit_input_payload_not_mutated():
     assert payload == snapshot, "emit() must not mutate caller payload"
 
 
-def test_stderr_fallback_record_is_single_line_json(capsys):
+def test_stderr_fallback_record_is_single_line_json(capsys, monkeypatch):
+    # pool_loop 이 있으면 run_coroutine_threadsafe 경로로 처리되어 stderr 출력이 없다.
+    # pool 미초기화 상태를 강제해 no_event_loop 분기(sync 호출 fallback)를 검증한다.
+    import app.providers.db_pool as _db_pool
+
+    monkeypatch.setattr(_db_pool, "_loop", None)
     emit(
         event_type="node_error",
         user_key="u:9",

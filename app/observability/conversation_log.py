@@ -57,14 +57,15 @@ LIST_CAP = 50  # items
 DICT_CAP = 100  # keys
 
 # ── In-flight task retention (R7 — prevent GC of pending log tasks) ────────
-# @MX:ANCHOR: 강한 참조(set)로 task 를 보유해야 함. WeakSet 으로 두면 caller 가
-# task 핸들을 버리는 순간 GC 가 PG INSERT 시작 전에 task 를 수거할 수 있어 데이터
+# @MX:ANCHOR: 강한 참조(set)로 task / future 를 보유해야 함. WeakSet 으로 두면
+# caller 가 핸들을 버리는 순간 GC 가 PG INSERT 시작 전에 수거할 수 있어 데이터
 # 손실이 발생한다 (code review P0-1).
 # @MX:REASON: WeakSet GC race — task lifetime must outlive the eventloop tick.
 # @MX:SPEC: SPEC-CONVERSATION-LOG-001
-# add_done_callback(_IN_FLIGHT.discard) 가 완료된 task 를 즉시 정리하므로 메모리
-# 누수 위험은 없다.
-_IN_FLIGHT: set[asyncio.Task[Any]] = set()
+# add_done_callback(_IN_FLIGHT.discard) 가 완료된 task/future 를 즉시 정리하므로
+# 메모리 누수 위험은 없다. pool_loop 경로는 concurrent.futures.Future,
+# fallback 경로는 asyncio.Task 를 보유 — 둘 다 done()/cancel() 인터페이스 동일.
+_IN_FLIGHT: set[Any] = set()
 
 
 def seed_thread() -> UUID:
@@ -408,6 +409,53 @@ def emit(
     except Exception:  # noqa: BLE001
         pass
 
+    # R9: pool.connection() 은 반드시 pool 이 생성된 loop(memory-pool-loop) 에서
+    # 호출해야 한다. FastAPI main loop 에서 직접 호출하면 pool 내부 asyncio
+    # primitive 들이 memory-pool-loop 에 바인딩돼 있어 wakeup 신호가 main loop
+    # 까지 전달되지 못하고 예외 없이 무한 대기하는 cross-loop hang 이 발생한다.
+    # run_coroutine_threadsafe 로 log_event() 전체를 memory-pool-loop 에 제출하면
+    # pool.connection() 이 올바른 loop 에서 실행된다.
+    try:
+        from app.providers import db_pool as _db_pool  # local import — break cycle
+
+        pool_loop = _db_pool.get_loop()
+    except Exception:  # noqa: BLE001
+        pool_loop = None
+
+    if pool_loop is not None and pool_loop.is_running():
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                log_event(
+                    event_type=event_type,
+                    user_key=user_key,
+                    chat_id=chat_id,
+                    thread_id=thread_id,
+                    turn_no=turn_no,
+                    payload=truncated,
+                    langfuse_trace=langfuse_trace,
+                    latency_ms=latency_ms,
+                ),
+                pool_loop,
+            )
+        except Exception as exc:  # noqa: BLE001 — never raise
+            _stderr_fallback(
+                event_type=event_type,
+                user_key=user_key,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                turn_no=turn_no,
+                payload=truncated,
+                langfuse_trace=langfuse_trace,
+                latency_ms=latency_ms,
+                error_phase="schedule",
+                exc=exc,
+            )
+            return
+        _IN_FLIGHT.add(fut)
+        fut.add_done_callback(_IN_FLIGHT.discard)
+        return
+
+    # pool_loop 미사용 환경(테스트 / pool 미초기화) — 기존 create_task 경로 유지.
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:

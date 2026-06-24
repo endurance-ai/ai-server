@@ -135,13 +135,15 @@ async def test_synthetic_800_emits_lands_in_log_table(
                 payload=payload,
             )
 
-    # Drain in-flight tasks created by `emit()` → `asyncio.create_task`.
-    # We let them finish on the loop, then poll until empty (or timeout).
+    # Drain in-flight items. emit() may store either asyncio.Task (fallback path)
+    # or concurrent.futures.Future (pool_loop path). asyncio.gather() only
+    # accepts awaitables, so wrap concurrent.futures.Future with asyncio.wrap_future.
     for _ in range(50):
         pending = [t for t in list(_IN_FLIGHT) if not t.done()]
         if not pending:
             break
-        await asyncio.gather(*pending, return_exceptions=True)
+        awaitables = [t if isinstance(t, (asyncio.Task, asyncio.Future)) else asyncio.wrap_future(t) for t in pending]
+        await asyncio.gather(*awaitables, return_exceptions=True)
         await asyncio.sleep(0.05)
 
     # Final assertion via direct COUNT.
