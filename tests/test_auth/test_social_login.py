@@ -1,0 +1,141 @@
+"""Auth API integration tests — provider calls are mocked, DB is real (testcontainers)."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+from uuid import uuid4
+
+import pytest
+from httpx import AsyncClient
+
+from app.core.social_auth.google import GoogleClaims
+from app.core.social_auth.apple import AppleClaims
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def _google_claims(sub: str = "google-sub-123") -> GoogleClaims:
+    return GoogleClaims(sub=sub, email="user@example.com", name="Test User", picture=None)
+
+
+def _apple_claims(sub: str = "apple-sub-456") -> AppleClaims:
+    return AppleClaims(sub=sub, email="user@apple.com")
+
+
+# ── /auth/social ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_google_login_returns_tokens(client: AsyncClient):
+    with patch("app.api.auth.verify_google_token", return_value=_google_claims()):
+        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "fake"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "access_token" in body
+    assert "refresh_token" in body
+    assert "user_id" in body
+    assert body["token_type"] == "bearer"
+
+
+@pytest.mark.asyncio
+async def test_apple_login_returns_tokens(client: AsyncClient):
+    with patch("app.api.auth.verify_apple_token", return_value=_apple_claims()):
+        resp = await client.post("/auth/social", json={"provider": "apple", "id_token": "fake"})
+
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_same_user_gets_same_user_id(client: AsyncClient):
+    """Second login with same provider_id must return the same user_id (upsert)."""
+    with patch("app.api.auth.verify_google_token", return_value=_google_claims("same-sub")):
+        r1 = await client.post("/auth/social", json={"provider": "google", "id_token": "a"})
+        r2 = await client.post("/auth/social", json={"provider": "google", "id_token": "b"})
+
+    assert r1.json()["user_id"] == r2.json()["user_id"]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_provider_returns_400(client: AsyncClient):
+    resp = await client.post("/auth/social", json={"provider": "twitter", "id_token": "fake"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_invalid_google_token_returns_401(client: AsyncClient):
+    from fastapi import HTTPException
+
+    with patch("app.api.auth.verify_google_token", side_effect=HTTPException(status_code=401)):
+        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "bad"})
+
+    assert resp.status_code == 401
+
+
+# ── /auth/refresh ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_refresh_issues_new_access_token(client: AsyncClient):
+    with patch("app.api.auth.verify_google_token", return_value=_google_claims()):
+        login = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+
+    refresh_token = login.json()["refresh_token"]
+    resp = await client.post("/auth/refresh", json={"refresh_token": refresh_token})
+
+    assert resp.status_code == 200
+    assert "access_token" in resp.json()
+
+
+@pytest.mark.asyncio
+async def test_invalid_refresh_token_returns_401(client: AsyncClient):
+    resp = await client.post("/auth/refresh", json={"refresh_token": "not-a-real-token"})
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_expired_refresh_token_returns_401(client: AsyncClient, pool):
+    import hashlib
+    import secrets
+    from datetime import UTC, datetime, timedelta
+
+    raw = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    past = datetime.now(UTC) - timedelta(seconds=1)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        # Insert a user first (foreign key constraint)
+        await cur.execute(
+            """
+            INSERT INTO ai.user_profiles (provider, provider_id, email)
+            VALUES ('google', 'expired-test-sub', 'expired@test.com')
+            RETURNING user_id
+            """
+        )
+        user_id = (await cur.fetchone())[0]
+        await cur.execute(
+            "INSERT INTO ai.refresh_tokens (user_id, token_hash, expires_at) VALUES (%s, %s, %s)",
+            (user_id, token_hash, past),
+        )
+        await conn.commit()
+
+    resp = await client.post("/auth/refresh", json={"refresh_token": raw})
+    assert resp.status_code == 401
+
+
+# ── /auth/revoke ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_revoke_then_refresh_returns_401(client: AsyncClient):
+    with patch("app.api.auth.verify_google_token", return_value=_google_claims()):
+        login = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+
+    refresh_token = login.json()["refresh_token"]
+
+    revoke = await client.post("/auth/revoke", json={"refresh_token": refresh_token})
+    assert revoke.status_code == 204
+
+    retry = await client.post("/auth/refresh", json={"refresh_token": refresh_token})
+    assert retry.status_code == 401
