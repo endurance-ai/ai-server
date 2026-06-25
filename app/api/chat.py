@@ -62,6 +62,10 @@ class SessionSummary(BaseModel):
     last_message_at: str | None
 
 
+class SessionRenameRequest(BaseModel):
+    title: str
+
+
 class MessageItem(BaseModel):
     message_id: str
     role: str
@@ -142,6 +146,51 @@ async def list_sessions(
         )
         for r in rows
     ]
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionSummary, status_code=status.HTTP_200_OK)
+async def rename_session(
+    session_id: UUID,
+    body: SessionRenameRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> SessionSummary:
+    """세션 제목 변경."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE ai.chat_sessions
+            SET title = %s, last_message_at = COALESCE(last_message_at, now())
+            WHERE session_id = %s AND user_id = %s
+            RETURNING session_id, title, last_message_at
+            """,
+            (body.title, session_id, user_id),
+        )
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return SessionSummary(
+        session_id=str(row[0]),
+        title=row[1],
+        last_message_at=row[2].isoformat() if row[2] else None,
+    )
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> None:
+    """세션 및 하위 메시지 삭제 (CASCADE)."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "DELETE FROM ai.chat_sessions WHERE session_id = %s AND user_id = %s RETURNING session_id",
+            (session_id, user_id),
+        )
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
 
 @router.get("/sessions/{session_id}/messages", response_model=MessageListResponse, status_code=status.HTTP_200_OK)
