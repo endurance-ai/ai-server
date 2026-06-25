@@ -16,7 +16,7 @@ async def _login(client: AsyncClient) -> str:
         "app.api.auth.verify_google_token",
         return_value=GoogleClaims(sub=f"sub-{uuid4()}", email="u@test.com", name="User", picture=None),
     ):
-        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
     return f"Bearer {resp.json()['access_token']}"
 
 
@@ -26,9 +26,9 @@ async def _create_session(client: AsyncClient, auth: str) -> str:
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        resp = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth})
+        resp = await client.post("/v1/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth})
     assert resp.status_code == 200
-    sessions = await client.get("/chat/sessions", headers={"Authorization": auth})
+    sessions = await client.get("/v1/chat/sessions", headers={"Authorization": auth})
     return sessions.json()[0]["session_id"]
 
 
@@ -40,7 +40,7 @@ async def test_rename_session_succeeds(client: AsyncClient):
     auth = await _login(client)
     sid = await _create_session(client, auth)
 
-    resp = await client.patch(f"/chat/sessions/{sid}", json={"title": "새 제목"}, headers={"Authorization": auth})
+    resp = await client.patch(f"/v1/chat/sessions/{sid}", json={"title": "새 제목"}, headers={"Authorization": auth})
     assert resp.status_code == 200
     assert resp.json()["title"] == "새 제목"
     assert resp.json()["session_id"] == sid
@@ -51,8 +51,8 @@ async def test_rename_session_persists(client: AsyncClient):
     auth = await _login(client)
     sid = await _create_session(client, auth)
 
-    await client.patch(f"/chat/sessions/{sid}", json={"title": "저장된 제목"}, headers={"Authorization": auth})
-    sessions = await client.get("/chat/sessions", headers={"Authorization": auth})
+    await client.patch(f"/v1/chat/sessions/{sid}", json={"title": "저장된 제목"}, headers={"Authorization": auth})
+    sessions = await client.get("/v1/chat/sessions", headers={"Authorization": auth})
     titles = [s["title"] for s in sessions.json()]
     assert "저장된 제목" in titles
 
@@ -60,7 +60,7 @@ async def test_rename_session_persists(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_rename_session_not_found(client: AsyncClient):
     auth = await _login(client)
-    resp = await client.patch(f"/chat/sessions/{uuid4()}", json={"title": "x"}, headers={"Authorization": auth})
+    resp = await client.patch(f"/v1/chat/sessions/{uuid4()}", json={"title": "x"}, headers={"Authorization": auth})
     assert resp.status_code == 404
 
 
@@ -70,13 +70,13 @@ async def test_rename_session_other_user_returns_404(client: AsyncClient):
     auth2 = await _login(client)
     sid = await _create_session(client, auth1)
 
-    resp = await client.patch(f"/chat/sessions/{sid}", json={"title": "x"}, headers={"Authorization": auth2})
+    resp = await client.patch(f"/v1/chat/sessions/{sid}", json={"title": "x"}, headers={"Authorization": auth2})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_rename_session_requires_auth(client: AsyncClient):
-    resp = await client.patch(f"/chat/sessions/{uuid4()}", json={"title": "x"})
+    resp = await client.patch(f"/v1/chat/sessions/{uuid4()}", json={"title": "x"})
     assert resp.status_code in (401, 403)
 
 
@@ -88,10 +88,10 @@ async def test_delete_session_succeeds(client: AsyncClient):
     auth = await _login(client)
     sid = await _create_session(client, auth)
 
-    resp = await client.request("DELETE", f"/chat/sessions/{sid}", headers={"Authorization": auth})
+    resp = await client.request("DELETE", f"/v1/chat/sessions/{sid}", headers={"Authorization": auth})
     assert resp.status_code == 204
 
-    sessions = await client.get("/chat/sessions", headers={"Authorization": auth})
+    sessions = await client.get("/v1/chat/sessions", headers={"Authorization": auth})
     assert all(s["session_id"] != sid for s in sessions.json())
 
 
@@ -100,16 +100,16 @@ async def test_delete_session_cascades_messages(client: AsyncClient):
     auth = await _login(client)
     sid = await _create_session(client, auth)
 
-    await client.request("DELETE", f"/chat/sessions/{sid}", headers={"Authorization": auth})
+    await client.request("DELETE", f"/v1/chat/sessions/{sid}", headers={"Authorization": auth})
 
-    resp = await client.get(f"/chat/sessions/{sid}/messages", headers={"Authorization": auth})
+    resp = await client.get(f"/v1/chat/sessions/{sid}/messages", headers={"Authorization": auth})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_session_not_found(client: AsyncClient):
     auth = await _login(client)
-    resp = await client.request("DELETE", f"/chat/sessions/{uuid4()}", headers={"Authorization": auth})
+    resp = await client.request("DELETE", f"/v1/chat/sessions/{uuid4()}", headers={"Authorization": auth})
     assert resp.status_code == 404
 
 
@@ -119,11 +119,11 @@ async def test_delete_session_other_user_returns_404(client: AsyncClient):
     auth2 = await _login(client)
     sid = await _create_session(client, auth1)
 
-    resp = await client.request("DELETE", f"/chat/sessions/{sid}", headers={"Authorization": auth2})
+    resp = await client.request("DELETE", f"/v1/chat/sessions/{sid}", headers={"Authorization": auth2})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_delete_session_requires_auth(client: AsyncClient):
-    resp = await client.request("DELETE", f"/chat/sessions/{uuid4()}")
+    resp = await client.request("DELETE", f"/v1/chat/sessions/{uuid4()}")
     assert resp.status_code in (401, 403)
