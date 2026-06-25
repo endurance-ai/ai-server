@@ -52,9 +52,7 @@ async def test_get_me_requires_auth(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_patch_me_updates_display_name(client: AsyncClient):
     auth, user_id = await _login(client)
-    resp = await client.patch(
-        "/v1/me", json={"display_name": "홍길동"}, headers={"Authorization": auth}
-    )
+    resp = await client.patch("/v1/me", json={"display_name": "홍길동"}, headers={"Authorization": auth})
     assert resp.status_code == 200
     data = resp.json()
     assert data["user_id"] == user_id
@@ -68,9 +66,7 @@ async def test_patch_me_updates_display_name(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_patch_me_updates_gender(client: AsyncClient):
     auth, _ = await _login(client)
-    resp = await client.patch(
-        "/v1/me", json={"gender": "female"}, headers={"Authorization": auth}
-    )
+    resp = await client.patch("/v1/me", json={"gender": "female"}, headers={"Authorization": auth})
     assert resp.status_code == 200
     assert resp.json()["gender"] == "female"
 
@@ -99,9 +95,7 @@ async def test_patch_me_empty_body_rejected(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_patch_me_invalid_gender_rejected(client: AsyncClient):
     auth, _ = await _login(client)
-    resp = await client.patch(
-        "/v1/me", json={"gender": "unknown"}, headers={"Authorization": auth}
-    )
+    resp = await client.patch("/v1/me", json={"gender": "unknown"}, headers={"Authorization": auth})
     assert resp.status_code == 422
 
 
@@ -117,9 +111,7 @@ async def test_patch_me_requires_auth(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_delete_me_succeeds_with_confirm(client: AsyncClient):
     auth, _ = await _login(client)
-    resp = await client.request(
-        "DELETE", "/v1/me", json={"confirm": True}, headers={"Authorization": auth}
-    )
+    resp = await client.request("DELETE", "/v1/me", json={"confirm": True}, headers={"Authorization": auth})
     assert resp.status_code == 204
 
     # token is still technically valid but the user row is gone
@@ -130,9 +122,7 @@ async def test_delete_me_succeeds_with_confirm(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_delete_me_without_confirm_rejected(client: AsyncClient):
     auth, _ = await _login(client)
-    resp = await client.request(
-        "DELETE", "/v1/me", json={"confirm": False}, headers={"Authorization": auth}
-    )
+    resp = await client.request("DELETE", "/v1/me", json={"confirm": False}, headers={"Authorization": auth})
     assert resp.status_code == 422
 
 
@@ -148,9 +138,7 @@ async def test_delete_me_cascades_chat_sessions(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create = await client.post(
-            "/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth}
-        )
+        create = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth})
     assert create.status_code == 200
 
     # delete user
