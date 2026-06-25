@@ -88,6 +88,7 @@ async def _truncate(pool) -> AsyncGenerator[None]:
                 ai.chat_messages,
                 ai.chat_sessions,
                 ai.refresh_tokens,
+                ai.iap_transactions,
                 ai.user_profiles,
                 ai.user_session,
                 ai.user_taste_profile
