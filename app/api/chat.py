@@ -21,16 +21,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
-from app.core import jwt as jwt_utils
+from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
 from app.services import chat_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-_bearer = HTTPBearer(auto_error=True)
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
@@ -38,22 +36,6 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 async def _to_sse(gen: AsyncGenerator[tuple[str, dict]]) -> AsyncGenerator[str]:
     async for event_type, payload in gen:
         yield f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-# ── Auth dependency ───────────────────────────────────────────────────────────
-
-
-async def get_current_user_id(
-    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> UUID:
-    payload = jwt_utils.verify_access_token(credentials.credentials)
-    try:
-        return UUID(payload["sub"])
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        ) from exc
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
