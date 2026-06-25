@@ -18,7 +18,7 @@ async def _login(client: AsyncClient) -> str:
         "app.api.auth.verify_google_token",
         return_value=GoogleClaims(sub=f"sub-{uuid4()}", email="u@test.com", name="User", picture=None),
     ):
-        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
     return f"Bearer {resp.json()['access_token']}"
 
 
@@ -50,7 +50,7 @@ def _parse_sse(text: str) -> dict[str, object]:
     return events
 
 
-# ── POST /chat/sessions ───────────────────────────────────────────────────────
+# ── POST /v1/chat/sessions ───────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -69,7 +69,7 @@ async def test_create_session_returns_reply(client: AsyncClient):
         mock_graph.ainvoke = AsyncMock(side_effect=_fake_invoke)
 
         resp = await client.post(
-            "/chat/sessions",
+            "/v1/chat/sessions",
             json={"message": "캐주얼 코디 추천해줘"},
             headers={"Authorization": auth},
         )
@@ -86,23 +86,23 @@ async def test_create_session_returns_reply(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_create_session_empty_message_rejected(client: AsyncClient):
     auth = await _login(client)
-    resp = await client.post("/chat/sessions", json={"message": "  "}, headers={"Authorization": auth})
+    resp = await client.post("/v1/chat/sessions", json={"message": "  "}, headers={"Authorization": auth})
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_chat_requires_auth(client: AsyncClient):
-    resp = await client.post("/chat/sessions", json={"message": "hi"})
+    resp = await client.post("/v1/chat/sessions", json={"message": "hi"})
     assert resp.status_code in (401, 403)  # HTTPBearer returns 403 on missing header
 
 
-# ── GET /chat/sessions ────────────────────────────────────────────────────────
+# ── GET /v1/chat/sessions ────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_list_sessions_empty_for_new_user(client: AsyncClient):
     auth = await _login(client)
-    resp = await client.get("/chat/sessions", headers={"Authorization": auth})
+    resp = await client.get("/v1/chat/sessions", headers={"Authorization": auth})
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -117,16 +117,16 @@ async def test_list_sessions_returns_created_sessions(client: AsyncClient):
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
         # consume SSE streams fully so sessions are persisted before listing
-        r1 = await client.post("/chat/sessions", json={"message": "msg 1"}, headers={"Authorization": auth})
-        r2 = await client.post("/chat/sessions", json={"message": "msg 2"}, headers={"Authorization": auth})
+        r1 = await client.post("/v1/chat/sessions", json={"message": "msg 1"}, headers={"Authorization": auth})
+        r2 = await client.post("/v1/chat/sessions", json={"message": "msg 2"}, headers={"Authorization": auth})
     _ = r1.text, r2.text  # ensure streams are fully read
 
-    resp = await client.get("/chat/sessions", headers={"Authorization": auth})
+    resp = await client.get("/v1/chat/sessions", headers={"Authorization": auth})
     assert resp.status_code == 200
     assert len(resp.json()) == 2
 
 
-# ── GET /chat/sessions/{id}/messages ─────────────────────────────────────────
+# ── GET /v1/chat/sessions/{id}/messages ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -138,11 +138,11 @@ async def test_get_messages_for_own_session(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create_resp = await client.post("/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth})
+        create_resp = await client.post("/v1/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth})
 
     events = _parse_sse(create_resp.text)
     session_id = events["session"]["session_id"]
-    resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
+    resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
 
     assert resp.status_code == 200
     messages = resp.json()["messages"]
@@ -160,15 +160,15 @@ async def test_get_messages_other_user_session_returns_404(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create_resp = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth1})
+        create_resp = await client.post("/v1/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth1})
 
     events = _parse_sse(create_resp.text)
     session_id = events["session"]["session_id"]
-    resp = await client.get(f"/chat/sessions/{session_id}/messages", headers={"Authorization": auth2})
+    resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth2})
     assert resp.status_code == 404
 
 
-# ── POST /chat/sessions/{id}/messages ────────────────────────────────────────
+# ── POST /v1/chat/sessions/{id}/messages ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -181,12 +181,12 @@ async def test_append_message_returns_reply(client: AsyncClient):
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
         create_resp = await client.post(
-            "/chat/sessions", json={"message": "첫 번째 메시지"}, headers={"Authorization": auth}
+            "/v1/chat/sessions", json={"message": "첫 번째 메시지"}, headers={"Authorization": auth}
         )
         session_id = _parse_sse(create_resp.text)["session"]["session_id"]
 
         resp = await client.post(
-            f"/chat/sessions/{session_id}/messages",
+            f"/v1/chat/sessions/{session_id}/messages",
             json={"message": "두 번째 메시지"},
             headers={"Authorization": auth},
         )
@@ -209,7 +209,7 @@ async def test_append_message_to_nonexistent_session_returns_404(client: AsyncCl
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
         resp = await client.post(
-            f"/chat/sessions/{fake_id}/messages",
+            f"/v1/chat/sessions/{fake_id}/messages",
             json={"message": "hi"},
             headers={"Authorization": auth},
         )
