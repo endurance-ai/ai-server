@@ -1,8 +1,8 @@
 """Consumer social login API (SPEC-AUTH-SOCIAL-001).
 
-POST /auth/social   — verify Google/Apple id_token, issue JWT pair
-POST /auth/refresh  — issue new access_token from refresh_token
-POST /auth/revoke   — revoke refresh_token (logout)
+POST /v1/auth/social   — verify Google/Apple id_token, issue JWT pair
+POST /v1/auth/refresh  — issue new access_token from refresh_token
+POST /v1/auth/logout   — revoke refresh_token (logout)
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from app.core.di import provide_db_pool
 from app.core.social_auth.apple import AppleClaims, verify_apple_token
 from app.core.social_auth.google import GoogleClaims, verify_google_token
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/v1/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=True)
 
 
@@ -176,7 +176,7 @@ async def refresh_token(
     return AccessTokenResponse(access_token=jwt_utils.create_access_token(user_id))
 
 
-@router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_token(
     body: RefreshRequest,
     pool: AsyncConnectionPool = Depends(provide_db_pool),

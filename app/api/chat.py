@@ -1,9 +1,9 @@
 """Consumer chat API (SPEC-AUTH-SOCIAL-001 Phase 1-C).
 
-POST /chat/sessions                        — start new session (SSE stream)
-POST /chat/sessions/{session_id}/messages  — continue existing session (SSE stream)
-GET  /chat/sessions                        — list user's sessions
-GET  /chat/sessions/{session_id}/messages  — paginated message history
+POST /v1/chat/sessions                        — start new session (SSE stream)
+POST /v1/chat/sessions/{session_id}/messages  — continue existing session (SSE stream)
+GET  /v1/chat/sessions                        — list user's sessions
+GET  /v1/chat/sessions/{session_id}/messages  — paginated message history
 
 SSE event sequence for POST endpoints:
   event: session  data: {"session_id": "<uuid>"}
@@ -28,7 +28,7 @@ from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
 from app.services import chat_service
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 

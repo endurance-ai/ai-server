@@ -16,7 +16,7 @@ async def _login(client: AsyncClient) -> str:
         "app.api.auth.verify_google_token",
         return_value=GoogleClaims(sub=f"sub-{uuid4()}", email="u@test.com", name="User", picture=None),
     ):
-        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
     return f"Bearer {resp.json()['access_token']}"
 
 
