@@ -27,6 +27,8 @@ from app.channels.schemas import BotCard, BotReply, ChannelMessage
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.observability.langfuse import build_callback_handler, observe, update_current_trace
+from app.observability.pii import hash_id
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +217,33 @@ async def set_session_title(
 # ── Core invoke ───────────────────────────────────────────────────────────────
 
 
+def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str) -> list:
+    """Bind the current Langfuse trace to this chat turn + return graph callbacks.
+
+    Mirrors the telegram webhook trace setup (telegram.py) so native-app (chat)
+    turns produce the same unified conversation traces: a root trace bound to
+    session/user + a CallbackHandler bridging nested LLM generations. `user_id`
+    is hashed (pii.hash_id); `session_id` is the chat-session UUID (internal id,
+    used as the Langfuse session grouping key).
+    """
+    sid = str(session_id)
+    uid = hash_id(str(user_id))
+    update_current_trace(
+        name="app.chat",
+        session_id=sid,
+        user_id=uid,
+        input={"channel": "app", "text": text[:200]},
+        metadata={"channel": "app", "graph": "fashion_bot"},
+    )
+    handler = build_callback_handler(
+        session_id=sid,
+        user_id=uid,
+        metadata={"channel": "app", "graph": "fashion_bot"},
+    )
+    return [handler] if handler is not None else []
+
+
+@observe(name="app.chat", as_type="span")
 async def invoke(
     user_id: UUID,
     text: str,
@@ -249,7 +278,8 @@ async def invoke(
     capture = CaptureAdapter()
     token = set_adapter(capture)
     try:
-        await GRAPH.ainvoke(input_state)
+        callbacks = _bind_chat_trace(resolved_session_id, user_id, text)
+        await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
     except Exception:
         logger.exception("[chat_service] graph invocation failed user=%s", user_id)
         raise
@@ -303,14 +333,19 @@ async def invoke_streaming(
     streaming = StreamingAdapter()
     graph_exc: BaseException | None = None
 
+    @observe(name="app.chat", as_type="span")
     async def _run_graph() -> None:
         nonlocal graph_exc
         # set_adapter/reset_adapter must run in the same context (task's own copy).
         # asyncio.create_task copies the context at creation time; the Token from the
         # parent context cannot be used to reset a ContextVar inside the task.
+        # @observe here creates the root Langfuse trace inside the task's own
+        # context (the SSE generator runs in the outer context), so nested
+        # node/LLM spans nest under a single conversation trace.
         token = set_adapter(streaming)
         try:
-            await GRAPH.ainvoke(input_state)
+            callbacks = _bind_chat_trace(resolved_session_id, user_id, text)
+            await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
         except Exception as exc:
             logger.exception("[chat_service] graph invocation failed user=%s", user_id)
             graph_exc = exc
