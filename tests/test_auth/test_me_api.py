@@ -18,7 +18,7 @@ async def _login(client: AsyncClient, sub: str | None = None) -> tuple[str, str]
         "app.api.auth.verify_google_token",
         return_value=GoogleClaims(sub=sub, email="u@test.com", name="User", picture=None),
     ):
-        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
     data = resp.json()
     return f"Bearer {data['access_token']}", data["user_id"]
 
@@ -138,7 +138,7 @@ async def test_delete_me_cascades_chat_sessions(client: AsyncClient):
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
         mock_graph.ainvoke = AsyncMock(side_effect=_noop)
-        create = await client.post("/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth})
+        create = await client.post("/v1/chat/sessions", json={"message": "hi"}, headers={"Authorization": auth})
     assert create.status_code == 200
 
     # delete user
@@ -146,7 +146,7 @@ async def test_delete_me_cascades_chat_sessions(client: AsyncClient):
 
     # new user logging in with different sub shouldn't see deleted user's sessions
     auth2, _ = await _login(client, sub=f"sub-new-{uuid4()}")
-    sessions = await client.get("/chat/sessions", headers={"Authorization": auth2})
+    sessions = await client.get("/v1/chat/sessions", headers={"Authorization": auth2})
     assert sessions.json() == []
 
 

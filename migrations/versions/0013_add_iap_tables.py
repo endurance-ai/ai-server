@@ -1,14 +1,14 @@
 """add iap_transactions table
 
-Revision ID: 0010
-Revises: 0009
+Revision ID: 0013
+Revises: 0012
 Create Date: 2026-06-26
 """
 
 from alembic import op
 
-revision = "0010"
-down_revision = "0009"
+revision = "0013"
+down_revision = "0012"
 branch_labels = None
 depends_on = None
 
