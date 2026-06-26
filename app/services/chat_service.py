@@ -243,6 +243,54 @@ def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str) -> list:
     return [handler] if handler is not None else []
 
 
+async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str) -> str | None:
+    """그래프 결과셋(sess.last_results)을 ai.searches 한 행으로 영속화하고 search_id 반환.
+
+    결과가 없으면 None (빈 검색은 결과셋이 아니므로 미저장). is_listed=false 로 시작 →
+    [더보기](Get Result Set Page 첫 호출) 시 true 로 승급한다. fail-open.
+    """
+    try:
+        from app.infrastructure.memory.session import get_store
+
+        sess = get_store().get_or_create(_user_id_to_chat_id(user_id))
+        candidates = list(getattr(sess, "last_results", None) or [])
+    except Exception:
+        logger.debug("[chat_service] search persist: session read failed", exc_info=True)
+        return None
+
+    product_ids: list[int] = []
+    cover_image_urls: list[str] = []
+    for c in candidates:
+        pid = getattr(c, "id", None)
+        if pid is not None:
+            try:
+                product_ids.append(int(pid))
+            except (TypeError, ValueError):
+                pass
+        img = getattr(c, "image_url", None)
+        if img and len(cover_image_urls) < 5:
+            cover_image_urls.append(str(img))
+
+    if not product_ids:
+        return None
+
+    new_id = uuid4()
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ai.searches
+                    (search_id, session_id, user_id, title, product_ids, cover_image_urls, total)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (new_id, session_id, user_id, title[:120], product_ids, cover_image_urls, len(product_ids)),
+            )
+    except Exception:
+        logger.exception("[chat_service] search persist failed user=%s", user_id)
+        return None
+    return str(new_id)
+
+
 @observe(name="app.chat", as_type="span")
 async def invoke(
     user_id: UUID,
@@ -296,6 +344,7 @@ async def invoke(
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
+    await _persist_search(pool, user_id, resolved_session_id, text)
 
     return resolved_session_id, reply
 
@@ -372,5 +421,9 @@ async def invoke_streaming(
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
+
+    search_id = await _persist_search(pool, user_id, resolved_session_id, text)
+    if search_id is not None:
+        yield "search", {"search_id": search_id}
 
     yield "done", {}
