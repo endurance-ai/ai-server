@@ -44,6 +44,42 @@ def _bootstrap(dsn: str) -> None:
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("CREATE SCHEMA IF NOT EXISTS ai")
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        # Minimal crawler tables needed by product endpoints
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.brand_nodes (
+                id          BIGSERIAL PRIMARY KEY,
+                brand_name  TEXT NOT NULL,
+                brand_name_normalized TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.products (
+                id             BIGSERIAL PRIMARY KEY,
+                brand          TEXT NOT NULL,
+                name           TEXT NOT NULL,
+                category       TEXT,
+                subcategory    TEXT,
+                price          NUMERIC,
+                original_price NUMERIC,
+                sale_price     NUMERIC,
+                source_currency TEXT DEFAULT 'KRW',
+                source_price   NUMERIC,
+                image_url      TEXT NOT NULL DEFAULT '',
+                images         TEXT[],
+                product_url    TEXT NOT NULL UNIQUE,
+                in_stock       BOOLEAN NOT NULL DEFAULT TRUE,
+                platform       TEXT NOT NULL DEFAULT '',
+                gender         TEXT[],
+                description    TEXT,
+                color          TEXT,
+                tags           TEXT[],
+                product_code   TEXT,
+                brand_node_id  BIGINT REFERENCES public.brand_nodes(id),
+                crawled_at     TIMESTAMPTZ DEFAULT now(),
+                last_seen_at   TIMESTAMPTZ DEFAULT now(),
+                updated_at     TIMESTAMPTZ DEFAULT now()
+            )
+        """)
 
 
 def _migrate(dsn: str) -> None:
@@ -97,6 +133,7 @@ async def _truncate(pool) -> AsyncGenerator[None]:
             CASCADE
             """
         )
+        await cur.execute("TRUNCATE public.products, public.brand_nodes RESTART IDENTITY CASCADE")
         await conn.commit()
 
 

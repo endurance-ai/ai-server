@@ -8,8 +8,10 @@ from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.legal import router as legal_router
 from app.api.me import router as me_router
+from app.api.products import router as products_router
 from app.api.recommend import router as recommend_router
 from app.api.redirect import router as redirect_router
+from app.api.saves import router as saves_router
 from app.api.webhooks.telegram import router as telegram_webhook_router
 
 router = APIRouter()
@@ -17,6 +19,8 @@ router.include_router(health_router, tags=["system"])
 router.include_router(auth_router)
 router.include_router(chat_router)
 router.include_router(me_router)
+router.include_router(saves_router)
+router.include_router(products_router)
 router.include_router(feedback_router)
 router.include_router(devices_router)
 router.include_router(legal_router)
