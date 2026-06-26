@@ -43,7 +43,7 @@ async def _login(client: AsyncClient, sub: str | None = None) -> tuple[str, str]
         "app.api.auth.verify_google_token",
         return_value=GoogleClaims(sub=sub, email="u@test.com", name="User", picture=None),
     ):
-        resp = await client.post("/auth/social", json={"provider": "google", "id_token": "t"})
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
     data = resp.json()
     return f"Bearer {data['access_token']}", data["user_id"]
 
