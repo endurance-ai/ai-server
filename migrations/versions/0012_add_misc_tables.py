@@ -1,14 +1,14 @@
 """add misc tables — feedback, devices, legal_consents, notification_settings
 
-Revision ID: 0010
-Revises: 0009
+Revision ID: 0012
+Revises: 0011
 Create Date: 2026-06-25
 """
 
 from alembic import op
 
-revision = "0010"
-down_revision = "0009"
+revision = "0012"
+down_revision = "0011"
 branch_labels = None
 depends_on = None
 
