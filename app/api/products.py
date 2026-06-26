@@ -1,0 +1,330 @@
+"""Products API.
+
+GET  /v1/products/{id}          — 상품 상세 (crawler DB)
+POST /v1/products/{id}/view     — 상품 조회 기록 (24h 중복 제거)
+GET  /v1/products/viewed        — 조회한 상품 목록 (세션 기준)
+POST /v1/products/{id}/link-check — 상품 URL 유효성 확인
+"""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from psycopg_pool import AsyncConnectionPool
+from pydantic import BaseModel
+
+from app.api.deps import get_current_user_id
+from app.core.di import provide_db_pool
+
+router = APIRouter(prefix="/v1", tags=["products"])
+
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+
+class BrandNode(BaseModel):
+    id: int
+    brand_name: str
+    brand_name_normalized: str | None
+
+
+class ProductDetail(BaseModel):
+    id: int
+    brand: str
+    name: str
+    category: str | None
+    subcategory: str | None
+    price: float | None
+    original_price: float | None
+    sale_price: float | None
+    image_url: str
+    images: list[str] | None
+    product_url: str
+    in_stock: bool
+    platform: str
+    gender: list[str] | None
+    description: str | None
+    color: str | None
+    tags: list[str] | None
+    brand_node: BrandNode | None
+
+
+class RecordViewRequest(BaseModel):
+    session_id: UUID
+    source_search_id: UUID | None = None
+    dwell_ms: int | None = None
+
+
+class RecordViewResponse(BaseModel):
+    recorded: bool
+    view_id: str | None = None
+
+
+class ViewedProduct(BaseModel):
+    product_id: int
+    brand: str
+    name: str
+    price: float | None
+    image_url: str
+    product_url: str
+    viewed_at: str
+    source_search_id: str | None
+
+
+class ViewedListResponse(BaseModel):
+    items: list[ViewedProduct]
+    next_cursor: str | None
+
+
+class LinkCheckResponse(BaseModel):
+    alive: bool
+    last_checked_at: str
+    http_status: int | None
+    alternative_url: str | None
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDetail | None:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT
+                p.id, p.brand, p.name, p.category, p.subcategory,
+                p.price, p.original_price, p.sale_price,
+                p.image_url, p.images, p.product_url,
+                p.in_stock, p.platform, p.gender,
+                p.description, p.color, p.tags,
+                p.brand_node_id,
+                bn.brand_name, bn.brand_name_normalized
+            FROM public.products p
+            LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+            WHERE p.id = %s
+            """,
+            (product_id,),
+        )
+        row = await cur.fetchone()
+    if not row:
+        return None
+    brand_node = (
+        BrandNode(id=row[17], brand_name=row[18], brand_name_normalized=row[19]) if row[17] is not None else None
+    )
+    return ProductDetail(
+        id=row[0],
+        brand=row[1],
+        name=row[2],
+        category=row[3],
+        subcategory=row[4],
+        price=float(row[5]) if row[5] is not None else None,
+        original_price=float(row[6]) if row[6] is not None else None,
+        sale_price=float(row[7]) if row[7] is not None else None,
+        image_url=row[8],
+        images=list(row[9]) if row[9] else None,
+        product_url=row[10],
+        in_stock=row[11],
+        platform=row[12],
+        gender=list(row[13]) if row[13] else None,
+        description=row[14],
+        color=row[15],
+        tags=list(row[16]) if row[16] else None,
+        brand_node=brand_node,
+    )
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+
+@router.get("/products/viewed", response_model=ViewedListResponse, status_code=status.HTTP_200_OK)
+async def list_viewed(
+    session_id: UUID = Query(..., description="필터링할 세션 ID"),
+    cursor: str | None = Query(default=None, description="Pagination cursor (view_id)"),
+    limit: int = Query(default=20, ge=1, le=100),
+    dedup: bool = Query(default=True, description="동일 상품 중복 제거"),
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> ViewedListResponse:
+    """세션 기준 조회한 상품 목록."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        if dedup:
+            # 상품별 가장 최근 조회만 반환 (DISTINCT ON)
+            if cursor:
+                await cur.execute(
+                    """
+                    SELECT view_id, product_id, brand, name, price, image_url, product_url,
+                           viewed_at, source_search_id
+                    FROM (
+                        SELECT DISTINCT ON (pv.product_id)
+                            pv.view_id, pv.product_id, p.brand, p.name, p.price,
+                            p.image_url, p.product_url,
+                            pv.viewed_at, pv.source_search_id
+                        FROM ai.product_views pv
+                        JOIN public.products p ON p.id = pv.product_id
+                        WHERE pv.user_id = %s AND pv.session_id = %s
+                        ORDER BY pv.product_id, pv.viewed_at DESC
+                    ) sub
+                    WHERE viewed_at < (
+                        SELECT viewed_at FROM ai.product_views WHERE view_id = %s
+                    )
+                    ORDER BY viewed_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, session_id, UUID(cursor), limit + 1),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT view_id, product_id, brand, name, price, image_url, product_url,
+                           viewed_at, source_search_id
+                    FROM (
+                        SELECT DISTINCT ON (pv.product_id)
+                            pv.view_id, pv.product_id, p.brand, p.name, p.price,
+                            p.image_url, p.product_url,
+                            pv.viewed_at, pv.source_search_id
+                        FROM ai.product_views pv
+                        JOIN public.products p ON p.id = pv.product_id
+                        WHERE pv.user_id = %s AND pv.session_id = %s
+                        ORDER BY pv.product_id, pv.viewed_at DESC
+                    ) sub
+                    ORDER BY viewed_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, session_id, limit + 1),
+                )
+        else:
+            if cursor:
+                await cur.execute(
+                    """
+                    SELECT pv.view_id, pv.product_id, p.brand, p.name, p.price,
+                           p.image_url, p.product_url, pv.viewed_at, pv.source_search_id
+                    FROM ai.product_views pv
+                    JOIN public.products p ON p.id = pv.product_id
+                    WHERE pv.user_id = %s AND pv.session_id = %s
+                      AND pv.viewed_at < (
+                          SELECT viewed_at FROM ai.product_views WHERE view_id = %s
+                      )
+                    ORDER BY pv.viewed_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, session_id, UUID(cursor), limit + 1),
+                )
+            else:
+                await cur.execute(
+                    """
+                    SELECT pv.view_id, pv.product_id, p.brand, p.name, p.price,
+                           p.image_url, p.product_url, pv.viewed_at, pv.source_search_id
+                    FROM ai.product_views pv
+                    JOIN public.products p ON p.id = pv.product_id
+                    WHERE pv.user_id = %s AND pv.session_id = %s
+                    ORDER BY pv.viewed_at DESC
+                    LIMIT %s
+                    """,
+                    (user_id, session_id, limit + 1),
+                )
+        rows = await cur.fetchall()
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = str(page[-1][0]) if has_more and page else None
+
+    items = [
+        ViewedProduct(
+            product_id=r[1],
+            brand=r[2],
+            name=r[3],
+            price=float(r[4]) if r[4] is not None else None,
+            image_url=r[5],
+            product_url=r[6],
+            viewed_at=r[7].isoformat(),
+            source_search_id=str(r[8]) if r[8] else None,
+        )
+        for r in page
+    ]
+    return ViewedListResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get("/products/{product_id}", response_model=ProductDetail, status_code=status.HTTP_200_OK)
+async def get_product(
+    product_id: int,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> ProductDetail:
+    """상품 상세 조회 (crawler DB)."""
+    product = await _get_product(pool, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
+
+
+@router.post("/products/{product_id}/view", response_model=RecordViewResponse, status_code=status.HTTP_200_OK)
+async def record_view(
+    product_id: int,
+    body: RecordViewRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> RecordViewResponse:
+    """상품 조회 기록. 24시간 내 동일 상품 중복 조회는 무시."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.product_views
+                (user_id, product_id, session_id, source_search_id, dwell_ms)
+            SELECT %s, %s, %s, %s, %s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ai.product_views
+                WHERE user_id = %s
+                  AND product_id = %s
+                  AND viewed_at > now() - INTERVAL '24 hours'
+            )
+            RETURNING view_id
+            """,
+            (
+                user_id,
+                product_id,
+                body.session_id,
+                body.source_search_id,
+                body.dwell_ms,
+                user_id,
+                product_id,
+            ),
+        )
+        row = await cur.fetchone()
+
+    if row:
+        return RecordViewResponse(recorded=True, view_id=str(row[0]))
+    return RecordViewResponse(recorded=False)
+
+
+@router.post("/products/{product_id}/link-check", response_model=LinkCheckResponse, status_code=status.HTTP_200_OK)
+async def link_check(
+    product_id: int,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> LinkCheckResponse:
+    """상품 URL 유효성 확인."""
+    product = await _get_product(pool, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    from datetime import UTC, datetime
+
+    checked_at = datetime.now(UTC).isoformat()
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+            resp = await client.head(product.product_url)
+        alive = resp.status_code < 400
+        return LinkCheckResponse(
+            alive=alive,
+            last_checked_at=checked_at,
+            http_status=resp.status_code,
+            alternative_url=str(resp.url) if str(resp.url) != product.product_url else None,
+        )
+    except (httpx.RequestError, TimeoutError):
+        return LinkCheckResponse(
+            alive=False,
+            last_checked_at=checked_at,
+            http_status=None,
+            alternative_url=None,
+        )
