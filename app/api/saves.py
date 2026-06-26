@@ -4,8 +4,9 @@ POST   /v1/saves               — 찜 추가
 GET    /v1/saves               — 찜 목록 (cursor 페이지네이션)
 DELETE /v1/saves/{product_id}  — 찜 해제
 
-Note: product 상세(brand/name/price)는 crawler DB 연동 시 추가 예정.
-현재는 save_id / product_id / created_at 만 반환.
+List Saves는 public.products와 LEFT JOIN 하여 product 상세(brand/name/price/
+image_url/in_stock)를 포함한다. 카탈로그에서 사라진 상품은 product=null.
+Add Save는 명세대로 {save_id, product_id, created_at} 만 반환.
 """
 
 from __future__ import annotations
@@ -35,8 +36,23 @@ class SaveItem(BaseModel):
     created_at: str
 
 
+class SavedProduct(BaseModel):
+    id: int
+    brand: str | None
+    name: str | None
+    price: float | None
+    image_url: str | None
+    in_stock: bool | None
+
+
+class SaveListItem(BaseModel):
+    save_id: str
+    product: SavedProduct | None  # None if the product is no longer in the catalog
+    created_at: str
+
+
 class SaveListResponse(BaseModel):
-    items: list[SaveItem]
+    items: list[SaveListItem]
     next_cursor: str | None
     total: int
 
@@ -86,11 +102,14 @@ async def list_saves(
         if cursor:
             await cur.execute(
                 """
-                SELECT save_id, product_id, created_at
-                FROM ai.saves
-                WHERE user_id = %s
-                  AND created_at < (SELECT created_at FROM ai.saves WHERE save_id = %s AND user_id = %s)
-                ORDER BY created_at DESC
+                SELECT s.save_id, s.created_at,
+                       p.id, p.brand, p.name, p.price, p.image_url, p.in_stock
+                FROM ai.saves s
+                LEFT JOIN public.products p
+                       ON p.id = CASE WHEN s.product_id ~ '^[0-9]+$' THEN s.product_id::bigint END
+                WHERE s.user_id = %s
+                  AND s.created_at < (SELECT created_at FROM ai.saves WHERE save_id = %s AND user_id = %s)
+                ORDER BY s.created_at DESC
                 LIMIT %s
                 """,
                 (user_id, UUID(cursor), user_id, limit + 1),
@@ -98,10 +117,13 @@ async def list_saves(
         else:
             await cur.execute(
                 """
-                SELECT save_id, product_id, created_at
-                FROM ai.saves
-                WHERE user_id = %s
-                ORDER BY created_at DESC
+                SELECT s.save_id, s.created_at,
+                       p.id, p.brand, p.name, p.price, p.image_url, p.in_stock
+                FROM ai.saves s
+                LEFT JOIN public.products p
+                       ON p.id = CASE WHEN s.product_id ~ '^[0-9]+$' THEN s.product_id::bigint END
+                WHERE s.user_id = %s
+                ORDER BY s.created_at DESC
                 LIMIT %s
                 """,
                 (user_id, limit + 1),
@@ -112,11 +134,23 @@ async def list_saves(
     page = rows[:limit]
     next_cursor = str(page[-1][0]) if has_more and page else None
 
-    return SaveListResponse(
-        items=[SaveItem(save_id=str(r[0]), product_id=r[1], created_at=r[2].isoformat()) for r in page],
-        next_cursor=next_cursor,
-        total=total,
-    )
+    items: list[SaveListItem] = []
+    for r in page:
+        product = (
+            SavedProduct(
+                id=r[2],
+                brand=r[3],
+                name=r[4],
+                price=float(r[5]) if r[5] is not None else None,
+                image_url=r[6],
+                in_stock=r[7],
+            )
+            if r[2] is not None
+            else None
+        )
+        items.append(SaveListItem(save_id=str(r[0]), product=product, created_at=r[1].isoformat()))
+
+    return SaveListResponse(items=items, next_cursor=next_cursor, total=total)
 
 
 @router.delete("/saves/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
