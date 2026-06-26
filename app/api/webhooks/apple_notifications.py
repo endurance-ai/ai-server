@@ -64,8 +64,8 @@ async def apple_notifications_v2(request: Request) -> dict:
 
     txn_payload = _safe_decode(data.get("signedTransactionInfo"))
     renewal_payload = _safe_decode(data.get("signedRenewalInfo"))
-    txn = parse_transaction(txn_payload) if txn_payload else None
-    renewal = parse_renewal_info(renewal_payload) if renewal_payload else None
+    txn = parse_transaction(txn_payload) if txn_payload is not None else None
+    renewal = parse_renewal_info(renewal_payload) if renewal_payload is not None else None
 
     original_txn_id = (txn.original_transaction_id if txn else None) or (
         renewal.original_transaction_id if renewal else None
