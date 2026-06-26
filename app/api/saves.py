@@ -106,7 +106,7 @@ async def list_saves(
                        p.id, p.brand, p.name, p.price, p.image_url, p.in_stock
                 FROM ai.saves s
                 LEFT JOIN public.products p
-                       ON s.product_id ~ '^[0-9]+$' AND p.id = s.product_id::bigint
+                       ON p.id = CASE WHEN s.product_id ~ '^[0-9]+$' THEN s.product_id::bigint END
                 WHERE s.user_id = %s
                   AND s.created_at < (SELECT created_at FROM ai.saves WHERE save_id = %s AND user_id = %s)
                 ORDER BY s.created_at DESC
@@ -121,7 +121,7 @@ async def list_saves(
                        p.id, p.brand, p.name, p.price, p.image_url, p.in_stock
                 FROM ai.saves s
                 LEFT JOIN public.products p
-                       ON s.product_id ~ '^[0-9]+$' AND p.id = s.product_id::bigint
+                       ON p.id = CASE WHEN s.product_id ~ '^[0-9]+$' THEN s.product_id::bigint END
                 WHERE s.user_id = %s
                 ORDER BY s.created_at DESC
                 LIMIT %s
