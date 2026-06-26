@@ -25,6 +25,15 @@ class TransactionInfo:
     environment: str  # 'Sandbox' | 'Production'
 
 
+@dataclass
+class RenewalInfo:
+    """Apple signedRenewalInfo — 자동갱신/유예기간 상태."""
+
+    auto_renew: bool
+    grace_period_expires_date: datetime | None
+    original_transaction_id: str | None
+
+
 def decode_apple_jws(token: str) -> dict:
     """Apple JWS(ES256) 디코드 및 서명 검증."""
     header = jose_jwt.get_unverified_header(token)
@@ -54,4 +63,18 @@ def parse_transaction(payload: dict) -> TransactionInfo:
         purchase_date=datetime.fromtimestamp(payload["purchaseDate"] / 1000, tz=UTC),
         expires_date=datetime.fromtimestamp(expires_ms / 1000, tz=UTC) if expires_ms else None,
         environment=payload.get("environment", "Production"),
+    )
+
+
+def parse_renewal_info(payload: dict) -> RenewalInfo:
+    """JWS 갱신정보 페이로드 → RenewalInfo.
+
+    autoRenewStatus: 1=on, 0=off. gracePeriodExpiresDate: 결제 재시도 유예 만료(ms).
+    """
+    grace_ms = payload.get("gracePeriodExpiresDate")
+    oti = payload.get("originalTransactionId")
+    return RenewalInfo(
+        auto_renew=str(payload.get("autoRenewStatus", "1")) == "1",
+        grace_period_expires_date=datetime.fromtimestamp(grace_ms / 1000, tz=UTC) if grace_ms else None,
+        original_transaction_id=str(oti) if oti else None,
     )

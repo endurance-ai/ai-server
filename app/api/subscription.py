@@ -1,11 +1,10 @@
-"""Subscription status API.
+"""Subscription status API (명세 계약).
 
-GET /v1/subscription — 내 구독 상태 조회
+GET /v1/subscription — 내 구독 상태 조회 (status/auto_renew/manage_url 포함)
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -14,14 +13,21 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
+from app.services import subscription_service
 
 router = APIRouter(prefix="/v1", tags=["subscription"])
 
+# 구독 관리(해지/변경)는 App Store 가 담당 — 정적 딥링크.
+_MANAGE_URL = "https://apps.apple.com/account/subscriptions"
+
 
 class SubscriptionResponse(BaseModel):
-    tier: str
-    tier_expires_at: str | None
-    is_active: bool
+    status: str  # 'active' | 'grace' | 'expired' | 'revoked' | 'none'
+    product_id: str | None
+    expires_at: str | None
+    auto_renew: bool | None
+    will_renew_at: str | None
+    manage_url: str
 
 
 @router.get("/subscription", response_model=SubscriptionResponse, status_code=status.HTTP_200_OK)
@@ -29,22 +35,26 @@ async def get_subscription(
     user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> SubscriptionResponse:
-    """현재 구독 티어 및 만료일 반환."""
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT tier, tier_expires_at FROM ai.user_profiles WHERE user_id = %s",
-            (user_id,),
+    """현재 구독 상태 반환. 구독 이력이 없으면 status='none'."""
+    state = await subscription_service.get_current(pool, user_id)
+    if state is None:
+        return SubscriptionResponse(
+            status="none",
+            product_id=None,
+            expires_at=None,
+            auto_renew=None,
+            will_renew_at=None,
+            manage_url=_MANAGE_URL,
         )
-        row = await cur.fetchone()
 
-    if not row:
-        return SubscriptionResponse(tier="free", tier_expires_at=None, is_active=False)
-
-    tier, expires_at = row
-    is_active = tier != "free" and (expires_at is None or expires_at > datetime.now(UTC))
-
+    expires_iso = state.expires_at.isoformat() if state.expires_at else None
+    # 자동갱신 ON + 활성/유예 상태일 때만 다음 갱신 예정일 노출.
+    will_renew_at = expires_iso if (state.auto_renew and state.status in ("active", "grace")) else None
     return SubscriptionResponse(
-        tier=tier,
-        tier_expires_at=expires_at.isoformat() if expires_at else None,
-        is_active=is_active,
+        status=state.status,
+        product_id=state.product_id,
+        expires_at=expires_iso,
+        auto_renew=state.auto_renew,
+        will_renew_at=will_renew_at,
+        manage_url=_MANAGE_URL,
     )

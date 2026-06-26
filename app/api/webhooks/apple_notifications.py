@@ -1,7 +1,9 @@
 """Apple App Store Server Notifications V2 webhook.
 
 POST /webhooks/apple/notifications-v2
-Apple이 구독 상태 변경 시 서버로 전송하는 S2S 알림을 처리합니다.
+Apple 이 구독 상태 변경 시 보내는 S2S 알림(JWS)을 받아 ai.subscriptions 를 갱신한다.
+notification_uuid 로 멱등 처리하고, signedRenewalInfo 로 auto_renew/grace 를 반영한다.
+Apple 은 비-2xx 응답 시 재전송하므로, 처리 불가 케이스도 200 으로 응답한다.
 """
 
 from __future__ import annotations
@@ -10,145 +12,93 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 from jose import JWTError
-from psycopg_pool import AsyncConnectionPool
 
-from app.core.apple_iap import decode_apple_jws, parse_transaction
+from app.core.apple_iap import decode_apple_jws, parse_renewal_info, parse_transaction
 from app.core.di import provide_db_pool
+from app.services import subscription_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks/apple", tags=["webhooks"])
 
-# 구독 만료/환불 시 free로 다운그레이드하는 타입
-_DOWNGRADE_TYPES = {"EXPIRED", "REFUND", "REVOKE"}
-# 갱신 성공 시 tier 연장하는 타입
-_RENEW_TYPES = {"DID_RENEW", "SUBSCRIBED", "DID_RECOVER"}
+
+def _map_status(notification_type: str, subtype: str | None) -> str | None:
+    """알림 유형 → 구독 status. None 이면 만료일 기준으로 서비스가 도출."""
+    if notification_type in ("SUBSCRIBED", "DID_RENEW", "DID_RECOVER"):
+        return "active"
+    if notification_type in ("EXPIRED", "GRACE_PERIOD_EXPIRED"):
+        return "expired"
+    if notification_type in ("REFUND", "REVOKE"):
+        return "revoked"
+    if notification_type == "DID_FAIL_TO_RENEW":
+        return "grace" if subtype == "GRACE_PERIOD" else "expired"
+    return None  # DID_CHANGE_RENEWAL_STATUS 등 → 만료일 기준 도출
+
+
+def _safe_decode(jws: str | None):
+    if not jws:
+        return None
+    try:
+        return decode_apple_jws(jws)
+    except (JWTError, Exception) as e:  # noqa: BLE001 — 외부 입력, 어떤 실패든 무시
+        logger.warning("Apple webhook sub-JWS decode failed: %s", e)
+        return None
 
 
 @router.post("/notifications-v2", status_code=status.HTTP_200_OK)
 async def apple_notifications_v2(request: Request) -> dict:
-    """Apple S2S 알림 V2 처리.
-
-    signedPayload(JWS) → 알림 유형 파싱 → 구독 상태 갱신.
-    Apple은 200 응답을 받아야 재전송하지 않습니다.
-    """
+    """Apple S2S 알림 V2 처리 (멱등)."""
     body = await request.json()
     signed_payload = body.get("signedPayload")
     if not signed_payload:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="signedPayload missing")
 
-    # 외부 의존성이므로 try/except로 감쌈 — 400이 아닌 200 반환해 Apple 재전송 방지
-    try:
-        notification = decode_apple_jws(signed_payload)
-    except (JWTError, Exception) as e:
-        logger.warning("Apple notification JWS decode failed: %s", e)
+    notification = _safe_decode(signed_payload)
+    if notification is None:
         return {"status": "ignored", "reason": "jws_decode_failed"}
 
-    notification_type = notification.get("notificationType", "")
+    ntype = notification.get("notificationType", "")
+    subtype = notification.get("subtype")
+    nuuid = notification.get("notificationUUID")
     data = notification.get("data", {})
-    bundle_id = data.get("bundleId", "")
 
-    logger.info("Apple notification received: type=%s bundle=%s", notification_type, bundle_id)
+    txn_payload = _safe_decode(data.get("signedTransactionInfo"))
+    renewal_payload = _safe_decode(data.get("signedRenewalInfo"))
+    txn = parse_transaction(txn_payload) if txn_payload else None
+    renewal = parse_renewal_info(renewal_payload) if renewal_payload else None
 
-    if notification_type in _RENEW_TYPES:
-        await _handle_renew(data, notification_type)
-    elif notification_type in _DOWNGRADE_TYPES:
-        await _handle_downgrade(data, notification_type)
-    else:
-        logger.info("Apple notification type %s — no action", notification_type)
+    original_txn_id = (txn.original_transaction_id if txn else None) or (
+        renewal.original_transaction_id if renewal else None
+    )
 
+    pool = provide_db_pool()
+
+    # 멱등성: 처음 보는 알림만 처리
+    if nuuid:
+        fresh = await subscription_service.record_event(
+            pool, nuuid, ntype, subtype, original_txn_id, raw={"type": ntype, "subtype": subtype}
+        )
+        if not fresh:
+            logger.info("Apple notification %s (uuid=%s) already processed — skip", ntype, nuuid)
+            return {"status": "duplicate"}
+
+    logger.info("Apple notification: type=%s subtype=%s", ntype, subtype)
+
+    if txn is None or original_txn_id is None:
+        return {"status": "ignored", "reason": "no_transaction"}
+
+    user_id = await subscription_service.find_user_by_original_txn(pool, original_txn_id)
+    if user_id is None:
+        logger.warning("Apple webhook: no user for original_txn_id=%s", original_txn_id)
+        return {"status": "ignored", "reason": "unknown_user"}
+
+    await subscription_service.upsert_from_transaction(
+        pool,
+        user_id,
+        txn,
+        status=_map_status(ntype, subtype),
+        auto_renew=(renewal.auto_renew if renewal else None),
+        notification_type=ntype,
+    )
+    logger.info("Apple webhook applied: user=%s type=%s", user_id, ntype)
     return {"status": "ok"}
-
-
-async def _handle_renew(data: dict, notification_type: str) -> None:
-    signed_txn = data.get("signedTransactionInfo")
-    if not signed_txn:
-        return
-
-    pool: AsyncConnectionPool = provide_db_pool()
-
-    try:
-        payload = decode_apple_jws(signed_txn)
-        txn = parse_transaction(payload)
-    except (JWTError, KeyError, ValueError) as e:
-        logger.warning("signedTransactionInfo decode failed: %s", e)
-        return
-
-    # apple_original_txn_id로 user_id 조회
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT user_id FROM ai.iap_transactions WHERE apple_original_txn_id = %s LIMIT 1",
-            (txn.original_transaction_id,),
-        )
-        row = await cur.fetchone()
-
-    if not row:
-        logger.warning("No user found for original_txn_id=%s", txn.original_transaction_id)
-        return
-
-    user_id = row[0]
-
-    # iap 모듈의 _activate_subscription 로직과 동일
-    from app.api.iap import _activate_subscription
-
-    _ = await _activate_subscription(pool, user_id, txn, notification_type=notification_type)
-    logger.info("Subscription renewed for user=%s txn=%s", user_id, txn.transaction_id)
-
-
-async def _handle_downgrade(data: dict, notification_type: str) -> None:
-    signed_txn = data.get("signedTransactionInfo")
-    if not signed_txn:
-        return
-
-    pool: AsyncConnectionPool = provide_db_pool()
-
-    try:
-        payload = decode_apple_jws(signed_txn)
-        txn = parse_transaction(payload)
-    except (JWTError, KeyError, ValueError) as e:
-        logger.warning("signedTransactionInfo decode failed: %s", e)
-        return
-
-    async with pool.connection() as conn, conn.cursor() as cur:
-        # user_id 조회
-        await cur.execute(
-            "SELECT user_id FROM ai.iap_transactions WHERE apple_original_txn_id = %s LIMIT 1",
-            (txn.original_transaction_id,),
-        )
-        row = await cur.fetchone()
-        if not row:
-            return
-
-        user_id = row[0]
-
-        # 트랜잭션 기록
-        await cur.execute(
-            """
-            INSERT INTO ai.iap_transactions
-                (user_id, apple_txn_id, apple_original_txn_id, product_id,
-                 tier, purchase_date, expires_date, environment, notification_type)
-            VALUES (%s, %s, %s, %s, 'free', %s, %s, %s, %s)
-            ON CONFLICT (apple_txn_id) DO NOTHING
-            """,
-            (
-                user_id,
-                txn.transaction_id,
-                txn.original_transaction_id,
-                txn.product_id,
-                txn.purchase_date,
-                txn.expires_date,
-                txn.environment,
-                notification_type,
-            ),
-        )
-        # 유저 티어 free로 다운그레이드
-        await cur.execute(
-            """
-            UPDATE ai.user_profiles
-            SET tier = 'free', tier_expires_at = NULL, updated_at = now()
-            WHERE user_id = %s
-            """,
-            (user_id,),
-        )
-
-    logger.info("Subscription downgraded to free for user=%s type=%s", user_id, notification_type)
