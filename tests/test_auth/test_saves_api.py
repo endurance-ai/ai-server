@@ -20,6 +20,22 @@ async def _login(client: AsyncClient) -> str:
     return f"Bearer {resp.json()['access_token']}"
 
 
+async def _insert_product(pool) -> int:
+    """Insert a test product into the catalog and return its numeric id."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO public.products (brand, name, category, price, image_url, product_url)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            ("TestBrand", "Test Product", "tops", 50000, "https://img.test/x.jpg", f"https://shop.test/{uuid4()}"),
+        )
+        row = await cur.fetchone()
+        await conn.commit()
+    return row[0]
+
+
 # ── POST /v1/saves ────────────────────────────────────────────────────────────
 
 
@@ -70,18 +86,25 @@ async def test_list_saves_empty(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_list_saves_returns_saved_items(client: AsyncClient):
+async def test_list_saves_returns_saved_items(client: AsyncClient, pool):
     auth = await _login(client)
-    await client.post("/v1/saves", json={"product_id": "prod-A"}, headers={"Authorization": auth})
+    pid = await _insert_product(pool)
+    await client.post("/v1/saves", json={"product_id": str(pid)}, headers={"Authorization": auth})
     await client.post("/v1/saves", json={"product_id": "prod-B"}, headers={"Authorization": auth})
 
     resp = await client.get("/v1/saves", headers={"Authorization": auth})
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 2
-    product_ids = [item["product_id"] for item in data["items"]]
-    assert "prod-A" in product_ids
-    assert "prod-B" in product_ids
+    # numeric product_id joins to the catalog → nested product object present
+    joined = [i for i in data["items"] if i["product"] is not None]
+    assert len(joined) == 1
+    assert joined[0]["product"]["id"] == pid
+    assert joined[0]["product"]["brand"] == "TestBrand"
+    assert joined[0]["product"]["price"] == 50000.0
+    # non-numeric / missing-from-catalog product → product is None
+    missing = [i for i in data["items"] if i["product"] is None]
+    assert len(missing) == 1
 
 
 @pytest.mark.asyncio
