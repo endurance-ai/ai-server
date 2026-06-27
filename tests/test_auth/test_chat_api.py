@@ -215,3 +215,70 @@ async def test_append_message_to_nonexistent_session_returns_404(client: AsyncCl
         )
 
     assert resp.status_code == 404
+
+
+# ── searches 영속화 (결과셋) ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_persisted_and_search_event_emitted(client: AsyncClient, pool):
+    """검색 결과셋이 ai.searches 에 저장되고 SSE 'search' 이벤트로 search_id 가 나온다."""
+    from types import SimpleNamespace
+
+    auth = await _login(client)
+
+    async def _fake_invoke(state, **_):
+        # 검색 툴이 하듯 세션에 결과셋을 채운다 (Candidate-like: id/image_url)
+        from app.infrastructure.memory.session import get_store
+
+        sess = get_store().get_or_create(state.chat_id)
+        sess.last_results = [
+            SimpleNamespace(id=101, image_url="https://img.test/1.jpg"),
+            SimpleNamespace(id=102, image_url="https://img.test/2.jpg"),
+        ]
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_fake_invoke)
+        resp = await client.post(
+            "/v1/chat/sessions",
+            json={"message": "코트 추천해줘"},
+            headers={"Authorization": auth},
+        )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert "search" in events
+    search_id = events["search"]["search_id"]
+    UUID(search_id)  # valid UUID
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT product_ids, total, is_listed FROM ai.searches WHERE search_id = %s",
+            (search_id,),
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[1] == 2  # total
+    assert row[2] is False  # is_listed default
+    assert 101 in row[0]
+
+
+@pytest.mark.asyncio
+async def test_no_search_event_when_no_results(client: AsyncClient):
+    """결과가 없으면 search 이벤트도 ai.searches 행도 없다."""
+    auth = await _login(client)
+
+    async def _noop(state, **_):
+        pass
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_noop)
+        resp = await client.post(
+            "/v1/chat/sessions",
+            json={"message": "hi"},
+            headers={"Authorization": auth},
+        )
+
+    events = _parse_sse(resp.text)
+    assert "search" not in events
+    assert "done" in events
