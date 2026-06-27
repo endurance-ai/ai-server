@@ -123,6 +123,9 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
     subcategory = (getattr(c, "subcategory", "") or "").strip()
     price_str = _format_price(getattr(c, "price", None))
 
+    pid_str = str(getattr(c, "id", "") or "") or None
+    product_id = int(pid_str) if pid_str and pid_str.isdigit() else None
+
     if not image_url or not product_url:
         return None
 
@@ -162,12 +165,13 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
         return BotCard(
             image_url=image_url,
             caption=caption,
+            product_id=product_id,
             # 260610 — no explicit URL button row; navigation is via the
             # hyperlinked brand text in the caption above.
             button_text=None,
             button_url=None,
             parse_mode="HTML",
-            critique_buttons=_critique_buttons_for(idx, lang=lang, product_id=str(getattr(c, "id", "") or "") or None),
+            critique_buttons=_critique_buttons_for(idx, lang=lang, product_id=pid_str),
         )
     except ValidationError:
         return None
