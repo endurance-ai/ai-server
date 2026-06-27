@@ -121,6 +121,8 @@ async def _truncate(pool) -> AsyncGenerator[None]:
         await cur.execute(
             """
             TRUNCATE
+                ai.searches,
+                ai.product_views,
                 ai.chat_messages,
                 ai.chat_sessions,
                 ai.refresh_tokens,
