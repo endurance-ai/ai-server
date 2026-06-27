@@ -168,6 +168,41 @@ async def test_get_messages_other_user_session_returns_404(client: AsyncClient):
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_product_id_flows_to_sse_and_history(client: AsyncClient):
+    """ProductRef.product_id must surface in the SSE `product` event and persist
+    into message-history product_refs so the client can deep-link to the PDP."""
+    auth = await _login(client)
+
+    async def _send_card(state, **_):
+        from app.channels.schemas import BotCard
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+        await adapter.send_text(state.chat_id, "여기 추천이에요!")
+        await adapter.send_card(
+            state.chat_id,
+            BotCard(image_url="https://example.com/p.jpg", caption="오버핏 니트", product_id=12345),
+        )
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_send_card)
+        create_resp = await client.post(
+            "/v1/chat/sessions", json={"message": "니트 추천"}, headers={"Authorization": auth}
+        )
+
+    events = _parse_sse(create_resp.text)
+    assert events["product"]["product_id"] == 12345
+    assert events["product"]["image_url"] == "https://example.com/p.jpg"
+
+    session_id = events["session"]["session_id"]
+    resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    messages = resp.json()["messages"]
+    assistant = next(m for m in messages if m["role"] == "assistant")
+    assert assistant["product_refs"][0]["product_id"] == 12345
+
+
 # ── POST /v1/chat/sessions/{id}/messages ────────────────────────────────────────
 
 

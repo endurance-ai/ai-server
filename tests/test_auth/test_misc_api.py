@@ -173,6 +173,42 @@ async def test_update_notifications_requires_auth(client: AsyncClient):
     assert resp.status_code in (401, 403)
 
 
+# ── GET /v1/me/notifications ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_defaults(client: AsyncClient):
+    auth, _ = await _login(client)
+    resp = await client.get("/v1/me/notifications", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    data = resp.json()
+    # New user with no saved settings → all categories opted in by default.
+    assert data["categories"]["release_alerts"] is True
+    assert data["categories"]["taste_push"] is True
+    assert data["categories"]["system"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_reflects_patch(client: AsyncClient):
+    auth, _ = await _login(client)
+    await client.patch(
+        "/v1/me/notifications",
+        headers={"Authorization": auth},
+        json={"categories": {"taste_push": False}},
+    )
+    resp = await client.get("/v1/me/notifications", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["categories"]["taste_push"] is False
+    assert data["categories"]["release_alerts"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_notifications_requires_auth(client: AsyncClient):
+    resp = await client.get("/v1/me/notifications")
+    assert resp.status_code in (401, 403)
+
+
 # ── GET /v1/legal/versions ────────────────────────────────────────────────────
 
 

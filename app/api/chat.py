@@ -8,7 +8,7 @@ GET  /v1/chat/sessions/{session_id}/messages  — paginated message history
 SSE event sequence for POST endpoints:
   event: session  data: {"session_id": "<uuid>"}
   event: text     data: {"text": "<reply text>"}      # 0-N times
-  event: product  data: {"image_url": "...", "caption": "..."}  # 0-N times
+  event: product  data: {"image_url": "...", "caption": "...", "product_id": 123}  # 0-N times
   event: done     data: {}
   event: error    data: {"detail": "..."}             # on failure
 """
@@ -48,6 +48,10 @@ class ChatRequest(BaseModel):
 class ProductRef(BaseModel):
     image_url: str | None = None
     caption: str | None = None
+    # products.id — lets the client deep-link a chat card to its PDP
+    # (GET /v1/products/{id}) and fire Record View. None for legacy rows /
+    # id-less candidates.
+    product_id: int | None = None
 
 
 class ChatResponse(BaseModel):

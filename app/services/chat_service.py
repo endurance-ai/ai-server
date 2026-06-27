@@ -129,7 +129,9 @@ class StreamingAdapter(MessengerAdapter):
 
     async def send_card(self, chat_id: int, card: BotCard) -> int | None:
         self._cards.append(card)
-        await self._queue.put(("product", {"image_url": str(card.image_url), "caption": card.caption}))
+        await self._queue.put(
+            ("product", {"image_url": str(card.image_url), "caption": card.caption, "product_id": card.product_id})
+        )
         return 0
 
     def close(self) -> None:
@@ -339,7 +341,9 @@ async def invoke(
     # Persist assistant reply
     product_refs = None
     if reply.cards:
-        product_refs = [{"image_url": str(c.image_url), "caption": c.caption} for c in reply.cards]
+        product_refs = [
+            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
+        ]
     assistant_content = reply.text or ""
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
@@ -416,7 +420,9 @@ async def invoke_streaming(
     reply = streaming.get_reply()
     product_refs = None
     if reply.cards:
-        product_refs = [{"image_url": str(c.image_url), "caption": c.caption} for c in reply.cards]
+        product_refs = [
+            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
+        ]
     assistant_content = reply.text or ""
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()

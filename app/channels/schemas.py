@@ -66,6 +66,10 @@ class ChannelMessage(BaseModel):
 class BotCard(BaseModel):
     image_url: HttpUrl
     caption: str
+    # Source product id (products.id). Carried so consumer surfaces (chat REST
+    # SSE `product` event + message-history `product_refs`) can deep-link a card
+    # to its PDP (`/v1/products/{id}`). None when the source candidate had no id.
+    product_id: int | None = None
     # 260610 — button_text/button_url are now Optional. When BOTH are None the
     # adapter skips the explicit Shop URL row entirely (the navigation moves
     # into the caption via an `<a href>` hyperlink wrap on the brand text).
