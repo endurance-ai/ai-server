@@ -308,6 +308,10 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
         new_ids = [str(getattr(c, "id", "") or "") for c in normalized]
         new_ids = [i for i in new_ids if i]
         sess.shown_product_ids = list(dict.fromkeys(sess.shown_product_ids + new_ids))
+        # Per-turn marker for REST result-set persistence (chat_service pops it
+        # after the graph turn → INSERT ai.searches). Ranked product_ids in
+        # cosine order; ignored entirely by the Telegram path.
+        sess.pending_search = {"product_ids": [int(i) for i in new_ids if i.isdigit()]}
         store.update(sess)
         # Mark THIS turn as card-bearing only when we actually persisted
         # candidates (>0). react_loop shares this `ctx` with `respond`.

@@ -214,6 +214,49 @@ async def set_session_title(
         )
 
 
+async def _persist_search(
+    pool: AsyncConnectionPool,
+    session_id: UUID,
+    user_id: UUID,
+    chat_id: int,
+    fallback_query: str,
+) -> None:
+    """Persist this turn's search result set into ai.searches, if a search ran.
+
+    Reads the per-turn marker `sess.pending_search` (set by
+    search_products.persist_last_results) and clears it. A text-only turn leaves
+    the marker unset → no row written. Backs GET /v1/results and /v1/history.
+    fail-open: never breaks the chat turn.
+    """
+    try:
+        from app.agents.last_query import get_last_query
+        from app.infrastructure.memory.session import get_store
+
+        store = get_store()
+        sess = store.get_or_create(chat_id)
+        pending = getattr(sess, "pending_search", None)
+        if not pending:
+            return
+        product_ids = [int(p) for p in pending.get("product_ids", []) if p is not None]
+        # Clear so a later text-only turn doesn't re-persist the stale set.
+        sess.pending_search = None
+        store.update(sess)
+        if not product_ids:
+            return
+        query_text = (get_last_query(chat_id) or fallback_query or "").strip()
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO ai.searches (session_id, user_id, query_text, product_ids, result_count)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (session_id, user_id, query_text, product_ids, len(product_ids)),
+            )
+            await conn.commit()
+    except Exception:
+        logger.debug("[chat_service] _persist_search skipped", exc_info=True)
+
+
 # ── Core invoke ───────────────────────────────────────────────────────────────
 
 
@@ -287,6 +330,9 @@ async def invoke(
         reset_adapter(token)
 
     reply = capture.get_reply()
+
+    # Persist this turn's search result set (if a search ran) for /v1/results.
+    await _persist_search(pool, resolved_session_id, user_id, synthetic_chat_id, text)
 
     # Persist assistant reply
     product_refs = None
@@ -363,6 +409,9 @@ async def invoke_streaming(
     if graph_exc is not None:
         yield "error", {"detail": "AI response failed"}
         return
+
+    # Persist this turn's search result set (if a search ran) for /v1/results.
+    await _persist_search(pool, resolved_session_id, user_id, synthetic_chat_id, text)
 
     reply = streaming.get_reply()
     product_refs = None

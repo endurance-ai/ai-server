@@ -72,6 +72,12 @@ class Session:
     # searches can exclude already-shown product_ids.
     last_results: list[Any] = field(default_factory=list)  # list of Candidate-like
     shown_product_ids: list[str] = field(default_factory=list)
+    # REST result-set persistence — per-turn marker set by
+    # search_products.persist_last_results and popped by chat_service after the
+    # graph turn to INSERT an ai.searches row. None on non-search turns (so a
+    # text-only turn never re-persists a stale result set). Shape:
+    # {"product_ids": [int, ...]} in cosine rank order.
+    pending_search: dict[str, Any] | None = None
     last_critique_summary: str | None = None  # for next-turn pre-search confirmation
     # SPEC-CLARIFY-CARDS-001 / REQ-CLARIFY-VALUE-MAPPING-001 — clarify 카드 응답에서
     # 파생된 sticky boost_keywords. 자기-비평 fast-path가 critique_delta를 갈아치워도
