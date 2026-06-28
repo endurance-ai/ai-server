@@ -18,7 +18,7 @@ All helpers are fail-open: Redis unavailability never blocks message handling.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Final, Literal
 
 from app.core.config import settings
@@ -47,6 +47,13 @@ def _seconds_until_kst_midnight() -> int:
     now_kst = datetime.now(_KST)
     next_midnight = (now_kst + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return max(60, int((next_midnight - now_kst).total_seconds()))
+
+
+def reset_at_kst_midnight() -> datetime:
+    """Return the next KST midnight as a timezone-aware UTC datetime."""
+    now_kst = datetime.now(_KST)
+    next_midnight = (now_kst + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return next_midnight.astimezone(UTC)
 
 
 def _tier_cap(tier: str) -> int:
