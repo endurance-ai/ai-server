@@ -42,6 +42,7 @@ dev = [
     "testcontainers[postgres]>=4.14.2",
     # SPEC-CHAT-STATE-REDIS-001 — in-process redis simulator for unit/integration tests.
     "fakeredis>=2.0",
+    "pytest-cov>=7.1.0",
 ]
 
 # 로컬 배치 임베딩 (`scripts/embed_batch_local.py`) 전용 — 운영 이미지에는 포함 X
