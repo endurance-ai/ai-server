@@ -59,3 +59,25 @@ def test_accumulate_lc_records_fallback_cost_and_metadata():
     assert totals["calls"][0]["source"] == "langchain"
     assert totals["calls"][0]["cost_source"] == "fallback_rates"
     assert turn_cost.langfuse_metadata() == {"turn_id": "turn-1"}
+
+
+def test_unframed_raw_call_still_emits_llm_call(monkeypatch):
+    emitted: list[dict] = []
+
+    def fake_emit(**kwargs):
+        emitted.append(kwargs)
+
+    monkeypatch.setattr("app.observability.conversation_log.emit", fake_emit)
+    turn_cost.clear_turn()
+
+    turn_cost.accumulate_raw(
+        "nova-lite",
+        {"prompt_tokens": 100, "completion_tokens": 10},
+        source="enhance_query",
+    )
+
+    assert emitted[0]["event_type"] == "llm_call"
+    assert emitted[0]["user_key"] == "internal:unframed"
+    assert emitted[0]["chat_id"] == 0
+    assert emitted[0]["payload"]["source"] == "enhance_query"
+    assert emitted[0]["payload"]["framed"] is False

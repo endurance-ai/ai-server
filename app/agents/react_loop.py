@@ -1640,19 +1640,18 @@ async def run_react_loop(state: WorkingState, sess: Any) -> dict[str, Any]:
                 "iter_count": iter_count,
                 "total_tokens": turn_total_tokens or total_tokens,
                 "llm_call_count": len(llm_calls),
+                "cost_usd": round(cost_usd, 8),
+                "cache_read_tokens": cache_read_tokens,
                 "tool_sequence": tool_sequence,
                 "status": status,
                 "exit_reason": exit_reason,
             }
-            if cost_usd > 0:
-                payload["cost_usd"] = round(cost_usd, 8)
-                payload["cache_read_tokens"] = cache_read_tokens
             emit(
                 event_type="turn_summary",
                 user_key=user_key_for(state.from_user_id, state.chat_id),
                 chat_id=state.chat_id,
                 thread_id=state.thread_id,
-                turn_no=1,
+                turn_no=state.turn_no,
                 payload=payload,
             )
         except Exception:  # noqa: BLE001 — observability is best-effort
