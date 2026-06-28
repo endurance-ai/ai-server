@@ -79,8 +79,65 @@ async def test_create_session_returns_reply(client: AsyncClient):
     events = _parse_sse(resp.text)
     assert "session" in events
     UUID(events["session"]["session_id"])  # valid UUID
+    assert events["session"]["user_tier"] == "free"
+    assert isinstance(events["session"]["daily_cap"], int)
+    assert isinstance(events["session"]["cap_used"], int)
+    assert "cap_remaining" in events["session"]
+    assert "cap_reset_at" in events["session"]
     assert events["_text"] == "Here are some picks!"
     assert "done" in events
+
+
+@pytest.mark.asyncio
+async def test_create_session_cap_reached_emits_banner_event_without_graph_or_messages(
+    client: AsyncClient,
+    monkeypatch,
+):
+    from app.services.chat_service import AppCapStatus
+
+    auth = await _login(client)
+
+    async def _cap_reached(*_args, **_kwargs):
+        return AppCapStatus(
+            user_tier="free",
+            cap_tier="free",
+            daily_cap=500_000,
+            cap_used=500_000,
+            cap_remaining=0,
+            cap_reset_at="2026-06-28T15:00:00+00:00",
+            cap_reached=True,
+        )
+
+    monkeypatch.setattr("app.services.chat_service.get_app_cap_status", _cap_reached)
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock()
+        resp = await client.post(
+            "/v1/chat/sessions",
+            json={"message": "더 추천해줘"},
+            headers={"Authorization": auth},
+        )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert events["session"]["user_tier"] == "free"
+    assert events["session"]["cap_remaining"] == 0
+    assert events["cap_reached"] == {
+        "code": "daily_token_cap_reached",
+        "user_tier": "free",
+        "used": 500_000,
+        "cap": 500_000,
+        "remaining": 0,
+        "reset_at": "2026-06-28T15:00:00+00:00",
+        "cta": "upgrade",
+    }
+    assert "done" in events
+    mock_graph.ainvoke.assert_not_called()
+
+    session_id = events["session"]["session_id"]
+    history = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
+    assert history.status_code == 200
+    assert history.json()["messages"] == []
 
 
 @pytest.mark.asyncio

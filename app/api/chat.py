@@ -6,9 +6,10 @@ GET  /v1/chat/sessions                        — list user's sessions
 GET  /v1/chat/sessions/{session_id}/messages  — paginated message history
 
 SSE event sequence for POST endpoints:
-  event: session  data: {"session_id": "<uuid>"}
+  event: session  data: {"session_id": "<uuid>", "user_tier": "free|basic|pro", ...cap metadata}
   event: text     data: {"text": "<reply text>"}      # 0-N times
   event: product  data: {"image_url": "...", "caption": "...", "product_id": 123}  # 0-N times
+  event: cap_reached data: {"code": "daily_token_cap_reached", "user_tier": "...", ...}  # cap hit
   event: done     data: {}
   event: error    data: {"detail": "..."}             # on failure
 """

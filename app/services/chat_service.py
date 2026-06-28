@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -42,6 +43,45 @@ def _user_id_to_chat_id(user_id: UUID) -> int:
 
 # user_profiles uses ('male','female','other'); taste_profile uses ('men','women','unisex')
 _GENDER_MAP = {"male": "men", "female": "women", "other": "unisex"}
+_APP_TO_CAP_TIER = {
+    "free": "free",
+    "basic": "standard",
+    "standard": "standard",
+    "pro": "pro",
+    "premium": "pro",
+    "developer": "developer",
+}
+
+
+@dataclass(frozen=True)
+class AppCapStatus:
+    user_tier: str
+    cap_tier: str
+    daily_cap: int
+    cap_used: int
+    cap_remaining: int | None
+    cap_reset_at: str
+    cap_reached: bool
+
+    def session_payload(self) -> dict:
+        return {
+            "user_tier": self.user_tier,
+            "daily_cap": self.daily_cap,
+            "cap_used": self.cap_used,
+            "cap_remaining": self.cap_remaining,
+            "cap_reset_at": self.cap_reset_at,
+        }
+
+    def cap_event_payload(self) -> dict:
+        return {
+            "code": "daily_token_cap_reached",
+            "user_tier": self.user_tier,
+            "used": self.cap_used,
+            "cap": self.daily_cap,
+            "remaining": 0,
+            "reset_at": self.cap_reset_at,
+            "cta": "upgrade",
+        }
 
 
 async def _sync_gender_to_taste_profile(
@@ -71,6 +111,41 @@ async def _sync_gender_to_taste_profile(
             store.update(profile)
     except Exception:
         logger.debug("[chat_service] gender sync skipped", exc_info=True)
+
+
+async def _get_app_user_tier(pool: AsyncConnectionPool, user_id: UUID) -> str:
+    """Return the app subscription tier cached on user_profiles."""
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT tier FROM ai.user_profiles WHERE user_id = %s", (user_id,))
+            row = await cur.fetchone()
+    except Exception:
+        logger.debug("[chat_service] tier lookup skipped", exc_info=True)
+        return "free"
+    tier = str(row[0] or "free").strip().lower() if row else "free"
+    return tier or "free"
+
+
+async def get_app_cap_status(pool: AsyncConnectionPool, user_id: UUID) -> AppCapStatus:
+    """Resolve the current app-user tier and daily token cap status."""
+    from app.core.config import settings
+    from app.infrastructure.cache import token_cap
+
+    user_tier = await _get_app_user_tier(pool, user_id)
+    cap_tier = _APP_TO_CAP_TIER.get(user_tier, "free")
+    daily_cap = int(token_cap._tier_cap(cap_tier))  # noqa: SLF001 - shared cap SoT
+    cap_used = int(await token_cap.get_usage(_user_id_to_chat_id(user_id)))
+    cap_remaining = None if daily_cap == 0 else max(0, daily_cap - cap_used)
+    cap_reached = bool(settings.DAILY_TOKEN_CAP_ENABLED and daily_cap > 0 and cap_used >= daily_cap)
+    return AppCapStatus(
+        user_tier=user_tier,
+        cap_tier=cap_tier,
+        daily_cap=daily_cap,
+        cap_used=cap_used,
+        cap_remaining=cap_remaining,
+        cap_reset_at=token_cap.reset_at_kst_midnight().isoformat(),
+        cap_reached=cap_reached,
+    )
 
 
 class CaptureAdapter(MessengerAdapter):
@@ -371,14 +446,44 @@ async def invoke_streaming(
 
     Event sequence: session → text* → product* → done   (or error on failure)
     """
+    synthetic_chat_id = _user_id_to_chat_id(user_id)
     resolved_session_id = await get_or_create_session(pool, user_id, session_id)
-    await _sync_gender_to_taste_profile(pool, user_id, _user_id_to_chat_id(user_id))
+    cap_status = await get_app_cap_status(pool, user_id)
+
+    yield "session", {"session_id": str(resolved_session_id), **cap_status.session_payload()}
+
+    if cap_status.cap_reached:
+        logger.info(
+            "[chat_service] daily cap reached user=%s tier=%s used=%d cap=%d",
+            user_id,
+            cap_status.user_tier,
+            cap_status.cap_used,
+            cap_status.daily_cap,
+        )
+        try:
+            from app.channels.lang import detect_lang
+            from app.infrastructure.memory.taste_profile import user_key_for
+            from app.observability.conversation_log import emit
+            from app.observability.event_payloads import CapReachedPayload
+
+            emit(
+                event_type="cap_reached",
+                user_key=user_key_for(None, synthetic_chat_id),
+                chat_id=synthetic_chat_id,
+                thread_id=uuid4(),
+                turn_no=0,
+                payload=CapReachedPayload(lang=detect_lang(text)),
+            )
+        except Exception:
+            logger.debug("[chat_service] cap_reached emit skipped", exc_info=True)
+        yield "cap_reached", cap_status.cap_event_payload()
+        yield "done", {}
+        return
+
+    await _sync_gender_to_taste_profile(pool, user_id, synthetic_chat_id)
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 
-    yield "session", {"session_id": str(resolved_session_id)}
-
-    synthetic_chat_id = _user_id_to_chat_id(user_id)
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
