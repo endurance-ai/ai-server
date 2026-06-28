@@ -23,15 +23,26 @@ from __future__ import annotations
 
 import logging
 import string
+from dataclasses import dataclass
 from typing import Any, Final
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StyleNodeSnapshot:
+    id: int
+    code: str
+    name_en: str | None = None
+    keywords_en: tuple[str, ...] = ()
+
 
 # A=1, B=2, ... U=21 — matches current production seed (dev-app inspected
 # 2026-06-14). Replaced in-place by `warm_cache` when DB is reachable.
 _FALLBACK: Final[dict[str, int]] = {letter: idx + 1 for idx, letter in enumerate(string.ascii_uppercase[:21])}
 
 _cache: dict[str, int] = dict(_FALLBACK)
+_nodes: list[StyleNodeSnapshot] = [StyleNodeSnapshot(id=node_id, code=code) for code, node_id in _FALLBACK.items()]
 # SPEC-SEARCH-V6-STYLE-WIRING follow-up: short prompt-ready digest of the
 # 21 active style nodes — fed to the search_products / refine_search tool
 # descriptions so the LLM has enough context to pick a letter on
@@ -107,15 +118,26 @@ async def warm_cache() -> None:
     _cache.clear()
     _cache.update({str(r[0]).strip().upper(): int(r[1]) for r in rows})
 
+    _nodes.clear()
     _digest.clear()
     for r in rows:
         letter = str(r[0]).strip().upper()
+        node_id = int(r[1])
         name_en = str(r[2] or "").strip()
         kw = r[3] or []
+        keywords = tuple(str(k).strip() for k in kw if k)
+        _nodes.append(
+            StyleNodeSnapshot(
+                id=node_id,
+                code=letter,
+                name_en=name_en or None,
+                keywords_en=keywords,
+            )
+        )
         # First 3 keywords keep the prompt tight (~12 tokens per line × 21 = ~250
         # tokens added to the tool description). Skip rows with no name to avoid
         # noise lines.
-        kw_head = ", ".join(str(k).strip() for k in kw[:3] if k)
+        kw_head = ", ".join(keywords[:3])
         if not name_en:
             continue
         line = f"  - {letter}: {name_en}" + (f" — {kw_head}" if kw_head else "")
@@ -163,6 +185,11 @@ def is_warmed() -> bool:
 def snapshot() -> dict[str, int]:
     """Return a copy of the current cache — for tests/observability only."""
     return dict(_cache)
+
+
+def list_nodes() -> list[StyleNodeSnapshot]:
+    """Return the active style-node list currently loaded in memory."""
+    return list(_nodes)
 
 
 def digest_lines() -> list[str]:
