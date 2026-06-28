@@ -62,6 +62,16 @@ class InputState(BaseModel):
     thread_id: UUID = Field(default_factory=uuid4)
     turn_no: int = 0
 
+    # Per-request search filters from the consumer mobile filter UI (chat API).
+    # Threaded into the tool dispatch ctx by react_loop._build_ctx so
+    # search_products / refine_search can apply them. Telegram intake leaves
+    # these None (defaults) → behavior unchanged on that path.
+    # req_gender: normalized taste token (men/women/unisex) — per-request only,
+    # never persisted to the taste profile (SPEC-GENDER-PIN-001).
+    # req_price_max: upper price bound in KRW integer 원 (None → no ceiling).
+    req_gender: str | None = None
+    req_price_max: int | None = None
+
 
 class WorkingState(InputState):
     """REQ-STATE-001/REQ-STATE-002: per-turn scratchpad threaded through nodes.

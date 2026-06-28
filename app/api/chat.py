@@ -22,7 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
@@ -41,8 +41,57 @@ async def _to_sse(gen: AsyncGenerator[tuple[str, dict]]) -> AsyncGenerator[str]:
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 
+# Mobile filter UI sends free-form gender labels (codes or KO labels). Normalize
+# to the taste-token vocabulary the search pipeline understands
+# (men/women/unisex). Unknown values normalize to None → "no gender filter".
+_GENDER_NORMALIZE = {
+    "men": "men",
+    "male": "men",
+    "man": "men",
+    "m": "men",
+    "남성": "men",
+    "남자": "men",
+    "women": "women",
+    "female": "women",
+    "woman": "women",
+    "w": "women",
+    "여성": "women",
+    "여자": "women",
+    "unisex": "unisex",
+    "other": "unisex",
+    "either": "unisex",
+    "all": "unisex",
+    "공용": "unisex",
+    "상관없음": "unisex",
+}
+
+
 class ChatRequest(BaseModel):
     message: str
+    # Per-request search filters from the mobile filter UI (FilterProvider).
+    # gender: 공용/여성/남성 → unisex/women/men. Per-request only — never persists
+    # to the user's taste profile (SPEC-GENDER-PIN-001).
+    # price_max: upper price bound in KRW integer 원. <=0 / None → no ceiling.
+    gender: str | None = None
+    price_max: int | None = None
+
+    @field_validator("gender", mode="before")
+    @classmethod
+    def _normalize_gender(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        return _GENDER_NORMALIZE.get(str(v).strip().lower())
+
+    @field_validator("price_max", mode="before")
+    @classmethod
+    def _clamp_price_max(cls, v: object) -> int | None:
+        if v is None:
+            return None
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
 
 
 class ProductRef(BaseModel):
@@ -96,7 +145,7 @@ async def create_session(
     if not body.message.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="message cannot be empty")
 
-    gen = chat_service.invoke_streaming(user_id, body.message, pool)
+    gen = chat_service.invoke_streaming(user_id, body.message, pool, gender=body.gender, price_max=body.price_max)
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
@@ -119,7 +168,9 @@ async def continue_session(
         if not await cur.fetchone():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    gen = chat_service.invoke_streaming(user_id, body.message, pool, session_id=session_id)
+    gen = chat_service.invoke_streaming(
+        user_id, body.message, pool, session_id=session_id, gender=body.gender, price_max=body.price_max
+    )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
