@@ -299,6 +299,9 @@ async def invoke(
     text: str,
     pool: AsyncConnectionPool,
     session_id: UUID | None = None,
+    *,
+    gender: str | None = None,
+    price_max: int | None = None,
 ) -> tuple[UUID, BotReply]:
     """Invoke the fashion bot graph for a consumer user.
 
@@ -323,6 +326,8 @@ async def invoke(
         chat_id=synthetic_chat_id,
         thread_id=uuid4(),
         turn_no=0,
+        req_gender=gender,
+        req_price_max=price_max,
     )
 
     capture = CaptureAdapter()
@@ -358,6 +363,9 @@ async def invoke_streaming(
     text: str,
     pool: AsyncConnectionPool,
     session_id: UUID | None = None,
+    *,
+    gender: str | None = None,
+    price_max: int | None = None,
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
 
@@ -381,6 +389,8 @@ async def invoke_streaming(
         chat_id=synthetic_chat_id,
         thread_id=uuid4(),
         turn_no=0,
+        req_gender=gender,
+        req_price_max=price_max,
     )
 
     streaming = StreamingAdapter()

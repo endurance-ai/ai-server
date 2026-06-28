@@ -433,6 +433,12 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         # (NOT the style-node letter). `search_products` passes THIS as the
         # search `category` arg → normalized to a canonical 20-token.
         "vision_category": _selected_vision_category(state, sess),
+        # Per-request mobile filter UI values (chat API). search_products /
+        # refine_search read these as overrides: req_gender wins over the
+        # profile pin (per-request only, no persist); req_price_max is the
+        # fallback price ceiling when the LLM didn't supply max_price.
+        "req_gender": state.req_gender,
+        "req_price_max": state.req_price_max,
     }
 
 

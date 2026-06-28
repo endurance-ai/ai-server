@@ -373,6 +373,23 @@ def apply_price_filter(
     return kept
 
 
+def effective_max_price(arg_max: Any, ctx: dict[str, Any]) -> Any:
+    """Resolve the price ceiling: the LLM-supplied `max_price` arg wins; else
+    fall back to the per-request mobile filter slider (`ctx['req_price_max']`).
+
+    Shared by `search_products` and `refine_search` so both honor the mobile
+    filter ceiling even when the LLM omits an explicit budget. Returns None when
+    neither source provides a usable (>0) bound.
+    """
+    if arg_max is not None:
+        return arg_max
+    rp = ctx.get("req_price_max")
+    try:
+        return rp if rp and int(rp) > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
     """SPEC-AGENT-V3-REACT Gap4 — flag-gated cross-thread dislike discount.
 
@@ -915,7 +932,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     if text_query:
         explicit_gender = _query_gender(text_query)
         if explicit_gender is None:
-            pinned = _lookup_profile_gender(ctx)
+            # Priority: gender word the user typed THIS turn (explicit_gender,
+            # handled above) > per-request mobile filter (ctx.req_gender) >
+            # pinned taste profile. The filter is a deliberate UI choice, so it
+            # overrides the profile pin — but it is per-request only and never
+            # persisted (SPEC-GENDER-PIN-001).
+            req_gender = ctx.get("req_gender")
+            pinned = req_gender if req_gender in _GENDER_TOKENS else _lookup_profile_gender(ctx)
             if pinned:
                 text_query = f"{text_query} {pinned}".strip()
             elif not has_image:
@@ -1103,8 +1126,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         cands = [c for c in cands if not any(k in _title_of(c).lower() for k in ek)]
 
     # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
-    # ranking + dislike discount so cosine ordering is preserved.
-    cands = apply_price_filter(cands, args.get("min_price"), args.get("max_price"))
+    # ranking + dislike discount so cosine ordering is preserved. The ceiling
+    # falls back to the per-request mobile filter slider when the LLM didn't
+    # supply an explicit max_price.
+    cands = apply_price_filter(cands, args.get("min_price"), effective_max_price(args.get("max_price"), ctx))
 
     # Persist FULL candidates for the turn so `respond` can render real cards
     # internally (the LLM never hand-serializes cards). LLM context still gets

@@ -23,6 +23,7 @@ from app.agents.tools.search_products import (
     _is_real_image_url,
     apply_dislike_discount,
     apply_price_filter,
+    effective_max_price,
     persist_last_results,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     pipeline_exc_detail,
     run_image_search,
@@ -100,8 +101,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         except Exception:  # noqa: BLE001
             pass
 
-    # Translate action → price clamp / drops.
-    max_price = args.get("max_price")
+    # Translate action → price clamp / drops. The ceiling falls back to the
+    # per-request mobile filter slider (ctx.req_price_max) when the LLM didn't
+    # supply an explicit max_price for this refine.
+    max_price = effective_max_price(args.get("max_price"), ctx)
     min_price = None if args.get("drop_min_price") else args.get("min_price")
 
     try:
