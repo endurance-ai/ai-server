@@ -56,12 +56,15 @@ def _parse_sse(text: str) -> dict[str, object]:
 @pytest.mark.asyncio
 async def test_create_session_returns_reply(client: AsyncClient):
     auth = await _login(client)
+    turn_contexts: list[dict] = []
 
     with patch("app.services.chat_service.GRAPH") as mock_graph:
 
         async def _fake_invoke(state, **_):
             from app.graphs.nodes._adapter_ctx import get_adapter
+            from app.observability.turn_cost import get_turn_totals
 
+            turn_contexts.append(get_turn_totals())
             adapter = get_adapter()
             if adapter:
                 await adapter.send_text(state.chat_id, "Here are some picks!")
@@ -84,6 +87,11 @@ async def test_create_session_returns_reply(client: AsyncClient):
     assert isinstance(events["session"]["cap_used"], int)
     assert "cap_remaining" in events["session"]
     assert "cap_reset_at" in events["session"]
+    assert "cap_reset_at_kst" in events["session"]
+    assert "cap_reset_display" in events["session"]
+    assert turn_contexts
+    assert turn_contexts[0]["turn_id"] == f"{turn_contexts[0]['thread_id']}:0"
+    assert turn_contexts[0]["chat_id"] is not None
     assert events["_text"] == "Here are some picks!"
     assert "done" in events
 
@@ -122,6 +130,9 @@ async def test_create_session_cap_reached_emits_banner_event_without_graph_or_me
     events = _parse_sse(resp.text)
     assert events["session"]["user_tier"] == "free"
     assert events["session"]["cap_remaining"] == 0
+    assert events["session"]["cap_reset_at"] == "2026-06-28T15:00:00+00:00"
+    assert events["session"]["cap_reset_at_kst"] == "2026-06-29T00:00:00+09:00"
+    assert events["session"]["cap_reset_display"] == "2026-06-29 00:00 KST"
     assert events["cap_reached"] == {
         "code": "daily_token_cap_reached",
         "user_tier": "free",
@@ -129,6 +140,8 @@ async def test_create_session_cap_reached_emits_banner_event_without_graph_or_me
         "cap": 500_000,
         "remaining": 0,
         "reset_at": "2026-06-28T15:00:00+00:00",
+        "reset_at_kst": "2026-06-29T00:00:00+09:00",
+        "reset_display": "2026-06-29 00:00 KST",
         "cta": "upgrade",
     }
     assert "done" in events

@@ -17,7 +17,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
@@ -28,12 +28,15 @@ from app.channels.schemas import BotCard, BotReply, ChannelMessage
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id
+from app.observability.turn_cost import clear_turn, reset_turn
 
 logger = logging.getLogger(__name__)
 
 _SENTINEL = object()  # signals StreamingAdapter queue is closed
+_KST = timezone(timedelta(hours=9))
 
 
 def _user_id_to_chat_id(user_id: UUID) -> int:
@@ -63,6 +66,14 @@ class AppCapStatus:
     cap_reset_at: str
     cap_reached: bool
 
+    @property
+    def cap_reset_at_kst(self) -> str:
+        return datetime.fromisoformat(self.cap_reset_at).astimezone(_KST).isoformat()
+
+    @property
+    def cap_reset_display(self) -> str:
+        return datetime.fromisoformat(self.cap_reset_at).astimezone(_KST).strftime("%Y-%m-%d %H:%M KST")
+
     def session_payload(self) -> dict:
         return {
             "user_tier": self.user_tier,
@@ -70,6 +81,8 @@ class AppCapStatus:
             "cap_used": self.cap_used,
             "cap_remaining": self.cap_remaining,
             "cap_reset_at": self.cap_reset_at,
+            "cap_reset_at_kst": self.cap_reset_at_kst,
+            "cap_reset_display": self.cap_reset_display,
         }
 
     def cap_event_payload(self) -> dict:
@@ -80,6 +93,8 @@ class AppCapStatus:
             "cap": self.daily_cap,
             "remaining": 0,
             "reset_at": self.cap_reset_at,
+            "reset_at_kst": self.cap_reset_at_kst,
+            "reset_display": self.cap_reset_display,
             "cta": "upgrade",
         }
 
@@ -294,7 +309,7 @@ async def set_session_title(
 # ── Core invoke ───────────────────────────────────────────────────────────────
 
 
-def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str) -> list:
+def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str, *, turn_id: str) -> list:
     """Bind the current Langfuse trace to this chat turn + return graph callbacks.
 
     Mirrors the telegram webhook trace setup (telegram.py) so native-app (chat)
@@ -310,14 +325,26 @@ def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str) -> list:
         session_id=sid,
         user_id=uid,
         input={"channel": "app", "text": text[:200]},
-        metadata={"channel": "app", "graph": "fashion_bot"},
+        metadata={"channel": "app", "graph": "fashion_bot", "turn_id": turn_id},
     )
     handler = build_callback_handler(
         session_id=sid,
         user_id=uid,
-        metadata={"channel": "app", "graph": "fashion_bot"},
+        metadata={"channel": "app", "graph": "fashion_bot", "turn_id": turn_id},
     )
     return [handler] if handler is not None else []
+
+
+def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn_no: int) -> str:
+    turn_id = f"{thread_id}:{turn_no}"
+    reset_turn(
+        turn_id=turn_id,
+        user_key=user_key_for(None, synthetic_chat_id),
+        chat_id=synthetic_chat_id,
+        thread_id=thread_id,
+        turn_no=turn_no,
+    )
+    return turn_id
 
 
 async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str) -> str | None:
@@ -396,25 +423,29 @@ async def invoke(
         text=text,
         received_at=datetime.now(UTC),
     )
+    thread_id = uuid4()
+    turn_no = 0
     input_state = InputState(
         message=message,
         chat_id=synthetic_chat_id,
-        thread_id=uuid4(),
-        turn_no=0,
+        thread_id=thread_id,
+        turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
     )
 
     capture = CaptureAdapter()
     token = set_adapter(capture)
+    turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
     try:
-        callbacks = _bind_chat_trace(resolved_session_id, user_id, text)
+        callbacks = _bind_chat_trace(resolved_session_id, user_id, text, turn_id=turn_id)
         await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
     except Exception:
         logger.exception("[chat_service] graph invocation failed user=%s", user_id)
         raise
     finally:
         reset_adapter(token)
+        clear_turn()
 
     reply = capture.get_reply()
 
@@ -489,11 +520,13 @@ async def invoke_streaming(
         text=text,
         received_at=datetime.now(UTC),
     )
+    thread_id = uuid4()
+    turn_no = 0
     input_state = InputState(
         message=message,
         chat_id=synthetic_chat_id,
-        thread_id=uuid4(),
-        turn_no=0,
+        thread_id=thread_id,
+        turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
     )
@@ -511,8 +544,9 @@ async def invoke_streaming(
         # context (the SSE generator runs in the outer context), so nested
         # node/LLM spans nest under a single conversation trace.
         token = set_adapter(streaming)
+        turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
         try:
-            callbacks = _bind_chat_trace(resolved_session_id, user_id, text)
+            callbacks = _bind_chat_trace(resolved_session_id, user_id, text, turn_id=turn_id)
             await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
         except Exception as exc:
             logger.exception("[chat_service] graph invocation failed user=%s", user_id)
@@ -520,6 +554,7 @@ async def invoke_streaming(
         finally:
             streaming.close()
             reset_adapter(token)
+            clear_turn()
 
     graph_task = asyncio.create_task(_run_graph())
 

@@ -346,7 +346,7 @@ async def _invoke_graph(
     / `state.turn_no` to maintain a single conversation thread across Updates.
     """
     from app.observability.langfuse import reset_trace_story
-    from app.observability.turn_cost import reset_turn
+    from app.observability.turn_cost import clear_turn, reset_turn
 
     turn_id = f"{thread_id}:{turn_no}"
     reset_trace_story()
@@ -551,7 +551,7 @@ async def _invoke_graph(
         await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
     finally:
         reset_adapter(token)
-        reset_turn()
+        clear_turn()
         reset_trace_story()
 
 

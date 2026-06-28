@@ -42,6 +42,7 @@ _ZERO: _TurnState = {
     "chat_id": None,
     "thread_id": None,
     "turn_no": None,
+    "framed": True,
 }
 
 # Cost per million tokens (USD).  First substring match wins — order matters.
@@ -94,6 +95,7 @@ def _extract_response_cost(data: Mapping[str, Any]) -> float | None:
 
 def _record_call(
     *,
+    state: _TurnState,
     source: str,
     transport: str,
     model: str,
@@ -105,14 +107,14 @@ def _record_call(
     cost_usd: float,
     cost_source: str,
 ) -> None:
-    s = _state.get()
     call = {
-        "turn_id": s.get("turn_id"),
+        "turn_id": state.get("turn_id"),
         # `source` = the call-site (vision / evaluator / intent_classifier / ...)
         # so each `llm_call` row is attributable to where the spend originated.
         # `transport` = raw HTTP vs LangChain (kept for debugging).
         "source": source,
         "transport": transport,
+        "framed": bool(state.get("framed", True)),
         "model": model,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
@@ -122,9 +124,9 @@ def _record_call(
         "cost_usd": round(cost_usd, 10),
         "cost_source": cost_source,
     }
-    s["calls"].append(call)
+    state["calls"].append(call)
 
-    if not s.get("user_key") or not s.get("chat_id"):
+    if not state.get("user_key") or state.get("chat_id") is None:
         return
     try:
         from app.observability.conversation_log import emit
@@ -135,10 +137,10 @@ def _record_call(
             call["langfuse_trace"] = trace_id
         emit(
             event_type="llm_call",
-            user_key=str(s["user_key"]),
-            chat_id=int(s["chat_id"]),
-            thread_id=s.get("thread_id"),
-            turn_no=s.get("turn_no"),
+            user_key=str(state["user_key"]),
+            chat_id=int(state["chat_id"]),
+            thread_id=state.get("thread_id"),
+            turn_no=state.get("turn_no"),
             payload=call,
             langfuse_trace=trace_id,
         )
@@ -171,6 +173,22 @@ def reset_turn(
     _state.set(state)
 
 
+def _state_or_unframed() -> _TurnState:
+    try:
+        return _state.get()
+    except LookupError:
+        return _unframed_state()
+
+
+def _unframed_state() -> _TurnState:
+    state = dict(_ZERO)
+    state["calls"] = []
+    state["user_key"] = "internal:unframed"
+    state["chat_id"] = 0
+    state["framed"] = False
+    return state
+
+
 def get_turn_totals() -> _TurnState:
     """Return a snapshot of accumulated cost for the current turn.
 
@@ -180,6 +198,16 @@ def get_turn_totals() -> _TurnState:
         return dict(_state.get())
     except LookupError:
         return dict(_ZERO)
+
+
+def clear_turn() -> None:
+    """Mark the current context as outside a user turn.
+
+    Used by request cleanup paths after a framed graph turn completes. Later
+    LLM calls in the same async context should still be auditable as unframed
+    instead of being absorbed by an empty frame.
+    """
+    _state.set(_unframed_state())
 
 
 def get_turn_context() -> dict[str, Any]:
@@ -218,10 +246,7 @@ def accumulate_raw(
     emitted ``llm_call`` row identifies where the spend came from. Defaults to
     the transport name when a caller does not specify one.
     """
-    try:
-        s = _state.get()
-    except LookupError:
-        return  # reset_turn() not called — skip silently (e.g. /recommend endpoint)
+    s = _state_or_unframed()
 
     inp = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
     out = int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
@@ -244,6 +269,7 @@ def accumulate_raw(
         cost_source = "unknown_model"
     s["cost_usd"] += cost
     _record_call(
+        state=s,
         source=source,
         transport="raw",
         model=model,
@@ -269,10 +295,7 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "
 
     ``source`` labels the call-site (e.g. "react_loop", "ask_clarify").
     """
-    try:
-        s = _state.get()
-    except LookupError:
-        return
+    s = _state_or_unframed()
 
     inp = int(usage_metadata.get("input_tokens") or 0)
     out = int(usage_metadata.get("output_tokens") or 0)
@@ -290,6 +313,7 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "
     cost = _calc(inp, out, cr, cc, r) if r else 0.0
     s["cost_usd"] += cost
     _record_call(
+        state=s,
         source=source,
         transport="langchain",
         model=model,

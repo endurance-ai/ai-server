@@ -106,6 +106,14 @@ async def rewrite_query(req: RewriteRequest) -> RewriteResponse:
     t0 = time.perf_counter()
     try:
         ai_msg = await llm.ainvoke(messages)
+        try:
+            from app.observability.turn_cost import accumulate_lc
+
+            usage = getattr(ai_msg, "usage_metadata", None)
+            if isinstance(usage, dict):
+                accumulate_lc(chosen_model, usage, source="debug_rewrite")
+        except Exception:  # noqa: BLE001
+            pass
     except Exception as exc:  # noqa: BLE001
         elapsed = int((time.perf_counter() - t0) * 1000)
         logger.warning("[debug.rewrite] LLM failed: %r", exc)
