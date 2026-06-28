@@ -96,6 +96,21 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # User image uploads — S3 presigned PUT + CloudFront final URL.
+    UPLOADS_S3_BUCKET: str = ""
+    UPLOADS_S3_REGION: str = "ap-northeast-2"
+    UPLOADS_S3_ACCESS_KEY_ID: str = ""
+    UPLOADS_S3_SECRET_ACCESS_KEY: str = ""
+    UPLOADS_S3_SESSION_TOKEN: str = ""
+    UPLOADS_PUBLIC_BASE_URL: str = ""
+    UPLOADS_KEY_PREFIX: str = "uploads"
+    UPLOADS_MAX_SIZE_BYTES: int = 1_048_576
+    UPLOADS_PRESIGN_EXPIRES_SECONDS: int = 300
+    # Standard AWS env fallback for upload signing.
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_SESSION_TOKEN: str = ""
+
     # 보안
     # Next.js → AI 서버 shared secret. 비어있으면 인증 skip (dev). 운영에선 반드시 설정.
     INTERNAL_API_TOKEN: str = ""

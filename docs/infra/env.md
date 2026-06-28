@@ -25,6 +25,22 @@
 ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflarestorage.com
 ```
 
+## Uploads
+
+`POST /v1/uploads` 가 S3 presigned PUT URL을 발급하고, 최종 `image_url`은 CloudFront base URL + object key로 반환한다. 클라이언트는 응답의 `upload_url`로 직접 PUT하며, PUT 요청에는 요청했던 `Content-Type` 헤더를 그대로 포함해야 한다.
+
+| 키 | 기본 | 용도 |
+|----|-----|------|
+| `UPLOADS_S3_BUCKET` | `""` | 업로드 대상 S3 bucket |
+| `UPLOADS_S3_REGION` | `ap-northeast-2` | S3 bucket region |
+| `UPLOADS_S3_ACCESS_KEY_ID` | `""` | presign 전용 access key. 비어 있으면 `AWS_ACCESS_KEY_ID` fallback |
+| `UPLOADS_S3_SECRET_ACCESS_KEY` | `""` | presign 전용 secret key. 비어 있으면 `AWS_SECRET_ACCESS_KEY` fallback |
+| `UPLOADS_S3_SESSION_TOKEN` | `""` | 임시 자격증명 사용 시 session token. 비어 있으면 `AWS_SESSION_TOKEN` fallback |
+| `UPLOADS_PUBLIC_BASE_URL` | `""` | CloudFront/public CDN base URL |
+| `UPLOADS_KEY_PREFIX` | `uploads` | S3 object key prefix |
+| `UPLOADS_MAX_SIZE_BYTES` | `1048576` | API가 허용하는 최대 이미지 크기. 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
+| `UPLOADS_PRESIGN_EXPIRES_SECONDS` | `300` | presigned URL TTL. 런타임에서 60~3600초로 clamp |
+
 ## Telegram 메신저 채널 (SPEC-MSG-001)
 
 | 키 | 용도 | 기본 |

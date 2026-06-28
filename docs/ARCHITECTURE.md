@@ -16,6 +16,7 @@
 | **Telegram 봇 채널** | Telegram Bot API | 메시지 수신·발신 transport (이 서버에서 블랙박스) |
 | **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
+| 이미지 업로드 | S3 + CloudFront | `POST /v1/uploads` presigned PUT 발급, 클라이언트 직접 업로드, `ai.uploads` 메타 기록 |
 | 벡터 DB | dev-app Postgres 16 + pgvector | `search_products_v6` RPC, embedding-first (cosine distance ASC). pgroonga/product_search_text DROPPED. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
 | LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
 | web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
@@ -41,6 +42,7 @@ flowchart TB
         WH["POST /webhooks/telegram"]
         GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
         PIPE["pipeline runner\nembed → search → diversify"]
+        UPLOADS["POST /v1/uploads\nS3 presigned PUT"]
         LITELLM["LiteLLM proxy\nnova-lite via Bedrock"]
         LFW["Langfuse self-host"]
         REC["POST /recommend\n(현재 미사용)"]
@@ -48,8 +50,10 @@ flowchart TB
 
     subgraph Ext["External"]
         MODAL["Modal /embed\nFashionSigLIP T4"]
+        S3["S3 + CloudFront\nuser image uploads"]
         PG[("dev-app Postgres\npgvector (v6 embedding-first)\nPostgREST nginx shim\n※ app과 DB만 공유")]
         CONVLOG[("ai.log_conversation_event\n(append-only)")]
+        UPLOADDB[("ai.uploads\nupload metadata")]
     end
 
     subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
@@ -68,6 +72,8 @@ flowchart TB
     PIPE -.LLM.-> LITELLM
     PIPE -.trace.-> LFW
     PIPE -.score.-> LFW
+    UPLOADS -->|presigned PUT target| S3
+    UPLOADS -->|insert pending row| UPLOADDB
 
     FIND -. "현재 미사용" .-> REC
     FIND -. "v4 fallback" .-> V4
@@ -81,10 +87,10 @@ flowchart TB
     classDef muted fill:#757575,color:#fff
 
     class TG_USER,TG_API primary
-    class WH,GRAPH,PIPE,LITELLM,LFW ai
+    class WH,GRAPH,PIPE,UPLOADS,LITELLM,LFW ai
     class REC muted
-    class MODAL ext
-    class PG,CONVLOG data
+    class MODAL,S3 ext
+    class PG,CONVLOG,UPLOADDB data
     class FIND,V4 muted
 ```
 
