@@ -27,6 +27,7 @@ _VALID_REASONS = {
     "mood_match",
     "new_brand",
     "price_good",
+    "fit_color_good",
     "discovery",
 }
 _VALID_RATINGS = {"positive", "negative"}
