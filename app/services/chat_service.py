@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
@@ -32,6 +33,8 @@ from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id
 from app.observability.turn_cost import clear_turn, reset_turn
+
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -418,9 +421,11 @@ async def invoke(
     await set_session_title(pool, resolved_session_id, text)
 
     synthetic_chat_id = _user_id_to_chat_id(user_id)
+    urls = _URL_RE.findall(text or "")
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
+        urls=urls,
         received_at=datetime.now(UTC),
     )
     thread_id = uuid4()
@@ -515,9 +520,11 @@ async def invoke_streaming(
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 
+    urls = _URL_RE.findall(text or "")
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
+        urls=urls,
         received_at=datetime.now(UTC),
     )
     thread_id = uuid4()
