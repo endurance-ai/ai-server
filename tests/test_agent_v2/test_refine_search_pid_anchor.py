@@ -21,7 +21,7 @@ These tests pin the wiring:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -54,6 +54,8 @@ def _captured_search(monkeypatch):
         # so tests can assert that pinned-anchor overrides the prior turn's
         # ctx.vision_category instead of leaking it into the search.
         captured["category"] = state.request.item.category
+        captured["fit"] = state.request.item.fit
+        captured["color_family"] = state.request.item.color_family
         captured["style_node"] = state.request.style_node.primary if state.request.style_node is not None else None
         state.raw_candidates = [{"id": "p1", "name": "X", "brand": "Y"}]
         return state
@@ -167,3 +169,96 @@ async def test_pinned_id_overrides_prior_turn_category(monkeypatch, _mock_embed_
     assert _captured_search["category"] == "Jeans"
     # Prior turn's brand letter is cleared on anchor.
     assert _captured_search["style_node"] is None
+
+
+@pytest.mark.asyncio
+async def test_pinned_id_clears_prior_fit_and_color(monkeypatch, _mock_embed_text, _captured_search):
+    """Prior turn was "white knit" so ctx.color_family="white" and ctx.fit
+    came along. User then pins a BLUE jeans card and presses 더 비슷하게.
+    Before this fix the anchored search was still narrowed to "white" and
+    the prior fit. Pinned-anchor must clear both unless the LLM explicitly
+    supplied them for this refine."""
+    fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+
+    ctx = {
+        "chat_id": 1,
+        "image_url": "",
+        "text_query": "[#54321 · Pezze Vintage · 청바지 · ₩120,000] 더 비슷하게",
+        "vision_category": "knit",
+        "color_family": "white",
+        "fit": "oversized",
+    }
+    res = await rs.dispatch({"action": "broaden"}, ctx)
+
+    assert res["ok"] is True
+    assert _captured_search["color_family"] is None
+    assert _captured_search["fit"] is None
+
+
+@pytest.mark.asyncio
+async def test_pinned_id_respects_explicit_color_override(monkeypatch, _mock_embed_text, _captured_search):
+    """When the LLM supplies an explicit colour for this refine
+    (e.g. "다른 색상으로 보여줘 → blue"), it must win over the cleared
+    default. fit follows the same arg-wins-on-anchor rule."""
+    fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+
+    ctx = {
+        "chat_id": 1,
+        "image_url": "",
+        "text_query": "[#54321 · Pezze Vintage · 청바지 · ₩120,000] 다른 색",
+        "vision_category": "knit",
+        "color_family": "white",
+        "fit": "oversized",
+    }
+    res = await rs.dispatch({"action": "broaden", "color": "blue", "fit": "slim"}, ctx)
+
+    assert res["ok"] is True
+    assert _captured_search["color_family"] == "blue"
+    assert _captured_search["fit"] == "slim"
+
+
+@pytest.mark.asyncio
+async def test_pinned_id_does_not_persist_last_query(monkeypatch, _mock_embed_text, _captured_search):
+    """Anchor turn must NOT call set_last_query — the text_query is the
+    mobile prefix ("[#id · brand · ...] chip"), persisting it would
+    pollute base_query on subsequent legacy (non-#id) refines."""
+    fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    set_lq = MagicMock()
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+    monkeypatch.setattr("app.agents.last_query.set_last_query", set_lq)
+
+    ctx = {
+        "chat_id": 1,
+        "image_url": "",
+        "text_query": "[#54321 · Pezze Vintage · 청바지 · ₩120,000] 더 비슷하게",
+    }
+    res = await rs.dispatch({"action": "broaden"}, ctx)
+
+    assert res["ok"] is True
+    set_lq.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_legacy_refine_still_persists_last_query(monkeypatch, _mock_embed_text, _captured_search):
+    """Non-anchor refines must keep the existing last_query persistence
+    so chained refines reuse the seed query (B15 dedup contract)."""
+    fetch = AsyncMock(return_value=None)
+    fetch_cat = AsyncMock(return_value=None)
+    set_lq = MagicMock()
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+    monkeypatch.setattr("app.agents.last_query.set_last_query", set_lq)
+
+    ctx = {"chat_id": 1, "image_url": "", "text_query": "더 저렴하게"}
+    res = await rs.dispatch({"action": "narrow", "boost_keywords": ["budget"]}, ctx)
+
+    assert res["ok"] is True
+    set_lq.assert_called()
