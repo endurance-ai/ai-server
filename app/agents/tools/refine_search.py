@@ -13,6 +13,7 @@ call `refine_search` (or another tool) on the next iteration.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from app.agents.tool_registry import RefineSearchResult
@@ -36,6 +37,13 @@ logger = logging.getLogger(__name__)
 # Test seam — import alias so tests can reference the helper without a
 # module-internal underscore prefix concern.
 _as_keyword_list_for_test = _as_keyword_list
+
+# Mobile sends a pinned-product anchor as `[#<id> · <brand> · <name> · ₩<price>]`
+# in front of the user's text (see kikoai-mobile home.tsx runStreamingTurn).
+# When this id is present, refine_search re-anchors the search on that product's
+# image embedding directly, bypassing the `last_query` text path that otherwise
+# bleeds the previous session's query into the result set.
+_PINNED_PID_RE = re.compile(r"#(\d+)")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
@@ -83,6 +91,40 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
+
+    # 260701 — Pinned-product anchor: when the user's CURRENT message text
+    # carries a `#<id>` prefix (mobile pinned card → critique chip), refine
+    # the search against that product's own embedding instead of the previous
+    # text query. Without this, `last_query` (the prior session search text)
+    # bleeds into the result set and the picks ignore which card was pinned.
+    # fail-open: any error/miss falls back to the existing text-only path.
+    pinned_embedding: list[float] | None = None
+    pinned_pid: int | None = None
+    raw_msg = ctx.get("text_query") or ""
+    _pid_match = _PINNED_PID_RE.search(raw_msg) if isinstance(raw_msg, str) else None
+    if _pid_match is not None:
+        try:
+            pinned_pid = int(_pid_match.group(1))
+        except (TypeError, ValueError):
+            pinned_pid = None
+    if pinned_pid is not None:
+        try:
+            from app.providers.database import DatabaseProvider
+
+            pinned_embedding = await DatabaseProvider.get_product_embedding(pinned_pid)
+        except Exception:  # noqa: BLE001 — fail-open to text path
+            pinned_embedding = None
+        if pinned_embedding is not None:
+            logger.info(
+                "🔍 [tool.refine_search] anchored on pinned product_id=%s (dim=%d)",
+                pinned_pid,
+                len(pinned_embedding),
+            )
+        else:
+            logger.info(
+                "🔍 [tool.refine_search] #%s in message but embedding unavailable — falling back to text path",
+                pinned_pid,
+            )
     # B15 — dedup tokens (case-insensitive, order-preserving). Without this,
     # chained refines accumulate the same token over and over (Langfuse trace
     # 66e78b7e: "wide jeans women roomy roomy roomy"). base_query order is
@@ -184,6 +226,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                override_embedding=pinned_embedding,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): shared enrichment helper. Host in log only (internal

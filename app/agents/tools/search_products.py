@@ -481,6 +481,7 @@ async def run_text_only_search(
     top_k: int = 15,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    override_embedding: list[float] | None = None,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -535,12 +536,13 @@ async def run_text_only_search(
     if not text_query.strip():
         raise ValueError("run_text_only_search requires a non-empty text_query")
     logger.info(
-        "🔍 [text_search] embed text_query=%r category=%r fit=%r color_family=%r top_k=%d",
+        "🔍 [text_search] embed text_query=%r category=%r fit=%r color_family=%r top_k=%d override_embedding=%s",
         text_query[:120],
         category,
         fit,
         color_family,
         max(1, int(top_k)),
+        "yes" if override_embedding else "no",
     )
     # 260522 per-step timing — the text-only path was opaquely slow (live: a
     # single search_products took 29.7s with a Modal embed timeout+retry). Time
@@ -548,8 +550,16 @@ async def run_text_only_search(
     #   ⏱ embed  = Modal /embed/text (cold-start prone; cache hit ≈ 0ms)
     #   ⏱ rpc    = search_step (PostgREST RPC + family gate)
     #   ⏱ divers = diversify_step (brand/platform/content caps)
+    # 260701: when the caller supplies `override_embedding` (e.g. refine_search
+    # anchored on a pinned product's `public.product_embeddings.embedding` row),
+    # skip the Modal text-embed call entirely — the product's image embedding
+    # IS the query vector. text_query is still required (for logging + the
+    # AnalyzedItem.search_query metadata path), but never reaches Modal.
     _t_embed0 = time.perf_counter()
-    state.embedding = await EmbedProvider.embed_text(text_query)
+    if override_embedding is not None:
+        state.embedding = list(override_embedding)
+    else:
+        state.embedding = await EmbedProvider.embed_text(text_query)
     _embed_ms = int((time.perf_counter() - _t_embed0) * 1000)
 
     _t_rpc0 = time.perf_counter()

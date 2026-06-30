@@ -38,6 +38,53 @@ class DatabaseProvider:
         return res.data or []
 
     @classmethod
+    async def get_product_embedding(cls, product_id: int) -> list[float] | None:
+        """`public.product_embeddings.embedding` 단건 조회 (PostgREST select).
+
+        pgvector 컬럼은 PostgREST 직렬화에서 보통 "[0.1, 0.2, ...]" 형태의 텍스트
+        로 떨어진다. 이미 list/tuple/JSON array 로 오는 경로(드라이버/세팅 차이
+        가능)도 일관되게 list[float] 로 정규화한다.
+
+        반환: 임베딩 list[float] / 행 없음 또는 NULL → None / 파싱 실패 → None.
+        호출부는 fail-open(None 처리) 으로 기존 텍스트 경로 폴백.
+        """
+        try:
+            client = await cls.get_client()
+            res = (
+                await client.from_("product_embeddings")
+                .select("embedding")
+                .eq("product_id", product_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            return None
+
+        rows = res.data or []
+        if not rows:
+            return None
+        raw = rows[0].get("embedding")
+        if raw is None:
+            return None
+
+        if isinstance(raw, list):
+            try:
+                return [float(x) for x in raw]
+            except (TypeError, ValueError):
+                return None
+
+        if isinstance(raw, str):
+            stripped = raw.strip().lstrip("[").rstrip("]")
+            if not stripped:
+                return None
+            try:
+                return [float(x) for x in stripped.split(",")]
+            except ValueError:
+                return None
+
+        return None
+
+    @classmethod
     async def close(cls) -> None:
         # supabase-py async 클라이언트는 명시적 close 불필요 (httpx 재사용)
         cls._client = None
