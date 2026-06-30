@@ -99,6 +99,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # bleeds into the result set and the picks ignore which card was pinned.
     # fail-open: any error/miss falls back to the existing text-only path.
     pinned_embedding: list[float] | None = None
+    pinned_category: str | None = None
     pinned_pid: int | None = None
     raw_msg = ctx.get("text_query") or ""
     _pid_match = _PINNED_PID_RE.search(raw_msg) if isinstance(raw_msg, str) else None
@@ -112,13 +113,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             from app.providers.database import DatabaseProvider
 
             pinned_embedding = await DatabaseProvider.get_product_embedding(pinned_pid)
+            pinned_category = await DatabaseProvider.get_product_category(pinned_pid)
         except Exception:  # noqa: BLE001 — fail-open to text path
             pinned_embedding = None
+            pinned_category = None
         if pinned_embedding is not None:
             logger.info(
-                "🔍 [tool.refine_search] anchored on pinned product_id=%s (dim=%d)",
+                "🔍 [tool.refine_search] anchored on pinned product_id=%s (dim=%d category=%r)",
                 pinned_pid,
                 len(pinned_embedding),
+                pinned_category,
             )
         else:
             logger.info(
@@ -155,7 +159,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # (`vision_category`), NOT the brand style-node letter. Sharing the
         # same run_image_search/run_text_only_search, the same fix applies so
         # refine turns also engage the canonical family gate.
-        category = ctx.get("vision_category")
+        # 260701 — Pinned anchor also overrides category/style_node. ctx
+        # values were set by the PREVIOUS turn's Vision/text search and bleed
+        # into the family gate when the user pins a card from a different
+        # category (e.g. prior=knit → pin=jeans → family gate filters to knit
+        # and the pinned-jeans embedding only returns knits). When anchored,
+        # we use the pinned product's own category and clear the brand
+        # style-node letter from the prior turn (per-product letter not
+        # currently stored — None falls through to no style gate).
+        if pinned_embedding is not None:
+            category = pinned_category or ctx.get("vision_category")
+        else:
+            category = ctx.get("vision_category")
         fit = ctx.get("fit")
         color_family = args.get("color") or ctx.get("color_family")
         # SPEC-SEARCH-V6-STYLE-WIRING — refine turns reuse the Vision letter
@@ -164,9 +179,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # the LLM may also supply an explicit override in args (text turns
         # have no Vision letter); args wins when present.
         _args_sn = args.get("style_node_primary")
-        style_node_primary = (
-            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
-        )
+        if pinned_embedding is not None:
+            # Pinned anchor: ignore ctx.style_node_primary (prior turn's letter).
+            # Only respect an explicit LLM override.
+            style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else None
+        else:
+            style_node_primary = (
+                _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
+            )
         # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
         user_key = ctx.get("user_key")
 
