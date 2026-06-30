@@ -72,9 +72,11 @@ jobs:
 
       - name: Docker Buildx 설정
         uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
 
       - name: Dockerfile 빌드 가능 여부 검증
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
@@ -82,4 +84,4 @@ jobs:
           platforms: linux/arm64
           provenance: false
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
