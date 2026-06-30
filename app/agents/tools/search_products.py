@@ -22,12 +22,21 @@ fabricated-placeholder-URL → Modal regression.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
 from app.agents.tool_registry import SearchProductsResult
 
 logger = logging.getLogger(__name__)
+
+# Mirrors refine_search._PINNED_PID_RE — mobile critique chips prepend
+# `[#<id> · brand · name · ₩price]` to the user's text. When the LLM picks
+# `search_products` (instead of `refine_search`) on such a turn — which can
+# happen for broader "비슷한 거" intents — we anchor the search on the pinned
+# product's image embedding, mirroring refine_search's behavior. Same fail-open
+# semantics: any miss falls back to the legacy text path.
+_PINNED_PID_RE = re.compile(r"#(\d+)")
 
 # RFC 2606 `.invalid` TLD — provably non-resolvable. Used ONLY to satisfy the
 # required RecommendRequest.image_url field on the text-only path. It is NEVER
@@ -909,6 +918,45 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)
 
+    # 260701 — Pinned-product anchor (mirrors refine_search). When the user's
+    # CURRENT message text (ctx.text_query is the RAW user message before the
+    # LLM's English-translated args.text_query) carries a `#<id>` prefix from
+    # a mobile pinned card, anchor the search on that product's image
+    # embedding instead of re-embedding text. Only fires on the text-only
+    # path (no fresh image, no origin_url blend) — image / blended paths
+    # already have their own image anchor. fail-open on any error/miss.
+    pinned_embedding: list[float] | None = None
+    pinned_category: str | None = None
+    pinned_pid: int | None = None
+    raw_msg = ctx.get("text_query") or ""
+    _pid_match = _PINNED_PID_RE.search(raw_msg) if isinstance(raw_msg, str) else None
+    if _pid_match is not None and not has_image:
+        try:
+            pinned_pid = int(_pid_match.group(1))
+        except (TypeError, ValueError):
+            pinned_pid = None
+    if pinned_pid is not None:
+        try:
+            from app.providers.database import DatabaseProvider
+
+            pinned_embedding = await DatabaseProvider.get_product_embedding(pinned_pid)
+            pinned_category = await DatabaseProvider.get_product_category(pinned_pid)
+        except Exception:  # noqa: BLE001 — fail-open to text path
+            pinned_embedding = None
+            pinned_category = None
+        if pinned_embedding is not None:
+            logger.info(
+                "🔍 [tool.search_products] anchored on pinned product_id=%s (dim=%d category=%r)",
+                pinned_pid,
+                len(pinned_embedding),
+                pinned_category,
+            )
+        else:
+            logger.info(
+                "🔍 [tool.search_products] #%s in message but embedding unavailable — falling back to text path",
+                pinned_pid,
+            )
+
     # B22 — wire `boost_keywords` / `exclude_keywords` into the dispatch.
     # Both fields are advertised in the SearchProductsArgs schema since the
     # 2026-05-16 V2 ReAct rollout (e21f746) but `search_products` never
@@ -993,12 +1041,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         # returned unrelated cheap junk — live trace 16:31). Stored only on the
         # query path; the actual >0-result guard is irrelevant (a 0-result
         # query is still the thing the user is refining).
-        try:
-            from app.agents.last_query import set_last_query
+        # 260701 — Skip persistence on anchor turns (mirrors refine_search
+        # cleanup PR #113). args.text_query on an anchor turn is the LLM's
+        # interpretation of "[#id · brand · ...] chip" and would pollute
+        # base_query on subsequent legacy refines.
+        if pinned_embedding is None:
+            try:
+                from app.agents.last_query import set_last_query
 
-            set_last_query(ctx.get("chat_id"), text_query)
-        except Exception:  # noqa: BLE001
-            pass
+                set_last_query(ctx.get("chat_id"), text_query)
+            except Exception:  # noqa: BLE001
+                pass
 
     top_k = int(args.get("top_k") or 15)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
@@ -1011,7 +1064,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # longer mislabel it as the search category here. Text-only / no-Vision
     # turn → vision_category None → to_canonical_family → `other` → gate
     # skipped (correct graceful degrade; never fabricate a category).
-    category = ctx.get("vision_category")
+    # 260701 — Pinned anchor overrides category and (since args.fit / args.color
+    # already win the legacy path) does nothing extra to fit/color here.
+    # ctx.vision_category leak: prior knit turn → pinned jeans → search would
+    # still apply the knit family gate. Mirrors refine_search PR #112.
+    if pinned_embedding is not None:
+        category = pinned_category or ctx.get("vision_category")
+    else:
+        category = ctx.get("vision_category")
     fit = args.get("fit")
     color_family = args.get("color_family")
 
@@ -1043,7 +1103,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # Vision turns still benefit: when the LLM also supplies a letter, args
     # wins, but if it omits the field, ctx (Vision) takes over.
     _args_sn = args.get("style_node_primary")
-    style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
+    if pinned_embedding is not None:
+        # Pinned anchor: ignore ctx.style_node_primary (prior turn's brand letter).
+        # Only respect an explicit LLM override.
+        style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else None
+    else:
+        style_node_primary = (
+            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
+        )
     # SPEC-PERSONALIZE-RERANK — forward the per-turn user_key so search_service
     # can look up TasteProfile and re-order the v6 raw rows.
     user_key = ctx.get("user_key")
@@ -1064,7 +1131,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 style_node_primary=style_node_primary,
                 user_key=user_key,
             )
-        elif origin_url:
+        elif origin_url and pinned_embedding is None:
             # Intent-aware Level 2 advanced blending (PR June 2026):
             # vector arithmetic for color_swap/fit_change, weighted-sum with
             # intent-tuned alpha otherwise. Falls through to text-only when
@@ -1100,6 +1167,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                override_embedding=pinned_embedding,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /
