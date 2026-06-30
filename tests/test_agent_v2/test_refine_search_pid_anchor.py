@@ -50,6 +50,11 @@ def _captured_search(monkeypatch):
 
     async def fake_search_step(state):
         captured["embedding"] = list(state.embedding or [])
+        # Capture the resolved AnalyzedItem fields the family gate keys off,
+        # so tests can assert that pinned-anchor overrides the prior turn's
+        # ctx.vision_category instead of leaking it into the search.
+        captured["category"] = state.request.item.category
+        captured["style_node"] = state.request.style_node.primary if state.request.style_node is not None else None
         state.raw_candidates = [{"id": "p1", "name": "X", "brand": "Y"}]
         return state
 
@@ -68,7 +73,9 @@ async def test_pinned_id_anchors_on_product_embedding(monkeypatch, _mock_embed_t
     run_text_only_search receives `override_embedding`, Modal text embed
     is skipped, search_step sees the product's own vector."""
     fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
     monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
 
     ctx = {
         "chat_id": 1,
@@ -91,7 +98,9 @@ async def test_pinned_id_with_missing_embedding_falls_back_to_text(monkeypatch, 
     path — Modal text embed is invoked and search runs against that
     vector. The previous behaviour is preserved on the failure edge."""
     fetch = AsyncMock(return_value=None)
+    fetch_cat = AsyncMock(return_value=None)
     monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
 
     ctx = {
         "chat_id": 1,
@@ -112,12 +121,49 @@ async def test_no_pinned_id_uses_text_path_unchanged(monkeypatch, _mock_embed_te
     must not call the embedding lookup at all and must use the text
     embedder exactly as before."""
     fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
     monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
 
     ctx = {"chat_id": 1, "image_url": "", "text_query": "더 비슷하게"}
     res = await rs.dispatch({"action": "broaden"}, ctx)
 
     assert res["ok"] is True
     fetch.assert_not_awaited()
+    fetch_cat.assert_not_awaited()
     _mock_embed_text.assert_awaited()
     assert _captured_search["embedding"] == _TEXT_VEC
+
+
+@pytest.mark.asyncio
+async def test_pinned_id_overrides_prior_turn_category(monkeypatch, _mock_embed_text, _captured_search):
+    """Live regression (2026-07-01): user searched knits in the prior turn
+    (ctx.vision_category="knit", ctx.style_node_primary="K"), then pinned a
+    jeans card and pressed "더 비슷하게". Before this fix the v6 family gate
+    used the stale knit category and returned knits even though the
+    embedding was anchored on the jeans. The fix: pinned-anchor also
+    overrides category (from products.category) and clears the prior turn's
+    style_node_primary letter."""
+    fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+
+    ctx = {
+        "chat_id": 1,
+        "image_url": "",
+        "text_query": "[#54321 · Pezze Vintage · 청바지 · ₩120,000] 더 비슷하게",
+        # Stale ctx from the prior knit search — must NOT leak through.
+        "vision_category": "knit",
+        "style_node_primary": "K",
+    }
+    res = await rs.dispatch({"action": "broaden"}, ctx)
+
+    assert res["ok"] is True
+    fetch.assert_awaited_once_with(54321)
+    fetch_cat.assert_awaited_once_with(54321)
+    assert _captured_search["embedding"] == _ANCHOR_VEC
+    # The pinned product's category, not the prior turn's "knit".
+    assert _captured_search["category"] == "Jeans"
+    # Prior turn's brand letter is cleared on anchor.
+    assert _captured_search["style_node"] is None
