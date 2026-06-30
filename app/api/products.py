@@ -8,15 +8,18 @@ POST /v1/products/{id}/link-check — 상품 URL 유효성 확인
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["products"])
 
@@ -28,6 +31,17 @@ class BrandNode(BaseModel):
     id: int
     brand_name: str
     brand_name_normalized: str | None
+
+
+class ProductRef(BaseModel):
+    """PDP '비슷한 제품' 카드 렌더용 경량 참조 (full ProductDetail 미사용)."""
+
+    id: int
+    brand: str
+    name: str
+    price: float | None
+    image_url: str
+    product_url: str
 
 
 class ProductDetail(BaseModel):
@@ -49,6 +63,7 @@ class ProductDetail(BaseModel):
     color: str | None
     tags: list[str] | None
     brand_node: BrandNode | None
+    similar: list[ProductRef] = Field(default_factory=list)
 
 
 class RecordViewRequest(BaseModel):
@@ -132,6 +147,48 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
         tags=list(row[16]) if row[16] else None,
         brand_node=brand_node,
     )
+
+
+async def _get_similar(pool: AsyncConnectionPool, product_id: int, limit: int = 10) -> list[ProductRef]:
+    """기준 상품 임베딩과 코사인 거리가 가까운 in-stock 상품 top-N (자기 자신 제외).
+
+    fail-open: 임베딩이 없거나 쿼리 실패 시 빈 리스트 (PDP fetch를 깨뜨리지 않음).
+    anchor 임베딩이 NULL이면 WHERE 절이 전체를 제외 → 빈 결과.
+    """
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                WITH anchor AS (
+                    SELECT embedding FROM public.product_embeddings WHERE product_id = %s
+                )
+                SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url
+                FROM public.product_embeddings e
+                JOIN public.products p ON p.id = e.product_id
+                WHERE e.product_id <> %s
+                  AND p.in_stock
+                  AND (SELECT embedding FROM anchor) IS NOT NULL
+                ORDER BY e.embedding <=> (SELECT embedding FROM anchor)
+                LIMIT %s
+                """,
+                (product_id, product_id, limit),
+            )
+            rows = await cur.fetchall()
+    except Exception:
+        logger.exception("[products] similar fetch failed product=%s", product_id)
+        return []
+
+    return [
+        ProductRef(
+            id=r[0],
+            brand=r[1],
+            name=r[2],
+            price=float(r[3]) if r[3] is not None else None,
+            image_url=r[4],
+            product_url=r[5],
+        )
+        for r in rows
+    ]
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -248,13 +305,15 @@ async def list_viewed(
 @router.get("/products/{product_id}", response_model=ProductDetail, status_code=status.HTTP_200_OK)
 async def get_product(
     product_id: int,
+    search_id: UUID | None = Query(default=None),
     user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> ProductDetail:
-    """상품 상세 조회 (crawler DB)."""
+    """상품 상세 조회 (crawler DB). search_id: 향후 추적용 예약 파라미터(현재 미사용)."""
     product = await _get_product(pool, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    product.similar = await _get_similar(pool, product_id)
     return product
 
 
