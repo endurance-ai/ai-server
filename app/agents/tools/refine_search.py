@@ -138,7 +138,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     # 260522: persist the refined query so a CHAINED refine reuses it (and
     # ctx so an in-turn respond/refine sees it). Mirrors search_products.
-    if text_query and text_query != "fashion":
+    # 260701 — Anchor turns: skip last_query persistence. The text_query on
+    # an anchor turn is the mobile prefix ("[#id · brand · ...] 더 비슷하게"),
+    # which is not a useful seed for any FUTURE refine that may not carry the
+    # #id. Persisting it would pollute base_query on subsequent legacy refines
+    # with prefix tokens. ctx["text_query"] is left alone so in-turn respond
+    # can still read it for trace purposes.
+    if text_query and text_query != "fashion" and pinned_embedding is None:
         ctx["text_query"] = text_query
         try:
             from app.agents.last_query import set_last_query
@@ -171,8 +177,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             category = pinned_category or ctx.get("vision_category")
         else:
             category = ctx.get("vision_category")
-        fit = ctx.get("fit")
-        color_family = args.get("color") or ctx.get("color_family")
+        # 260701 — Pinned anchor also clears fit / color_family. They were
+        # set by the previous turn's Vision/text search ("white knit" →
+        # ctx.color_family="white") and would otherwise narrow the anchored
+        # search (e.g. user pins a blue jeans card → still filtered to
+        # "white"). args wins when the LLM explicitly supplies a colour for
+        # this refine (e.g. "다른 색상").
+        if pinned_embedding is not None:
+            fit = args.get("fit")
+            color_family = args.get("color")
+        else:
+            fit = ctx.get("fit")
+            color_family = args.get("color") or ctx.get("color_family")
         # SPEC-SEARCH-V6-STYLE-WIRING — refine turns reuse the Vision letter
         # that the original search already established (kept in ctx for the
         # whole chat turn by react_loop._build_ctx). text-only follow-up:
