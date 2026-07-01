@@ -80,6 +80,10 @@ class ChatRequest(BaseModel):
     # price_max: upper price bound in KRW integer 원. <=0 / None → no ceiling.
     gender: str | None = None
     price_max: int | None = None
+    # Image uploaded via POST /v1/uploads (presigned S3 PUT → CloudFront/CDN URL).
+    # Passed through to ChannelMessage.urls — the existing SSRF guard there drops
+    # it silently if malformed, same fail-open contract as the Pinterest-link path.
+    attached_image_url: str | None = None
 
     @field_validator("gender", mode="before")
     @classmethod
@@ -161,7 +165,14 @@ async def create_session(
     if not body.message.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="message cannot be empty")
 
-    gen = chat_service.invoke_streaming(user_id, body.message, pool, gender=body.gender, price_max=body.price_max)
+    gen = chat_service.invoke_streaming(
+        user_id,
+        body.message,
+        pool,
+        gender=body.gender,
+        price_max=body.price_max,
+        attached_image_url=body.attached_image_url,
+    )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
@@ -185,7 +196,13 @@ async def continue_session(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     gen = chat_service.invoke_streaming(
-        user_id, body.message, pool, session_id=session_id, gender=body.gender, price_max=body.price_max
+        user_id,
+        body.message,
+        pool,
+        session_id=session_id,
+        gender=body.gender,
+        price_max=body.price_max,
+        attached_image_url=body.attached_image_url,
     )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 

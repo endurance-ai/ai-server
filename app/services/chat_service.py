@@ -520,6 +520,7 @@ async def invoke_streaming(
     *,
     gender: str | None = None,
     price_max: int | None = None,
+    attached_image_url: str | None = None,
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
 
@@ -566,6 +567,7 @@ async def invoke_streaming(
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
+        urls=[attached_image_url] if attached_image_url else [],
         received_at=datetime.now(UTC),
     )
     thread_id = uuid4()

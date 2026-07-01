@@ -162,6 +162,21 @@ _DIRECT_IMAGE_HOSTS: tuple[str, ...] = (
 )
 
 
+def _uploads_public_host() -> str | None:
+    """Hostname of `UPLOADS_PUBLIC_BASE_URL` (the app's own presigned-upload CDN).
+
+    Not a fixed literal like the other direct-image hosts — it's an env-configured
+    CloudFront/CDN domain that differs per deployment — so it's resolved at call
+    time instead of hardcoded into `_DIRECT_IMAGE_HOSTS`.
+    """
+    from app.core.config import settings
+
+    base = (settings.UPLOADS_PUBLIC_BASE_URL or "").strip()
+    if not base:
+        return None
+    return (urlparse(base).hostname or "").lower() or None
+
+
 def _is_direct_image_host(host: str) -> bool:
     # Exact match OR proper subdomain (dot-prefixed) only. The bare
     # `endswith(d)` form was removed (review 260522): it let lookalike hosts
@@ -169,7 +184,14 @@ def _is_direct_image_host(host: str) -> bool:
     # `_ssrf_guard_url` still runs downstream, but the allowlist itself must
     # not be bypassable.
     h = host.lower()
-    return any(h == d or h.endswith("." + d) for d in _DIRECT_IMAGE_HOSTS)
+    if any(h == d or h.endswith("." + d) for d in _DIRECT_IMAGE_HOSTS):
+        return True
+    # `/v1/uploads` already validates content-type as image/jpeg|png|webp before
+    # issuing the presigned URL (app/api/uploads.py), so this host is always an
+    # image — without this, attached_image_url would silently fail the og:image
+    # HTML scrape below (the response is raw image bytes, not a page).
+    uploads_host = _uploads_public_host()
+    return bool(uploads_host) and (h == uploads_host or h.endswith("." + uploads_host))
 
 
 def _cache_get(url: str) -> list[str] | None:
