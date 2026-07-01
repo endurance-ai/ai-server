@@ -194,11 +194,36 @@ class CaptureAdapter(MessengerAdapter):
         )
 
 
+def _infer_clarify_axis(callback_data: str) -> str:
+    """Infer the UI axis from a callback_data prefix — pure string parsing so the
+    6 hasattr-fallback call sites (pick_item, ask_clarify, intro, ask_user_clarification,
+    search_products, suggest_next_step) never need to pass an explicit axis.
+
+    item:N -> pick_item / clarify:{axis}:val -> {axis} (gender, category_pick, ...)
+    onboard:lang:xx -> lang / suggest:... -> suggest_next_step / card(s):... -> cards
+    """
+    parts = callback_data.split(":", 2)
+    head = parts[0] if parts else ""
+    if head == "item":
+        return "pick_item"
+    if head in ("clarify", "onboard") and len(parts) > 1:
+        return parts[1]
+    if head == "suggest":
+        return "suggest_next_step"
+    if head in ("card", "cards"):
+        return "cards"
+    return head or "unknown"
+
+
 class StreamingAdapter(MessengerAdapter):
     """Puts graph outputs into an asyncio.Queue for SSE streaming.
 
     send_text streams text in small chunks with a delay to produce a typing effect.
     Event type `text_delta` carries {"delta": "<chunk>"} — clients accumulate deltas.
+
+    send_text_with_buttons / send_text_with_keyboard carry inline-keyboard prompts
+    (clarify cards, gender pick, pick_item carousel, ...) as a single `clarify` event
+    — {"axis": "...", "prompt": "...", "options": [{"label", "callback"}, ...]}.
     """
 
     _CHUNK_SIZE = 3  # characters per text_delta event
@@ -226,6 +251,29 @@ class StreamingAdapter(MessengerAdapter):
             ("product", {"image_url": str(card.image_url), "caption": card.caption, "product_id": card.product_id})
         )
         return 0
+
+    async def send_text_with_buttons(self, chat_id: int, text: str, buttons: list[tuple[str, str]]) -> int | None:
+        self._texts.append(text)  # keep get_reply() history parity with send_text
+        axis = _infer_clarify_axis(buttons[0][1]) if buttons else "unknown"
+        await self._queue.put(
+            (
+                "clarify",
+                {
+                    "axis": axis,
+                    "prompt": text,
+                    "options": [{"label": label, "callback": cb} for label, cb in buttons],
+                },
+            )
+        )
+        return None
+
+    async def send_text_with_keyboard(
+        self, chat_id: int, text: str, keyboard: list[list[tuple[str, str]]]
+    ) -> int | None:
+        # Mobile renders options as a vertical list — row grouping (a Telegram
+        # inline-keyboard concern) doesn't matter here, so flatten.
+        flat = [pair for row in keyboard for pair in row]
+        return await self.send_text_with_buttons(chat_id, text, flat)
 
     def close(self) -> None:
         self._queue.put_nowait(_SENTINEL)
@@ -477,6 +525,7 @@ async def invoke_streaming(
     *,
     gender: str | None = None,
     price_max: int | None = None,
+    attached_image_url: str | None = None,
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
 
@@ -520,7 +569,9 @@ async def invoke_streaming(
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 
-    urls = _URL_RE.findall(text or "")
+    # attached_image_url (explicit upload) takes priority over a URL pasted in
+    # free text — it's a deliberate attach action, not an incidental link.
+    urls = ([attached_image_url] if attached_image_url else []) + _URL_RE.findall(text or "")
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
@@ -586,6 +637,99 @@ async def invoke_streaming(
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
 
     search_id = await _persist_search(pool, user_id, resolved_session_id, text)
+    if search_id is not None:
+        yield "search", {"search_id": search_id}
+
+    yield "done", {}
+
+
+async def invoke_streaming_callback(
+    user_id: UUID,
+    session_id: UUID,
+    callback_data: str,
+    pool: AsyncConnectionPool,
+    *,
+    label: str | None = None,
+) -> AsyncGenerator[tuple[str, dict]]:
+    """Invoke the fashion bot graph for a button-tap (clarify/gender/pick_item callback)
+    and yield (event_type, payload) tuples for SSE — the app-side counterpart of the
+    Telegram webhook's callback_query handling.
+
+    `session_id` ownership is verified by the caller (route) before this runs.
+    Cap gating is skipped — matches the Telegram webhook, which lets callback taps
+    through even over-cap since they're cheap UI actions, not new generations
+    (app/api/webhooks/telegram.py `_invoke_graph`).
+
+    thread_id/turn_no are freshly minted per callback (no card_sent DB correlation
+    like Telegram's `_resolve_thread_id`) — graph routing (`_route_after_ingest_v2`)
+    decides purely from the `callback_data` string, so this only affects conversation-
+    log thread grouping, not behavior.
+    """
+    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    cap_status = await get_app_cap_status(pool, user_id)
+    yield "session", {"session_id": str(session_id), **cap_status.session_payload()}
+
+    if label:
+        await append_message(pool, session_id, "user", label)
+
+    trace_text = label or callback_data
+    message = ChannelMessage(
+        chat_id=synthetic_chat_id,
+        callback_data=callback_data,
+        received_at=datetime.now(UTC),
+    )
+    thread_id = uuid4()
+    turn_no = 0
+    input_state = InputState(
+        message=message,
+        chat_id=synthetic_chat_id,
+        thread_id=thread_id,
+        turn_no=turn_no,
+    )
+
+    streaming = StreamingAdapter()
+    graph_exc: BaseException | None = None
+
+    @observe(name="app.chat", as_type="span")
+    async def _run_graph() -> None:
+        nonlocal graph_exc
+        token = set_adapter(streaming)
+        turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
+        try:
+            callbacks = _bind_chat_trace(session_id, user_id, trace_text, turn_id=turn_id)
+            await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+        except Exception as exc:
+            logger.exception("[chat_service] callback graph invocation failed user=%s", user_id)
+            graph_exc = exc
+        finally:
+            streaming.close()
+            reset_adapter(token)
+            clear_turn()
+
+    graph_task = asyncio.create_task(_run_graph())
+
+    async for event_type, payload in streaming.iter_events():
+        yield event_type, payload
+
+    await graph_task
+
+    if graph_exc is not None:
+        yield "error", {"detail": "AI response failed"}
+        return
+
+    reply = streaming.get_reply()
+    product_refs = None
+    if reply.cards:
+        product_refs = [
+            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
+        ]
+    assistant_content = reply.text or ""
+    if reply.closing_text:
+        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
+    if assistant_content:
+        await append_message(pool, session_id, "assistant", assistant_content, product_refs)
+
+    search_id = await _persist_search(pool, user_id, session_id, trace_text)
     if search_id is not None:
         yield "search", {"search_id": search_id}
 

@@ -9,9 +9,14 @@ SSE event sequence for POST endpoints:
   event: session  data: {"session_id": "<uuid>", "user_tier": "free|basic|pro", ...cap metadata}
   event: text     data: {"text": "<reply text>"}      # 0-N times
   event: product  data: {"image_url": "...", "caption": "...", "product_id": 123}  # 0-N times
+  event: clarify  data: {"axis": "pick_item|gender|...", "prompt": "...",
+                         "options": [{"label": "...", "callback": "item:0"}, ...]}  # 0-N times
   event: cap_reached data: {"code": "daily_token_cap_reached", "user_tier": "...", ...}  # cap hit
   event: done     data: {}
   event: error    data: {"detail": "..."}             # on failure
+
+POST /v1/chat/sessions/{session_id}/callback — send a button tap (`clarify` event's
+`options[i].callback`). Returns the same SSE stream.
 """
 
 from __future__ import annotations
@@ -75,6 +80,10 @@ class ChatRequest(BaseModel):
     # price_max: upper price bound in KRW integer 원. <=0 / None → no ceiling.
     gender: str | None = None
     price_max: int | None = None
+    # Image uploaded via POST /v1/uploads (presigned S3 PUT → CloudFront/CDN URL).
+    # Passed through to ChannelMessage.urls — the existing SSRF guard there drops
+    # it silently if malformed, same fail-open contract as the Pinterest-link path.
+    attached_image_url: str | None = None
 
     @field_validator("gender", mode="before")
     @classmethod
@@ -93,6 +102,16 @@ class ChatRequest(BaseModel):
         except (TypeError, ValueError):
             return None
         return n if n > 0 else None
+
+
+class ChatCallbackRequest(BaseModel):
+    """Body for POST /sessions/{session_id}/callback — a button tap from a `clarify`
+    SSE event (`options[i].callback`). `label` is the tapped button's display text,
+    persisted as the user's chat-history turn when present (mirrors what the user
+    "said" by tapping)."""
+
+    callback_data: str
+    label: str | None = None
 
 
 class ProductRef(BaseModel):
@@ -146,7 +165,14 @@ async def create_session(
     if not body.message.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="message cannot be empty")
 
-    gen = chat_service.invoke_streaming(user_id, body.message, pool, gender=body.gender, price_max=body.price_max)
+    gen = chat_service.invoke_streaming(
+        user_id,
+        body.message,
+        pool,
+        gender=body.gender,
+        price_max=body.price_max,
+        attached_image_url=body.attached_image_url,
+    )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
@@ -170,8 +196,37 @@ async def continue_session(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     gen = chat_service.invoke_streaming(
-        user_id, body.message, pool, session_id=session_id, gender=body.gender, price_max=body.price_max
+        user_id,
+        body.message,
+        pool,
+        session_id=session_id,
+        gender=body.gender,
+        price_max=body.price_max,
+        attached_image_url=body.attached_image_url,
     )
+    return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@router.post("/sessions/{session_id}/callback", status_code=status.HTTP_200_OK)
+async def send_callback(
+    session_id: UUID,
+    body: ChatCallbackRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> StreamingResponse:
+    """Send a button tap (a `clarify` event's `options[i].callback`). Returns an SSE stream."""
+    if not body.callback_data.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="callback_data cannot be empty")
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT 1 FROM ai.chat_sessions WHERE session_id = %s AND user_id = %s",
+            (session_id, user_id),
+        )
+        if not await cur.fetchone():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    gen = chat_service.invoke_streaming_callback(user_id, session_id, body.callback_data, pool, label=body.label)
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
