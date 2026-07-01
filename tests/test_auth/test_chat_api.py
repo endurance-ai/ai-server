@@ -273,6 +273,74 @@ async def test_product_id_flows_to_sse_and_history(client: AsyncClient):
     assert assistant["product_refs"][0]["product_id"] == 12345
 
 
+@pytest.mark.asyncio
+async def test_search_id_flows_to_sse_and_history(client: AsyncClient):
+    """The search_id from the SSE `search` event must persist onto the assistant
+    message so GET /messages can rebuild the "더보기" button on history restore."""
+    from types import SimpleNamespace
+
+    auth = await _login(client)
+
+    async def _send_card_with_results(state, **_):
+        from app.channels.schemas import BotCard
+        from app.graphs.nodes._adapter_ctx import get_adapter
+        from app.infrastructure.memory.session import get_store
+
+        # Populate the session result set so _persist_search writes an ai.searches row.
+        sess = get_store().get_or_create(state.chat_id)
+        sess.last_results = [SimpleNamespace(id=12345, image_url="https://example.com/p.jpg")]
+
+        adapter = get_adapter()
+        await adapter.send_text(state.chat_id, "여기 추천이에요!")
+        await adapter.send_card(
+            state.chat_id,
+            BotCard(image_url="https://example.com/p.jpg", caption="오버핏 니트", product_id=12345),
+        )
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_send_card_with_results)
+        create_resp = await client.post(
+            "/v1/chat/sessions", json={"message": "니트 추천"}, headers={"Authorization": auth}
+        )
+
+    events = _parse_sse(create_resp.text)
+    search_id = events["search"]["search_id"]
+    assert search_id
+
+    session_id = events["session"]["session_id"]
+    resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    messages = resp.json()["messages"]
+    assistant = next(m for m in messages if m["role"] == "assistant")
+    assert assistant["search_id"] == search_id
+
+
+@pytest.mark.asyncio
+async def test_search_id_null_when_no_results(client: AsyncClient):
+    """A text-only turn produces no result set, so the assistant message search_id
+    stays null (no "더보기" button to reconstruct)."""
+    auth = await _login(client)
+
+    async def _text_only(state, **_):
+        from app.graphs.nodes._adapter_ctx import get_adapter
+
+        adapter = get_adapter()
+        await adapter.send_text(state.chat_id, "안녕하세요!")
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_text_only)
+        create_resp = await client.post("/v1/chat/sessions", json={"message": "안녕"}, headers={"Authorization": auth})
+
+    events = _parse_sse(create_resp.text)
+    assert "search" not in events
+
+    session_id = events["session"]["session_id"]
+    resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
+    messages = resp.json()["messages"]
+    assistant = next(m for m in messages if m["role"] == "assistant")
+    assert assistant["search_id"] is None
+
+
 # ── POST /v1/chat/sessions/{id}/messages ────────────────────────────────────────
 
 
