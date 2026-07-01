@@ -69,14 +69,14 @@ def _decode_cursor(cursor: str) -> datetime:
 
 @router.get("/history", response_model=HistoryResponse, status_code=status.HTTP_200_OK)
 async def list_history(
-    session_id: UUID = Query(..., description="세션 ID (단일 세션 한정)"),
+    session_id: UUID | None = Query(default=None, description="세션 ID (미전달 시 전체 세션)"),
     feed_type: Literal["all", "result_set", "product"] = Query(default="all", alias="type"),
     cursor: str | None = Query(default=None, description="Opaque pagination cursor"),
     limit: int = Query(default=20, ge=1, le=100),
     user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> HistoryResponse:
-    """결과셋 + PDP 조회를 시간순 통합 피드로 반환."""
+    """결과셋 + PDP 조회를 시간순 통합 피드로 반환. session_id 미전달 시 전체 세션 통합."""
     before_ts: datetime | None = None
     if cursor:
         try:
@@ -90,23 +90,43 @@ async def list_history(
     union_parts: list[str] = []
     params: list = []
     if include_rs:
-        union_parts.append(
-            """
-            SELECT 'result_set' AS kind, s.created_at AS occurred_at, s.search_id::text AS ident
-            FROM ai.searches s
-            WHERE s.session_id = %s AND s.user_id = %s AND s.is_listed = TRUE
-            """
-        )
-        params += [session_id, user_id]
+        if session_id is not None:
+            union_parts.append(
+                """
+                SELECT 'result_set' AS kind, s.created_at AS occurred_at, s.search_id::text AS ident
+                FROM ai.searches s
+                WHERE s.session_id = %s AND s.user_id = %s AND s.is_listed = TRUE
+                """
+            )
+            params += [session_id, user_id]
+        else:
+            union_parts.append(
+                """
+                SELECT 'result_set' AS kind, s.created_at AS occurred_at, s.search_id::text AS ident
+                FROM ai.searches s
+                WHERE s.user_id = %s AND s.is_listed = TRUE
+                """
+            )
+            params += [user_id]
     if include_pv:
-        union_parts.append(
-            """
-            SELECT 'product' AS kind, pv.viewed_at AS occurred_at, pv.view_id::text AS ident
-            FROM ai.product_views pv
-            WHERE pv.session_id = %s AND pv.user_id = %s
-            """
-        )
-        params += [session_id, user_id]
+        if session_id is not None:
+            union_parts.append(
+                """
+                SELECT 'product' AS kind, pv.viewed_at AS occurred_at, pv.view_id::text AS ident
+                FROM ai.product_views pv
+                WHERE pv.session_id = %s AND pv.user_id = %s
+                """
+            )
+            params += [session_id, user_id]
+        else:
+            union_parts.append(
+                """
+                SELECT 'product' AS kind, pv.viewed_at AS occurred_at, pv.view_id::text AS ident
+                FROM ai.product_views pv
+                WHERE pv.user_id = %s
+                """
+            )
+            params += [user_id]
 
     union_sql = " UNION ALL ".join(f"({p})" for p in union_parts)
     where_cursor = ""
