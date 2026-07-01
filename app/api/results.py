@@ -4,9 +4,9 @@ GET /v1/results              — list listed result sets in a session
 GET /v1/results/{search_id}  — paginate a single result set (opens it = is_listed)
 
 A "result set" is the ranked product list produced by one search turn, persisted
-to ai.searches (product_ids BIGINT[] in cosine order). /v1/results surfaces only
-sets the user opened as a list view (is_listed=true); opening a set via
-GET /v1/results/{search_id} flips that flag.
+to ai.searches (product_ids BIGINT[] in cosine order, cover_image_urls precomputed
+at persist time). /v1/results surfaces only sets the user opened as a list view
+(is_listed=true); opening a set via GET /v1/results/{search_id} flips that flag.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/v1", tags=["results"])
 
 class ResultSetSummary(BaseModel):
     search_id: str
-    query_text: str
+    title: str | None
     result_count: int
     preview_images: list[str]
     created_at: str
@@ -51,19 +51,13 @@ class ResultProduct(BaseModel):
 
 class ResultSetPageResponse(BaseModel):
     search_id: str
-    query_text: str
+    title: str | None
     result_count: int
     items: list[ResultProduct]
     next_cursor: str | None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
-
-_PREVIEW_SUBQUERY = """
-    (SELECT array_agg(p.image_url ORDER BY t.ord)
-     FROM unnest(s.product_ids[1:4]) WITH ORDINALITY AS t(pid, ord)
-     JOIN public.products p ON p.id = t.pid)
-"""
 
 
 @router.get("/results", response_model=ResultSetListResponse, status_code=status.HTTP_200_OK)
@@ -78,8 +72,8 @@ async def list_result_sets(
     async with pool.connection() as conn, conn.cursor() as cur:
         if cursor:
             await cur.execute(
-                f"""
-                SELECT s.search_id, s.query_text, s.result_count, s.created_at, {_PREVIEW_SUBQUERY} AS preview
+                """
+                SELECT s.search_id, s.title, s.total, s.created_at, s.cover_image_urls
                 FROM ai.searches s
                 WHERE s.session_id = %s AND s.user_id = %s AND s.is_listed = TRUE
                   AND s.created_at < (SELECT created_at FROM ai.searches WHERE search_id = %s)
@@ -90,8 +84,8 @@ async def list_result_sets(
             )
         else:
             await cur.execute(
-                f"""
-                SELECT s.search_id, s.query_text, s.result_count, s.created_at, {_PREVIEW_SUBQUERY} AS preview
+                """
+                SELECT s.search_id, s.title, s.total, s.created_at, s.cover_image_urls
                 FROM ai.searches s
                 WHERE s.session_id = %s AND s.user_id = %s AND s.is_listed = TRUE
                 ORDER BY s.created_at DESC
@@ -107,7 +101,7 @@ async def list_result_sets(
     items = [
         ResultSetSummary(
             search_id=str(r[0]),
-            query_text=r[1],
+            title=r[1],
             result_count=r[2],
             preview_images=list(r[4]) if r[4] else [],
             created_at=r[3].isoformat(),
@@ -139,7 +133,7 @@ async def get_result_set_page(
             """
             UPDATE ai.searches SET is_listed = TRUE
             WHERE search_id = %s AND user_id = %s
-            RETURNING query_text, result_count
+            RETURNING title, total
             """,
             (search_id, user_id),
         )
@@ -180,7 +174,7 @@ async def get_result_set_page(
     ]
     return ResultSetPageResponse(
         search_id=str(search_id),
-        query_text=meta[0],
+        title=meta[0],
         result_count=meta[1],
         items=items,
         next_cursor=next_cursor,

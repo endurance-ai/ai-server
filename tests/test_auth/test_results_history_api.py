@@ -61,18 +61,25 @@ async def _seed_search(
     product_ids: list[int],
     *,
     is_listed: bool = False,
-    query: str = "leather jacket",
+    title: str = "leather jacket",
     created_at: datetime | None = None,
 ) -> UUID:
     sid = uuid4()
     async with pool.connection() as conn, conn.cursor() as cur:
+        cover_image_urls: list[str] = []
+        if product_ids:
+            await cur.execute(
+                "SELECT image_url FROM public.products WHERE id = ANY(%s) ORDER BY array_position(%s, id) LIMIT 4",
+                (product_ids, product_ids),
+            )
+            cover_image_urls = [r[0] for r in await cur.fetchall()]
         await cur.execute(
             """
             INSERT INTO ai.searches
-                (search_id, session_id, user_id, query_text, product_ids, result_count, is_listed, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
+                (search_id, session_id, user_id, title, product_ids, cover_image_urls, total, is_listed, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
             """,
-            (sid, session_id, user_id, query, product_ids, len(product_ids), is_listed, created_at),
+            (sid, session_id, user_id, title, product_ids, cover_image_urls, len(product_ids), is_listed, created_at),
         )
         await conn.commit()
     return sid
@@ -99,14 +106,14 @@ async def test_list_result_sets_only_listed(client: AsyncClient, pool):
     uid = await _user_id(pool)
     session_id = await _seed_session(pool, uid)
     p1 = await _insert_product(pool)
-    await _seed_search(pool, session_id, uid, [p1], is_listed=True, query="listed one")
-    await _seed_search(pool, session_id, uid, [p1], is_listed=False, query="hidden one")
+    await _seed_search(pool, session_id, uid, [p1], is_listed=True, title="listed one")
+    await _seed_search(pool, session_id, uid, [p1], is_listed=False, title="hidden one")
 
     resp = await client.get(f"/v1/results?session_id={session_id}", headers={"Authorization": auth})
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["items"]) == 1
-    assert data["items"][0]["query_text"] == "listed one"
+    assert data["items"][0]["title"] == "listed one"
     assert data["items"][0]["preview_images"]  # non-empty
 
 

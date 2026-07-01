@@ -33,7 +33,7 @@ class HistoryItem(BaseModel):
     occurred_at: str
     # result_set fields
     search_id: str | None = None
-    query_text: str | None = None
+    title: str | None = None
     result_count: int | None = None
     preview_images: list[str] | None = None
     # product fields
@@ -138,10 +138,7 @@ async def list_history(
         if rs_ids:
             await cur.execute(
                 """
-                SELECT s.search_id::text, s.query_text, s.result_count,
-                    (SELECT array_agg(p.image_url ORDER BY t.ord)
-                     FROM unnest(s.product_ids[1:4]) WITH ORDINALITY AS t(pid, ord)
-                     JOIN public.products p ON p.id = t.pid) AS preview
+                SELECT s.search_id::text, s.title, s.total, s.cover_image_urls
                 FROM ai.searches s
                 WHERE s.search_id = ANY(%s)
                 """,
@@ -149,7 +146,7 @@ async def list_history(
             )
             for sr in await cur.fetchall():
                 rs_map[sr[0]] = {
-                    "query_text": sr[1],
+                    "title": sr[1],
                     "result_count": sr[2],
                     "preview_images": list(sr[3]) if sr[3] else [],
                 }
