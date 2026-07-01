@@ -191,11 +191,36 @@ class CaptureAdapter(MessengerAdapter):
         )
 
 
+def _infer_clarify_axis(callback_data: str) -> str:
+    """Infer the UI axis from a callback_data prefix — pure string parsing so the
+    6 hasattr-fallback call sites (pick_item, ask_clarify, intro, ask_user_clarification,
+    search_products, suggest_next_step) never need to pass an explicit axis.
+
+    item:N -> pick_item / clarify:{axis}:val -> {axis} (gender, category_pick, ...)
+    onboard:lang:xx -> lang / suggest:... -> suggest_next_step / card(s):... -> cards
+    """
+    parts = callback_data.split(":", 2)
+    head = parts[0] if parts else ""
+    if head == "item":
+        return "pick_item"
+    if head in ("clarify", "onboard") and len(parts) > 1:
+        return parts[1]
+    if head == "suggest":
+        return "suggest_next_step"
+    if head in ("card", "cards"):
+        return "cards"
+    return head or "unknown"
+
+
 class StreamingAdapter(MessengerAdapter):
     """Puts graph outputs into an asyncio.Queue for SSE streaming.
 
     send_text streams text in small chunks with a delay to produce a typing effect.
     Event type `text_delta` carries {"delta": "<chunk>"} — clients accumulate deltas.
+
+    send_text_with_buttons / send_text_with_keyboard carry inline-keyboard prompts
+    (clarify cards, gender pick, pick_item carousel, ...) as a single `clarify` event
+    — {"axis": "...", "prompt": "...", "options": [{"label", "callback"}, ...]}.
     """
 
     _CHUNK_SIZE = 3  # characters per text_delta event
@@ -223,6 +248,29 @@ class StreamingAdapter(MessengerAdapter):
             ("product", {"image_url": str(card.image_url), "caption": card.caption, "product_id": card.product_id})
         )
         return 0
+
+    async def send_text_with_buttons(self, chat_id: int, text: str, buttons: list[tuple[str, str]]) -> int | None:
+        self._texts.append(text)  # keep get_reply() history parity with send_text
+        axis = _infer_clarify_axis(buttons[0][1]) if buttons else "unknown"
+        await self._queue.put(
+            (
+                "clarify",
+                {
+                    "axis": axis,
+                    "prompt": text,
+                    "options": [{"label": label, "callback": cb} for label, cb in buttons],
+                },
+            )
+        )
+        return None
+
+    async def send_text_with_keyboard(
+        self, chat_id: int, text: str, keyboard: list[list[tuple[str, str]]]
+    ) -> int | None:
+        # Mobile renders options as a vertical list — row grouping (a Telegram
+        # inline-keyboard concern) doesn't matter here, so flatten.
+        flat = [pair for row in keyboard for pair in row]
+        return await self.send_text_with_buttons(chat_id, text, flat)
 
     def close(self) -> None:
         self._queue.put_nowait(_SENTINEL)
