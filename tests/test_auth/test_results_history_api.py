@@ -197,6 +197,44 @@ async def test_history_unified_merge_time_ordered(client: AsyncClient, pool):
 
 
 @pytest.mark.asyncio
+async def test_history_includes_unopened_recommendations(client: AsyncClient, pool):
+    """Every Kiko recommendation shows in history, even if its list was never opened
+    ([더보기] not tapped → is_listed=False). Unlike /v1/results, history has no
+    is_listed gate."""
+    auth = await _login(client)
+    uid = await _user_id(pool)
+    session_id = await _seed_session(pool, uid)
+    p1 = await _insert_product(pool)
+    await _seed_search(pool, session_id, uid, [p1], is_listed=False, title="never opened")
+
+    resp = await client.get(f"/v1/history?session_id={session_id}&type=result_set", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert [it["title"] for it in items] == ["never opened"]
+
+
+@pytest.mark.asyncio
+async def test_history_global_merges_all_sessions(client: AsyncClient, pool):
+    """Omitting session_id merges result sets across every session for the user —
+    the global history feed."""
+    auth = await _login(client)
+    uid = await _user_id(pool)
+    session_a = await _seed_session(pool, uid)
+    session_b = await _seed_session(pool, uid)
+    p1 = await _insert_product(pool)
+    now = datetime.now(UTC)
+    await _seed_search(
+        pool, session_a, uid, [p1], is_listed=False, title="room A", created_at=now - timedelta(minutes=2)
+    )
+    await _seed_search(pool, session_b, uid, [p1], is_listed=False, title="room B", created_at=now)
+
+    resp = await client.get("/v1/history?type=result_set", headers={"Authorization": auth})
+    assert resp.status_code == 200
+    titles = [it["title"] for it in resp.json()["items"]]
+    assert titles == ["room B", "room A"]  # DESC by occurred_at, across sessions
+
+
+@pytest.mark.asyncio
 async def test_history_type_filter_product_only(client: AsyncClient, pool):
     auth = await _login(client)
     uid = await _user_id(pool)
