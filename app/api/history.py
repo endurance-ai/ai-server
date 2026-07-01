@@ -1,7 +1,7 @@
 """Unified history feed API.
 
-GET /v1/history — time-ordered unified feed of result sets (is_listed searches)
-                  + viewed products (PDP) within a single session.
+GET /v1/history — time-ordered unified feed of result sets (every Kiko recommendation,
+                  regardless of whether its list was opened) + viewed products (PDP).
 
 The feed merges ai.searches and ai.product_views by occurred_at DESC. `type`
 filters to one source. Cursor is an opaque base64(occurred_at|id) token because
@@ -95,7 +95,7 @@ async def list_history(
                 """
                 SELECT 'result_set' AS kind, s.created_at AS occurred_at, s.search_id::text AS ident
                 FROM ai.searches s
-                WHERE s.session_id = %s AND s.user_id = %s AND s.is_listed = TRUE
+                WHERE s.session_id = %s AND s.user_id = %s
                 """
             )
             params += [session_id, user_id]
@@ -104,7 +104,7 @@ async def list_history(
                 """
                 SELECT 'result_set' AS kind, s.created_at AS occurred_at, s.search_id::text AS ident
                 FROM ai.searches s
-                WHERE s.user_id = %s AND s.is_listed = TRUE
+                WHERE s.user_id = %s
                 """
             )
             params += [user_id]
