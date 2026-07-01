@@ -330,14 +330,15 @@ async def append_message(
     role: str,
     content: str,
     product_refs: list[dict] | None = None,
+    search_id: UUID | str | None = None,
 ) -> None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO ai.chat_messages (session_id, role, content, product_refs)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO ai.chat_messages (session_id, role, content, product_refs, search_id)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (session_id, role, content, Jsonb(product_refs) if product_refs is not None else None),
+            (session_id, role, content, Jsonb(product_refs) if product_refs is not None else None, search_id),
         )
         await cur.execute(
             "UPDATE ai.chat_sessions SET last_message_at = now() WHERE session_id = %s",
@@ -634,9 +635,12 @@ async def invoke_streaming(
     assistant_content = reply.text or ""
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
-    await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs)
 
+    # Persist the search first so its id can be stored on the assistant message row
+    # (lets GET /messages rebuild the "더보기" button on history restore).
     search_id = await _persist_search(pool, user_id, resolved_session_id, text)
+    await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs, search_id)
+
     if search_id is not None:
         yield "search", {"search_id": search_id}
 
@@ -726,10 +730,13 @@ async def invoke_streaming_callback(
     assistant_content = reply.text or ""
     if reply.closing_text:
         assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
-    if assistant_content:
-        await append_message(pool, session_id, "assistant", assistant_content, product_refs)
 
+    # Persist the search first so its id can be stored on the assistant message row
+    # (lets GET /messages rebuild the "더보기" button on history restore).
     search_id = await _persist_search(pool, user_id, session_id, trace_text)
+    if assistant_content:
+        await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)
+
     if search_id is not None:
         yield "search", {"search_id": search_id}
 

@@ -144,6 +144,10 @@ class MessageItem(BaseModel):
     role: str
     content: str
     product_refs: list[ProductRef] | None
+    # ai.searches.search_id for the result set this (assistant) turn produced — lets
+    # the client rebuild the "더보기" button on history restore. None when the turn had
+    # no result set (user messages, text-only replies).
+    search_id: str | None = None
     created_at: str
 
 
@@ -326,7 +330,7 @@ async def list_messages(
         if cursor:
             await cur.execute(
                 """
-                SELECT message_id, role, content, product_refs, created_at
+                SELECT message_id, role, content, product_refs, search_id, created_at
                 FROM ai.chat_messages
                 WHERE session_id = %s
                   AND created_at > (SELECT created_at FROM ai.chat_messages WHERE message_id = %s)
@@ -338,7 +342,7 @@ async def list_messages(
         else:
             await cur.execute(
                 """
-                SELECT message_id, role, content, product_refs, created_at
+                SELECT message_id, role, content, product_refs, search_id, created_at
                 FROM ai.chat_messages
                 WHERE session_id = %s
                 ORDER BY created_at ASC
@@ -358,7 +362,8 @@ async def list_messages(
             role=r[1],
             content=r[2],
             product_refs=[ProductRef(**p) for p in r[3]] if r[3] else None,
-            created_at=r[4].isoformat(),
+            search_id=str(r[4]) if r[4] else None,
+            created_at=r[5].isoformat(),
         )
         for r in page
     ]
