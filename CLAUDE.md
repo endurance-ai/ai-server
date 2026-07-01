@@ -79,6 +79,7 @@ uv sync                                              # 의존성 설치
 uv run uvicorn app.main:app --reload --port 8000     # 로컬 실행
 uv run ruff check . && uv run ruff format .          # 린트 + 포맷
 uv run pytest                                        # 테스트
+uv run pytest --cov=app --cov-report=term-missing    # 커버리지 측정 (목표 85%)
 docker compose up -d                                 # 로컬 스택 (AI 서버만)
 ```
 

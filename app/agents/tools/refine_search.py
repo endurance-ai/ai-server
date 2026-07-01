@@ -13,6 +13,7 @@ call `refine_search` (or another tool) on the next iteration.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from app.agents.tool_registry import RefineSearchResult
@@ -36,6 +37,13 @@ logger = logging.getLogger(__name__)
 # Test seam — import alias so tests can reference the helper without a
 # module-internal underscore prefix concern.
 _as_keyword_list_for_test = _as_keyword_list
+
+# Mobile sends a pinned-product anchor as `[#<id> · <brand> · <name> · ₩<price>]`
+# in front of the user's text (see kikoai-mobile home.tsx runStreamingTurn).
+# When this id is present, refine_search re-anchors the search on that product's
+# image embedding directly, bypassing the `last_query` text path that otherwise
+# bleeds the previous session's query into the result set.
+_PINNED_PID_RE = re.compile(r"#(\d+)")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
@@ -83,6 +91,44 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
+
+    # 260701 — Pinned-product anchor: when the user's CURRENT message text
+    # carries a `#<id>` prefix (mobile pinned card → critique chip), refine
+    # the search against that product's own embedding instead of the previous
+    # text query. Without this, `last_query` (the prior session search text)
+    # bleeds into the result set and the picks ignore which card was pinned.
+    # fail-open: any error/miss falls back to the existing text-only path.
+    pinned_embedding: list[float] | None = None
+    pinned_category: str | None = None
+    pinned_pid: int | None = None
+    raw_msg = ctx.get("text_query") or ""
+    _pid_match = _PINNED_PID_RE.search(raw_msg) if isinstance(raw_msg, str) else None
+    if _pid_match is not None:
+        try:
+            pinned_pid = int(_pid_match.group(1))
+        except (TypeError, ValueError):
+            pinned_pid = None
+    if pinned_pid is not None:
+        try:
+            from app.providers.database import DatabaseProvider
+
+            pinned_embedding = await DatabaseProvider.get_product_embedding(pinned_pid)
+            pinned_category = await DatabaseProvider.get_product_category(pinned_pid)
+        except Exception:  # noqa: BLE001 — fail-open to text path
+            pinned_embedding = None
+            pinned_category = None
+        if pinned_embedding is not None:
+            logger.info(
+                "🔍 [tool.refine_search] anchored on pinned product_id=%s (dim=%d category=%r)",
+                pinned_pid,
+                len(pinned_embedding),
+                pinned_category,
+            )
+        else:
+            logger.info(
+                "🔍 [tool.refine_search] #%s in message but embedding unavailable — falling back to text path",
+                pinned_pid,
+            )
     # B15 — dedup tokens (case-insensitive, order-preserving). Without this,
     # chained refines accumulate the same token over and over (Langfuse trace
     # 66e78b7e: "wide jeans women roomy roomy roomy"). base_query order is
@@ -92,7 +138,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     # 260522: persist the refined query so a CHAINED refine reuses it (and
     # ctx so an in-turn respond/refine sees it). Mirrors search_products.
-    if text_query and text_query != "fashion":
+    # 260701 — Anchor turns: skip last_query persistence. The text_query on
+    # an anchor turn is the mobile prefix ("[#id · brand · ...] 더 비슷하게"),
+    # which is not a useful seed for any FUTURE refine that may not carry the
+    # #id. Persisting it would pollute base_query on subsequent legacy refines
+    # with prefix tokens. ctx["text_query"] is left alone so in-turn respond
+    # can still read it for trace purposes.
+    if text_query and text_query != "fashion" and pinned_embedding is None:
         ctx["text_query"] = text_query
         try:
             from app.agents.last_query import set_last_query
@@ -113,18 +165,44 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # (`vision_category`), NOT the brand style-node letter. Sharing the
         # same run_image_search/run_text_only_search, the same fix applies so
         # refine turns also engage the canonical family gate.
-        category = ctx.get("vision_category")
-        fit = ctx.get("fit")
-        color_family = args.get("color") or ctx.get("color_family")
+        # 260701 — Pinned anchor also overrides category/style_node. ctx
+        # values were set by the PREVIOUS turn's Vision/text search and bleed
+        # into the family gate when the user pins a card from a different
+        # category (e.g. prior=knit → pin=jeans → family gate filters to knit
+        # and the pinned-jeans embedding only returns knits). When anchored,
+        # we use the pinned product's own category and clear the brand
+        # style-node letter from the prior turn (per-product letter not
+        # currently stored — None falls through to no style gate).
+        if pinned_embedding is not None:
+            category = pinned_category or ctx.get("vision_category")
+        else:
+            category = ctx.get("vision_category")
+        # 260701 — Pinned anchor also clears fit / color_family. They were
+        # set by the previous turn's Vision/text search ("white knit" →
+        # ctx.color_family="white") and would otherwise narrow the anchored
+        # search (e.g. user pins a blue jeans card → still filtered to
+        # "white"). args wins when the LLM explicitly supplies a colour for
+        # this refine (e.g. "다른 색상").
+        if pinned_embedding is not None:
+            fit = args.get("fit")
+            color_family = args.get("color")
+        else:
+            fit = ctx.get("fit")
+            color_family = args.get("color") or ctx.get("color_family")
         # SPEC-SEARCH-V6-STYLE-WIRING — refine turns reuse the Vision letter
         # that the original search already established (kept in ctx for the
         # whole chat turn by react_loop._build_ctx). text-only follow-up:
         # the LLM may also supply an explicit override in args (text turns
         # have no Vision letter); args wins when present.
         _args_sn = args.get("style_node_primary")
-        style_node_primary = (
-            _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
-        )
+        if pinned_embedding is not None:
+            # Pinned anchor: ignore ctx.style_node_primary (prior turn's letter).
+            # Only respect an explicit LLM override.
+            style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else None
+        else:
+            style_node_primary = (
+                _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
+            )
         # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
         user_key = ctx.get("user_key")
 
@@ -184,6 +262,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                override_embedding=pinned_embedding,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): shared enrichment helper. Host in log only (internal
