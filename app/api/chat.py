@@ -14,6 +14,9 @@ SSE event sequence for POST endpoints:
   event: cap_reached data: {"code": "daily_token_cap_reached", "user_tier": "...", ...}  # cap hit
   event: done     data: {}
   event: error    data: {"detail": "..."}             # on failure
+
+POST /v1/chat/sessions/{session_id}/callback — send a button tap (`clarify` event's
+`options[i].callback`). Returns the same SSE stream.
 """
 
 from __future__ import annotations
@@ -97,6 +100,16 @@ class ChatRequest(BaseModel):
         return n if n > 0 else None
 
 
+class ChatCallbackRequest(BaseModel):
+    """Body for POST /sessions/{session_id}/callback — a button tap from a `clarify`
+    SSE event (`options[i].callback`). `label` is the tapped button's display text,
+    persisted as the user's chat-history turn when present (mirrors what the user
+    "said" by tapping)."""
+
+    callback_data: str
+    label: str | None = None
+
+
 class ProductRef(BaseModel):
     image_url: str | None = None
     caption: str | None = None
@@ -174,6 +187,29 @@ async def continue_session(
     gen = chat_service.invoke_streaming(
         user_id, body.message, pool, session_id=session_id, gender=body.gender, price_max=body.price_max
     )
+    return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+@router.post("/sessions/{session_id}/callback", status_code=status.HTTP_200_OK)
+async def send_callback(
+    session_id: UUID,
+    body: ChatCallbackRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> StreamingResponse:
+    """Send a button tap (a `clarify` event's `options[i].callback`). Returns an SSE stream."""
+    if not body.callback_data.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="callback_data cannot be empty")
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT 1 FROM ai.chat_sessions WHERE session_id = %s AND user_id = %s",
+            (session_id, user_id),
+        )
+        if not await cur.fetchone():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    gen = chat_service.invoke_streaming_callback(user_id, session_id, body.callback_data, pool, label=body.label)
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 

@@ -631,3 +631,96 @@ async def invoke_streaming(
         yield "search", {"search_id": search_id}
 
     yield "done", {}
+
+
+async def invoke_streaming_callback(
+    user_id: UUID,
+    session_id: UUID,
+    callback_data: str,
+    pool: AsyncConnectionPool,
+    *,
+    label: str | None = None,
+) -> AsyncGenerator[tuple[str, dict]]:
+    """Invoke the fashion bot graph for a button-tap (clarify/gender/pick_item callback)
+    and yield (event_type, payload) tuples for SSE — the app-side counterpart of the
+    Telegram webhook's callback_query handling.
+
+    `session_id` ownership is verified by the caller (route) before this runs.
+    Cap gating is skipped — matches the Telegram webhook, which lets callback taps
+    through even over-cap since they're cheap UI actions, not new generations
+    (app/api/webhooks/telegram.py `_invoke_graph`).
+
+    thread_id/turn_no are freshly minted per callback (no card_sent DB correlation
+    like Telegram's `_resolve_thread_id`) — graph routing (`_route_after_ingest_v2`)
+    decides purely from the `callback_data` string, so this only affects conversation-
+    log thread grouping, not behavior.
+    """
+    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    cap_status = await get_app_cap_status(pool, user_id)
+    yield "session", {"session_id": str(session_id), **cap_status.session_payload()}
+
+    if label:
+        await append_message(pool, session_id, "user", label)
+
+    trace_text = label or callback_data
+    message = ChannelMessage(
+        chat_id=synthetic_chat_id,
+        callback_data=callback_data,
+        received_at=datetime.now(UTC),
+    )
+    thread_id = uuid4()
+    turn_no = 0
+    input_state = InputState(
+        message=message,
+        chat_id=synthetic_chat_id,
+        thread_id=thread_id,
+        turn_no=turn_no,
+    )
+
+    streaming = StreamingAdapter()
+    graph_exc: BaseException | None = None
+
+    @observe(name="app.chat", as_type="span")
+    async def _run_graph() -> None:
+        nonlocal graph_exc
+        token = set_adapter(streaming)
+        turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
+        try:
+            callbacks = _bind_chat_trace(session_id, user_id, trace_text, turn_id=turn_id)
+            await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+        except Exception as exc:
+            logger.exception("[chat_service] callback graph invocation failed user=%s", user_id)
+            graph_exc = exc
+        finally:
+            streaming.close()
+            reset_adapter(token)
+            clear_turn()
+
+    graph_task = asyncio.create_task(_run_graph())
+
+    async for event_type, payload in streaming.iter_events():
+        yield event_type, payload
+
+    await graph_task
+
+    if graph_exc is not None:
+        yield "error", {"detail": "AI response failed"}
+        return
+
+    reply = streaming.get_reply()
+    product_refs = None
+    if reply.cards:
+        product_refs = [
+            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
+        ]
+    assistant_content = reply.text or ""
+    if reply.closing_text:
+        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
+    if assistant_content:
+        await append_message(pool, session_id, "assistant", assistant_content, product_refs)
+
+    search_id = await _persist_search(pool, user_id, session_id, trace_text)
+    if search_id is not None:
+        yield "search", {"search_id": search_id}
+
+    yield "done", {}
