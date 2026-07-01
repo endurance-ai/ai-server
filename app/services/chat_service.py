@@ -401,8 +401,14 @@ def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn
 async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str) -> str | None:
     """그래프 결과셋(sess.last_results)을 ai.searches 한 행으로 영속화하고 search_id 반환.
 
-    결과가 없으면 None (빈 검색은 결과셋이 아니므로 미저장). is_listed=false 로 시작 →
-    [더보기](Get Result Set Page 첫 호출) 시 true 로 승급한다. fail-open.
+    결과가 없으면 None (빈 검색은 결과셋이 아니므로 미저장). fail-open.
+
+    260701 — is_listed 기본값 TRUE 로 변경. 이전에는 사용자가 명시적으로
+    "더보기" (`/v1/results/{search_id}`) 를 열어야 히스토리 피드에 노출됐는데,
+    모바일 UX 상 채팅 카드로 이미 결과를 본 시점이 "검색이 발생한" 시점이라
+    히스토리에 바로 남아야 함 (라이브 피드백 2026-07-01: 대화 세션 중 검색
+    결과가 히스토리 탭에 안 뜬다). `/v1/results/{id}` 의 promotion UPDATE 는
+    유지 — is_listed 컬럼 자체의 다른 활용 여지는 남겨둠.
     """
     try:
         from app.infrastructure.memory.session import get_store
@@ -435,8 +441,8 @@ async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: 
             await cur.execute(
                 """
                 INSERT INTO ai.searches
-                    (search_id, session_id, user_id, title, product_ids, cover_image_urls, total)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (search_id, session_id, user_id, title, product_ids, cover_image_urls, total, is_listed)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
                 """,
                 (new_id, session_id, user_id, title[:120], product_ids, cover_image_urls, len(product_ids)),
             )
