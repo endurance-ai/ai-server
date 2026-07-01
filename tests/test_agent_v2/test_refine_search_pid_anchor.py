@@ -138,6 +138,25 @@ async def test_no_pinned_id_uses_text_path_unchanged(monkeypatch, _mock_embed_te
 
 
 @pytest.mark.asyncio
+async def test_free_text_hash_digit_does_not_trigger_anchor(monkeypatch, _mock_embed_text, _captured_search):
+    """Free-text like "그 #1 같은 거" MUST NOT trigger a spurious anchor
+    (product_id=1 lookup). The mobile prefix always starts with `[#<id>`;
+    the regex is anchored to the message start with the literal bracket."""
+    fetch = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+
+    ctx = {"chat_id": 1, "image_url": "", "text_query": "그 #1 같은 거 더 저렴하게"}
+    res = await rs.dispatch({"action": "narrow"}, ctx)
+
+    assert res["ok"] is True
+    fetch.assert_not_awaited()
+    fetch_cat.assert_not_awaited()
+    _mock_embed_text.assert_awaited()  # legacy text path
+
+
+@pytest.mark.asyncio
 async def test_pinned_id_overrides_prior_turn_category(monkeypatch, _mock_embed_text, _captured_search):
     """Live regression (2026-07-01): user searched knits in the prior turn
     (ctx.vision_category="knit", ctx.style_node_primary="K"), then pinned a
