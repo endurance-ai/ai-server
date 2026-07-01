@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 # happen for broader "비슷한 거" intents — we anchor the search on the pinned
 # product's image embedding, mirroring refine_search's behavior. Same fail-open
 # semantics: any miss falls back to the legacy text path.
-_PINNED_PID_RE = re.compile(r"#(\d+)")
+# Pattern anchored to `^\[#<digits>` (mobile prefix only) so free-text like
+# "그 #1 같은 거" doesn't spuriously trigger a product_id fetch.
+_PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
 # RFC 2606 `.invalid` TLD — provably non-resolvable. Used ONLY to satisfy the
 # required RecommendRequest.image_url field on the text-only path. It is NEVER

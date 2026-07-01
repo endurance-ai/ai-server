@@ -43,7 +43,13 @@ _as_keyword_list_for_test = _as_keyword_list
 # When this id is present, refine_search re-anchors the search on that product's
 # image embedding directly, bypassing the `last_query` text path that otherwise
 # bleeds the previous session's query into the result set.
-_PINNED_PID_RE = re.compile(r"#(\d+)")
+#
+# 260701 — Anchor ONLY on the mobile prefix shape at the start of the message
+# (leading `[#<digits>`). The old ``r"#(\d+)"`` matched anywhere, so a free-text
+# turn like "그 #1 같은 거" would accidentally trigger a product_id=1 fetch.
+# fail-open still catches that edge (no embedding row → text fallback), but
+# tightening the pattern avoids the spurious DB round-trip + log noise entirely.
+_PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:

@@ -147,6 +147,27 @@ async def test_no_pinned_id_uses_text_path_unchanged(monkeypatch, _mock_embed_te
 
 
 @pytest.mark.asyncio
+async def test_free_text_hash_digit_does_not_trigger_anchor(monkeypatch, _mock_embed_text, _captured_search):
+    """Free-text "그 #1 같은 거" MUST NOT trigger a product_id=1 fetch.
+    Regex is anchored to the mobile prefix shape (`^\\[#<digits>`) so free
+    text that happens to contain a `#N` pattern falls through to the
+    legacy text path."""
+    fetch_emb = AsyncMock(return_value=_ANCHOR_VEC)
+    fetch_cat = AsyncMock(return_value="Jeans")
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_embedding", fetch_emb)
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", fetch_cat)
+
+    ctx = {"chat_id": 1, "user_key": "u:1", "image_url": "", "text_query": "그 #1 같은 거 찾아줘"}
+    args = {"text_query": "similar item"}
+    res = await sp.dispatch(args, ctx)
+
+    assert res["ok"] is True
+    fetch_emb.assert_not_awaited()
+    fetch_cat.assert_not_awaited()
+    _mock_embed_text.assert_awaited()
+
+
+@pytest.mark.asyncio
 async def test_pinned_id_with_fresh_image_skips_anchor(monkeypatch, _mock_embed_text, _captured_search):
     """Fresh image_url in ctx (Vision photo turn) → anchor MUST NOT fire.
     The image-search path has its own image anchor; we don't want to
