@@ -423,6 +423,7 @@ async def test_search_persisted_and_search_event_emitted(client: AsyncClient, po
     assert "search" in events
     search_id = events["search"]["search_id"]
     UUID(search_id)  # valid UUID
+    assert events["search"]["total"] == 2
 
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
