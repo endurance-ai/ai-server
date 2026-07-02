@@ -37,7 +37,7 @@ class FeedbackRequest(BaseModel):
     search_id: UUID | None = None
     rating: str
     reasons: list[str] = []
-    comment: str
+    comment: str = ""
     consent: bool = False
 
     @field_validator("rating")
@@ -45,13 +45,6 @@ class FeedbackRequest(BaseModel):
     def validate_rating(cls, v: str) -> str:
         if v not in _VALID_RATINGS:
             raise ValueError(f"rating must be one of {sorted(_VALID_RATINGS)}")
-        return v
-
-    @field_validator("comment")
-    @classmethod
-    def validate_comment(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("comment cannot be empty")
         return v
 
     @field_validator("reasons")
