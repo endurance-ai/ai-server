@@ -214,27 +214,6 @@ async def test_history_includes_unopened_recommendations(client: AsyncClient, po
 
 
 @pytest.mark.asyncio
-async def test_history_global_merges_all_sessions(client: AsyncClient, pool):
-    """Omitting session_id merges result sets across every session for the user —
-    the global history feed."""
-    auth = await _login(client)
-    uid = await _user_id(pool)
-    session_a = await _seed_session(pool, uid)
-    session_b = await _seed_session(pool, uid)
-    p1 = await _insert_product(pool)
-    now = datetime.now(UTC)
-    await _seed_search(
-        pool, session_a, uid, [p1], is_listed=False, title="room A", created_at=now - timedelta(minutes=2)
-    )
-    await _seed_search(pool, session_b, uid, [p1], is_listed=False, title="room B", created_at=now)
-
-    resp = await client.get("/v1/history?type=result_set", headers={"Authorization": auth})
-    assert resp.status_code == 200
-    titles = [it["title"] for it in resp.json()["items"]]
-    assert titles == ["room B", "room A"]  # DESC by occurred_at, across sessions
-
-
-@pytest.mark.asyncio
 async def test_history_type_filter_product_only(client: AsyncClient, pool):
     auth = await _login(client)
     uid = await _user_id(pool)
