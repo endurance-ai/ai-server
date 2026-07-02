@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -229,6 +229,17 @@ async def test_list_viewed_requires_auth(client: AsyncClient, pool):
     assert resp.status_code in (401, 403)
 
 
+def _stream_cm(status_code: int, url: str):
+    """client.stream("GET", ...) 가 반환하는 async context manager 목."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.url = url
+    cm = AsyncMock()
+    cm.__aenter__ = AsyncMock(return_value=resp)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    return cm
+
+
 # ── POST /v1/products/{id}/link-check ───────────────────────────────────────
 
 
@@ -237,15 +248,11 @@ async def test_link_check_alive(client: AsyncClient, pool):
     auth = await _login(client)
     product_id = await _insert_product(pool)
 
-    mock_resp = AsyncMock()
-    mock_resp.status_code = 200
-    mock_resp.url = "https://shop.test/product"
-
     with patch("app.api.products.httpx.AsyncClient") as mock_cls:
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
         mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_ctx.head = AsyncMock(return_value=mock_resp)
+        mock_ctx.stream = MagicMock(return_value=_stream_cm(200, "https://shop.test/product"))
         mock_cls.return_value = mock_ctx
 
         resp = await client.post(f"/v1/products/{product_id}/link-check", headers={"Authorization": auth})
@@ -261,15 +268,11 @@ async def test_link_check_dead(client: AsyncClient, pool):
     auth = await _login(client)
     product_id = await _insert_product(pool)
 
-    mock_resp = AsyncMock()
-    mock_resp.status_code = 404
-    mock_resp.url = "https://shop.test/product"
-
     with patch("app.api.products.httpx.AsyncClient") as mock_cls:
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
         mock_ctx.__aexit__ = AsyncMock(return_value=None)
-        mock_ctx.head = AsyncMock(return_value=mock_resp)
+        mock_ctx.stream = MagicMock(return_value=_stream_cm(404, "https://shop.test/product"))
         mock_cls.return_value = mock_ctx
 
         resp = await client.post(f"/v1/products/{product_id}/link-check", headers={"Authorization": auth})
