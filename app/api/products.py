@@ -371,14 +371,18 @@ async def link_check(
 
     checked_at = datetime.now(UTC).isoformat()
     try:
+        # HEAD 를 지원하지 않는 쇼핑몰이 많아 405/501 을 반환 → 정상 상품이 dead 로 오판됨.
+        # GET 으로 상태를 확인하되, 본문은 스트림으로 열어 상태 코드만 읽고 끊어 전량 다운로드를 피한다.
         async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
-            resp = await client.head(product.product_url)
-        alive = resp.status_code < 400
+            async with client.stream("GET", product.product_url) as resp:
+                status_code = resp.status_code
+                final_url = str(resp.url)
+        alive = status_code < 400
         return LinkCheckResponse(
             alive=alive,
             last_checked_at=checked_at,
-            http_status=resp.status_code,
-            alternative_url=str(resp.url) if str(resp.url) != product.product_url else None,
+            http_status=status_code,
+            alternative_url=final_url if final_url != product.product_url else None,
         )
     except (httpx.RequestError, TimeoutError):
         return LinkCheckResponse(
