@@ -69,14 +69,14 @@ async def test_submit_feedback_invalid_rating(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_submit_feedback_empty_comment(client: AsyncClient):
+async def test_submit_feedback_chips_only_no_comment(client: AsyncClient):
     auth, _ = await _login(client)
     resp = await client.post(
         "/v1/feedback",
         headers={"Authorization": auth},
-        json={"rating": "positive", "comment": "   "},
+        json={"rating": "positive", "reasons": ["mood_match"]},
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 201
 
 
 @pytest.mark.asyncio
