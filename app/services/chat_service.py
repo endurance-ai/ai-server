@@ -399,8 +399,10 @@ def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn
     return turn_id
 
 
-async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str) -> str | None:
-    """그래프 결과셋(sess.last_results)을 ai.searches 한 행으로 영속화하고 search_id 반환.
+async def _persist_search(
+    pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str
+) -> tuple[str, int] | None:
+    """그래프 결과셋(sess.last_results)을 ai.searches 한 행으로 영속화하고 (search_id, total) 반환.
 
     결과가 없으면 None (빈 검색은 결과셋이 아니므로 미저장). is_listed=false 로 시작 →
     [더보기](Get Result Set Page 첫 호출) 시 true 로 승급한다. fail-open.
@@ -431,6 +433,7 @@ async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: 
         return None
 
     new_id = uuid4()
+    total = len(product_ids)
     try:
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
@@ -439,12 +442,12 @@ async def _persist_search(pool: AsyncConnectionPool, user_id: UUID, session_id: 
                     (search_id, session_id, user_id, title, product_ids, cover_image_urls, total)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (new_id, session_id, user_id, title[:120], product_ids, cover_image_urls, len(product_ids)),
+                (new_id, session_id, user_id, title[:120], product_ids, cover_image_urls, total),
             )
     except Exception:
         logger.exception("[chat_service] search persist failed user=%s", user_id)
         return None
-    return str(new_id)
+    return str(new_id), total
 
 
 @observe(name="app.chat", as_type="span")
@@ -638,11 +641,12 @@ async def invoke_streaming(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    search_id = await _persist_search(pool, user_id, resolved_session_id, text)
+    persisted = await _persist_search(pool, user_id, resolved_session_id, text)
+    search_id = persisted[0] if persisted else None
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs, search_id)
 
-    if search_id is not None:
-        yield "search", {"search_id": search_id}
+    if persisted is not None:
+        yield "search", {"search_id": persisted[0], "total": persisted[1]}
 
     yield "done", {}
 
@@ -733,11 +737,12 @@ async def invoke_streaming_callback(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    search_id = await _persist_search(pool, user_id, session_id, trace_text)
+    persisted = await _persist_search(pool, user_id, session_id, trace_text)
+    search_id = persisted[0] if persisted else None
     if assistant_content:
         await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)
 
-    if search_id is not None:
-        yield "search", {"search_id": search_id}
+    if persisted is not None:
+        yield "search", {"search_id": persisted[0], "total": persisted[1]}
 
     yield "done", {}
