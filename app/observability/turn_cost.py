@@ -39,6 +39,7 @@ _ZERO: _TurnState = {
     "calls": [],
     "turn_id": None,
     "user_key": None,
+    "user_id": None,
     "chat_id": None,
     "thread_id": None,
     "turn_no": None,
@@ -138,6 +139,7 @@ def _record_call(
         emit(
             event_type="llm_call",
             user_key=str(state["user_key"]),
+            user_id=state.get("user_id"),
             chat_id=int(state["chat_id"]),
             thread_id=state.get("thread_id"),
             turn_no=state.get("turn_no"),
@@ -155,6 +157,7 @@ def reset_turn(
     *,
     turn_id: str | None = None,
     user_key: str | None = None,
+    user_id: UUID | None = None,
     chat_id: int | None = None,
     thread_id: UUID | None = None,
     turn_no: int | None = None,
@@ -162,11 +165,17 @@ def reset_turn(
     """Initialize a fresh accumulator for the current async context.
 
     Must be called once per webhook turn before any LLM calls.
+
+    `user_id` is the real `ai.user_profiles.user_id` for consumer-app turns
+    (None for telegram-channel turns, which have no app user_profiles row).
+    It rides the same per-turn accumulator so `emit()` call sites do not each
+    need to thread it through separately (SPEC-CONVERSATION-LOG-001 follow-up).
     """
     state = dict(_ZERO)
     state["calls"] = []
     state["turn_id"] = turn_id
     state["user_key"] = user_key
+    state["user_id"] = user_id
     state["chat_id"] = chat_id
     state["thread_id"] = thread_id
     state["turn_no"] = turn_no
@@ -219,6 +228,7 @@ def get_turn_context() -> dict[str, Any]:
     return {
         "turn_id": s.get("turn_id"),
         "user_key": s.get("user_key"),
+        "user_id": s.get("user_id"),
         "chat_id": s.get("chat_id"),
         "thread_id": s.get("thread_id"),
         "turn_no": s.get("turn_no"),

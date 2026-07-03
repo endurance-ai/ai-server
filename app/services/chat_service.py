@@ -392,6 +392,7 @@ def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn
     reset_turn(
         turn_id=turn_id,
         user_key=user_key_for(None, synthetic_chat_id),
+        user_id=user_id,
         chat_id=synthetic_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
