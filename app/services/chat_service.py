@@ -36,6 +36,31 @@ from app.observability.turn_cost import clear_turn, reset_turn
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
+# URL 뒤에 붙는 trailing punctuation 문자. `\S+` 이 공백까지 다 삼키기 때문에
+# 유저가 "이 링크: https://pin.it/xxx." 처럼 붙여넣거나 문장 끝에 URL 을
+# 두면 `xxx.` 이 shortcode 로 들어가 pin.it → pinterest 홈으로 리다이렉트되고
+# 홈의 default og:image (Pinterest 로고) 를 실물 이미지처럼 취급하는 버그가
+# 생긴다. path 안에 원래 존재하는 punctuation 은 실무에서 매우 드물어
+# 후행 문자를 통째로 벗겨내는 쪽이 안전.
+_URL_TRAILING_PUNCT = ".,;:!?)]}>'\""
+
+
+def _extract_urls(text: str | None) -> list[str]:
+    """텍스트에서 URL 리스트 추출 + trailing punctuation 정리.
+
+    `_URL_RE.findall` 이 잡은 매치의 오른쪽 끝에서 문장 부호를 벗겨낸다.
+    빈 문자열이 되면 그 URL 은 무시한다.
+    """
+    if not text:
+        return []
+    out: list[str] = []
+    for raw in _URL_RE.findall(text):
+        cleaned = raw.rstrip(_URL_TRAILING_PUNCT)
+        if cleaned:
+            out.append(cleaned)
+    return out
+
+
 logger = logging.getLogger(__name__)
 
 _SENTINEL = object()  # signals StreamingAdapter queue is closed
@@ -474,7 +499,7 @@ async def invoke(
     await set_session_title(pool, resolved_session_id, text)
 
     synthetic_chat_id = _user_id_to_chat_id(user_id)
-    urls = _URL_RE.findall(text or "")
+    urls = _extract_urls(text)
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
@@ -576,7 +601,7 @@ async def invoke_streaming(
 
     # attached_image_url (explicit upload) takes priority over a URL pasted in
     # free text — it's a deliberate attach action, not an incidental link.
-    urls = ([attached_image_url] if attached_image_url else []) + _URL_RE.findall(text or "")
+    urls = ([attached_image_url] if attached_image_url else []) + _extract_urls(text)
     message = ChannelMessage(
         chat_id=synthetic_chat_id,
         text=text,
