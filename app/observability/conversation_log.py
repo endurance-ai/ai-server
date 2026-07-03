@@ -268,8 +268,13 @@ async def log_event(
     payload: Mapping[str, Any],
     langfuse_trace: str | None = None,
     latency_ms: int | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     """Insert one row into `ai.log_conversation_event`. **Never raises.**
+
+    `user_id` is the real `ai.user_profiles.user_id` for consumer-app turns
+    (None for telegram-channel turns). Callers normally omit it and let
+    `emit()` fill it from the per-turn context (see `emit()` docstring).
 
     REQ-LOG-FAILSOFT-001 — any failure (pool acquire / encode / insert) is
     swallowed and re-emitted to stderr as a `CONV_LOG_FALLBACK` line.
@@ -324,8 +329,8 @@ async def log_event(
                 """
                 INSERT INTO ai.log_conversation_event (
                     user_key, chat_id, thread_id, turn_no, event_type,
-                    payload, langfuse_trace, latency_ms
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    payload, langfuse_trace, latency_ms, user_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     user_key,
@@ -336,6 +341,7 @@ async def log_event(
                     payload_jsonb,
                     langfuse_trace,
                     latency_ms,
+                    user_id,
                 ),
             )
             await conn.commit()
@@ -368,6 +374,7 @@ def emit(
     payload: Mapping[str, Any],
     langfuse_trace: str | None = None,
     latency_ms: int | None = None,
+    user_id: UUID | None = None,
 ) -> None:
     """Fire-and-forget convenience wrapper.
 
@@ -379,7 +386,23 @@ def emit(
     On WeakSet retention: tasks are added to `_IN_FLIGHT` immediately and the
     `done_callback(discard)` evicts them on completion. This prevents Python
     GC from cancelling the pending task before the INSERT actually runs.
+
+    `user_id` (real `ai.user_profiles.user_id`, joinable for `display_name`
+    etc.) is normally omitted — the ~50 call sites across graph nodes/tools
+    were never threaded to carry it individually, so it is filled here from
+    the per-turn context set once via `turn_cost.reset_turn(user_id=...)`
+    (SPEC-CONVERSATION-LOG-001 follow-up). Pass it explicitly only for
+    call sites that fire outside a turn context (e.g. `_record_call` in
+    `turn_cost.py` itself, which already has its own snapshot).
     """
+    if user_id is None:
+        try:
+            from app.observability.turn_cost import get_turn_context
+
+            user_id = get_turn_context().get("user_id")
+        except Exception:  # noqa: BLE001
+            user_id = None
+
     # Capture trace_id in caller context FIRST (R8). Never raise from this path.
     if langfuse_trace is None:
         try:
@@ -434,6 +457,7 @@ def emit(
                     payload=truncated,
                     langfuse_trace=langfuse_trace,
                     latency_ms=latency_ms,
+                    user_id=user_id,
                 ),
                 pool_loop,
             )
@@ -486,6 +510,7 @@ def emit(
                 payload=truncated,
                 langfuse_trace=langfuse_trace,
                 latency_ms=latency_ms,
+                user_id=user_id,
             )
         )
     except Exception as exc:  # noqa: BLE001 — never raise
