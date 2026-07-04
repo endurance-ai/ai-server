@@ -314,9 +314,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # price in the pre-filter set (guarantees at least one row clears).
         try:
             _prices = [
-                int(getattr(c, "price", 0) or 0)
-                for c in _pre_filter_cands
-                if int(getattr(c, "price", 0) or 0) > 0
+                int(getattr(c, "price", 0) or 0) for c in _pre_filter_cands if int(getattr(c, "price", 0) or 0) > 0
             ]
             _min_available = min(_prices) if _prices else None
         except (TypeError, ValueError):
