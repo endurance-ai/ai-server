@@ -298,7 +298,42 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # entry points apply identical semantics (KRW integer 원, missing-price
     # rows dropped when ANY bound is set). 2026-05-20: previously discarded
     # ("informational only in α") — now wired through to actual filtering.
+    #
+    # Weak-result rescue (SPEC-AGENT-V2-REACT follow-up, 2026-07-04):
+    # a price clamp on a sparse catalog slice frequently drops candidates to
+    # 0-1. Keep the pre-filter set so we can relax `max_price` ONCE and
+    # re-filter without paying another embed+RPC round-trip. Langfuse trace
+    # 14279b4a: "더 저렴한 카고팬츠" → refine returned 0 → agent apologized
+    # instead of trying a looser price. The prompt-level rule (see
+    # `_PROACTIVE_DIRECTIVE`) tells the LLM to retry; this is the code-level
+    # safety net for when the LLM doesn't follow it.
+    _pre_filter_cands = list(cands)
     cands = apply_price_filter(cands, min_price, max_price)
+    if len(cands) < 3 and max_price is not None and _pre_filter_cands:
+        # Bump the ceiling +25%, but no lower than the smallest available
+        # price in the pre-filter set (guarantees at least one row clears).
+        try:
+            _prices = [
+                int(getattr(c, "price", 0) or 0) for c in _pre_filter_cands if int(getattr(c, "price", 0) or 0) > 0
+            ]
+            _min_available = min(_prices) if _prices else None
+        except (TypeError, ValueError):
+            _min_available = None
+        bumped = int(max_price * 1.25)
+        if _min_available is not None and _min_available > bumped:
+            # Even the cheapest row is above +25%; use its price as the
+            # ceiling so the rescue always yields ≥1 result.
+            bumped = _min_available
+        rescue_cands = apply_price_filter(_pre_filter_cands, min_price, bumped)
+        if len(rescue_cands) > len(cands):
+            logger.info(
+                "🔍 [tool.refine_search] weak result (%d) → price rescue %s → %s (rescued %d cands)",
+                len(cands),
+                max_price,
+                bumped,
+                len(rescue_cands),
+            )
+            cands = rescue_cands
     _ = action  # action is informational metadata, not used for filtering
 
     # Persist FULL refined candidates so `respond` renders real cards
