@@ -177,7 +177,7 @@ _PROACTIVE_DIRECTIVE = (
     "  - If the last call had a `max_price` clamp → bump it ~25% higher and retry.\n"
     "  - Else if it had a `color`/`fit`/`brand` filter → drop the most restrictive one "
     "and retry.\n"
-    "  - Else → `refine_search(action=\"broaden\")` once.\n"
+    '  - Else → `refine_search(action="broaden")` once.\n'
     "Only if this second attempt is ALSO weak (< 3), THEN call `suggest_next_step` to "
     "offer concrete follow-up options (similar items, different fit, another mood, or "
     "broaden). This 'rescue once, then escalate' rule prevents dead-end turns where the "
