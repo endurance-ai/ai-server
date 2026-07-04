@@ -30,6 +30,12 @@ class MessengerAdapter(ABC):
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
         return False
 
+    # Non-visible progress heartbeat for long-running steps (vision extract, etc).
+    # StreamingAdapter forwards to the SSE queue so the mobile client can reset
+    # its stall-timeout. Telegram/other adapters no-op.
+    async def send_progress(self, chat_id: int, stage: str) -> bool:
+        return False
+
     # @MX:SPEC: SPEC-ONBOARD-CARDS-001 — multi-row inline keyboard for cards
     # with more than 4 buttons (e.g. 8-option mood card in 4 rows of 2 + footer).
     async def send_text_with_keyboard(

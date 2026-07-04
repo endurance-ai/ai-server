@@ -12,6 +12,7 @@ is read by `routing._route_after_vision`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from langchain_core.messages import SystemMessage
@@ -148,8 +149,6 @@ async def vision_node(state: WorkingState) -> dict:
     from app.core.config import settings as _settings
 
     if _settings.DEMO_MODE:
-        import asyncio
-
         from app.pipeline.demo_fixtures import get_demo_vision_result
 
         # Pinterest link_resolver already adds ~2s for og:image fetch; keep
@@ -158,17 +157,39 @@ async def vision_node(state: WorkingState) -> dict:
         result = get_demo_vision_result()
         logger.info("🎬 [vision] DEMO_MODE — fixture VisionResult (items=%d)", len(result.items))
     else:
+        # Emit periodic `progress` heartbeats to the SSE stream while the
+        # Vision LLM runs (typically 10~15s). The mobile client resets its
+        # stall-timeout on each progress event, preventing spurious cancels
+        # when the model itself is legitimately slow.
+        adapter = _adapter_var.get()
+
+        async def _heartbeat() -> None:
+            try:
+                while True:
+                    await asyncio.sleep(3.0)
+                    try:
+                        await adapter.send_progress(int(state.chat_id), "vision")
+                    except Exception:  # noqa: BLE001 — fail-open, never block Vision
+                        return
+            except asyncio.CancelledError:
+                return
+
+        hb_task = asyncio.create_task(_heartbeat()) if adapter is not None else None
         try:
-            result = await vision_module.extract(state.image_url)
-        except Exception as exc:  # REQ-AGENT-007
-            logger.exception("👁 [vision] ❌ vision.extract raised")
-            _emit_vision_done(state, None, error=f"{type(exc).__name__}: {str(exc)[:200]}")
-            _emit_node_error(state, node_name="vision", exc=exc, recovered=True)
-            node_skip("vision_node", f"extract error {type(exc).__name__}")
-            return {
-                "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
-                "turn_no": 3,
-            }
+            try:
+                result = await vision_module.extract(state.image_url)
+            except Exception as exc:  # REQ-AGENT-007
+                logger.exception("👁 [vision] ❌ vision.extract raised")
+                _emit_vision_done(state, None, error=f"{type(exc).__name__}: {str(exc)[:200]}")
+                _emit_node_error(state, node_name="vision", exc=exc, recovered=True)
+                node_skip("vision_node", f"extract error {type(exc).__name__}")
+                return {
+                    "log_events": [f"vision_node_error: {type(exc).__name__}: {exc}"[:200]],
+                    "turn_no": 3,
+                }
+        finally:
+            if hb_task is not None:
+                hb_task.cancel()
 
     # Defensive: extract() should always return a VisionResult. Tests
     # monkeypatching `vision_module.extract` may still return the legacy dict
