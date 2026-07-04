@@ -171,11 +171,20 @@ _SYSTEM_PROMPT = (
 # the system prompt (the AGENT_V3_PROACTIVE_ENABLED flag was removed).
 _PROACTIVE_DIRECTIVE = (
     "Be proactive. When a `search_products` / `refine_search` result is weak "
-    "(candidates_count < 3), do NOT just respond with an apology — first call "
-    "`suggest_next_step` to offer concrete follow-up options (similar items, "
-    "different fit, another mood, or broaden). When the user's intent is "
-    "ambiguous, prefer calling `ask_user_clarification` BEFORE searching rather "
-    "than guessing. Always end the turn with `respond`."
+    "(candidates_count < 3), do NOT jump straight to `suggest_next_step` and do NOT "
+    "just respond with an apology. First try to RESCUE the turn with ONE more "
+    "`refine_search` call using a broader delta:\n"
+    "  - If the last call had a `max_price` clamp → bump it ~25% higher and retry.\n"
+    "  - Else if it had a `color`/`fit`/`brand` filter → drop the most restrictive one "
+    "and retry.\n"
+    '  - Else → `refine_search(action="broaden")` once.\n'
+    "Only if this second attempt is ALSO weak (< 3), THEN call `suggest_next_step` to "
+    "offer concrete follow-up options (similar items, different fit, another mood, or "
+    "broaden). This 'rescue once, then escalate' rule prevents dead-end turns where the "
+    "catalog just doesn't have anything at the exact price/style slice the user asked "
+    "for — one broadened retry almost always yields something usable.\n"
+    "When the user's intent is ambiguous, prefer calling `ask_user_clarification` "
+    "BEFORE searching rather than guessing. Always end the turn with `respond`."
 )
 
 
