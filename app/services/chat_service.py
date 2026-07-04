@@ -300,6 +300,12 @@ class StreamingAdapter(MessengerAdapter):
         flat = [pair for row in keyboard for pair in row]
         return await self.send_text_with_buttons(chat_id, text, flat)
 
+    async def send_progress(self, chat_id: int, stage: str) -> bool:
+        # Non-visible heartbeat — clients use it to reset stall-timeout while
+        # a long step (vision extract, etc.) is still running.
+        await self._queue.put(("progress", {"stage": stage}))
+        return True
+
     def close(self) -> None:
         self._queue.put_nowait(_SENTINEL)
 

@@ -381,6 +381,52 @@ async def _fetch_image_bytes(url: str) -> bytes | None:
         return None
 
 
+_MAX_VISION_LONGEST_EDGE = 1024
+
+
+def _resize_for_vision(raw: bytes) -> bytes:
+    """Downscale to `_MAX_VISION_LONGEST_EDGE` px longest side and re-encode JPEG.
+
+    Preserves garment detail (1024px is the sweet spot for fashion Vision LLMs)
+    while cutting token/transfer cost on large source images (Pinterest boards,
+    modern phone captures can exceed 4000×5000). Fail-open: any exception
+    returns the original bytes unchanged.
+    """
+    try:
+        import io
+
+        from PIL import Image
+    except Exception:  # noqa: BLE001
+        return raw
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            im.load()
+            w, h = im.size
+            longest = max(w, h)
+            if longest <= _MAX_VISION_LONGEST_EDGE:
+                return raw
+            scale = _MAX_VISION_LONGEST_EDGE / longest
+            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            im = im.resize(new_size, Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, format="JPEG", quality=88, optimize=True)
+            logger.info(
+                "👁️  [VISION] resized %dx%d → %dx%d (%.1f → %.1f KB)",
+                w,
+                h,
+                new_size[0],
+                new_size[1],
+                len(raw) / 1024,
+                buf.tell() / 1024,
+            )
+            return buf.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("👁️  [VISION] resize failed, using original: %r", exc)
+        return raw
+
+
 async def _predownload_image(url: str) -> bytes | None:
     """B26 — pre-download an image URL to bytes so the Vision LLM never has
     to fetch it server-side.
@@ -423,9 +469,11 @@ async def extract(image: str | bytes) -> VisionResult:
     if isinstance(image, str) and image.startswith(("http://", "https://")):
         downloaded = await _predownload_image(image)
         if downloaded is not None:
-            image = downloaded
+            image = _resize_for_vision(downloaded)
         # else: pre-download failed → fall through with the URL, let the LLM
         # try (cheaper than blocking the whole turn on our outbound HTTP).
+    elif isinstance(image, bytes):
+        image = _resize_for_vision(image)
 
     if isinstance(image, bytes):
         b64 = base64.b64encode(image).decode("ascii")
