@@ -287,6 +287,27 @@ async def test_link_check_dead(client: AsyncClient, pool):
 
 
 @pytest.mark.asyncio
+async def test_link_check_antibot_failopen(client: AsyncClient, pool):
+    """봇 차단(403)은 dead 가 아니라 anti-bot — 실제 사용자 브라우저는 열리므로 alive 로 취급."""
+    auth = await _login(client)
+    product_id = await _insert_product(pool)
+
+    with patch("app.api.products.httpx.AsyncClient") as mock_cls:
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_ctx)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+        mock_ctx.stream = MagicMock(return_value=_stream_cm(403, "https://www.zara.com/product"))
+        mock_cls.return_value = mock_ctx
+
+        resp = await client.post(f"/v1/products/{product_id}/link-check", headers={"Authorization": auth})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["alive"] is True
+    assert data["http_status"] == 403
+
+
+@pytest.mark.asyncio
 async def test_link_check_not_found(client: AsyncClient, pool):
     auth = await _login(client)
     resp = await client.post("/v1/products/9999999/link-check", headers={"Authorization": auth})

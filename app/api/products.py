@@ -30,6 +30,19 @@ _LINK_CHECK_UA = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# UA 하나만으로는 부족한 쇼핑몰(예: Zara/Akamai Bot Manager)을 위해 브라우저가 보내는
+# 표준 헤더를 함께 실어 봇 지문을 줄인다.
+_LINK_CHECK_HEADERS = {
+    "User-Agent": _LINK_CHECK_UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+# Akamai/Cloudflare 등의 봇 차단은 데이터센터(EC2) IP 를 헤더와 무관하게 막을 수 있다.
+# 이는 "죽은 링크"가 아니라 "봇 차단"이므로, 실제 사용자의 브라우저에서는 정상 접속된다.
+# 따라서 이 상태코드들은 dead 로 오판하지 않고 살아있는 것으로 취급(fail-open)한다.
+_ANTIBOT_STATUSES = frozenset({401, 403, 429})
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -380,13 +393,12 @@ async def link_check(
     try:
         # HEAD 를 지원하지 않는 쇼핑몰이 많아 405/501 을 반환 → 정상 상품이 dead 로 오판됨.
         # GET 으로 상태를 확인하되, 본문은 스트림으로 열어 상태 코드만 읽고 끊어 전량 다운로드를 피한다.
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=10.0, headers={"User-Agent": _LINK_CHECK_UA}
-        ) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, headers=_LINK_CHECK_HEADERS) as client:
             async with client.stream("GET", product.product_url) as resp:
                 status_code = resp.status_code
                 final_url = str(resp.url)
-        alive = status_code < 400
+        # 봇 차단(401/403/429)은 dead 가 아니라 anti-bot 이므로 fail-open 으로 살아있게 둔다.
+        alive = status_code < 400 or status_code in _ANTIBOT_STATUSES
         return LinkCheckResponse(
             alive=alive,
             last_checked_at=checked_at,
