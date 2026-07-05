@@ -37,6 +37,7 @@ from app.core.config import settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
+from app.observability.langfuse import start_as_current_span, update_current_span
 
 logger = logging.getLogger(__name__)
 
@@ -1362,45 +1363,66 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             json.dumps(_args_summary(raw_args), ensure_ascii=False),
         )
 
+        # Langfuse span around the whole retry-wrapped dispatch. Previously
+        # tool bodies were invisible in traces: only inner `pipeline.*` spans
+        # surfaced, leaving 25-40s of tool-side work (DB fetches, embedding
+        # anchors, ranking, card hydration) unaccounted for under `node.agent`.
+        # Now every ReAct iteration produces a `tool.<name>` span whose latency
+        # matches the retry-inclusive wall clock.
+        _span_name = REGISTRY[tool_name].get("langfuse_span_tag", f"tool.{tool_name}")
         t0 = time.monotonic()
         result: dict[str, Any]
         dispatch_err: str | None = None
-        for attempt in range(effective_max_retries + 1):
-            try:
-                dispatcher = _resolve_dispatcher(tool_name)
-                result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=effective_timeout)
-                dispatch_err = None
-                break
-            except (TimeoutError, Exception) as exc:  # noqa: BLE001
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-                    result = {"ok": False, "error": "tool_timeout"}
-                    dispatch_err = "tool_timeout"
-                else:
-                    logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
-                    result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
-                    dispatch_err = result["error"]
-                transient = _is_transient(exc)
-                retries_left = attempt < effective_max_retries
-                if not (transient and retries_left):
+        with start_as_current_span(
+            _span_name,
+            input={"iter": it, "args": _args_summary(raw_args)},
+        ):
+            for attempt in range(effective_max_retries + 1):
+                try:
+                    dispatcher = _resolve_dispatcher(tool_name)
+                    result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=effective_timeout)
+                    dispatch_err = None
                     break
-                backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]
-                if time.monotonic() + backoff >= turn_deadline:
+                except (TimeoutError, Exception) as exc:  # noqa: BLE001
+                    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                        result = {"ok": False, "error": "tool_timeout"}
+                        dispatch_err = "tool_timeout"
+                    else:
+                        logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
+                        result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
+                        dispatch_err = result["error"]
+                    transient = _is_transient(exc)
+                    retries_left = attempt < effective_max_retries
+                    if not (transient and retries_left):
+                        break
+                    backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]
+                    if time.monotonic() + backoff >= turn_deadline:
+                        logger.warning(
+                            "[agent_v2] tool %s transient error but turn deadline reached: %r",
+                            tool_name,
+                            exc,
+                        )
+                        break
                     logger.warning(
-                        "[agent_v2] tool %s transient error but turn deadline reached: %r",
+                        "[agent_v2] tool %s transient error (attempt %d/%d), retrying in %.1fs: %r",
                         tool_name,
+                        attempt + 1,
+                        tool_max_retries,
+                        backoff,
                         exc,
                     )
-                    break
-                logger.warning(
-                    "[agent_v2] tool %s transient error (attempt %d/%d), retrying in %.1fs: %r",
-                    tool_name,
-                    attempt + 1,
-                    tool_max_retries,
-                    backoff,
-                    exc,
-                )
-                await asyncio.sleep(backoff)
-        latency_ms = int((time.monotonic() - t0) * 1000)
+                    await asyncio.sleep(backoff)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            # Attach compact outcome to the span so slow tools are inspectable
+            # in Langfuse without opening the trace payload.
+            _span_meta = {
+                "latency_ms": latency_ms,
+                "attempts": attempt + 1,
+                "error": dispatch_err,
+                "candidates_count": result.get("candidates_count"),
+                "card_sent": result.get("card_sent"),
+            }
+            update_current_span(metadata={k: v for k, v in _span_meta.items() if v is not None})
 
         if dispatch_err:
             logger.info("🔧 [tool:%s] → err %s %dms", tool_name, dispatch_err, latency_ms)
