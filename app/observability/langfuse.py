@@ -9,10 +9,11 @@ fallback cases (REQ-OBS-FALLBACK-001 / REQ-OBS-FALLBACK-002).
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from functools import wraps
 from typing import Any, ParamSpec, TypeVar
 
@@ -127,6 +128,32 @@ def update_current_trace(metadata: dict[str, Any] | None = None, **kwargs: Any) 
         client.update_current_trace(metadata=metadata, **kwargs)
     except Exception:  # noqa: BLE001
         pass
+
+
+@contextlib.contextmanager
+def start_as_current_span(name: str, **kwargs: Any) -> Iterator[Any]:
+    """Open a Langfuse span scoped to the current async context.
+
+    Wraps `client.start_as_current_span` (v3) with a null-context fallback so
+    callers can uniformly `with start_as_current_span(...)` regardless of
+    whether Langfuse is wired. Use for instrumenting synchronous code regions
+    that don't have a natural `@observe` decoration point — e.g. the ReAct
+    tool dispatch loop in `app.agents.react_loop`, where each iteration's tool
+    body was previously invisible in traces (only the `node.agent` parent and
+    a handful of inner `pipeline.*` spans surfaced, leaving 25-40s of tool
+    execution unaccounted for).
+    """
+    if _lf_get_client is None:
+        yield None
+        return
+    try:
+        client = _lf_get_client()
+        cm = client.start_as_current_span(name=name, **kwargs)
+    except Exception:  # noqa: BLE001 — tracing is best-effort
+        yield None
+        return
+    with cm as span:
+        yield span
 
 
 def reset_trace_story() -> None:
