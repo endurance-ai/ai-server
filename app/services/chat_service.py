@@ -438,6 +438,12 @@ async def _persist_search(
 
     결과가 없으면 None (빈 검색은 결과셋이 아니므로 미저장). is_listed=false 로 시작 →
     [더보기](Get Result Set Page 첫 호출) 시 true 로 승급한다. fail-open.
+
+    `sess.last_results` PERSISTS across turns (respond.py의 CARDS_READY_KEY 코멘트 참고) —
+    새 검색이 없는 턴(잡담, cards:more 페이징, 좋아요 탭 등)에도 그대로 남아있다. 이 함수가
+    매 턴 무조건 호출되므로, 이전 턴과 동일한 product_ids 를 그대로 재삽입하면 히스토리
+    피드에 같은 결과셋이 매 턴 제목만 바뀐 채 중복 적재된다. 직전 저장분과 product_ids 가
+    같으면 새 행을 만들지 않고 기존 search_id 를 그대로 반환한다.
     """
     try:
         from app.infrastructure.memory.session import get_store
@@ -468,6 +474,19 @@ async def _persist_search(
     total = len(product_ids)
     try:
         async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT search_id, product_ids FROM ai.searches
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            )
+            prev = await cur.fetchone()
+            if prev is not None and list(prev[1] or []) == product_ids:
+                return str(prev[0]), total
+
             await cur.execute(
                 """
                 INSERT INTO ai.searches

@@ -438,6 +438,87 @@ async def test_search_persisted_and_search_event_emitted(client: AsyncClient, po
 
 
 @pytest.mark.asyncio
+async def test_stale_last_results_do_not_duplicate_search_history(client: AsyncClient, pool):
+    """`sess.last_results` persists across turns even when a turn does no new
+    search (chit-chat, follow-up question, etc). Before the fix, `_persist_search`
+    re-inserted the SAME product_ids as a brand-new `ai.searches` row on every
+    such turn — the same recommended list piling up in history with only the
+    title (whatever the user typed that turn) differing. It must now reuse the
+    existing row instead of duplicating it, and only insert a new row when the
+    result set actually changes."""
+    from types import SimpleNamespace
+
+    auth = await _login(client)
+
+    def _set_results(ids: list[int]):
+        async def _invoke(state, **_):
+            from app.infrastructure.memory.session import get_store
+
+            sess = get_store().get_or_create(state.chat_id)
+            sess.last_results = [SimpleNamespace(id=pid, image_url=f"https://img.test/{pid}.jpg") for pid in ids]
+
+        return _invoke
+
+    # Turn 1 — an actual search happens (아우터 추천).
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_set_results([201, 202]))
+        resp1 = await client.post("/v1/chat/sessions", json={"message": "아우터 추천"}, headers={"Authorization": auth})
+    events1 = _parse_sse(resp1.text)
+    session_id = events1["session"]["session_id"]
+    search_id_1 = events1["search"]["search_id"]
+
+    # Turn 2 — a follow-up turn with NO new search (e.g. "스포티한 옷 추천하라고
+    # 했잖아" chit-chat). The mocked graph does nothing to `sess.last_results`,
+    # so it still holds turn 1's [201, 202] — exactly the leftover-state bug.
+    async def _noop(state, **_):
+        pass
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_noop)
+        resp2 = await client.post(
+            f"/v1/chat/sessions/{session_id}/messages",
+            json={"message": "스포티한 옷 추천하라고 했잖아"},
+            headers={"Authorization": auth},
+        )
+    events2 = _parse_sse(resp2.text)
+    assert events2["search"]["search_id"] == search_id_1
+
+    # Turn 3 — another no-op turn; still must not duplicate.
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_noop)
+        resp3 = await client.post(
+            f"/v1/chat/sessions/{session_id}/messages",
+            json={"message": "다른 것도 보여줘"},
+            headers={"Authorization": auth},
+        )
+    events3 = _parse_sse(resp3.text)
+    assert events3["search"]["search_id"] == search_id_1
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT search_id FROM ai.searches WHERE session_id = %s", (session_id,))
+        rows = await cur.fetchall()
+    assert len(rows) == 1, f"expected exactly 1 row after 3 turns with unchanged results, got {len(rows)}"
+
+    # Turn 4 — a genuinely NEW search (different product_ids) must still persist
+    # as a new row, proving the dedup isn't over-broad.
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_set_results([301, 302, 303]))
+        resp4 = await client.post(
+            f"/v1/chat/sessions/{session_id}/messages",
+            json={"message": "스포티한 옷 추천해줘"},
+            headers={"Authorization": auth},
+        )
+    events4 = _parse_sse(resp4.text)
+    search_id_4 = events4["search"]["search_id"]
+    assert search_id_4 != search_id_1
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT search_id FROM ai.searches WHERE session_id = %s", (session_id,))
+        rows = await cur.fetchall()
+    assert len(rows) == 2
+
+
+@pytest.mark.asyncio
 async def test_no_search_event_when_no_results(client: AsyncClient):
     """결과가 없으면 search 이벤트도 ai.searches 행도 없다."""
     auth = await _login(client)
