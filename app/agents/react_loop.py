@@ -1427,56 +1427,90 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         t0 = time.monotonic()
         result: dict[str, Any]
         dispatch_err: str | None = None
-        with start_as_current_span(
-            _span_name,
-            input={"iter": it, "args": _args_summary(raw_args)},
-        ):
-            for attempt in range(effective_max_retries + 1):
-                try:
-                    dispatcher = _resolve_dispatcher(tool_name)
-                    result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=effective_timeout)
-                    dispatch_err = None
-                    break
-                except (TimeoutError, Exception) as exc:  # noqa: BLE001
-                    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
-                        result = {"ok": False, "error": "tool_timeout"}
-                        dispatch_err = "tool_timeout"
-                    else:
-                        logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
-                        result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
-                        dispatch_err = result["error"]
-                    transient = _is_transient(exc)
-                    retries_left = attempt < effective_max_retries
-                    if not (transient and retries_left):
+        # Emit periodic `progress` heartbeats to the SSE stream while the tool
+        # dispatch runs. The mobile client resets its stall-timeout on each
+        # progress event; without this, a slow tool call (esp. search_products
+        # with a cold Modal embed) that exceeds the client's 20s stall window
+        # triggers a spurious "요청을 처리하지 못했어요" banner even though the
+        # server is legitimately mid-way through the request. Observed
+        # 2026-07-06 trace 72646c8b: pin.it pick_item → search_products
+        # attempts=2 latency=22.96s → client stalled at 20s → banner + stream
+        # cancel → the eventual respond text + 5 cards never reached the user.
+        # Mirrors the vision heartbeat (SPEC-VISION-PROGRESS). Fire-and-forget,
+        # fail-open: any exception in the heartbeat is silently swallowed so
+        # tracing/adapter transients cannot break tool execution.
+        from app.graphs.nodes._adapter_ctx import _adapter_var
+
+        _hb_adapter = _adapter_var.get()
+        _hb_chat_id = ctx.get("chat_id")
+
+        async def _tool_heartbeat() -> None:
+            if _hb_adapter is None or _hb_chat_id is None:
+                return
+            try:
+                while True:
+                    await asyncio.sleep(3.0)
+                    try:
+                        await _hb_adapter.send_progress(int(_hb_chat_id), f"tool:{tool_name}")
+                    except Exception:  # noqa: BLE001 — never block dispatch
+                        return
+            except asyncio.CancelledError:
+                return
+
+        hb_task = asyncio.create_task(_tool_heartbeat())
+        try:
+            with start_as_current_span(
+                _span_name,
+                input={"iter": it, "args": _args_summary(raw_args)},
+            ):
+                for attempt in range(effective_max_retries + 1):
+                    try:
+                        dispatcher = _resolve_dispatcher(tool_name)
+                        result = await asyncio.wait_for(dispatcher(raw_args, ctx), timeout=effective_timeout)
+                        dispatch_err = None
                         break
-                    backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]
-                    if time.monotonic() + backoff >= turn_deadline:
+                    except (TimeoutError, Exception) as exc:  # noqa: BLE001
+                        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+                            result = {"ok": False, "error": "tool_timeout"}
+                            dispatch_err = "tool_timeout"
+                        else:
+                            logger.warning("[agent_v2] tool %s raised: %r", tool_name, exc)
+                            result = {"ok": False, "error": f"exception:{type(exc).__name__}"}
+                            dispatch_err = result["error"]
+                        transient = _is_transient(exc)
+                        retries_left = attempt < effective_max_retries
+                        if not (transient and retries_left):
+                            break
+                        backoff = _TOOL_BACKOFF[min(attempt, len(_TOOL_BACKOFF) - 1)]
+                        if time.monotonic() + backoff >= turn_deadline:
+                            logger.warning(
+                                "[agent_v2] tool %s transient error but turn deadline reached: %r",
+                                tool_name,
+                                exc,
+                            )
+                            break
                         logger.warning(
-                            "[agent_v2] tool %s transient error but turn deadline reached: %r",
+                            "[agent_v2] tool %s transient error (attempt %d/%d), retrying in %.1fs: %r",
                             tool_name,
+                            attempt + 1,
+                            tool_max_retries,
+                            backoff,
                             exc,
                         )
-                        break
-                    logger.warning(
-                        "[agent_v2] tool %s transient error (attempt %d/%d), retrying in %.1fs: %r",
-                        tool_name,
-                        attempt + 1,
-                        tool_max_retries,
-                        backoff,
-                        exc,
-                    )
-                    await asyncio.sleep(backoff)
-            latency_ms = int((time.monotonic() - t0) * 1000)
-            # Attach compact outcome to the span so slow tools are inspectable
-            # in Langfuse without opening the trace payload.
-            _span_meta = {
-                "latency_ms": latency_ms,
-                "attempts": attempt + 1,
-                "error": dispatch_err,
-                "candidates_count": result.get("candidates_count"),
-                "card_sent": result.get("card_sent"),
-            }
-            update_current_span(metadata={k: v for k, v in _span_meta.items() if v is not None})
+                        await asyncio.sleep(backoff)
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                # Attach compact outcome to the span so slow tools are inspectable
+                # in Langfuse without opening the trace payload.
+                _span_meta = {
+                    "latency_ms": latency_ms,
+                    "attempts": attempt + 1,
+                    "error": dispatch_err,
+                    "candidates_count": result.get("candidates_count"),
+                    "card_sent": result.get("card_sent"),
+                }
+                update_current_span(metadata={k: v for k, v in _span_meta.items() if v is not None})
+        finally:
+            hb_task.cancel()
 
         if dispatch_err:
             logger.info("🔧 [tool:%s] → err %s %dms", tool_name, dispatch_err, latency_ms)
