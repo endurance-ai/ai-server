@@ -20,8 +20,9 @@ from app.infrastructure.memory.session import Session, SessionState
 
 
 class _FakeAIMessage:
-    def __init__(self, tool_calls):
+    def __init__(self, tool_calls, content=""):
         self.tool_calls = tool_calls
+        self.content = content
         self.usage_metadata = {"total_tokens": 100}
 
 
@@ -137,8 +138,94 @@ async def test_infinite_loop_guard(monkeypatch):
 async def test_json_malform_no_tool_calls(monkeypatch):
     from app.agents import react_loop as rl
 
-    # Two empty tool_calls → exhaustion (2-strike).
-    fake = _FakeLLM([_FakeAIMessage([]), _FakeAIMessage([])])
+    # Two truly empty responses (no tool_calls AND no meaningful text)
+    # → exhaustion (2-strike malform).
+    fake = _FakeLLM([_FakeAIMessage([], content=""), _FakeAIMessage([], content="")])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "exhausted"
+
+
+@pytest.mark.asyncio
+async def test_no_tool_call_but_text_synthesizes_respond(monkeypatch):
+    """LLM writes a closing text but forgets the `respond` tool_call wrapper.
+
+    Observed 2026-07-06 trace 7023bf36 ("카프리팬츠 찾아줘"): iter 2's
+    search_products returned 13 candidates → iter 3 LLM wrote "오 카프리팬츠
+    몇 개 골라봤어! ..." as plain content (no tool_calls). Prior behavior
+    discarded the text and nudged for another iteration; the fix routes the
+    text through a synthetic `respond` dispatch so the loop terminates with
+    the user actually seeing the answer.
+    """
+    from app.agents import react_loop as rl
+
+    closing_text = "오 카프리팬츠 몇 개 골라봤어! 다양하게 있네 ✨"
+    fake = _FakeLLM([_FakeAIMessage([], content=closing_text)])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+    assert delta["agent_iterations"] == 1
+    # The synthesized respond ran the real dispatcher, which sent the LLM's
+    # own text to the adapter (not a fallback "잠깐만..." message).
+    mock_adapter.send_text.assert_awaited_once()
+    sent_text = mock_adapter.send_text.await_args.args[1]
+    assert sent_text.startswith("오 카프리팬츠")
+    # History records the synthesis so we can measure how often this fires.
+    hist = delta["tool_call_history"]
+    assert hist and hist[-1]["tool_name"] == "respond"
+
+
+@pytest.mark.asyncio
+async def test_no_tool_call_anthropic_content_blocks(monkeypatch):
+    """Anthropic returns `content` as a list of typed blocks (thinking + text)
+    on tool-use turns. The extractor must ignore non-text blocks and stitch
+    together only the visible text.
+    """
+    from app.agents import react_loop as rl
+
+    blocks = [
+        {"type": "thinking", "thinking": "internal deliberation..."},
+        {"type": "text", "text": "여기 세 벌 골라봤어! "},
+        {"type": "text", "text": "취향에 맞는 게 있으면 알려줘 🐱"},
+    ]
+    fake = _FakeLLM([_FakeAIMessage([], content=blocks)])
+    monkeypatch.setattr(rl, "get_llm", lambda: fake)
+    mock_adapter = MagicMock()
+    mock_adapter.send_text = AsyncMock()
+    monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: mock_adapter)
+
+    delta = await rl.run_react_loop(_make_state(), _make_session())
+    assert delta["agent_status"] == "done"
+    sent_text = mock_adapter.send_text.await_args.args[1]
+    # Both text blocks concatenated; thinking block is not leaked.
+    assert "세 벌 골라봤어" in sent_text
+    assert "취향에 맞는 게" in sent_text
+    assert "internal deliberation" not in sent_text
+
+
+@pytest.mark.asyncio
+async def test_no_tool_call_whitespace_only_still_nudges(monkeypatch):
+    """A whitespace-only or trivially short content is NOT worth synthesizing
+    a respond call — the malform-streak safety net must still fire so we don't
+    send empty text to the user.
+    """
+    from app.agents import react_loop as rl
+
+    # Both attempts have blank content → streak reaches 2 → exhaustion path.
+    fake = _FakeLLM(
+        [
+            _FakeAIMessage([], content="   \n  "),
+            _FakeAIMessage([], content=""),
+        ]
+    )
     monkeypatch.setattr(rl, "get_llm", lambda: fake)
     mock_adapter = MagicMock()
     mock_adapter.send_text = AsyncMock()

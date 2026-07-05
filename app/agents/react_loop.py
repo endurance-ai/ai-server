@@ -333,6 +333,29 @@ def _is_identical(a: dict[str, Any], b: dict[str, Any]) -> bool:
         return False
 
 
+def _extract_ai_text(ai_msg: Any) -> str:
+    """Extract the plain-text portion of an AIMessage.
+
+    Anthropic returns `content` as either a `str` (simple text) or a list of
+    content blocks (`[{"type": "text", "text": ...}, {"type": "thinking", ...}]`).
+    We only care about the visible text — thinking/tool_use blocks are ignored.
+    """
+    content = getattr(ai_msg, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts).strip()
+    return ""
+
+
 def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
     """The selected Vision item's garment `category` (the SPEC-VISION-UNIFY-001
     7-enum value: Outer/Top/Bottom/Shoes/Bag/Dress/Accessories).
@@ -1140,34 +1163,65 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
 
         tool_calls = list(getattr(ai_msg, "tool_calls", None) or [])
         if not tool_calls:
-            # No tool call — treat as JSON malformation (the LLM should always
-            # call a tool, terminating with `respond`).
-            json_malform_streak += 1
-            logger.info(
-                "🧩 [agent] iter=%d → no_tool_call (nudge, streak=%d)",
-                it,
-                json_malform_streak,
-            )
-            if json_malform_streak >= 2:
-                fb = await _fallback_respond(state, sess, "json_malform_repeated", ctx=ctx)
-                return {
-                    "agent_iterations": iterations,
-                    "agent_status": "exhausted",
-                    "tool_call_history": history,
-                    "response_text": fb.get("response_text"),
-                }
-            # Corrective retry — append the assistant turn first, then a
-            # user-role msg nudging tool use. The assistant turn must precede
-            # any follow-up so the next ainvoke has a valid transcript.
-            messages.append(ai_msg)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Your previous response had no tool call. You MUST call a tool. "
-                    "If you have nothing else to do, call `respond` with the final text.",
-                }
-            )
-            continue
+            # Recover from missing tool_call by synthesizing a `respond` call
+            # from the plain text the LLM wrote. Observed pattern (2026-07-06
+            # trace 7023bf36 "카프리팬츠 찾아줘"): search_products iter 2
+            # returned 13 candidates → `CARDS_READY_KEY` set → iter 3 LLM wrote
+            # a perfect closing text ("오 카프리팬츠 몇 개 골라봤어! ..." )
+            # but omitted the `respond` tool_call wrapper. The prior behavior
+            # discarded that text and nudged for another iteration — which then
+            # either exhausted the token budget or hit the malform streak
+            # limit → user saw nothing (no cards, no closing text). The LLM's
+            # answer was already correct in substance; the failure was purely
+            # in the tool-call formatting. Route the text through the normal
+            # `respond` dispatch so cards flow through the same CARDS_READY_KEY
+            # gate and the loop terminates via respond's terminates_loop=True.
+            ai_text = _extract_ai_text(ai_msg)
+            if ai_text and len(ai_text) >= 5:
+                synth_tc_id = f"synth_respond_iter{it}"
+                logger.info(
+                    "🧩 [agent] iter=%d → no_tool_call, synthesizing respond from text (len=%d)",
+                    it,
+                    len(ai_text),
+                )
+                tool_calls = [
+                    {
+                        "name": "respond",
+                        "args": {"text": ai_text},
+                        "id": synth_tc_id,
+                        "type": "tool_call",
+                    }
+                ]
+                # Fall through — the dispatch block below will run this
+                # synthetic respond and terminate the loop.
+            else:
+                # Truly empty response — keep the malform-streak safety net.
+                json_malform_streak += 1
+                logger.info(
+                    "🧩 [agent] iter=%d → no_tool_call empty (nudge, streak=%d)",
+                    it,
+                    json_malform_streak,
+                )
+                if json_malform_streak >= 2:
+                    fb = await _fallback_respond(state, sess, "json_malform_repeated", ctx=ctx)
+                    return {
+                        "agent_iterations": iterations,
+                        "agent_status": "exhausted",
+                        "tool_call_history": history,
+                        "response_text": fb.get("response_text"),
+                    }
+                # Corrective retry — append the assistant turn first, then a
+                # user-role msg nudging tool use. The assistant turn must precede
+                # any follow-up so the next ainvoke has a valid transcript.
+                messages.append(ai_msg)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "Your previous response had no tool call. You MUST call a tool. "
+                        "If you have nothing else to do, call `respond` with the final text.",
+                    }
+                )
+                continue
         json_malform_streak = 0
 
         # We honor only the first tool call per iteration (sequential ReAct).

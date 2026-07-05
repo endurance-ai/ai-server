@@ -257,7 +257,16 @@ class Settings(BaseSettings):
     # Max iterations per turn (REQ-AGENT-LOOP-ITERATION-001).
     AGENT_MAX_ITERATIONS: int = 6
     # Per-turn cumulative LLM token budget (REQ-AGENT-PERF-TURN-BUDGET-001).
-    AGENT_TURN_TOKEN_BUDGET: int = 32000
+    # 32k → 80k (2026-07-06): the 32k catch-all cap was calibrated when the
+    # ReAct prompt was ~5-6k/iter (SPEC-AGENT-V2-REACT plan.md rationale).
+    # Since then _STATIC_SYSTEM_PROMPT, _PROACTIVE_DIRECTIVE, tool schema,
+    # and memory-context injection grew each iter to ~11k tokens. Traces on
+    # 2026-07-06 (e.g. 427418c3 "카프리 팬츠 더 비슷하게") showed the cap
+    # firing at iter 4 before the LLM could call `respond` — search
+    # succeeded (8 candidates ready) but the user saw nothing. 80k lets
+    # max_iter=6 complete at 13k/iter without tripping the guard, while
+    # still catching runaways in the 100k+ range.
+    AGENT_TURN_TOKEN_BUDGET: int = 80000
     # Per-tool dispatch timeout in seconds (REQ-AGENT-FAILURE-TOOL-001).
     AGENT_TOOL_TIMEOUT_S: float = 5.0
     # LLM model ID for the ReAct agent. Defaults to the production model so the
