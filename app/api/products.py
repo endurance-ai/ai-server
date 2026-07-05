@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["products"])
 
+# 일부 쇼핑몰은 기본 User-Agent(python-httpx/...)를 봇으로 감지해 403 을 반환한다.
+# 브라우저 UA 로 위장해 정상 상품이 dead 로 오판되는 것을 방지한다.
+_LINK_CHECK_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -373,7 +380,9 @@ async def link_check(
     try:
         # HEAD 를 지원하지 않는 쇼핑몰이 많아 405/501 을 반환 → 정상 상품이 dead 로 오판됨.
         # GET 으로 상태를 확인하되, 본문은 스트림으로 열어 상태 코드만 읽고 끊어 전량 다운로드를 피한다.
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=10.0, headers={"User-Agent": _LINK_CHECK_UA}
+        ) as client:
             async with client.stream("GET", product.product_url) as resp:
                 status_code = resp.status_code
                 final_url = str(resp.url)

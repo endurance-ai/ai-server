@@ -262,6 +262,10 @@ async def test_link_check_alive(client: AsyncClient, pool):
     assert data["alive"] is True
     assert data["http_status"] == 200
 
+    # 봇 차단(403) 오판 방지를 위해 브라우저 User-Agent 를 보내야 한다.
+    _, kwargs = mock_cls.call_args
+    assert "Mozilla" in kwargs["headers"]["User-Agent"]
+
 
 @pytest.mark.asyncio
 async def test_link_check_dead(client: AsyncClient, pool):
