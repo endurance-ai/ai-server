@@ -105,7 +105,7 @@ async def test_keep_warm_cancels_cleanly(monkeypatch):
         await asyncio.wait_for(task, timeout=1.0)
     except asyncio.CancelledError:
         pass
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pytest.fail("keep-warm loop did not honor cancellation within 1s")
 
     assert task.done()
