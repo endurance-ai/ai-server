@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     MODAL_EMBED_URL: str = ""
     MODAL_EMBED_TOKEN: str = ""  # Modal proxy auth (optional)
     MODAL_EMBED_TIMEOUT: float = 90.0  # cold start (모델 GPU 로드) 여유 — warm 시 1초 내
+    # SPEC-MODAL-KEEP-WARM-001 — 배경 태스크로 Modal `/health` 를 주기적으로
+    # ping 해 컨테이너를 warm 유지. Modal 이 `min_containers=0` (scale-to-zero)
+    # 로 배포돼 있어 idle 후 첫 요청이 ~19-20s 콜드 스타트를 겪는 것에 대한
+    # 실용적 완화책. 근본은 Modal 소스에 `min_containers=1` 지정이지만
+    # 소스 접근이 워크스페이스 이전 대기 중이라 그동안의 우회.
+    MODAL_KEEP_WARM_ENABLED: bool = True
+    # Ping 주기 (초). Modal `scaledown_window` 기본값 5분 (300초) 보다 확실히
+    # 짧아야 warm 유지됨. 실측에서 다른 콜드 컨테이너 히트 사례도 있어
+    # 안전 마진 확보 위해 3분 (180초) 을 기본으로. 최소 30초로 클램프.
+    MODAL_KEEP_WARM_INTERVAL_S: int = 180
+    # 단일 ping 타임아웃. `check_connection` 은 GET /health 라 정상 시 <1초.
+    # 콜드 컨테이너 히트 시 5-15초까지 걸릴 수 있어 25초로 여유. 이걸 초과
+    # 하면 조용히 다음 iteration 대기 (재시도 안 함 — 다음 주기 때 다시 시도).
+    MODAL_KEEP_WARM_TIMEOUT_S: float = 25.0
 
     # LiteLLM Proxy — LLM 호출 (enhance_query, future rerank)
     LITELLM_BASE_URL: str = "http://localhost:4000"

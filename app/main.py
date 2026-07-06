@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import os
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -41,6 +43,58 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logging.getLogger("app").setLevel(logging.DEBUG)
+
+
+async def _modal_keep_warm_loop() -> None:
+    """SPEC-MODAL-KEEP-WARM-001 — Modal `/embed` 콜드 스타트 방지용 배경 태스크.
+
+    Modal 워크스페이스 `portal-embed` 는 `min_containers=0` (scale-to-zero) 로
+    배포돼 있어 idle 후 첫 요청이 콜드 스타트 (~19-20s) 를 겪음. 2026-07-07
+    실측 트레이스 (`modal.embed_image.modal_ms`) 기준:
+    - 콜드: 19,785ms / 19,789ms / 15,063ms
+    - 웜: 3,207ms / 454ms / 406ms
+
+    현재 `AGENT_TOOL_TIMEOUT_S=20` 에 딱 걸려 재시도가 발동하는데, 재시도가
+    또 다른 콜드 컨테이너를 때리는 경우 (04:00 카고 쇼츠 트레이스) 총
+    ~35-45초로 늘어남. 클라이언트 stall heartbeat 로 배너는 안 뜨지만
+    유저 대기가 여전히 길다.
+
+    근본 해결은 Modal 소스 (`embed_app.py`) 에 `min_containers=1` 을
+    지정하는 것이지만, 소스가 hchsa77 개인 워크스페이스에만 존재하고
+    org 이전 진행 중이라 우리 쪽에서는 접근 불가. 그동안의 실용 조치로
+    `check_connection` (`/health` GET) 를 주기적으로 호출해 Modal 의
+    `scaledown_window` (기본 5분) 를 리셋 → 컨테이너 계속 warm 유지.
+
+    Fail-open: 모든 예외는 조용히 삼킴 (Modal 다운은 별개 알람 채널로
+    감지). 태스크 자체는 lifespan 종료 시 `cancel()` 로 정리.
+    """
+    from app.observability.langfuse import start_as_current_span, update_current_span
+
+    log = logging.getLogger(__name__)
+    interval = max(30, int(settings.MODAL_KEEP_WARM_INTERVAL_S))
+    timeout = max(5.0, float(settings.MODAL_KEEP_WARM_TIMEOUT_S))
+    log.info("🔥 [modal.keepwarm] loop started · interval=%ds timeout=%.1fs", interval, timeout)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            log.info("🔥 [modal.keepwarm] loop cancelled")
+            return
+        try:
+            with start_as_current_span("modal.keepwarm"):
+                _t0 = time.perf_counter()
+                ok = await asyncio.wait_for(EmbedProvider.check_connection(), timeout=timeout)
+                _ms = int((time.perf_counter() - _t0) * 1000)
+                update_current_span(metadata={"modal_ms": _ms, "ok": ok})
+            if ok:
+                log.info("🔥 [modal.keepwarm] ping ok · ⏱ modal=%dms", _ms)
+            else:
+                log.warning("🔥 [modal.keepwarm] ping returned ok=False · ⏱ modal=%dms", _ms)
+        except asyncio.CancelledError:
+            log.info("🔥 [modal.keepwarm] loop cancelled")
+            return
+        except Exception as exc:  # noqa: BLE001 — never crash the loop
+            log.warning("🔥 [modal.keepwarm] ping raised: %r", exc)
 
 
 @asynccontextmanager
@@ -99,9 +153,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         except Exception:
             logging.getLogger(__name__).exception("setup_webhook failed")
 
+    # SPEC-MODAL-KEEP-WARM-001 — start the Modal keep-warm background task.
+    # `MODAL_KEEP_WARM_ENABLED=false` in dev/local when a live Modal endpoint
+    # isn't configured. Task handle is stashed on app.state so shutdown can
+    # cancel it cleanly (a stray asyncio task blocks graceful shutdown).
+    if settings.MODAL_KEEP_WARM_ENABLED:
+        app.state.modal_keep_warm_task = asyncio.create_task(_modal_keep_warm_loop())
+    else:
+        app.state.modal_keep_warm_task = None
+        logging.getLogger(__name__).info("🔥 [modal.keepwarm] disabled (MODAL_KEEP_WARM_ENABLED=false)")
+
     yield
 
     # Shutdown
+    kw_task = getattr(app.state, "modal_keep_warm_task", None)
+    if kw_task is not None:
+        kw_task.cancel()
+        try:
+            await kw_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001 — best-effort cleanup
+            pass
     await shutdown_taste_store()
     await shutdown_store()
     await db_pool.close_pool()
