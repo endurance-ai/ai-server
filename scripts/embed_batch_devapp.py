@@ -56,6 +56,12 @@ from PIL import Image
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+# Windows 콘솔 기본 코드페이지(cp949 등)는 em-dash(—)/middot(·) 인코딩이 안 되어
+# 진행률 출력에서 UnicodeEncodeError 로 배치가 크래시한다 (2026-07-07, Windows 로컬
+# 실행 중 확인). 운영 EC2(Linux, UTF-8)에는 영향 없음.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 MODEL_ID = "Marqo/marqo-fashionSigLIP"
 PAGE_SIZE = 200
 UPSERT_CHUNK = 25
