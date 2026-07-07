@@ -35,6 +35,12 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
     --upsert-chunk 25       # RPC 1회 upsert row 수
 
 재실행 안전 — `embedding IS NULL` 만 가져오므로 중단되어도 다음 실행 시 이어서 진행.
+
+배치 완료 시 product_crawl_status(091, brand_node_id 기준) + product_crawl_runs 에
+자동 반영되어 kiko.ai-app `/admin/product-collection` 에 수기 마킹 없이 embedded 상태가
+보인다 (crawl.ts/import-products.ts 와 동일한 동기화 패턴). brand_node_id 가 NULL인
+상품은 집계에서 자연히 제외되고, 이미 'active' 인 브랜드는 'embedded' 로 되돌리지 않는다.
+--dry-run 시에는 동기화하지 않는다.
 """
 
 import argparse
@@ -84,6 +90,7 @@ def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
     # 비어있어도(예: Zara 엔진은 image_url 만 채움) image_url 로 폴백해 임베딩 대상에 포함.
     sql = """
         SELECT p.id,
+               p.brand_node_id,
                CASE WHEN p.images IS NOT NULL AND array_length(p.images, 1) > 0
                     THEN p.images
                     ELSE ARRAY[p.image_url]
@@ -104,7 +111,7 @@ def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
         cur.execute(sql)
         rows = cur.fetchall()
     # UUID → str (psycopg Json dumps 용)
-    return [{"id": str(r["id"]), "images": r["images"]} for r in rows]
+    return [{"id": str(r["id"]), "brand_node_id": r["brand_node_id"], "images": r["images"]} for r in rows]
 
 
 def download_image(client: httpx.Client, url: str) -> Image.Image:
@@ -197,6 +204,45 @@ def upsert(
     return total
 
 
+def sync_crawl_status(conn: psycopg.Connection, brand_embed_counts: dict[int, int]) -> None:
+    """임베딩 결과를 product_crawl_status(091, brand_node_id 기준)에 반영한다.
+
+    /admin/product-collection 이 읽는 product_crawl_brands 뷰의 소스가 이 테이블이라,
+    임베딩 배치도 crawl.ts/import-products.ts 와 같은 패턴으로 동기화해야 admin에서
+    수기 마킹 없이 embedded 상태가 보인다. products.brand_node_id 가 NULL인 상품
+    (brand_nodes 미매칭)은 집계에서 이미 제외됨 — no-op.
+
+    이미 'active' 인 브랜드는 되돌리지 않는다 (embedded 로 다운그레이드 방지).
+    """
+    if not brand_embed_counts:
+        return
+    with conn.cursor() as cur:
+        for brand_node_id, count in brand_embed_counts.items():
+            cur.execute(
+                """
+                INSERT INTO product_crawl_status (brand_node_id, status, embedded_at, qc_summary)
+                VALUES (%(brand_node_id)s, 'embedded', now(), %(qc_summary)s)
+                ON CONFLICT (brand_node_id) DO UPDATE SET
+                    status = CASE WHEN product_crawl_status.status = 'active'
+                                  THEN product_crawl_status.status
+                                  ELSE 'embedded' END,
+                    embedded_at = now(),
+                    qc_summary = product_crawl_status.qc_summary || %(qc_summary)s
+                """,
+                {"brand_node_id": brand_node_id, "qc_summary": Jsonb({"embedded_count": count})},
+            )
+            cur.execute(
+                """
+                INSERT INTO product_crawl_runs (brand_node_id, stage, status, actor, command, metrics)
+                VALUES (%(brand_node_id)s, 'embed', 'success', 'embed-batch-devapp',
+                        'embed_batch_devapp.py', %(metrics)s)
+                """,
+                {"brand_node_id": brand_node_id, "metrics": Jsonb({"embedded_count": count})},
+            )
+        conn.commit()
+    print(f"\n[sync] product_crawl_status 갱신 — {len(brand_embed_counts)}개 브랜드")
+
+
 def fmt_eta(seconds: float) -> str:
     if seconds < 60:
         return f"{seconds:.0f}s"
@@ -240,6 +286,10 @@ def main() -> None:
             print("처리할 항목 없음")
             return
 
+        # product_id → brand_node_id (동기화용, brand_node_id NULL은 자연히 제외)
+        id_to_brand = {r["id"]: r["brand_node_id"] for r in pending if r["brand_node_id"] is not None}
+        brand_embed_counts: dict[int, int] = {}
+
         start = time.time()
         upserted_total = 0
         failed_total = 0
@@ -269,6 +319,12 @@ def main() -> None:
             n = upsert(conn, embs, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
             upserted_total += n
 
+            if not args.dry_run:
+                for pid in embs:
+                    brand_id = id_to_brand.get(pid)
+                    if brand_id is not None:
+                        brand_embed_counts[brand_id] = brand_embed_counts.get(brand_id, 0) + 1
+
             elapsed = time.time() - page_start
             done = offset + page_n
             overall_rate = done / (time.time() - start)
@@ -277,6 +333,8 @@ def main() -> None:
 
         elapsed = time.time() - start
         print(f"\n완료 — upsert {upserted_total}/{total} (다운로드 실패 {failed_total}) · {fmt_eta(elapsed)}")
+
+        sync_crawl_status(conn, brand_embed_counts)
 
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute("SELECT * FROM product_embedding_coverage")
