@@ -1,0 +1,2438 @@
+{
+  "meta": {
+    "sha": "f421f4bd",
+    "branch": "feat/search-eval-harness",
+    "label": "raw_baseline",
+    "top_k": 5,
+    "rewrite": false,
+    "rewrite_model": null,
+    "timestamp": "20260708T172033Z",
+    "dataset_version": "1.1"
+  },
+  "summary": {
+    "total": 30,
+    "errors": 0,
+    "overall": {
+      "n": 30,
+      "quality_score_mean": 0.373,
+      "keyword_hit_mean": 0.373,
+      "color_hit_mean": 0.217,
+      "fit_hit_mean": 0.067,
+      "brand_diversity_mean": 3.867,
+      "distance_p50_mean": 0.911,
+      "subcat_hit_mean": 0.16,
+      "subcat_hit_tagged_mean": 0.5,
+      "tag_coverage_mean": 0.36
+    },
+    "by_type": {
+      "text_ko_basic": {
+        "n": 8,
+        "quality_score_mean": 0.025,
+        "keyword_hit_mean": 0.025,
+        "color_hit_mean": 0.267,
+        "fit_hit_mean": 0.0,
+        "brand_diversity_mean": 4.5,
+        "distance_p50_mean": 0.933,
+        "subcat_hit_mean": 0.075,
+        "subcat_hit_tagged_mean": 0.146,
+        "tag_coverage_mean": 0.475
+      },
+      "text_ko_mood": {
+        "n": 3,
+        "quality_score_mean": 0.0,
+        "keyword_hit_mean": 0.0,
+        "color_hit_mean": 0.0,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 4.0,
+        "distance_p50_mean": 0.929,
+        "subcat_hit_mean": 0.067,
+        "subcat_hit_tagged_mean": 0.111,
+        "tag_coverage_mean": 0.6
+      },
+      "text_ko_branded": {
+        "n": 2,
+        "quality_score_mean": 0.5,
+        "keyword_hit_mean": 0.5,
+        "color_hit_mean": null,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 4.5,
+        "distance_p50_mean": 0.931,
+        "subcat_hit_mean": 0.5,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.5
+      },
+      "text_en_basic": {
+        "n": 5,
+        "quality_score_mean": 0.84,
+        "keyword_hit_mean": 0.84,
+        "color_hit_mean": 0.4,
+        "fit_hit_mean": 0.1,
+        "brand_diversity_mean": 3.2,
+        "distance_p50_mean": 0.873,
+        "subcat_hit_mean": 0.24,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.24
+      },
+      "text_en_mood": {
+        "n": 5,
+        "quality_score_mean": 0.64,
+        "keyword_hit_mean": 0.64,
+        "color_hit_mean": 0.0,
+        "fit_hit_mean": 0.2,
+        "brand_diversity_mean": 3.0,
+        "distance_p50_mean": 0.885,
+        "subcat_hit_mean": 0.12,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.12
+      },
+      "text_en_gendered": {
+        "n": 2,
+        "quality_score_mean": 0.8,
+        "keyword_hit_mean": 0.8,
+        "color_hit_mean": 0.6,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 4.5,
+        "distance_p50_mean": 0.904,
+        "subcat_hit_mean": 0.3,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.3
+      },
+      "text_ko_qa": {
+        "n": 3,
+        "quality_score_mean": 0.067,
+        "keyword_hit_mean": 0.067,
+        "color_hit_mean": 0.0,
+        "fit_hit_mean": 0.0,
+        "brand_diversity_mean": 4.0,
+        "distance_p50_mean": 0.93,
+        "subcat_hit_mean": 0.0,
+        "subcat_hit_tagged_mean": 0.0,
+        "tag_coverage_mean": 0.4
+      },
+      "text_edge": {
+        "n": 2,
+        "quality_score_mean": 0.4,
+        "keyword_hit_mean": 0.4,
+        "color_hit_mean": null,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 3.5,
+        "distance_p50_mean": 0.916,
+        "subcat_hit_mean": 0.3,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.3
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "text_ko_basic_hoodie_001",
+      "type": "text_ko_basic",
+      "input": "검정 오버사이즈 후드",
+      "embed_input": "검정 오버사이즈 후드",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.4,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 0.667,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": true,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": true,
+            "kw": false,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_capri_002",
+      "type": "text_ko_basic",
+      "input": "카프리 팬츠",
+      "embed_input": "카프리 팬츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_miniskirt_003",
+      "type": "text_ko_basic",
+      "input": "미니스커트",
+      "embed_input": "미니스커트",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9413,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 579666,
+            "brand": "S.J",
+            "name": "40 Acres x COINTEL Do The Right Thing Tee - Blue",
+            "subcategory": "t-shirt",
+            "distance": 0.9333,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454478,
+            "brand": "South2 West8",
+            "name": "South2 West8 Crew Neck Tee - Black",
+            "subcategory": "sweater",
+            "distance": 0.9413,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454769,
+            "brand": "Kith",
+            "name": "Kith Ivy for Wilson Logo Wide Headband - White",
+            "subcategory": "",
+            "distance": 0.9413,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 533762,
+            "brand": "Sohc",
+            "name": "Food Vs Life T-Shirt (Grey)",
+            "subcategory": "",
+            "distance": 0.9442,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454754,
+            "brand": "Kith",
+            "name": "Kith Ivy for Wilson Logo Wide Headband - Black",
+            "subcategory": "",
+            "distance": 0.9446,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_tee_004",
+      "type": "text_ko_basic",
+      "input": "화이트 티셔츠",
+      "embed_input": "화이트 티셔츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.2,
+        "keyword_hit": 0.2,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 0.5,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_denimjkt_005",
+      "type": "text_ko_basic",
+      "input": "데님 자켓",
+      "embed_input": "데님 자켓",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_ballet_006",
+      "type": "text_ko_basic",
+      "input": "발레리나 슈즈",
+      "embed_input": "발레리나 슈즈",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_leathermini_007",
+      "type": "text_ko_basic",
+      "input": "블랙 레더 미니스커트",
+      "embed_input": "블랙 레더 미니스커트",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.4,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_widejean_008",
+      "type": "text_ko_basic",
+      "input": "와이드 데님 팬츠",
+      "embed_input": "와이드 데님 팬츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_minimalknit_009",
+      "type": "text_ko_mood",
+      "input": "미니멀한 베이지 니트",
+      "embed_input": "미니멀한 베이지 니트",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_streetsetup_010",
+      "type": "text_ko_mood",
+      "input": "스트릿한 그래픽 티",
+      "embed_input": "스트릿한 그래픽 티",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 0.333,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": true,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_lovelydress_011",
+      "type": "text_ko_mood",
+      "input": "러블리한 미니 원피스",
+      "embed_input": "러블리한 미니 원피스",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_branded_zara_012",
+      "type": "text_ko_branded",
+      "input": "자라 데님 셔츠",
+      "embed_input": "자라 데님 셔츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": 0.0,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_branded_cos_013",
+      "type": "text_ko_branded",
+      "input": "코스 셔츠",
+      "embed_input": "코스 셔츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.4,
+        "keyword_hit": 0.4,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": 0.0,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_loafers_014",
+      "type": "text_en_basic",
+      "input": "leather loafers",
+      "embed_input": "leather loafers",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8683,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 446770,
+            "brand": "The Row",
+            "name": "Leo loafers",
+            "subcategory": "",
+            "distance": 0.8679,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 469881,
+            "brand": "ZARA",
+            "name": "레더 로퍼",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 517561,
+            "brand": "ZARA",
+            "name": "LEATHER LOAFERS",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 442133,
+            "brand": "Tod's",
+            "name": "leather loafers",
+            "subcategory": "",
+            "distance": 0.8708,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 445526,
+            "brand": "Dries Van Noten",
+            "name": "penny-strap loafers",
+            "subcategory": "loafers",
+            "distance": 0.8714,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_hoodie_015",
+      "type": "text_en_basic",
+      "input": "oversized black hoodie",
+      "embed_input": "oversized black hoodie",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 1.0,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.8712,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 566145,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Logo Piping Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.8623,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566113,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Chain Volume Sweat Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.8702,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566229,
+            "brand": "TREEMINGBIRD",
+            "name": "Zipper Finishing Sweat Hoodie Zip-up [ Black ]",
+            "subcategory": "",
+            "distance": 0.8712,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566147,
+            "brand": "TREEMINGBIRD",
+            "name": "Zipper Finishing Sweat Hoodie Zip-up [ Black ]",
+            "subcategory": "",
+            "distance": 0.8712,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 454257,
+            "brand": "Ksubi",
+            "name": "Ksubi Intruder Ekcess Hoodie - Jet Black",
+            "subcategory": "hoodie",
+            "distance": 0.8716,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_widejeans_016",
+      "type": "text_en_basic",
+      "input": "wide leg jeans",
+      "embed_input": "wide leg jeans",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": 0.2,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8812,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437105,
+            "brand": "MCQUEEN",
+            "name": "Wide Leg Jeans in Washed Blue",
+            "subcategory": "wide-pants",
+            "distance": 0.8777,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": true
+          },
+          {
+            "id": 443382,
+            "brand": "KHAITE",
+            "name": "Dane stretch jeans",
+            "subcategory": "wide-pants",
+            "distance": 0.8779,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 450487,
+            "brand": "GANNI",
+            "name": "GANNI Soft Rigid Denim Baggy Jeans (Light Blue Stone)",
+            "subcategory": "",
+            "distance": 0.8812,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 566648,
+            "brand": "TREEMINGBIRD",
+            "name": "Brushed Denim Pants [ Navy ]",
+            "subcategory": "",
+            "distance": 0.883,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 566519,
+            "brand": "TREEMINGBIRD",
+            "name": "Brushed Denim Pants [ Navy ]",
+            "subcategory": "",
+            "distance": 0.883,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_minidress_017",
+      "type": "text_en_basic",
+      "input": "black satin mini dress",
+      "embed_input": "black satin mini dress",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 1,
+        "distance_p50": 0.8723,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 474852,
+            "brand": "ZARA",
+            "name": "SATIN EFFECT HALTER DRESS",
+            "subcategory": "",
+            "distance": 0.8675,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 468612,
+            "brand": "ZARA",
+            "name": "새틴 트임 미니 원피스",
+            "subcategory": "",
+            "distance": 0.871,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 474953,
+            "brand": "ZARA",
+            "name": "SATIN MINI STRAPPY DRESS",
+            "subcategory": "",
+            "distance": 0.8723,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 469424,
+            "brand": "ZARA",
+            "name": "새틴 미니 스트랩 원피스",
+            "subcategory": "",
+            "distance": 0.8723,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 471306,
+            "brand": "ZARA",
+            "name": "SATIN EFFECT SHORT DRESS",
+            "subcategory": "",
+            "distance": 0.8752,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_trench_018",
+      "type": "text_en_basic",
+      "input": "beige trench coat",
+      "embed_input": "beige trench coat",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": 0.2,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8721,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 435059,
+            "brand": "Aimé Leon Dore",
+            "name": "Linen Trench Coat",
+            "subcategory": "trench-coat",
+            "distance": 0.8672,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 527137,
+            "brand": "Renaissance Renaissance",
+            "name": "ann coat, beige",
+            "subcategory": "",
+            "distance": 0.8702,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 439150,
+            "brand": "CALVIN KLEIN COLLECTION",
+            "name": "Mireille belted trench coat",
+            "subcategory": "trench-coat",
+            "distance": 0.8721,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 471589,
+            "brand": "ZARA",
+            "name": "BELTED TRENCH COAT ZW COLLECTION",
+            "subcategory": "",
+            "distance": 0.873,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 476298,
+            "brand": "YLEVE",
+            "name": "일레브_ HIGHDENSITY COTTON BROAD LINER CO [SAGE]",
+            "subcategory": "",
+            "distance": 0.8746,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_cozyknit_019",
+      "type": "text_en_mood",
+      "input": "cozy beige oversized knit",
+      "embed_input": "cozy beige oversized knit",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 0.0,
+        "fit_hit": 0.2,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8764,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 446546,
+            "brand": "Balmain",
+            "name": "open-shoulder sweater",
+            "subcategory": "sweater",
+            "distance": 0.861,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 472348,
+            "brand": "ZARA",
+            "name": "OVERSIZED KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8717,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": true
+          },
+          {
+            "id": 472338,
+            "brand": "ZARA",
+            "name": "ASYMMETRIC KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8764,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 558237,
+            "brand": "Bergwerk Seoul",
+            "name": "HIGH-NECK BUTTON KNIT",
+            "subcategory": "",
+            "distance": 0.8767,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 472174,
+            "brand": "ZARA",
+            "name": "CHUNKY KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8769,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_streetgraphic_020",
+      "type": "text_en_mood",
+      "input": "streetwear graphic tee",
+      "embed_input": "streetwear graphic tee",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8889,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 467206,
+            "brand": "Uniqlo",
+            "name": "PEACE FOR ALL Graphic T-Shirt | Saul Leiter",
+            "subcategory": "",
+            "distance": 0.888,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 541611,
+            "brand": "UNAFFECTED X SCARFACE",
+            "name": "scarface world tour t-shirt / charcoal",
+            "subcategory": "",
+            "distance": 0.8887,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 541607,
+            "brand": "UNAFFECTED X SCARFACE",
+            "name": "vintage movie poster oversized t-shirt / charcoal",
+            "subcategory": "",
+            "distance": 0.8889,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534556,
+            "brand": "Schism Inducing",
+            "name": "Malice Pistols T Shirt (Yellow)",
+            "subcategory": "",
+            "distance": 0.8898,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 518042,
+            "brand": "ZARA",
+            "name": "WASHED KNIT PRINTED T-SHIRT",
+            "subcategory": "",
+            "distance": 0.8899,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_officechic_021",
+      "type": "text_en_mood",
+      "input": "office chic tailored trousers",
+      "embed_input": "office chic tailored trousers",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8956,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 554046,
+            "brand": "LOSSYROW",
+            "name": "Long Slim Bootcut Slacks [Navy]",
+            "subcategory": "",
+            "distance": 0.8928,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 553614,
+            "brand": "LOSSYROW",
+            "name": "Long Slim Bootcut Slacks [Navy]",
+            "subcategory": "",
+            "distance": 0.8928,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 561697,
+            "brand": "mu:arvo",
+            "name": "WOOL SILK WIDE TUCK PANTS_GREYISH BLUE",
+            "subcategory": "",
+            "distance": 0.8956,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 580042,
+            "brand": "Duequa",
+            "name": "Diesel - Khaki Collar Jacket",
+            "subcategory": "",
+            "distance": 0.8963,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 580017,
+            "brand": "Duequa",
+            "name": "Diesel - Khaki Collar Jacket",
+            "subcategory": "",
+            "distance": 0.8963,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_coquette_022",
+      "type": "text_en_mood",
+      "input": "coquette pastel mini skirt",
+      "embed_input": "coquette pastel mini skirt",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 1,
+        "distance_p50": 0.8686,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 580901,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580765,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580609,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580891,
+            "brand": "UuuuP",
+            "name": "로맨틱 레이스 탑 - 라벤더",
+            "subcategory": "",
+            "distance": 0.8735,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580755,
+            "brand": "UuuuP",
+            "name": "로맨틱 레이스 탑 - 라벤더",
+            "subcategory": "",
+            "distance": 0.8735,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_athleisure_023",
+      "type": "text_en_mood",
+      "input": "athleisure track pants",
+      "embed_input": "athleisure track pants",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8976,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 449537,
+            "brand": "Represent",
+            "name": "logo-detail track pant",
+            "subcategory": "joggers",
+            "distance": 0.8929,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465518,
+            "brand": "Patta",
+            "name": "Tricot Straight Track Pants (Black Iris)",
+            "subcategory": "",
+            "distance": 0.8936,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454568,
+            "brand": "Loewe",
+            "name": "Loewe Tracksuit Trousers - Khaki Green",
+            "subcategory": "joggers",
+            "distance": 0.8976,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 577961,
+            "brand": "THE MYSTERIOUS HOTEL",
+            "name": "[5차] PATCH MESH PANTS - NAVY",
+            "subcategory": "",
+            "distance": 0.8984,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 577915,
+            "brand": "THE MYSTERIOUS HOTEL",
+            "name": "[5차] PATCH MESH PANTS - NAVY",
+            "subcategory": "",
+            "distance": 0.8984,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_gendered_mens_024",
+      "type": "text_en_gendered",
+      "input": "men's black straight jeans",
+      "embed_input": "men's black straight jeans",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": 0.6,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8731,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437072,
+            "brand": "STONE ISLAND",
+            "name": "J100007  Denim Jeans",
+            "subcategory": "",
+            "distance": 0.8679,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 479022,
+            "brand": "SUNFLOWER",
+            "name": "썬플라워_ LOOSE [BLACK RINSE]",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 456220,
+            "brand": "Studio Nicholson",
+            "name": "Studio Nicholson x Aaron Levine Woodstock Corduroy Pant - Faded Blue",
+            "subcategory": "",
+            "distance": 0.8731,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 464052,
+            "brand": "Guess USA",
+            "name": "Straight Denim Pants Black",
+            "subcategory": "",
+            "distance": 0.8747,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 479159,
+            "brand": "TONYWACK",
+            "name": "토니웩_ SLIM STRAIGHT DENIM JEANS [BLACK]",
+            "subcategory": "",
+            "distance": 0.8758,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_gendered_womens_025",
+      "type": "text_en_gendered",
+      "input": "women's floral summer dress",
+      "embed_input": "women's floral summer dress",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9348,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 449211,
+            "brand": "Dolce & Gabbana",
+            "name": "floral strap dress",
+            "subcategory": "",
+            "distance": 0.9318,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 446169,
+            "brand": "Dolce & Gabbana",
+            "name": "floral-print midi dress",
+            "subcategory": "midi-dress",
+            "distance": 0.9333,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 440363,
+            "brand": "DÔEN",
+            "name": "Clea floral-print midi dress",
+            "subcategory": "midi-dress",
+            "distance": 0.9348,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 442073,
+            "brand": "LoveShackFancy",
+            "name": "Clemence floral-print maxi dress",
+            "subcategory": "maxi-dress",
+            "distance": 0.9368,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 448806,
+            "brand": "Agua By Agua Bendita",
+            "name": "Alcaparra Paramo strappy floral dress",
+            "subcategory": "",
+            "distance": 0.9388,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_capri_hoodie_026",
+      "type": "text_ko_qa",
+      "input": "오버사이즈 박시 드롭 숄더 드로우 스트링 후드 블랙 플리스 후디",
+      "embed_input": "오버사이즈 박시 드롭 숄더 드로우 스트링 후드 블랙 플리스 후디",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.2,
+        "keyword_hit": 0.2,
+        "color_hit": 0.0,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9322,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 442737,
+            "brand": "Rick Owens",
+            "name": "Prong gown",
+            "subcategory": "",
+            "distance": 0.919,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 569957,
+            "brand": "Ballew",
+            "name": "technical separable vest",
+            "subcategory": "",
+            "distance": 0.9281,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 481669,
+            "brand": "SATISFY",
+            "name": "새티스파이_ FuzzFleece™ AD Neck Warmer [FALCON]",
+            "subcategory": "",
+            "distance": 0.9322,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 558630,
+            "brand": "Bergwerk Seoul",
+            "name": "COLOR SINGLE ECO BAG",
+            "subcategory": "",
+            "distance": 0.9331,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 558648,
+            "brand": "Bergwerk Seoul",
+            "name": "EYELET COMBI BELT BAG",
+            "subcategory": "",
+            "distance": 0.9357,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_leatherloafer_027",
+      "type": "text_ko_qa",
+      "input": "브라운 레더 로퍼",
+      "embed_input": "브라운 레더 로퍼",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_cargopants_028",
+      "type": "text_ko_qa",
+      "input": "카고 팬츠 남자",
+      "embed_input": "카고 팬츠 남자",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_edge_generic_029",
+      "type": "text_edge",
+      "input": "shirt",
+      "embed_input": "shirt",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9163,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 518665,
+            "brand": "ZARA",
+            "name": "WILLY CHAVARRIA X ZARA RELAXED FIT COTTON SHIRT",
+            "subcategory": "",
+            "distance": 0.9145,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 567173,
+            "brand": "Years Ago",
+            "name": "Single Breasted Raglan Coat, Green Check",
+            "subcategory": "",
+            "distance": 0.9156,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 456091,
+            "brand": "Barena",
+            "name": "Barena Prama Overshirt - Navy",
+            "subcategory": "shirt",
+            "distance": 0.9163,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 445679,
+            "brand": "Stone Island",
+            "name": "Compass-badge short-sleeved shirt",
+            "subcategory": "shirt",
+            "distance": 0.9169,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 456661,
+            "brand": "Orlebar Brown",
+            "name": "Orlebar Brown Maitan Solstice Shirt - Tarragon Green",
+            "subcategory": "shirt",
+            "distance": 0.9177,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_edge_ambiguous_030",
+      "type": "text_edge",
+      "input": "something nice for autumn",
+      "embed_input": "something nice for autumn",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.9167,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 465584,
+            "brand": "Nike",
+            "name": "Nike Air Force 1 '07 \"Leaf Camo\"",
+            "subcategory": "",
+            "distance": 0.9146,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563384,
+            "brand": "AUTUMN",
+            "name": "[made]스윗캡소매티셔츠",
+            "subcategory": "",
+            "distance": 0.9167,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 562942,
+            "brand": "AUTUMN",
+            "name": "[made]스윗캡소매티셔츠",
+            "subcategory": "",
+            "distance": 0.9167,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563729,
+            "brand": "AUTUMN",
+            "name": "[made]테이크논페이드데님",
+            "subcategory": "",
+            "distance": 0.9208,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563391,
+            "brand": "AUTUMN",
+            "name": "[made]하쿠와플티셔츠",
+            "subcategory": "",
+            "distance": 0.9249,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -16,11 +16,19 @@ Environment:
                                               PostgREST is bypassed on purpose
                                               so we test the raw retrieval,
                                               not the shim.)
+    LITELLM_BASE_URL / LITELLM_MASTER_KEY   — required with --rewrite (LLM
+                                              call for KO → EN rewrite)
 
 Usage:
-    uv run python tests/eval/search_quality_eval.py
-    uv run python tests/eval/search_quality_eval.py --top-k 5 --limit 10
-    uv run python tests/eval/search_quality_eval.py --output custom.json
+    # A. Raw baseline (input goes straight to embedder — measures pure
+    #    retrieval quality at the FashionSigLIP level, isolates the LLM
+    #    rewrite step)
+    uv run python tests/eval/search_quality_eval.py --label raw_baseline
+
+    # B. Prod baseline (KO cases first go through an LLM rewrite to
+    #    concise English keywords — mirrors the ReAct agent's behavior
+    #    before it calls the search_products tool)
+    uv run python tests/eval/search_quality_eval.py --rewrite --label prod_baseline
 """
 
 from __future__ import annotations
@@ -65,6 +73,70 @@ async def _embed_text(client: httpx.AsyncClient, url: str, token: str, text: str
     resp.raise_for_status()
     payload = resp.json()
     return list(payload.get("embedding") or payload.get("vector") or [])
+
+
+# --- LLM rewrite (KO → EN keywords) ---------------------------------------
+
+# Focused rewrite prompt. NOT the full ReAct agent prompt — we only want the
+# rewrite behavior the agent exhibits when it produces `text_query` for the
+# search_products tool. Prod agent prompt says (paraphrased): "For text
+# requests, pass a concise ENGLISH text_query (e.g. 'leather loafers')".
+# Reproducing just that single step here is deterministic (temp=0), cheap
+# (one short call per case), and testable.
+_REWRITE_SYSTEM_PROMPT = (
+    "You rewrite Korean fashion search queries to concise English keywords for a "
+    "FashionSigLIP embedding retrieval system. Rules:\n"
+    "- Output ONLY the rewritten English query, no explanation, no quotes.\n"
+    "- Keep it short (2-6 words). Include garment type, color, silhouette/fit, "
+    "and material when present.\n"
+    "- If the input is already English, return it unchanged.\n"
+    "- Do not invent attributes that are not in the input."
+)
+
+_REWRITE_MODEL = "nova-lite"  # matches AGENT_LLM_MODEL default
+
+
+async def _rewrite_query(
+    client: httpx.AsyncClient,
+    litellm_url: str,
+    litellm_key: str,
+    query: str,
+    lang: str | None,
+) -> str:
+    """KO fashion query → concise EN keywords via LiteLLM.
+
+    English inputs pass through untouched. Any failure (HTTP, parse, empty)
+    falls back to the original query — fail-open matches the prod agent
+    behavior when rewrite is unreliable.
+    """
+    if not query or (lang or "").lower() == "en":
+        return query
+    try:
+        headers = {"Content-Type": "application/json"}
+        if litellm_key:
+            headers["Authorization"] = f"Bearer {litellm_key}"
+        resp = await client.post(
+            f"{litellm_url.rstrip('/')}/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": _REWRITE_MODEL,
+                "messages": [
+                    {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
+                    {"role": "user", "content": query},
+                ],
+                "temperature": 0.0,
+                "max_tokens": 40,
+            },
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        rewritten = (content or "").strip().strip('"').strip("'")
+        return rewritten or query
+    except Exception as exc:  # noqa: BLE001 — fail-open, log for visibility
+        logger.warning("rewrite fallback for %r: %r", query[:40], exc)
+        return query
 
 
 # --- Postgres RPC ---------------------------------------------------------
@@ -327,19 +399,30 @@ async def main() -> None:
     )
     parser.add_argument("--top-k", type=int, default=_DEFAULT_TOP_K, help="top-K (default 5)")
     parser.add_argument("--limit", type=int, default=None, help="처음 N개만 실행")
-    parser.add_argument("--label", default=None, help="결과 파일 라벨 (예: 'baseline' / 'with_rewrite')")
+    parser.add_argument("--label", default=None, help="결과 파일 라벨 (예: 'raw_baseline' / 'prod_baseline')")
+    parser.add_argument(
+        "--rewrite",
+        action="store_true",
+        help="KO 케이스를 LLM 으로 concise EN 키워드로 리라이트 후 embed (프로덕션 ReAct 에이전트 미러링). "
+        "off 상태면 raw 텍스트를 그대로 임베드 → 순수 retrieval 품질 측정.",
+    )
     parser.add_argument("--output", default=None, help="결과 저장 경로 (기본: results/search_quality_<sha>_<ts>.json)")
     args = parser.parse_args()
 
     modal_url = os.environ.get("MODAL_EMBED_URL")
     modal_token = os.environ.get("MODAL_EMBED_TOKEN")
     dsn = os.environ.get("KIKOAI_DEVAPP_DSN") or os.environ.get("DB_DSN")
+    litellm_url = os.environ.get("LITELLM_BASE_URL")
+    litellm_key = os.environ.get("LITELLM_MASTER_KEY", "")
 
     if not modal_url or not modal_token:
         print("ERROR: MODAL_EMBED_URL / MODAL_EMBED_TOKEN 환경변수 필요")
         sys.exit(1)
     if not dsn:
         print("ERROR: KIKOAI_DEVAPP_DSN 또는 DB_DSN 환경변수 필요")
+        sys.exit(1)
+    if args.rewrite and not litellm_url:
+        print("ERROR: --rewrite 사용 시 LITELLM_BASE_URL 환경변수 필요")
         sys.exit(1)
 
     dataset_path = Path(args.dataset)
@@ -360,7 +443,14 @@ async def main() -> None:
         output_dir.mkdir(exist_ok=True)
         output_path = output_dir / f"search_quality_{sha}{label_part}_{ts}.json"
 
-    logger.info("로드 완료: %d 케이스 · top_k=%d · sha=%s · branch=%s", len(cases), args.top_k, sha, branch)
+    logger.info(
+        "로드 완료: %d 케이스 · top_k=%d · rewrite=%s · sha=%s · branch=%s",
+        len(cases),
+        args.top_k,
+        args.rewrite,
+        sha,
+        branch,
+    )
 
     results: list[dict[str, Any]] = []
     async with httpx.AsyncClient() as http_client:
@@ -368,28 +458,38 @@ async def main() -> None:
         try:
             for i, case in enumerate(cases, 1):
                 try:
-                    query_vec = await _embed_text(http_client, modal_url, modal_token, case["input"])
+                    raw_input = case["input"]
+                    if args.rewrite:
+                        embed_input = await _rewrite_query(
+                            http_client, litellm_url, litellm_key, raw_input, case.get("lang")
+                        )
+                    else:
+                        embed_input = raw_input
+                    query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
                     rows = _search_products_v6(conn, query_embedding=query_vec, top_k=args.top_k)
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
                             "id": case["id"],
                             "type": case["type"],
-                            "input": case["input"],
+                            "input": raw_input,
+                            "embed_input": embed_input,  # after rewrite (or same as input if off)
                             "lang": case.get("lang"),
                             "scores": scores,
                         }
                     )
+                    rewrite_note = f' → "{embed_input}"' if args.rewrite and embed_input != raw_input else ""
                     logger.info(
-                        "[%d/%d] %s [%s] sc=%.2f kw=%.2f Q=%.2f n=%d",
+                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f sc=%.2f n=%d%s",
                         i,
                         len(cases),
                         case["id"],
                         case["type"],
-                        scores["subcat_hit"],
-                        scores["keyword_hit"],
                         scores["quality_score"],
+                        scores["keyword_hit"],
+                        scores["subcat_hit"],
                         scores["result_count"],
+                        rewrite_note,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[%s] failed: %r", case["id"], exc)
@@ -443,6 +543,8 @@ async def main() -> None:
                     "branch": branch,
                     "label": args.label,
                     "top_k": args.top_k,
+                    "rewrite": args.rewrite,
+                    "rewrite_model": _REWRITE_MODEL if args.rewrite else None,
                     "timestamp": ts,
                     "dataset_version": data.get("version"),
                 },
