@@ -20,16 +20,24 @@ from pathlib import Path
 from typing import Any
 
 _METRICS = [
+    # primary
     "quality_score",
-    "subcat_hit",
+    # retrieval signals (scored on)
     "keyword_hit",
     "color_hit",
     "fit_hit",
     "brand_hit",
     "brand_diversity",
     "distance_p50",
+    # diagnostic (displayed but do not color-grade — mixed with crawler tag coverage)
+    "subcat_hit",
+    "subcat_hit_tagged",
+    "tag_coverage",
 ]
 _LOWER_IS_BETTER = {"distance_p50"}
+# Metrics we suppress the 🟢/🔴 grader for — comparing them alone is misleading
+# because they conflate retrieval quality with crawler backfill progress.
+_DIAGNOSTIC_ONLY = {"subcat_hit", "subcat_hit_tagged", "tag_coverage"}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -40,10 +48,13 @@ def _fmt_delta(a: float | None, b: float | None, metric: str) -> str:
     if a is None or b is None:
         return "  ─  "
     diff = b - a
-    lower_better = metric in _LOWER_IS_BETTER
-    # improvement direction depends on metric semantics
-    good = (diff < 0) if lower_better else (diff > 0)
     sign = "+" if diff > 0 else ""
+    if metric in _DIAGNOSTIC_ONLY:
+        # No color marker — diagnostic metrics can move for reasons unrelated
+        # to search quality (e.g. crawler backfill lifts tag_coverage).
+        return f"{sign}{diff:+.3f}   "
+    lower_better = metric in _LOWER_IS_BETTER
+    good = (diff < 0) if lower_better else (diff > 0)
     marker = "🟢" if good and abs(diff) >= 0.01 else ("🔴" if not good and abs(diff) >= 0.01 else "  ")
     return f"{sign}{diff:+.3f} {marker}"
 

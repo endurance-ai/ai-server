@@ -109,25 +109,45 @@ def _match_any(text: str, needles: list[str]) -> bool:
 
 
 def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[str, Any]:
-    """Six metrics per case (all @top-K where K = len(rows)).
+    """Metrics per case (all @top-K where K = len(rows)).
 
-    - subcat_hit    : fraction whose subcategory ∈ expected.subcategory_any
+    PRIMARY
+    - quality_score : keyword_hit — single-number summary the compare tool
+                      grades on. subcategory intentionally excluded because
+                      52% of prod rows have NULL subcategory (crawler gap),
+                      which caps a sqrt(subcat*keyword) primary at the tagging
+                      rate rather than at retrieval quality. Once the crawler
+                      backfills we can re-promote subcat to primary.
+
+    RETRIEVAL SIGNALS
     - keyword_hit   : fraction whose name/brand matches expected.keywords_any
+                      (reliable — name/brand ≈ 100% coverage)
     - color_hit     : fraction whose name matches expected.color_any (or None if not asserted)
     - fit_hit       : fraction whose name matches expected.fit_any (or None if not asserted)
     - brand_diversity : count of unique brands
     - distance_p50  : median distance (lower = more confident retrieval)
-    - quality_score : sqrt(subcat_hit * keyword_hit) — single-number summary
+
+    DIAGNOSTIC (visible but not scored on)
+    - subcat_hit         : fraction whose subcategory ∈ expected.subcategory_any
+                           (NULL rows count as miss — reflects tag coverage AND accuracy)
+    - subcat_hit_tagged  : subcat_hit computed ONLY over rows with non-NULL
+                           subcategory (real tagging accuracy). None when
+                           tag_coverage is 0.
+    - tag_coverage       : fraction of top-K with a non-NULL subcategory
+                           (crawler tagging rate for this retrieval slice)
     """
     if not rows:
         return {
-            "subcat_hit": 0.0,
+            "quality_score": 0.0,
             "keyword_hit": 0.0,
             "color_hit": None,
             "fit_hit": None,
+            "brand_hit": None,
             "brand_diversity": 0,
             "distance_p50": None,
-            "quality_score": 0.0,
+            "subcat_hit": 0.0,
+            "subcat_hit_tagged": None,
+            "tag_coverage": 0.0,
             "result_count": 0,
             "samples": [],
         }
@@ -139,6 +159,8 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     brand_hints = expected.get("brand_any") or []
 
     subcat_hits = 0
+    subcat_hits_tagged = 0
+    tagged_count = 0
     keyword_hits = 0
     color_hits = 0
     fit_hits = 0
@@ -150,12 +172,20 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     for row in rows:
         name = str(row.get("name") or "")
         brand = str(row.get("brand") or "").strip()
-        subcategory = str(row.get("subcategory") or "").strip().lower()
+        raw_subcat = row.get("subcategory")
+        subcategory = str(raw_subcat or "").strip().lower()
+        is_tagged = raw_subcat is not None and subcategory != ""
         distance = row.get("distance")
 
         # subcategory scoring: prefix or exact match against any expected token.
-        sc_match = bool(subcat_expected) and any(
-            (subcategory == token) or subcategory.startswith(token) or token in subcategory for token in subcat_expected
+        # NULL/empty subcategory always misses subcat_hit (reflects tag coverage).
+        sc_match = (
+            is_tagged
+            and bool(subcat_expected)
+            and any(
+                (subcategory == token) or subcategory.startswith(token) or token in subcategory
+                for token in subcat_expected
+            )
         )
         # keyword scoring: look in name OR brand (some products encode garment
         # type in the name, others rely on the brand line).
@@ -164,6 +194,10 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
         fit_match = _match_any(name, fits) if fits else None
         brand_match = _match_any(brand, brand_hints) if brand_hints else None
 
+        if is_tagged:
+            tagged_count += 1
+            if sc_match:
+                subcat_hits_tagged += 1
         if sc_match:
             subcat_hits += 1
         if kw_match:
@@ -196,20 +230,25 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     n = len(rows)
     subcat_hit = subcat_hits / n
     keyword_hit = keyword_hits / n
-    # geometric mean of the two primary signals — 0 if either bombs, rewards
-    # cases where both are strong (harmonic would also work; geo picked so a
-    # single strong metric doesn't paper over a weak one).
-    quality = (subcat_hit * keyword_hit) ** 0.5
+    # PRIMARY: keyword_hit only. subcategory kept as diagnostic because the
+    # 52% NULL rate on products.subcategory (crawler backfill in progress)
+    # would make sqrt(subcat*keyword) grade the crawler tagging rate, not
+    # retrieval quality. Once tag_coverage climbs closer to 1.0 across the
+    # dataset we can re-promote subcat into the primary formula.
+    quality = keyword_hit
 
     return {
-        "subcat_hit": round(subcat_hit, 3),
+        "quality_score": round(quality, 3),
         "keyword_hit": round(keyword_hit, 3),
         "color_hit": round(color_hits / n, 3) if colors else None,
         "fit_hit": round(fit_hits / n, 3) if fits else None,
         "brand_hit": round(brand_hits / n, 3) if brand_hints else None,
         "brand_diversity": len(brands),
         "distance_p50": round(statistics.median(distances), 4) if distances else None,
-        "quality_score": round(quality, 3),
+        # diagnostic — visible in results but not graded on
+        "subcat_hit": round(subcat_hit, 3),
+        "subcat_hit_tagged": round(subcat_hits_tagged / tagged_count, 3) if tagged_count else None,
+        "tag_coverage": round(tagged_count / n, 3),
         "result_count": n,
         "samples": samples,
     }
@@ -237,13 +276,16 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
     def _agg(rs: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "n": len(rs),
-            "subcat_hit_mean": _mean_optional([r["scores"]["subcat_hit"] for r in rs]),
+            "quality_score_mean": _mean_optional([r["scores"]["quality_score"] for r in rs]),
             "keyword_hit_mean": _mean_optional([r["scores"]["keyword_hit"] for r in rs]),
             "color_hit_mean": _mean_optional([r["scores"]["color_hit"] for r in rs]),
             "fit_hit_mean": _mean_optional([r["scores"]["fit_hit"] for r in rs]),
             "brand_diversity_mean": _mean_optional([r["scores"]["brand_diversity"] for r in rs]),
             "distance_p50_mean": _mean_optional([r["scores"]["distance_p50"] for r in rs]),
-            "quality_score_mean": _mean_optional([r["scores"]["quality_score"] for r in rs]),
+            # diagnostic
+            "subcat_hit_mean": _mean_optional([r["scores"]["subcat_hit"] for r in rs]),
+            "subcat_hit_tagged_mean": _mean_optional([r["scores"]["subcat_hit_tagged"] for r in rs]),
+            "tag_coverage_mean": _mean_optional([r["scores"]["tag_coverage"] for r in rs]),
         }
 
     return {
@@ -370,13 +412,16 @@ async def main() -> None:
     print("=" * 66)
     print(f"  Total              : {summary['total']} (errors: {summary.get('errors', 0)})")
     ov = summary["overall"]
-    print(f"  Quality mean       : {ov['quality_score_mean']}    ← primary")
-    print(f"  Subcat hit mean    : {ov['subcat_hit_mean']}")
+    print(f"  Quality mean       : {ov['quality_score_mean']}    ← primary (= keyword_hit)")
     print(f"  Keyword hit mean   : {ov['keyword_hit_mean']}")
     print(f"  Color hit mean     : {ov['color_hit_mean']}    (None = not asserted)")
     print(f"  Fit hit mean       : {ov['fit_hit_mean']}    (None = not asserted)")
     print(f"  Brand diversity avg: {ov['brand_diversity_mean']}")
     print(f"  Distance p50 avg   : {ov['distance_p50_mean']}    (lower = better)")
+    print("  ─── diagnostic (not graded) ───")
+    print(f"  Tag coverage mean  : {ov['tag_coverage_mean']}    ← crawler subcategory fill rate")
+    print(f"  Subcat hit mean    : {ov['subcat_hit_mean']}    (all rows, NULL counted as miss)")
+    print(f"  Subcat hit (tagged): {ov['subcat_hit_tagged_mean']}    (real tag accuracy on non-NULL rows)")
     print()
     print("  By type:")
     for t, v in summary["by_type"].items():
