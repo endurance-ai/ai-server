@@ -79,6 +79,9 @@ async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
         "p_category": "tops",
         "p_subcategory": None,
         "p_brand_names": None,
+        # SPEC-SEARCH-V6-COLOR: color filter param — None here (fixture has
+        # no color_family). Backward-compatible with pre-color rollout.
+        "p_color_family": None,
         "p_limit": 50,
     }
 
@@ -97,6 +100,8 @@ async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture
         "p_category",
         "p_subcategory",
         "p_brand_names",
+        # SPEC-SEARCH-V6-COLOR added — 7-key param dict (was 6).
+        "p_color_family",
         "p_limit",
     }
 
