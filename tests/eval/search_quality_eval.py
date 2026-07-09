@@ -116,6 +116,77 @@ _REWRITE_SYSTEM_PROMPT = (
 _REWRITE_MODEL = "nova-lite"  # matches AGENT_LLM_MODEL default
 
 
+# --- Color canonicalization -----------------------------------------------
+
+# Vision v2 emits 16 canonical color families (see app/channels/vision_prompt.py).
+# For the eval harness we need to look at `expected.color_any` on a case (which
+# may contain any of "black" / "블랙" / "camel" / "Ivory" ...) and pick a single
+# canonical token to pass as p_color_family. Kept small — the RPC does UPPER()
+# match against products.color, so the value just needs to match how the
+# catalog is spelled.
+_COLOR_CANONICAL: dict[str, str] = {
+    # BLACK
+    "black": "Black",
+    "블랙": "Black",
+    "검정": "Black",
+    "검정색": "Black",
+    # WHITE / IVORY / CREAM
+    "white": "White",
+    "화이트": "White",
+    "ivory": "Ivory",
+    "cream": "Cream",
+    # GREY
+    "grey": "Grey",
+    "gray": "Grey",
+    "charcoal": "Charcoal",
+    # NAVY / BLUE
+    "navy": "Navy",
+    "blue": "Blue",
+    "baby blue": "Blue",
+    "indigo": "Indigo",
+    # BEIGE / CAMEL / TAN
+    "beige": "Beige",
+    "베이지": "Beige",
+    "camel": "Beige",
+    "tan": "Beige",
+    "sand": "Sand",
+    "khaki": "Khaki",
+    "ecru": "Ecru",
+    # BROWN
+    "brown": "Brown",
+    "브라운": "Brown",
+    "cognac": "Brown",
+    "chocolate": "Brown",
+    # GREEN
+    "green": "Green",
+    "olive": "Olive",
+    # RED / PINK / PURPLE / ORANGE / YELLOW / MULTI
+    "red": "Red",
+    "pink": "Pink",
+    "pastel": "Pink",
+    "lavender": "Purple",
+    "purple": "Purple",
+    "orange": "Orange",
+    "yellow": "Yellow",
+    "multi": "Multicolor",
+    "multicolor": "Multicolor",
+}
+
+
+def _pick_color_hint(expected: dict[str, Any]) -> str | None:
+    """Given `expected.color_any` from a golden case, return the canonical
+    catalog-side color token to pass as p_color_family. Prefers the first
+    match against `_COLOR_CANONICAL`. Returns None if no color is asserted
+    or none of the tokens map (harness runs without filter — matches the
+    pre-color baseline path for that case)."""
+    tokens = expected.get("color_any") or []
+    for t in tokens:
+        canonical = _COLOR_CANONICAL.get((t or "").strip().lower())
+        if canonical:
+            return canonical
+    return None
+
+
 async def _rewrite_query(
     client: httpx.AsyncClient,
     litellm_url: str,
@@ -171,9 +242,16 @@ def _search_products_v6(
     *,
     query_embedding: list[float],
     top_k: int,
+    color_family: str | None = None,
 ) -> list[dict[str, Any]]:
     """Direct RPC call — same signature as SearchRepository.search but bypasses
-    PostgREST shim. Mirrors `tests/eval/multiturn_eval.py` for consistency."""
+    PostgREST shim. Mirrors `tests/eval/multiturn_eval.py` for consistency.
+
+    SPEC-SEARCH-V6-COLOR: `color_family` triggers the RPC's optional color hard
+    filter. Pass None to disable (matches pre-color baseline). Pass a canonical
+    16-family token (BLACK / WHITE / GREY / ...) to narrow results server-side
+    to `UPPER(products.color) = UPPER(color_family)`.
+    """
     sql = """
         SELECT * FROM search_products_v6(
             query_embedding := %s::halfvec,
@@ -181,11 +259,12 @@ def _search_products_v6(
             p_category := 'other',
             p_subcategory := NULL,
             p_brand_names := NULL,
+            p_color_family := %s,
             p_limit := %s
         )
     """
     with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql, [_embedding_to_pgvector(query_embedding), top_k])
+        cur.execute(sql, [_embedding_to_pgvector(query_embedding), color_family, top_k])
         return list(cur.fetchall())
 
 
@@ -432,6 +511,12 @@ async def main() -> None:
         help="type='image_url' 케이스도 실행 (Modal /embed 이미지 endpoint 호출). "
         "off 상태 (기본) 면 이미지 케이스 skip → 텍스트 전용 실행 빠름.",
     )
+    parser.add_argument(
+        "--color-filter",
+        action="store_true",
+        help="SPEC-SEARCH-V6-COLOR: 케이스의 expected.color_any 첫 매칭 값을 canonical 색으로 변환해 "
+        "p_color_family 로 RPC 에 전달. off 상태 (기본) 면 색 필터 없이 실행 → pre-color baseline 재현.",
+    )
     parser.add_argument("--output", default=None, help="결과 저장 경로 (기본: results/search_quality_<sha>_<ts>.json)")
     args = parser.parse_args()
 
@@ -509,7 +594,10 @@ async def main() -> None:
                         else:
                             embed_input = raw_input
                         query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
-                    rows = _search_products_v6(conn, query_embedding=query_vec, top_k=args.top_k)
+                    color_hint = _pick_color_hint(case.get("expected", {})) if args.color_filter else None
+                    rows = _search_products_v6(
+                        conn, query_embedding=query_vec, top_k=args.top_k, color_family=color_hint
+                    )
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
@@ -518,14 +606,16 @@ async def main() -> None:
                             "input": raw_input,
                             "embed_input": embed_input,
                             "lang": case.get("lang"),
+                            "color_filter": color_hint,
                             "scores": scores,
                         }
                     )
                     rewrite_note = (
                         f' → "{embed_input}"' if (not is_image) and args.rewrite and embed_input != raw_input else ""
                     )
+                    color_note = f" [color={color_hint}]" if color_hint else ""
                     logger.info(
-                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f sc=%.2f n=%d%s",
+                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f sc=%.2f n=%d%s%s",
                         i,
                         len(cases),
                         case["id"],
@@ -535,6 +625,7 @@ async def main() -> None:
                         scores["subcat_hit"],
                         scores["result_count"],
                         rewrite_note,
+                        color_note,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[%s] failed: %r", case["id"], exc)
@@ -591,6 +682,7 @@ async def main() -> None:
                     "rewrite": args.rewrite,
                     "rewrite_model": _REWRITE_MODEL if args.rewrite else None,
                     "include_image": args.include_image,
+                    "color_filter": args.color_filter,
                     "timestamp": ts,
                     "dataset_version": data.get("version"),
                 },
