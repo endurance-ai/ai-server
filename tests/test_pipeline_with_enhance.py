@@ -102,6 +102,9 @@ def _expected_v6_params() -> dict[str, Any]:
         "p_category": "tops",
         "p_subcategory": None,
         "p_brand_names": None,
+        # SPEC-SEARCH-V6-COLOR: color filter param — None here (fixture has no
+        # color_family). See tests/test_search_color_filter.py for the on path.
+        "p_color_family": None,
         "p_limit": 50,
     }
 

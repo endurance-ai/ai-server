@@ -60,6 +60,10 @@ async def search_service(state: PipelineState) -> PipelineState:
         brand_filter=req.brand_filter,
         category=req.item.category,
         style_node_code=style_node_code,
+        # SPEC-SEARCH-V6-COLOR: pass Vision's colorFamily (16 canonical) directly.
+        # `AnalyzedItem.color_family` is populated by Vision v2 for image queries
+        # and by the agent tool for text queries with an explicit color signal.
+        color_family=req.item.color_family,
     )
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
