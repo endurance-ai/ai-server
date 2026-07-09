@@ -355,6 +355,42 @@
         ],
         "keywords_any": ["knit", "sweater", "cardigan", "coat", "jacket"]
       }
+    },
+    {
+      "id": "image_pin_neutralknit_031",
+      "type": "image_url",
+      "image_url": "https://i.pinimg.com/originals/b7/ce/8e/b7ce8ee589e5a9c3243a27b924a58a99.jpg",
+      "note": "QA trace 2026-07-06 — pin.it/6e2SeIyNn resolved. Cream/neutral outer-knit vibe. Top-5 baseline observed: coats/knits/wraps in oatmeal/cream range (d=0.29).",
+      "expected": {
+        "subcategory_any": [
+          "sweater",
+          "knit-top",
+          "cardigan",
+          "hoodie",
+          "trench-coat",
+          "overcoat",
+          "blazer",
+          "shirt"
+        ],
+        "keywords_any": ["knit", "sweater", "wrap", "trench", "coat", "cardigan", "hoodie"],
+        "color_any": ["cream", "ivory", "beige", "oatmeal", "camel", "white", "tan"]
+      }
+    },
+    {
+      "id": "image_pin_beigebottoms_032",
+      "type": "image_url",
+      "image_url": "https://i.pinimg.com/originals/03/5f/7c/035f7c5384df2ca257b92be94794d509.jpg",
+      "note": "QA trace — pin.it/6W7EzMZdT resolved. Beige/khaki bottoms + shirt vibe. Top-5 baseline observed: bermuda/chino/hunting-shirt in khaki-beige (d=0.21).",
+      "expected": {
+        "subcategory_any": ["shorts", "trousers", "chinos", "cargo-pants", "wide-pants", "shirt", "overshirt"],
+        "keywords_any": ["short", "pant", "chino", "bermuda", "shirt", "trouser"],
+        "color_any": ["beige", "khaki", "tan", "cream", "camel", "sand", "olive"]
+      }
     }
+  ],
+  "image_case_notes": [
+    "Image cases use direct i.pinimg.com URLs (resolved from pin.it via app/channels/link_resolver.py in the app; harness ships direct URLs to Modal /embed).",
+    "Add more image cases as QA surfaces interesting failure modes. Direct pinimg URLs are stable (Pinterest CDN), Unsplash also works.",
+    "Expected fields are LOOSER for image cases than text cases — the source images can carry ambiguous multi-item outfit signals. Score keyword_hit as the primary signal; subcat_hit is inflated by the 52% NULL crawler gap."
   ]
 }

@@ -29,6 +29,11 @@ Usage:
     #    concise English keywords — mirrors the ReAct agent's behavior
     #    before it calls the search_products tool)
     uv run python tests/eval/search_quality_eval.py --rewrite --label prod_baseline
+
+    # C. Include image cases (Modal /embed image endpoint; opt-in because
+    #    of cold-start risk. Runs both text and image cases together.)
+    uv run python tests/eval/search_quality_eval.py --rewrite --include-image \\
+        --label prod_baseline_with_images
 """
 
 from __future__ import annotations
@@ -68,6 +73,21 @@ async def _embed_text(client: httpx.AsyncClient, url: str, token: str, text: str
         f"{url}/embed/text",
         headers={"Authorization": f"Bearer {token}"},
         json={"text": text},
+        timeout=_MODAL_TIMEOUT,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    return list(payload.get("embedding") or payload.get("vector") or [])
+
+
+async def _embed_image_url(client: httpx.AsyncClient, url: str, token: str, image_url: str) -> list[float]:
+    """Modal `/embed` image endpoint. Mirrors production `EmbedProvider.embed_image_url`
+    — same FashionSigLIP space as `/embed/text`, so results are directly
+    comparable to text cases."""
+    resp = await client.post(
+        f"{url}/embed",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"image_url": image_url},
         timeout=_MODAL_TIMEOUT,
     )
     resp.raise_for_status()
@@ -406,6 +426,12 @@ async def main() -> None:
         help="KO 케이스를 LLM 으로 concise EN 키워드로 리라이트 후 embed (프로덕션 ReAct 에이전트 미러링). "
         "off 상태면 raw 텍스트를 그대로 임베드 → 순수 retrieval 품질 측정.",
     )
+    parser.add_argument(
+        "--include-image",
+        action="store_true",
+        help="type='image_url' 케이스도 실행 (Modal /embed 이미지 endpoint 호출). "
+        "off 상태 (기본) 면 이미지 케이스 skip → 텍스트 전용 실행 빠름.",
+    )
     parser.add_argument("--output", default=None, help="결과 저장 경로 (기본: results/search_quality_<sha>_<ts>.json)")
     args = parser.parse_args()
 
@@ -457,34 +483,53 @@ async def main() -> None:
         conn = psycopg.connect(dsn, application_name="search_quality_eval")
         try:
             for i, case in enumerate(cases, 1):
+                case_type = case.get("type", "")
+                is_image = case_type == "image_url" or "image_url" in case
+                if is_image and not args.include_image:
+                    logger.info(
+                        "[%d/%d] %s [%s] SKIP (image case; use --include-image)",
+                        i,
+                        len(cases),
+                        case["id"],
+                        case_type,
+                    )
+                    continue
                 try:
-                    raw_input = case["input"]
-                    if args.rewrite:
-                        embed_input = await _rewrite_query(
-                            http_client, litellm_url, litellm_key, raw_input, case.get("lang")
-                        )
+                    if is_image:
+                        image_url = case["image_url"]
+                        query_vec = await _embed_image_url(http_client, modal_url, modal_token, image_url)
+                        raw_input = image_url
+                        embed_input = image_url
                     else:
-                        embed_input = raw_input
-                    query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
+                        raw_input = case["input"]
+                        if args.rewrite:
+                            embed_input = await _rewrite_query(
+                                http_client, litellm_url, litellm_key, raw_input, case.get("lang")
+                            )
+                        else:
+                            embed_input = raw_input
+                        query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
                     rows = _search_products_v6(conn, query_embedding=query_vec, top_k=args.top_k)
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
                             "id": case["id"],
-                            "type": case["type"],
+                            "type": case_type,
                             "input": raw_input,
-                            "embed_input": embed_input,  # after rewrite (or same as input if off)
+                            "embed_input": embed_input,
                             "lang": case.get("lang"),
                             "scores": scores,
                         }
                     )
-                    rewrite_note = f' → "{embed_input}"' if args.rewrite and embed_input != raw_input else ""
+                    rewrite_note = (
+                        f' → "{embed_input}"' if (not is_image) and args.rewrite and embed_input != raw_input else ""
+                    )
                     logger.info(
                         "[%d/%d] %s [%s] Q=%.2f kw=%.2f sc=%.2f n=%d%s",
                         i,
                         len(cases),
                         case["id"],
-                        case["type"],
+                        case_type,
                         scores["quality_score"],
                         scores["keyword_hit"],
                         scores["subcat_hit"],
@@ -496,8 +541,8 @@ async def main() -> None:
                     results.append(
                         {
                             "id": case["id"],
-                            "type": case["type"],
-                            "input": case.get("input"),
+                            "type": case_type,
+                            "input": case.get("input") or case.get("image_url"),
                             "error": f"{type(exc).__name__}: {exc}",
                         }
                     )
@@ -545,6 +590,7 @@ async def main() -> None:
                     "top_k": args.top_k,
                     "rewrite": args.rewrite,
                     "rewrite_model": _REWRITE_MODEL if args.rewrite else None,
+                    "include_image": args.include_image,
                     "timestamp": ts,
                     "dataset_version": data.get("version"),
                 },
