@@ -33,7 +33,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarific
             axis=str(axis),
         )
 
-    options = list(args.get("options") or [])
+    # 7/10 사고 방어: options 안의 None/빈값을 걸러내고 전부 str 로 강제.
+    # (검색 실패로 후보 0개 → 카드 빌드 중 IndexError/TypeError 재발 방지)
+    options = [str(o) for o in (args.get("options") or []) if o]
     prompt = (args.get("prompt") or "").strip()
     if not options or not prompt:
         return AskUserClarificationResult(ok=False, error="missing_options_or_prompt", card_sent=False, axis=axis)
@@ -53,7 +55,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarific
         else:
             await adapter.send_text(chat_id, prompt)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("[tool.ask_user_clarification] raised: %r", exc)
+        # exc_info=True: 다음 사고 때 정확한 라인/스택을 로그에서 바로 잡기 위함.
+        logger.warning("[tool.ask_user_clarification] card send failed: %r", exc, exc_info=True)
+        # 7/10 사고 방어: 카드(버튼) 전송이 터져도 최소한 prompt 텍스트는 유저에게
+        # 나가도록 plain-text fallback. (카드 실패 → 텍스트만 조용히 나가던 문제 방지)
+        try:
+            from app.graphs.nodes._adapter_ctx import get_adapter
+
+            await get_adapter().send_text(chat_id, prompt)
+        except Exception as fb_exc:  # noqa: BLE001
+            logger.warning("[tool.ask_user_clarification] text fallback also failed: %r", fb_exc, exc_info=True)
+            return AskUserClarificationResult(
+                ok=False, error=f"send_failed:{type(exc).__name__}", card_sent=False, axis=axis
+            )
+        # 텍스트는 전달됐으나 카드(버튼)는 실패 — card_sent=False 로 정직하게 보고.
         return AskUserClarificationResult(
             ok=False, error=f"send_failed:{type(exc).__name__}", card_sent=False, axis=axis
         )

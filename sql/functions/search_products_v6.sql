@@ -1,24 +1,46 @@
--- SPEC-SEARCH-V6-COLOR — search_products_v6 RPC + p_color_family hard filter
+-- search_products_v6.sql — v6 검색 RPC 캐노니컬 정의 (배포 시 자동 적용 대상)
 --
--- 색 필터 (`p_color_family`) 파라미터 추가. Vision v2 가 뽑는 canonical 16 family
+-- ⚠️ SOURCE OF TRUTH: 이 파일이 dev DB 의 search_products_v6 단일 정의다.
+--   함수 시그니처/본문을 바꿔야 하면 이 파일만 수정하면 배포가 자동 적용한다
+--   (deploy.ai.sh → docker compose run → psql). 더 이상 수동 psql/DBeaver 적용에
+--   의존하지 않는다.
+--
+-- 7/10 사고 재발 방지:
+--   사고 원인 = 코드가 새 시그니처로 호출하는데 DB 함수는 옛날 시그니처 그대로.
+--   Postgres 는 인자 리스트가 다르면 CREATE OR REPLACE 가 "교체"가 아니라
+--   "오버로드 추가"라, 옛날/새 함수가 공존 → RPC 가 엉뚱한 쪽으로 resolve.
+--   (color 파라미터 추가로 6-인자 → 7-인자가 되며 6-인자가 남은 게 바로 그 사례.)
+--   → 아래 DO 블록이 search_products_v6 의 **모든 오버로드를 먼저 DROP** 한 뒤
+--     캐노니컬 1개만 재생성. 매 배포마다 "정확히 이 시그니처 하나"를 보장한다.
+--   전체가 BEGIN/COMMIT 로 원자 적용 → 동시 쿼리는 옛/새 커밋 상태만 관찰 (중간 공백 없음).
+--
+-- ── 함수 사양 (SPEC-SEARCH-V6-COLOR) ──────────────────────────────────────
+-- 색 필터 (`p_color_family`) 파라미터. Vision v2 가 뽑는 canonical 16 family
 -- (BLACK / WHITE / GREY / NAVY / BLUE / BEIGE / BROWN / GREEN / RED / PINK /
 -- PURPLE / ORANGE / YELLOW / CREAM / KHAKI / MULTI) 를 그대로 넘기면 됨.
---
--- 매칭: `UPPER(p.color) = UPPER(p_color_family)`
---   ├── 'Black' / 'BLACK' 다 잡음 (카탈로그 대소문자 분열 대응)
---   └── 'Charcoal' / 'Ivory' 등 family enum 밖 색은 못 잡음 (임베딩이 근처
---       색을 어차피 랭킹 상위로 뽑아줌 — 실측 후 필요하면 color_canonical
---       테이블로 정식화)
---
+-- 매칭: `UPPER(p.color) = UPPER(p_color_family)` ('Black'/'BLACK' 다 잡음).
 -- 하위 호환: `p_color_family text DEFAULT NULL`. NULL 이면 필터 disable →
 -- 기존 caller (색 안 넘기는 코드경로) 는 byte-identical.
---
--- Fallback: 색 필터가 pool 을 지나치게 좁혀도 별도 rung 없음. 임팩트 측정 후
--- 필요하면 rung 4 (color dropped) 추가 검토.
---
--- 적용: DBeaver 나 `sudo -u postgres psql` 로 전체 파일 실행.
--- 적용 후 pg_proc 시그니처에 `p_color_family` 나타나면 성공.
+-- 검증: 적용 후 `\df search_products_v6` 시그니처에 `p_color_family` 나오면 성공.
 
+BEGIN;
+
+-- ── 모든 search_products_v6 오버로드 제거 (옛 6-인자 포함) ──────────────────
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN
+    SELECT oid::regprocedure AS sig
+    FROM pg_proc
+    WHERE proname = 'search_products_v6'
+      AND pronamespace = 'public'::regnamespace
+  LOOP
+    EXECUTE 'DROP FUNCTION ' || r.sig::text;
+  END LOOP;
+END $$;
+
+-- ── 캐노니컬 정의 (7-arg + p_color_family hard filter) ─────────────────────
 CREATE OR REPLACE FUNCTION public.search_products_v6(
   query_embedding halfvec,
   p_style_node_id bigint DEFAULT NULL::bigint,
@@ -158,3 +180,5 @@ BEGIN
     LIMIT p_limit;
 END;
 $function$;
+
+COMMIT;
