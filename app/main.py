@@ -163,16 +163,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.modal_keep_warm_task = None
         logging.getLogger(__name__).info("🔥 [modal.keepwarm] disabled (MODAL_KEEP_WARM_ENABLED=false)")
 
+    # 메인 큐레이션 auto 구좌 계산 + 노션 editorial 동기화 백그라운드 루프.
+    # fail-open — 실패해도 ai.curation_sections 기존 행이 그대로 서빙된다.
+    if settings.CURATION_REFRESH_ENABLED:
+        from app.services.curation_refresh import curation_refresh_loop
+
+        app.state.curation_refresh_task = asyncio.create_task(curation_refresh_loop())
+    else:
+        app.state.curation_refresh_task = None
+        logging.getLogger(__name__).info("🗂 [curation] refresh disabled (CURATION_REFRESH_ENABLED=false)")
+
     yield
 
     # Shutdown
-    kw_task = getattr(app.state, "modal_keep_warm_task", None)
-    if kw_task is not None:
-        kw_task.cancel()
-        try:
-            await kw_task
-        except (asyncio.CancelledError, Exception):  # noqa: BLE001 — best-effort cleanup
-            pass
+    for task_attr in ("modal_keep_warm_task", "curation_refresh_task"):
+        bg_task = getattr(app.state, task_attr, None)
+        if bg_task is not None:
+            bg_task.cancel()
+            try:
+                await bg_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001 — best-effort cleanup
+                pass
     await shutdown_taste_store()
     await shutdown_store()
     await db_pool.close_pool()

@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
     SESSION_CLEANUP_INTERVAL_S: int = 300
 
+    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
+    # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
+    CURATION_REFRESH_ENABLED: bool = True
+    CURATION_REFRESH_INTERVAL_S: int = 3600
+    NOTION_TOKEN: str = ""
+    NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
+
     # 소비자 소셜 로그인 (SPEC-AUTH-SOCIAL-001)
     GOOGLE_CLIENT_ID: str = ""  # Google Cloud Console > OAuth 2.0 (iOS type)
     APPLE_CLIENT_ID: str = ""  # iOS Bundle ID (e.g. com.kiko.app)
