@@ -84,6 +84,8 @@ async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
         # SPEC-SEARCH-V6-COLOR: color filter param — None here (fixture has
         # no color_family). Backward-compatible with pre-color rollout.
         "p_color_family": None,
+        # 2026-07-16 — p_gender 하드 필터 (req.gender 미지정 → None = off)
+        "p_gender": None,
         "p_limit": 50,
     }
 
@@ -104,6 +106,7 @@ async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture
         "p_brand_names",
         # SPEC-SEARCH-V6-COLOR added — 7-key param dict (was 6).
         "p_color_family",
+        "p_gender",
         "p_limit",
     }
 

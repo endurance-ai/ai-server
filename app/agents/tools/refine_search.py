@@ -22,6 +22,7 @@ from app.agents.tools._keyword_utils import dedup_join as _dedup_join
 from app.agents.tools.search_products import (
     _candidate_to_dict,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     _is_real_image_url,
+    _query_gender,
     apply_dislike_discount,
     apply_price_filter,
     effective_max_price,
@@ -225,11 +226,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             except Exception:  # noqa: BLE001
                 pass
 
+        # 2026-07-16 — v6 p_gender 하드 필터: 리파인의 최종 쿼리(base_query 는
+        # 이전 턴의 gender-pinned product query)에서 gender 토큰을 역파싱.
+        # 없으면 None(필터 off). 'unisex' 는 service 가 None 으로 매핑.
+        refine_gender = _query_gender(text_query or "") or _query_gender(base_query or "")
         if has_image:
             cands = await run_image_search(
                 image_url=str(ctx_image),
                 text_query=text_query,
                 category=category,
+                gender=refine_gender,
                 fit=fit,
                 color_family=color_family,
                 top_k=15,
@@ -253,6 +259,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 chat_id=ctx.get("chat_id"),
                 prior_outfit_context=prior_ctx or None,
                 category=category,
+                gender=refine_gender,
                 fit=fit,
                 color_family=color_family,
                 top_k=15,
@@ -263,6 +270,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             cands = await run_text_only_search(
                 text_query=text_query,
                 category=category,
+                gender=refine_gender,
                 fit=fit,
                 color_family=color_family,
                 top_k=15,

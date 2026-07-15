@@ -86,6 +86,9 @@ async def _run_one(sem: asyncio.Semaphore, pattern: dict, value: dict, gender: s
             cands = await run_text_only_search(
                 text_query=query,
                 category=value.get("category"),
+                # 2026-07-16 — v6 p_gender 하드 필터: 실제 봇 경로와 동일하게
+                # 구조화 성별도 전달 (none 런은 필터 off).
+                gender=gender if gender in ("men", "women") else None,
                 top_k=TOP_K,
             )
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
@@ -138,6 +141,8 @@ def _apply_precision(precision: str) -> None:
     on = precision == "on"
     settings.SEARCH_SUBCATEGORY_FILTER_ENABLED = on
     settings.SEARCH_COLOR_FILTER_ENABLED = on
+    # 2026-07-16 — p_gender 하드 필터도 같은 스위치로 (off = 배포 전 재현).
+    settings.SEARCH_GENDER_FILTER_ENABLED = on
     print(f"precision filters: {'ON (현행)' if on else 'OFF (배포 전 재현)'}", flush=True)
 
 

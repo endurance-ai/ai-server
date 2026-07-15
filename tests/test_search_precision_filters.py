@@ -26,6 +26,7 @@ def _state(
     category: str = "apparel",
     subcategory: str | None = None,
     color_family: str | None = None,
+    gender: str | None = None,
 ) -> PipelineState:
     item = AnalyzedItem(
         id="item-1",
@@ -34,7 +35,7 @@ def _state(
         colorFamily=color_family,
         searchQuery="q",
     )
-    req = RecommendRequest(item=item, imageUrl="https://example.com/x.jpg")
+    req = RecommendRequest(item=item, imageUrl="https://example.com/x.jpg", gender=gender)
     state = PipelineState(request=req)
     state.embedding = list(_EMBED)
     return state
@@ -171,3 +172,49 @@ async def test_color_flag_off_restores_none(monkeypatch):
     monkeypatch.setattr(settings, "SEARCH_COLOR_FILTER_ENABLED", False)
     await search_service(_state(category="Top", color_family="black"))
     assert spy.calls[0]["p_color_family"] is None
+
+
+# ── p_gender 하드 필터 (2026-07-16) ─────────────────────────────────────────
+
+
+async def test_gender_men_passes_to_rpc(monkeypatch):
+    spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install(monkeypatch, spy)
+    await search_service(_state(category="Top", gender="men"))
+    assert spy.calls[0]["p_gender"] == "men"
+
+
+async def test_gender_unisex_maps_to_none(monkeypatch):
+    """'unisex'/미확인은 필터 off — RPC 가 [g,'unisex'] 오버랩 매치라
+    unisex 를 그대로 보내면 men/women 상품이 전부 배제되기 때문."""
+    spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install(monkeypatch, spy)
+    await search_service(_state(category="Top", gender="unisex"))
+    assert spy.calls[0]["p_gender"] is None
+
+
+async def test_gender_unknown_value_fails_open(monkeypatch):
+    spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install(monkeypatch, spy)
+    await search_service(_state(category="Top", gender="kids"))
+    assert spy.calls[0]["p_gender"] is None
+
+
+async def test_gender_flag_off_restores_none(monkeypatch):
+    spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install(monkeypatch, spy)
+    monkeypatch.setattr(settings, "SEARCH_GENDER_FILTER_ENABLED", False)
+    await search_service(_state(category="Top", gender="women"))
+    assert spy.calls[0]["p_gender"] is None
+
+
+async def test_relax_retry_preserves_gender(monkeypatch):
+    """완화 재시도는 subcategory/color 만 제거 — gender 는 시맨틱 제약이라
+    유지된다 (여성 요청에 남성 상품으로 리콜을 채우면 안 됨)."""
+    spy = _RpcSpy([_rows(1, 2), _rows(2, 3, 4, 5, 6)])
+    _install(monkeypatch, spy)
+    monkeypatch.setattr(settings, "SEARCH_FILTER_RELAX_MIN", 5)
+    await search_service(_state(category="hoodie", gender="women"))
+    assert len(spy.calls) == 2
+    assert spy.calls[1]["p_subcategory"] is None
+    assert spy.calls[1]["p_gender"] == "women"
