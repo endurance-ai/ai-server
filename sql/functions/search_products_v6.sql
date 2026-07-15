@@ -182,3 +182,10 @@ END;
 $function$;
 
 COMMIT;
+
+-- PostgREST 스키마 캐시 리로드 (2026-07-15 사고 재발 방지): 오버로드
+-- DROP/재생성 후 캐시가 stale 이면 기존 param-set 호출이 PGRST203
+-- (ambiguous overload) 로 전면 실패한다 — 실사고: 7-param 교체 직후
+-- 6-key 호출 전부 다운, NOTIFY 수동 발사로 복구. 함수 적용과 같은
+-- 세션에서 즉시 리로드해 무중단을 보장한다.
+NOTIFY pgrst, 'reload schema';
