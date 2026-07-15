@@ -55,6 +55,7 @@ class SearchRepository:
         brand_filter: list[str] | None,
         category: str | None = None,
         style_node_code: str | None = None,
+        color_family: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -87,6 +88,11 @@ class SearchRepository:
             previous always-degraded baseline; never worse than today).
           - Brand narrowing is the only legit optional filter preserved →
             p_brand_names.
+          - `p_color_family` is the v6 color gate (SPEC-SEARCH-V6-COLOR).
+            Vision v2 emits 16 canonical family tokens (BLACK/WHITE/GREY/…);
+            passing one narrows the RPC to `UPPER(products.color) = UPPER(...)`.
+            None disables the filter. `products.color` is NOT NULL repo-wide,
+            so unlike subcategory this is safe to hard-filter on.
         This mapping exists ONLY here (single source — REQ-AI-002).
         """
         return {
@@ -100,6 +106,9 @@ class SearchRepository:
             # no-op; ALWAYS None (req #3).
             "p_subcategory": None,
             "p_brand_names": brand_filter,
+            # Vision colorFamily → v6 color gate (SPEC-SEARCH-V6-COLOR). None
+            # → filter off (backward-compatible with pre-color rollout).
+            "p_color_family": color_family or None,
             "p_limit": settings.SEARCH_DEFAULT_K,
         }
 

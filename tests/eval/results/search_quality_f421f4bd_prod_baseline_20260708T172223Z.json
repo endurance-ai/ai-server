@@ -1,0 +1,2438 @@
+{
+  "meta": {
+    "sha": "f421f4bd",
+    "branch": "feat/search-eval-harness",
+    "label": "prod_baseline",
+    "top_k": 5,
+    "rewrite": true,
+    "rewrite_model": "nova-lite",
+    "timestamp": "20260708T172223Z",
+    "dataset_version": "1.1"
+  },
+  "summary": {
+    "total": 30,
+    "errors": 0,
+    "overall": {
+      "n": 30,
+      "quality_score_mean": 0.74,
+      "keyword_hit_mean": 0.74,
+      "color_hit_mean": 0.4,
+      "fit_hit_mean": 0.167,
+      "brand_diversity_mean": 3.267,
+      "distance_p50_mean": 0.884,
+      "subcat_hit_mean": 0.2,
+      "subcat_hit_tagged_mean": 0.941,
+      "tag_coverage_mean": 0.213
+    },
+    "by_type": {
+      "text_ko_basic": {
+        "n": 8,
+        "quality_score_mean": 0.8,
+        "keyword_hit_mean": 0.8,
+        "color_hit_mean": 0.6,
+        "fit_hit_mean": 0.3,
+        "brand_diversity_mean": 3.125,
+        "distance_p50_mean": 0.887,
+        "subcat_hit_mean": 0.175,
+        "subcat_hit_tagged_mean": 0.9,
+        "tag_coverage_mean": 0.2
+      },
+      "text_ko_mood": {
+        "n": 3,
+        "quality_score_mean": 0.6,
+        "keyword_hit_mean": 0.6,
+        "color_hit_mean": 0.2,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 3.667,
+        "distance_p50_mean": 0.885,
+        "subcat_hit_mean": 0.2,
+        "subcat_hit_tagged_mean": 0.75,
+        "tag_coverage_mean": 0.267
+      },
+      "text_ko_branded": {
+        "n": 2,
+        "quality_score_mean": 0.7,
+        "keyword_hit_mean": 0.7,
+        "color_hit_mean": null,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 2.0,
+        "distance_p50_mean": 0.871,
+        "subcat_hit_mean": 0.0,
+        "subcat_hit_tagged_mean": null,
+        "tag_coverage_mean": 0.0
+      },
+      "text_en_basic": {
+        "n": 5,
+        "quality_score_mean": 0.84,
+        "keyword_hit_mean": 0.84,
+        "color_hit_mean": 0.4,
+        "fit_hit_mean": 0.1,
+        "brand_diversity_mean": 3.2,
+        "distance_p50_mean": 0.873,
+        "subcat_hit_mean": 0.24,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.24
+      },
+      "text_en_mood": {
+        "n": 5,
+        "quality_score_mean": 0.64,
+        "keyword_hit_mean": 0.64,
+        "color_hit_mean": 0.0,
+        "fit_hit_mean": 0.2,
+        "brand_diversity_mean": 3.0,
+        "distance_p50_mean": 0.885,
+        "subcat_hit_mean": 0.12,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.12
+      },
+      "text_en_gendered": {
+        "n": 2,
+        "quality_score_mean": 0.8,
+        "keyword_hit_mean": 0.8,
+        "color_hit_mean": 0.6,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 4.5,
+        "distance_p50_mean": 0.904,
+        "subcat_hit_mean": 0.3,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.3
+      },
+      "text_ko_qa": {
+        "n": 3,
+        "quality_score_mean": 0.933,
+        "keyword_hit_mean": 0.933,
+        "color_hit_mean": 0.5,
+        "fit_hit_mean": 0.0,
+        "brand_diversity_mean": 3.667,
+        "distance_p50_mean": 0.867,
+        "subcat_hit_mean": 0.333,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.333
+      },
+      "text_edge": {
+        "n": 2,
+        "quality_score_mean": 0.4,
+        "keyword_hit_mean": 0.4,
+        "color_hit_mean": null,
+        "fit_hit_mean": null,
+        "brand_diversity_mean": 3.5,
+        "distance_p50_mean": 0.916,
+        "subcat_hit_mean": 0.3,
+        "subcat_hit_tagged_mean": 1.0,
+        "tag_coverage_mean": 0.3
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "text_ko_basic_hoodie_001",
+      "type": "text_ko_basic",
+      "input": "검정 오버사이즈 후드",
+      "embed_input": "black oversized hoodie",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": 0.8,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8679,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 0.5,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 566145,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Logo Piping Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.86,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566113,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Chain Volume Sweat Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.8669,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 454257,
+            "brand": "Ksubi",
+            "name": "Ksubi Intruder Ekcess Hoodie - Jet Black",
+            "subcategory": "hoodie",
+            "distance": 0.8679,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 534699,
+            "brand": "innir",
+            "name": "251 Heavyweight Hooded sweat (Black)",
+            "subcategory": "",
+            "distance": 0.8693,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 570003,
+            "brand": "Ballew",
+            "name": "melton parka",
+            "subcategory": "parka",
+            "distance": 0.8694,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_capri_002",
+      "type": "text_ko_basic",
+      "input": "카프리 팬츠",
+      "embed_input": "capri pants",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.2,
+        "keyword_hit": 0.2,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8978,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 563733,
+            "brand": "AUTUMN",
+            "name": "[made]카프리스판팬츠",
+            "subcategory": "",
+            "distance": 0.8915,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 576679,
+            "brand": "PLASTICPRODUCT",
+            "name": "MPa DUCT SYSTEM 3/4 PANTS WOMEN (BLACK)",
+            "subcategory": "",
+            "distance": 0.8978,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 576639,
+            "brand": "PLASTICPRODUCT",
+            "name": "MPa DUCT SYSTEM 3/4 PANTS WOMEN (BLACK)",
+            "subcategory": "",
+            "distance": 0.8978,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 576510,
+            "brand": "PLASTICPRODUCT",
+            "name": "MPa DUCT SYSTEM 3/4 PANTS WOMEN (BLACK)",
+            "subcategory": "",
+            "distance": 0.8978,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 557600,
+            "brand": "wonet",
+            "name": "selena pants",
+            "subcategory": "",
+            "distance": 0.8993,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_miniskirt_003",
+      "type": "text_ko_basic",
+      "input": "미니스커트",
+      "embed_input": "mini skirt",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.9126,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 463809,
+            "brand": "Toile Studios",
+            "name": "Byte Cargo Mini Skirt Black",
+            "subcategory": "skirt",
+            "distance": 0.9073,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556536,
+            "brand": "MAU SOLEUM",
+            "name": "Mila Waist A-Line Skirt - Charcoal",
+            "subcategory": "",
+            "distance": 0.9126,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556031,
+            "brand": "MAU SOLEUM",
+            "name": "Mila Waist A-Line Skirt - Charcoal",
+            "subcategory": "",
+            "distance": 0.9126,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556538,
+            "brand": "MAU SOLEUM",
+            "name": "Mila Waist A-Line Skirt - Grey",
+            "subcategory": "",
+            "distance": 0.9127,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556033,
+            "brand": "MAU SOLEUM",
+            "name": "Mila Waist A-Line Skirt - Grey",
+            "subcategory": "",
+            "distance": 0.9127,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_tee_004",
+      "type": "text_ko_basic",
+      "input": "화이트 티셔츠",
+      "embed_input": "white t-shirt",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 0.8,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8899,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 451935,
+            "brand": "Kith",
+            "name": "&Kin Pima Jersey Alex Boxy Tee - White",
+            "subcategory": "t-shirt",
+            "distance": 0.8874,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 438302,
+            "brand": "Grown&Sewn",
+            "name": "RINGSPUN JERSEY SHORT SLEEVE TEE",
+            "subcategory": "t-shirt",
+            "distance": 0.888,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 523013,
+            "brand": "Havati",
+            "name": "[DOCUMENT] THE DOCUMENTEE 02 (WHITE)",
+            "subcategory": "",
+            "distance": 0.8899,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 482405,
+            "brand": "UNIVERSAL PRODUCTS",
+            "name": "Miller 2Pac T-Shirts (White)",
+            "subcategory": "",
+            "distance": 0.8901,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 451936,
+            "brand": "Kith",
+            "name": "&Kin Albie Tee - White",
+            "subcategory": "t-shirt",
+            "distance": 0.8903,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_denimjkt_005",
+      "type": "text_ko_basic",
+      "input": "데님 자켓",
+      "embed_input": "denim jacket",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8956,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 458032,
+            "brand": "Sillage",
+            "name": "Trucker Denim Jacket in One Wash",
+            "subcategory": "denim-jacket",
+            "distance": 0.8931,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 458065,
+            "brand": "Lemaire",
+            "name": "Cropped Blouson With Studs in Slate",
+            "subcategory": "",
+            "distance": 0.8955,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 444147,
+            "brand": "Prada",
+            "name": "washed denim blouson jacket",
+            "subcategory": "",
+            "distance": 0.8956,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 476935,
+            "brand": "REMI RELIEF",
+            "name": "레미릴리프_ 12oz SELVEDGE DENIM 1st JKT [ONE WASH]",
+            "subcategory": "",
+            "distance": 0.8958,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 449069,
+            "brand": "Anni Salonen",
+            "name": "rose-detail button-fastening jacket",
+            "subcategory": "",
+            "distance": 0.8958,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_ballet_006",
+      "type": "text_ko_basic",
+      "input": "발레리나 슈즈",
+      "embed_input": "ballerina shoes",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.8791,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 483125,
+            "brand": "Sienne",
+            "name": "168,000 Michelle Flat ShoesIvoryExclusive",
+            "subcategory": "",
+            "distance": 0.8776,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 575817,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "(EXCLUSIVE) PATENT BALLERINA FLAT IN BLACK",
+            "subcategory": "",
+            "distance": 0.8791,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 575263,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "(EXCLUSIVE) PATENT BALLERINA FLAT IN BLACK",
+            "subcategory": "",
+            "distance": 0.8791,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 575816,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "(EXCLUSIVE) PATENT BALLERINA FLAT IN SILVER",
+            "subcategory": "",
+            "distance": 0.8793,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 575262,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "(EXCLUSIVE) PATENT BALLERINA FLAT IN SILVER",
+            "subcategory": "",
+            "distance": 0.8793,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_leathermini_007",
+      "type": "text_ko_basic",
+      "input": "블랙 레더 미니스커트",
+      "embed_input": "black leather mini skirt",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": 0.2,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.879,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 455360,
+            "brand": "Agolde",
+            "name": "Agolde Keira Mini Skirt - Black",
+            "subcategory": "skirt",
+            "distance": 0.8761,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 475657,
+            "brand": "ZARA",
+            "name": "100% LEATHER MINI SKIRT",
+            "subcategory": "",
+            "distance": 0.879,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 469809,
+            "brand": "ZARA",
+            "name": "100% 가죽 미니 스커트",
+            "subcategory": "",
+            "distance": 0.879,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 559434,
+            "brand": "A.R.U",
+            "name": "BASIC TEE",
+            "subcategory": "",
+            "distance": 0.8864,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 559354,
+            "brand": "A.R.U",
+            "name": "BASIC TEE",
+            "subcategory": "",
+            "distance": 0.8864,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_widejean_008",
+      "type": "text_ko_basic",
+      "input": "와이드 데님 팬츠",
+      "embed_input": "wide denim pants",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": 0.6,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.8703,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 566530,
+            "brand": "TREEMINGBIRD",
+            "name": "Utility Zipper Denim Pants [ Black ]",
+            "subcategory": "",
+            "distance": 0.8646,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 565499,
+            "brand": "TREEMINGBIRD",
+            "name": "Utility Zipper Denim Pants [ Black ]",
+            "subcategory": "",
+            "distance": 0.8646,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 569638,
+            "brand": "Years Ago",
+            "name": "Y-959 Okayama Cotton Light Washed One Tuck Wide Denim, Light Indigo",
+            "subcategory": "",
+            "distance": 0.8703,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": true
+          },
+          {
+            "id": 569549,
+            "brand": "Years Ago",
+            "name": "Y-959 Okayama Cotton Light Washed One Tuck Wide Denim, Light Indigo",
+            "subcategory": "",
+            "distance": 0.8703,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": true
+          },
+          {
+            "id": 569459,
+            "brand": "Years Ago",
+            "name": "Y-959 Okayama Cotton Light Washed One Tuck Wide Denim, Light Indigo",
+            "subcategory": "",
+            "distance": 0.8703,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_minimalknit_009",
+      "type": "text_ko_mood",
+      "input": "미니멀한 베이지 니트",
+      "embed_input": "minimal beige knit",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": 0.2,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8555,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 575469,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "RELAXED COTTON SWEATER IN ECRU",
+            "subcategory": "",
+            "distance": 0.8513,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 558240,
+            "brand": "Bergwerk Seoul",
+            "name": "WAFFLE RAGLAN HALF KNIT",
+            "subcategory": "",
+            "distance": 0.8538,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 484659,
+            "brand": "Another Office",
+            "name": "w. Cashmere Mockneck Pullover (Oatmeal)",
+            "subcategory": "",
+            "distance": 0.8555,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 575498,
+            "brand": "NOTHINGEVERYTHING",
+            "name": "BALLOON SLEEVE SWEATER IN IVORY",
+            "subcategory": "",
+            "distance": 0.8556,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 558237,
+            "brand": "Bergwerk Seoul",
+            "name": "HIGH-NECK BUTTON KNIT",
+            "subcategory": "",
+            "distance": 0.857,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_streetsetup_010",
+      "type": "text_ko_mood",
+      "input": "스트릿한 그래픽 티",
+      "embed_input": "street graphic tee",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.2,
+        "keyword_hit": 0.2,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8872,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 519247,
+            "brand": "ZARA",
+            "name": "COMBINED PRINT T-SHIRT",
+            "subcategory": "",
+            "distance": 0.8819,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 463448,
+            "brand": "AAR",
+            "name": "Damage Done T-Shirt White",
+            "subcategory": "t-shirt",
+            "distance": 0.8826,
+            "sc": true,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 557394,
+            "brand": "ROARINGRAD",
+            "name": "PATCH SHAPE T-SHIRTS BLACK",
+            "subcategory": "",
+            "distance": 0.8872,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 557303,
+            "brand": "ROARINGRAD",
+            "name": "PATCH SHAPE T-SHIRTS BLACK",
+            "subcategory": "",
+            "distance": 0.8872,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 455997,
+            "brand": "Brain Dead",
+            "name": "Brain Dead Euphoria Tee - White",
+            "subcategory": "t-shirt",
+            "distance": 0.8875,
+            "sc": true,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_lovelydress_011",
+      "type": "text_ko_mood",
+      "input": "러블리한 미니 원피스",
+      "embed_input": "lovely mini dress",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9115,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 0.5,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 439669,
+            "brand": "Rebecca Vallance",
+            "name": "bow-embellished mini dress",
+            "subcategory": "mini-dress",
+            "distance": 0.9051,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 581961,
+            "brand": "UNCO STUDIO",
+            "name": "Vintage babydoll white buttoned dress",
+            "subcategory": "",
+            "distance": 0.9107,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 439261,
+            "brand": "Self-Portrait",
+            "name": "knitted midi ress",
+            "subcategory": "midi-dress",
+            "distance": 0.9115,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556641,
+            "brand": "MAU SOLEUM",
+            "name": "Lena Draped Dress - Black",
+            "subcategory": "",
+            "distance": 0.912,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 556248,
+            "brand": "MAU SOLEUM",
+            "name": "Lena Draped Dress - Black",
+            "subcategory": "",
+            "distance": 0.912,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_branded_zara_012",
+      "type": "text_ko_branded",
+      "input": "자라 데님 셔츠",
+      "embed_input": "Zara denim shirt",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": 1.0,
+        "brand_diversity": 1,
+        "distance_p50": 0.847,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 518475,
+            "brand": "ZARA",
+            "name": "LIGHTWEIGHT DENIM OVERSHIRT",
+            "subcategory": "",
+            "distance": 0.8467,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 470772,
+            "brand": "ZARA",
+            "name": "라이트 데님 오버셔츠",
+            "subcategory": "",
+            "distance": 0.8467,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 470348,
+            "brand": "ZARA",
+            "name": "코튼-라이오셀 데님 오버셔츠",
+            "subcategory": "",
+            "distance": 0.847,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 518400,
+            "brand": "ZARA",
+            "name": "COTTON LYOCELL DENIM OVERSHIRT",
+            "subcategory": "",
+            "distance": 0.847,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 518696,
+            "brand": "ZARA",
+            "name": "WESTERN DENIM SHIRT",
+            "subcategory": "",
+            "distance": 0.8474,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_branded_cos_013",
+      "type": "text_ko_branded",
+      "input": "코스 셔츠",
+      "embed_input": "cotton shirt",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": 0.0,
+        "brand_diversity": 3,
+        "distance_p50": 0.8951,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 477880,
+            "brand": "ÉÉ",
+            "name": "ÉÉ_ WOMENS GARMENT DYED CURVED SHIRT [BLUE]",
+            "subcategory": "",
+            "distance": 0.8927,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 482893,
+            "brand": "Sienne",
+            "name": "128,000 Matin BlousePale Green",
+            "subcategory": "",
+            "distance": 0.8931,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 477879,
+            "brand": "ÉÉ",
+            "name": "ÉÉ_ WOMENS GARMENT DYED CURVED SHIRT [CHARCOAL]",
+            "subcategory": "",
+            "distance": 0.8951,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 554057,
+            "brand": "LOSSYROW",
+            "name": "lossy Symbol Accent Shirt [White]",
+            "subcategory": "",
+            "distance": 0.8952,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 483015,
+            "brand": "Sienne",
+            "name": "148,000 Archive ShirtBlueExclusive",
+            "subcategory": "",
+            "distance": 0.8969,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_loafers_014",
+      "type": "text_en_basic",
+      "input": "leather loafers",
+      "embed_input": "leather loafers",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8683,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 446770,
+            "brand": "The Row",
+            "name": "Leo loafers",
+            "subcategory": "",
+            "distance": 0.8679,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 469881,
+            "brand": "ZARA",
+            "name": "레더 로퍼",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 517561,
+            "brand": "ZARA",
+            "name": "LEATHER LOAFERS",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 442133,
+            "brand": "Tod's",
+            "name": "leather loafers",
+            "subcategory": "",
+            "distance": 0.8708,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 445526,
+            "brand": "Dries Van Noten",
+            "name": "penny-strap loafers",
+            "subcategory": "loafers",
+            "distance": 0.8714,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_hoodie_015",
+      "type": "text_en_basic",
+      "input": "oversized black hoodie",
+      "embed_input": "oversized black hoodie",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 1.0,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.8712,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 566145,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Logo Piping Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.8623,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566113,
+            "brand": "TREEMINGBIRD",
+            "name": "TMB Chain Volume Sweat Hoodie [ Black ]",
+            "subcategory": "",
+            "distance": 0.8702,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566229,
+            "brand": "TREEMINGBIRD",
+            "name": "Zipper Finishing Sweat Hoodie Zip-up [ Black ]",
+            "subcategory": "",
+            "distance": 0.8712,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 566147,
+            "brand": "TREEMINGBIRD",
+            "name": "Zipper Finishing Sweat Hoodie Zip-up [ Black ]",
+            "subcategory": "",
+            "distance": 0.8712,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 454257,
+            "brand": "Ksubi",
+            "name": "Ksubi Intruder Ekcess Hoodie - Jet Black",
+            "subcategory": "hoodie",
+            "distance": 0.8716,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_widejeans_016",
+      "type": "text_en_basic",
+      "input": "wide leg jeans",
+      "embed_input": "wide leg jeans",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": 0.2,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8812,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437105,
+            "brand": "MCQUEEN",
+            "name": "Wide Leg Jeans in Washed Blue",
+            "subcategory": "wide-pants",
+            "distance": 0.8777,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": true
+          },
+          {
+            "id": 443382,
+            "brand": "KHAITE",
+            "name": "Dane stretch jeans",
+            "subcategory": "wide-pants",
+            "distance": 0.8779,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 450487,
+            "brand": "GANNI",
+            "name": "GANNI Soft Rigid Denim Baggy Jeans (Light Blue Stone)",
+            "subcategory": "",
+            "distance": 0.8812,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 566648,
+            "brand": "TREEMINGBIRD",
+            "name": "Brushed Denim Pants [ Navy ]",
+            "subcategory": "",
+            "distance": 0.883,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          },
+          {
+            "id": 566519,
+            "brand": "TREEMINGBIRD",
+            "name": "Brushed Denim Pants [ Navy ]",
+            "subcategory": "",
+            "distance": 0.883,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_minidress_017",
+      "type": "text_en_basic",
+      "input": "black satin mini dress",
+      "embed_input": "black satin mini dress",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 1,
+        "distance_p50": 0.8723,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 474852,
+            "brand": "ZARA",
+            "name": "SATIN EFFECT HALTER DRESS",
+            "subcategory": "",
+            "distance": 0.8675,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 468612,
+            "brand": "ZARA",
+            "name": "새틴 트임 미니 원피스",
+            "subcategory": "",
+            "distance": 0.871,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 474953,
+            "brand": "ZARA",
+            "name": "SATIN MINI STRAPPY DRESS",
+            "subcategory": "",
+            "distance": 0.8723,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 469424,
+            "brand": "ZARA",
+            "name": "새틴 미니 스트랩 원피스",
+            "subcategory": "",
+            "distance": 0.8723,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 471306,
+            "brand": "ZARA",
+            "name": "SATIN EFFECT SHORT DRESS",
+            "subcategory": "",
+            "distance": 0.8752,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_trench_018",
+      "type": "text_en_basic",
+      "input": "beige trench coat",
+      "embed_input": "beige trench coat",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": 0.2,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8721,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 435059,
+            "brand": "Aimé Leon Dore",
+            "name": "Linen Trench Coat",
+            "subcategory": "trench-coat",
+            "distance": 0.8672,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 527137,
+            "brand": "Renaissance Renaissance",
+            "name": "ann coat, beige",
+            "subcategory": "",
+            "distance": 0.8702,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 439150,
+            "brand": "CALVIN KLEIN COLLECTION",
+            "name": "Mireille belted trench coat",
+            "subcategory": "trench-coat",
+            "distance": 0.8721,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 471589,
+            "brand": "ZARA",
+            "name": "BELTED TRENCH COAT ZW COLLECTION",
+            "subcategory": "",
+            "distance": 0.873,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 476298,
+            "brand": "YLEVE",
+            "name": "일레브_ HIGHDENSITY COTTON BROAD LINER CO [SAGE]",
+            "subcategory": "",
+            "distance": 0.8746,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_cozyknit_019",
+      "type": "text_en_mood",
+      "input": "cozy beige oversized knit",
+      "embed_input": "cozy beige oversized knit",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 0.0,
+        "fit_hit": 0.2,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8764,
+        "subcat_hit": 0.2,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.2,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 446546,
+            "brand": "Balmain",
+            "name": "open-shoulder sweater",
+            "subcategory": "sweater",
+            "distance": 0.861,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 472348,
+            "brand": "ZARA",
+            "name": "OVERSIZED KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8717,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": true
+          },
+          {
+            "id": 472338,
+            "brand": "ZARA",
+            "name": "ASYMMETRIC KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8764,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 558237,
+            "brand": "Bergwerk Seoul",
+            "name": "HIGH-NECK BUTTON KNIT",
+            "subcategory": "",
+            "distance": 0.8767,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 472174,
+            "brand": "ZARA",
+            "name": "CHUNKY KNIT JUMPER",
+            "subcategory": "",
+            "distance": 0.8769,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_streetgraphic_020",
+      "type": "text_en_mood",
+      "input": "streetwear graphic tee",
+      "embed_input": "streetwear graphic tee",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8889,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 467206,
+            "brand": "Uniqlo",
+            "name": "PEACE FOR ALL Graphic T-Shirt | Saul Leiter",
+            "subcategory": "",
+            "distance": 0.888,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 541611,
+            "brand": "UNAFFECTED X SCARFACE",
+            "name": "scarface world tour t-shirt / charcoal",
+            "subcategory": "",
+            "distance": 0.8887,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 541607,
+            "brand": "UNAFFECTED X SCARFACE",
+            "name": "vintage movie poster oversized t-shirt / charcoal",
+            "subcategory": "",
+            "distance": 0.8889,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534556,
+            "brand": "Schism Inducing",
+            "name": "Malice Pistols T Shirt (Yellow)",
+            "subcategory": "",
+            "distance": 0.8898,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 518042,
+            "brand": "ZARA",
+            "name": "WASHED KNIT PRINTED T-SHIRT",
+            "subcategory": "",
+            "distance": 0.8899,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_officechic_021",
+      "type": "text_en_mood",
+      "input": "office chic tailored trousers",
+      "embed_input": "office chic tailored trousers",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 3,
+        "distance_p50": 0.8956,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 554046,
+            "brand": "LOSSYROW",
+            "name": "Long Slim Bootcut Slacks [Navy]",
+            "subcategory": "",
+            "distance": 0.8928,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 553614,
+            "brand": "LOSSYROW",
+            "name": "Long Slim Bootcut Slacks [Navy]",
+            "subcategory": "",
+            "distance": 0.8928,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 561697,
+            "brand": "mu:arvo",
+            "name": "WOOL SILK WIDE TUCK PANTS_GREYISH BLUE",
+            "subcategory": "",
+            "distance": 0.8956,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 580042,
+            "brand": "Duequa",
+            "name": "Diesel - Khaki Collar Jacket",
+            "subcategory": "",
+            "distance": 0.8963,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 580017,
+            "brand": "Duequa",
+            "name": "Diesel - Khaki Collar Jacket",
+            "subcategory": "",
+            "distance": 0.8963,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_coquette_022",
+      "type": "text_en_mood",
+      "input": "coquette pastel mini skirt",
+      "embed_input": "coquette pastel mini skirt",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 1,
+        "distance_p50": 0.8686,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 580901,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580765,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580609,
+            "brand": "UuuuP",
+            "name": "로지 플리츠 랩 스커트 - 핑크",
+            "subcategory": "",
+            "distance": 0.8686,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580891,
+            "brand": "UuuuP",
+            "name": "로맨틱 레이스 탑 - 라벤더",
+            "subcategory": "",
+            "distance": 0.8735,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 580755,
+            "brand": "UuuuP",
+            "name": "로맨틱 레이스 탑 - 라벤더",
+            "subcategory": "",
+            "distance": 0.8735,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_athleisure_023",
+      "type": "text_en_mood",
+      "input": "athleisure track pants",
+      "embed_input": "athleisure track pants",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8976,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 449537,
+            "brand": "Represent",
+            "name": "logo-detail track pant",
+            "subcategory": "joggers",
+            "distance": 0.8929,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465518,
+            "brand": "Patta",
+            "name": "Tricot Straight Track Pants (Black Iris)",
+            "subcategory": "",
+            "distance": 0.8936,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454568,
+            "brand": "Loewe",
+            "name": "Loewe Tracksuit Trousers - Khaki Green",
+            "subcategory": "joggers",
+            "distance": 0.8976,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 577961,
+            "brand": "THE MYSTERIOUS HOTEL",
+            "name": "[5차] PATCH MESH PANTS - NAVY",
+            "subcategory": "",
+            "distance": 0.8984,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 577915,
+            "brand": "THE MYSTERIOUS HOTEL",
+            "name": "[5차] PATCH MESH PANTS - NAVY",
+            "subcategory": "",
+            "distance": 0.8984,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_gendered_mens_024",
+      "type": "text_en_gendered",
+      "input": "men's black straight jeans",
+      "embed_input": "men's black straight jeans",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.6,
+        "keyword_hit": 0.6,
+        "color_hit": 0.6,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8731,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437072,
+            "brand": "STONE ISLAND",
+            "name": "J100007  Denim Jeans",
+            "subcategory": "",
+            "distance": 0.8679,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 479022,
+            "brand": "SUNFLOWER",
+            "name": "썬플라워_ LOOSE [BLACK RINSE]",
+            "subcategory": "",
+            "distance": 0.8683,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 456220,
+            "brand": "Studio Nicholson",
+            "name": "Studio Nicholson x Aaron Levine Woodstock Corduroy Pant - Faded Blue",
+            "subcategory": "",
+            "distance": 0.8731,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 464052,
+            "brand": "Guess USA",
+            "name": "Straight Denim Pants Black",
+            "subcategory": "",
+            "distance": 0.8747,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          },
+          {
+            "id": 479159,
+            "brand": "TONYWACK",
+            "name": "토니웩_ SLIM STRAIGHT DENIM JEANS [BLACK]",
+            "subcategory": "",
+            "distance": 0.8758,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_en_gendered_womens_025",
+      "type": "text_en_gendered",
+      "input": "women's floral summer dress",
+      "embed_input": "women's floral summer dress",
+      "lang": "en",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9348,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 449211,
+            "brand": "Dolce & Gabbana",
+            "name": "floral strap dress",
+            "subcategory": "",
+            "distance": 0.9318,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 446169,
+            "brand": "Dolce & Gabbana",
+            "name": "floral-print midi dress",
+            "subcategory": "midi-dress",
+            "distance": 0.9333,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 440363,
+            "brand": "DÔEN",
+            "name": "Clea floral-print midi dress",
+            "subcategory": "midi-dress",
+            "distance": 0.9348,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 442073,
+            "brand": "LoveShackFancy",
+            "name": "Clemence floral-print maxi dress",
+            "subcategory": "maxi-dress",
+            "distance": 0.9368,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 448806,
+            "brand": "Agua By Agua Bendita",
+            "name": "Alcaparra Paramo strappy floral dress",
+            "subcategory": "",
+            "distance": 0.9388,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_capri_hoodie_026",
+      "type": "text_ko_qa",
+      "input": "오버사이즈 박시 드롭 숄더 드로우 스트링 후드 블랙 플리스 후디",
+      "embed_input": "oversized boxy black fleece hoodie",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": 1.0,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.8479,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 528417,
+            "brand": "Rier",
+            "name": "fleece hoodie, black",
+            "subcategory": "",
+            "distance": 0.822,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 527441,
+            "brand": "Rier",
+            "name": "fleece hoodie, black",
+            "subcategory": "",
+            "distance": 0.822,
+            "sc": false,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 456439,
+            "brand": "Entire Studios",
+            "name": "Entire Studios Heavy Hoodie - Black",
+            "subcategory": "hoodie",
+            "distance": 0.8479,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 465057,
+            "brand": "Essentials",
+            "name": "PROPERTY LOUNGE HALF ZIP HOODIE (BLACK)",
+            "subcategory": "hoodie",
+            "distance": 0.8499,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 454257,
+            "brand": "Ksubi",
+            "name": "Ksubi Intruder Ekcess Hoodie - Jet Black",
+            "subcategory": "hoodie",
+            "distance": 0.8499,
+            "sc": true,
+            "kw": true,
+            "co": true,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_leatherloafer_027",
+      "type": "text_ko_qa",
+      "input": "브라운 레더 로퍼",
+      "embed_input": "brown leather loafer",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": 0.0,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.8575,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 449464,
+            "brand": "Dear Frances",
+            "name": "Gio pointed-toe leather loafers",
+            "subcategory": "",
+            "distance": 0.8536,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 480044,
+            "brand": "ASTORFLEX",
+            "name": "아스토플렉스_ DARTFLEX [NOCCIOLA]",
+            "subcategory": "",
+            "distance": 0.8548,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 436212,
+            "brand": "MIU MIU",
+            "name": "Penny Loafers",
+            "subcategory": "loafers",
+            "distance": 0.8575,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 440280,
+            "brand": "G.H.Bass",
+            "name": "Weejuns Larson penny loafers",
+            "subcategory": "loafers",
+            "distance": 0.8641,
+            "sc": true,
+            "kw": true,
+            "co": false,
+            "fi": null
+          },
+          {
+            "id": 448577,
+            "brand": "Tod's",
+            "name": "logo-debossed leather loafers",
+            "subcategory": "",
+            "distance": 0.8665,
+            "sc": false,
+            "kw": true,
+            "co": false,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_qa_cargopants_028",
+      "type": "text_ko_qa",
+      "input": "카고 팬츠 남자",
+      "embed_input": "cargo pants men",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 1.0,
+        "keyword_hit": 1.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.8948,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 576610,
+            "brand": "PLASTICPRODUCT",
+            "name": "MPa MULTI PANEL CARGO PANTS (GREY)",
+            "subcategory": "",
+            "distance": 0.8927,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 576467,
+            "brand": "PLASTICPRODUCT",
+            "name": "MPa MULTI PANEL CARGO PANTS (GREY)",
+            "subcategory": "",
+            "distance": 0.8927,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 559248,
+            "brand": "NUAKLE",
+            "name": "(m) Field wide cargo pants_soft cream",
+            "subcategory": "",
+            "distance": 0.8948,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 559198,
+            "brand": "NUAKLE",
+            "name": "(m) Field wide cargo pants_soft cream",
+            "subcategory": "",
+            "distance": 0.8948,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 559118,
+            "brand": "NUAKLE",
+            "name": "(m) Field wide cargo pants_soft cream",
+            "subcategory": "",
+            "distance": 0.8948,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_edge_generic_029",
+      "type": "text_edge",
+      "input": "shirt",
+      "embed_input": "shirt",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.8,
+        "keyword_hit": 0.8,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9163,
+        "subcat_hit": 0.6,
+        "subcat_hit_tagged": 1.0,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 518665,
+            "brand": "ZARA",
+            "name": "WILLY CHAVARRIA X ZARA RELAXED FIT COTTON SHIRT",
+            "subcategory": "",
+            "distance": 0.9145,
+            "sc": false,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 567173,
+            "brand": "Years Ago",
+            "name": "Single Breasted Raglan Coat, Green Check",
+            "subcategory": "",
+            "distance": 0.9156,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 456091,
+            "brand": "Barena",
+            "name": "Barena Prama Overshirt - Navy",
+            "subcategory": "shirt",
+            "distance": 0.9163,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 445679,
+            "brand": "Stone Island",
+            "name": "Compass-badge short-sleeved shirt",
+            "subcategory": "shirt",
+            "distance": 0.9169,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 456661,
+            "brand": "Orlebar Brown",
+            "name": "Orlebar Brown Maitan Solstice Shirt - Tarragon Green",
+            "subcategory": "shirt",
+            "distance": 0.9177,
+            "sc": true,
+            "kw": true,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_edge_ambiguous_030",
+      "type": "text_edge",
+      "input": "something nice for autumn",
+      "embed_input": "something nice for autumn",
+      "lang": "en",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 2,
+        "distance_p50": 0.9167,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": null,
+        "tag_coverage": 0.0,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 465584,
+            "brand": "Nike",
+            "name": "Nike Air Force 1 '07 \"Leaf Camo\"",
+            "subcategory": "",
+            "distance": 0.9146,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563384,
+            "brand": "AUTUMN",
+            "name": "[made]스윗캡소매티셔츠",
+            "subcategory": "",
+            "distance": 0.9167,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 562942,
+            "brand": "AUTUMN",
+            "name": "[made]스윗캡소매티셔츠",
+            "subcategory": "",
+            "distance": 0.9167,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563729,
+            "brand": "AUTUMN",
+            "name": "[made]테이크논페이드데님",
+            "subcategory": "",
+            "distance": 0.9208,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 563391,
+            "brand": "AUTUMN",
+            "name": "[made]하쿠와플티셔츠",
+            "subcategory": "",
+            "distance": 0.9249,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    }
+  ]
+}
