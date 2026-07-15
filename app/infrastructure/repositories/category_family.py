@@ -50,15 +50,20 @@ CANONICAL_FAMILIES: frozenset[str] = frozenset(
     }
 )
 
+# 2026-07-15 백엔드 정규화 반영: products.category 는 이제 14 family + other
+# 로 정규화 완료 (실 DB 확인 — sneakers 카테고리 상품 0행). `sneakers` family
+# 로 게이트를 걸면 rung 2 count=0 → rung 3 로 떨어져 family gate 가 통째로
+# 무력화되므로, sneakers 로 resolve 되는 모든 입력은 `shoes` 로 리맵한다.
+# 스니커즈 정밀도는 subcategory 레벨(`p_subcategory='sneakers'`, DB 2.3k행)
+# 에서 해결된다 — subcategory_vocab.py 참조.
+_FAMILY_REMAP: dict[str, str] = {
+    "sneakers": "shoes",
+}
+
 # Bot Vision 7-enum (vision_prompt.py:150 — `Outer/Top/Bottom/Shoes/Bag/Dress/
 # Accessories`) lowercased → canonical family. Plus a SMALL, conservative set
 # of obvious singular/plural/synonym defensives whose target is one of the 20.
 # When unsure → DO NOT add an entry; let it fall through to `other`.
-#
-# shoes vs sneakers: bot Vision emits only "Shoes" (no sneaker split), so
-# `shoes→shoes` is INTENTIONAL coarseness — the `sneakers` family is
-# unreachable from the bot Vision path; the gate still engages on `shoes`.
-# This is by design, NOT a bug.
 _VISION_ALIAS: dict[str, str] = {
     # Vision 7-enum (the primary, authoritative mapping)
     "outer": "outerwear",
@@ -122,10 +127,10 @@ _VISION_ALIAS: dict[str, str] = {
     "puffer": "outerwear",
     "vest": "outerwear",
     "windbreaker": "outerwear",
-    # shoes / sneakers
-    "sneaker": "sneakers",
-    "sneakers": "sneakers",
-    "trainers": "sneakers",
+    # shoes (2026-07-15: sneakers family 는 상품 매핑에 미사용 — shoes 로 통합)
+    "sneaker": "shoes",
+    "sneakers": "shoes",
+    "trainers": "shoes",
     "boots": "shoes",
     "boot": "shoes",
     "loafers": "shoes",
@@ -184,6 +189,9 @@ def to_canonical_family(raw: str | None) -> str:
       2. Vision-alias map — `t in _VISION_ALIAS` → return the mapped family;
       3. else → `"other"` (the v6 catch-all → family gate intentionally
          skipped → graceful cosine-only degrade).
+    The resolved token then passes `_FAMILY_REMAP` (sneakers→shoes — the
+    sneakers family has zero product rows since the 2026-07 backend
+    normalization, so gating on it would silently kill the family gate).
 
     Always returns exactly ONE lowercase token from `CANONICAL_FAMILIES`;
     NEVER returns None (the v6 contract requires `p_category` to be exactly
@@ -191,9 +199,10 @@ def to_canonical_family(raw: str | None) -> str:
     """
     t = (raw or "").strip().lower()
     if t in CANONICAL_FAMILIES:
-        return t
+        return _FAMILY_REMAP.get(t, t)
     if t in _VISION_ALIAS:
-        return _VISION_ALIAS[t]
+        t = _VISION_ALIAS[t]
+        return _FAMILY_REMAP.get(t, t)
     return "other"
 
 

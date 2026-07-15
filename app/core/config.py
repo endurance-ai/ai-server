@@ -55,6 +55,12 @@ class Settings(BaseSettings):
 
     # 검색 파라미터 기본값
     SEARCH_DEFAULT_K: int = 50  # RPC top-k
+    # 2026-07-15 정밀 필터 (백엔드 products.subcategory/color 정규화 연동).
+    # v6 의 p_subcategory/p_color_family 는 EXACT·무완화 필터 — kill-switch 로
+    # 즉시 회귀 가능하도록 개별 플래그. RELAX_MIN 미만이면 필터 제거 재시도.
+    SEARCH_SUBCATEGORY_FILTER_ENABLED: bool = True
+    SEARCH_COLOR_FILTER_ENABLED: bool = True
+    SEARCH_FILTER_RELAX_MIN: int = 5
     # 다양성 cap — 2026-06-17 완화 (이전: brand=2, platform=3).
     # Langfuse 트레이스 분석에서 raw 50개 후보 중 45개가 cap 으로 잘려
     # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만

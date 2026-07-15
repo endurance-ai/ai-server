@@ -56,6 +56,7 @@ class SearchRepository:
         category: str | None = None,
         style_node_code: str | None = None,
         color_family: str | None = None,
+        subcategory: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -74,9 +75,12 @@ class SearchRepository:
             normalization map is the single source in
             app/infrastructure/repositories/category_family.py (vision_prompt.py
             is the SPEC-VISION-UNIFY-001 frozen mirror — NOT edited).
-          - `p_subcategory` is ALWAYS None: products.subcategory is 100% NULL
-            repo-wide, so any subcategory narrowing is a guaranteed no-op
-            (req #3). Never attempt subcategory narrowing.
+          - `p_subcategory` (2026-07-15 활성화): products.subcategory 가
+            백엔드 정규화로 60%+ 채워짐 (실 DB 확인 — "100% NULL" 전제 무효).
+            RPC 는 EXACT 매치 + 어느 rung 에서도 완화하지 않으므로, 호출자
+            (search_service)는 반드시 `subcategory_vocab.normalize_subcategory`
+            를 통과한 canonical 토큰 또는 None 만 넘긴다 (여기서 재정규화
+            하지 않음 — 이중 정규화 방지).
           - There is no v6 RPC price param and no client-side price filter
             (user-confirmed) → price_min/price_max retired.
           - `p_style_node_id` is the v6 RPC's FILTER 1 — a brand-level
@@ -102,9 +106,8 @@ class SearchRepository:
             # tokens (`other` when no apparel match → gate intentionally
             # skipped). Single-source map: category_family.to_canonical_family.
             "p_category": to_canonical_family(category),
-            # products.subcategory is 100% NULL repo-wide → narrowing is a
-            # no-op; ALWAYS None (req #3).
-            "p_subcategory": None,
+            # EXACT·무완화 필터 — canonical 토큰 또는 None (호출자가 정규화).
+            "p_subcategory": subcategory,
             "p_brand_names": brand_filter,
             # Vision colorFamily → v6 color gate (SPEC-SEARCH-V6-COLOR). None
             # → filter off (backward-compatible with pre-color rollout).
