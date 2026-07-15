@@ -15,6 +15,7 @@ SearchRepository).
 """
 
 import logging
+from typing import Any
 
 from app.core.config import settings
 from app.infrastructure.repositories.category_family import to_canonical_family
@@ -26,6 +27,7 @@ from app.infrastructure.repositories.search_repository import (
 # search_rpc_contract imports only pydantic/typing (no app.* back-edge) so a
 # module-top import is cycle-free -- no lazy/seam pattern needed here.
 from app.infrastructure.repositories.search_rpc_contract import RpcContractError
+from app.infrastructure.repositories.subcategory_vocab import normalize_subcategory
 from app.pipeline.state import PipelineState
 from app.scoring.brand_2tower_rescore import rescore as _brand_2tower_rescore
 from app.scoring.personalize_rerank import RerankWeights
@@ -37,6 +39,46 @@ logger = logging.getLogger(__name__)
 # tests reference _embedding_to_pgvector. The implementation now lives in the
 # repository (single source for the pgvector format alongside the param map).
 embedding_to_pgvector = _embedding_to_pgvector
+
+# 2026-07-15 — p_color_family EXACT 매치 보정용 최소 alias. products.color 는
+# 크롤러 원본값(Black/BLACK/Charcoal/"제품명 참조"…)이라 Vision color_family
+# enum 과 완전히 겹치지 않는다. RPC 가 양측 UPPER 비교하므로 케이스는 무관,
+# 철자만 보정한다 (MULTI → DB "Multicolor", gray → DB "Grey").
+_COLOR_ALIAS: dict[str, str] = {
+    "multi": "multicolor",
+    "multi-color": "multicolor",
+    "multicolour": "multicolor",
+    "gray": "grey",
+}
+
+
+def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str | None]:
+    """`(subcategory, subcategory_family, color_family)` 정밀 필터 해석.
+
+    v6 의 `p_subcategory`/`p_color_family` 는 EXACT 매치이고 어느 rung 에서도
+    완화되지 않는다 (실물 함수 정의 확인) — 모르는 값을 보내면 0결과가 되므로
+    subcategory 는 canonical vocabulary 에 매칭된 값만 통과시킨다 (fail-open
+    → None).
+
+    subcategory 소스 우선순위: `item.subcategory` (Vision v2 / mobile) →
+    `item.category` (LLM 자유형 arg 가 "hoodie" 같은 subcategory 레벨 단어인
+    경우). 매칭되면 family 도 함께 반환 — subcategory 가 family 보다 강한
+    신호라(백엔드 배치: hoodie→tops, sweater→knitwear — Vision 분류와 다름)
+    호출부가 family gate 를 이 family 로 정렬한다.
+    """
+    sub: str | None = None
+    sub_family: str | None = None
+    if settings.SEARCH_SUBCATEGORY_FILTER_ENABLED:
+        sub, sub_family = normalize_subcategory(getattr(item, "subcategory", None))
+        if sub is None:
+            sub, sub_family = normalize_subcategory(getattr(item, "category", None))
+
+    color: str | None = None
+    if settings.SEARCH_COLOR_FILTER_ENABLED:
+        c = str(getattr(item, "color_family", None) or "").strip().lower()
+        if c:
+            color = _COLOR_ALIAS.get(c, c)
+    return sub, sub_family, color
 
 
 async def search_service(state: PipelineState) -> PipelineState:
@@ -55,15 +97,26 @@ async def search_service(state: PipelineState) -> PipelineState:
     # SPEC-SEARCH-V6-001 family gate: pass the real Vision/app item category;
     # SearchRepository normalizes it to one of the 20 canonical tokens.
     style_node_code = req.style_node.primary if req.style_node else None
+
+    # 2026-07-15 정밀 필터 (백엔드 subcategory 정규화 연동 + SPEC-SEARCH-V6-COLOR
+    # 보강): subcategory 는 canonical vocab 매칭 성공 값만, color 는 alias 보정
+    # 후 전달. subcategory 가 resolve 되면 family gate 는 **항상** 그 subcategory
+    # 의 소속 family 로 정렬한다 — Vision 분류(hoodie=Outer, sweater=Top)와
+    # 백엔드 배치(hoodie→tops, sweater→knitwear)가 다르기 때문에, item 의
+    # category family 를 그대로 쓰면 "outerwear family + hoodie EXACT" 처럼
+    # 교집합 0 인 조합이 나온다. subcategory 미해석 시엔 기존 category 경로.
+    sub_norm, sub_family, color_norm = _resolve_precision_filters(req.item)
+    category_for_gate = req.item.category
+    if sub_family is not None:
+        category_for_gate = sub_family
+
     params = SearchRepository.build_params(
         embedding=state.embedding,
         brand_filter=req.brand_filter,
-        category=req.item.category,
+        category=category_for_gate,
         style_node_code=style_node_code,
-        # SPEC-SEARCH-V6-COLOR: pass Vision's colorFamily (16 canonical) directly.
-        # `AnalyzedItem.color_family` is populated by Vision v2 for image queries
-        # and by the agent tool for text queries with an explicit color signal.
-        color_family=req.item.color_family,
+        color_family=color_norm,
+        subcategory=sub_norm,
     )
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
@@ -71,12 +124,14 @@ async def search_service(state: PipelineState) -> PipelineState:
     # line surfaces the category-miss → `other` gate-skip BEFORE the RPC so
     # "category-miss other-skip" is never conflated with node-presence
     # `degraded`. raw=Vision/app value, canonical=resolved 20-token.
-    canonical = to_canonical_family(req.item.category)
+    canonical = to_canonical_family(category_for_gate)
     logger.info(
-        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s style_node=%s→id=%s",
+        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s subcat=%r color=%r style_node=%s→id=%s",
         req.item.category,
         canonical,
         "active" if canonical != "other" else "skipped(other)",
+        sub_norm,
+        color_norm,
         style_node_code,
         params.get("p_style_node_id"),
     )
@@ -106,6 +161,37 @@ async def search_service(state: PipelineState) -> PipelineState:
             type(exc).__name__,
         )
         rows = []
+
+    # 2026-07-15 정밀 필터 완화 재시도: v6 는 p_subcategory/p_color_family 를
+    # 어느 rung 에서도 완화하지 않으므로 (실물 함수 정의 확인) AI 서버가
+    # 완화 rung 을 맡는다 — subcategory 40% NULL(라벨 미부여 상품은 EXACT
+    # 매치에서 무조건 탈락) + color 크롤러 원본값 특성상 정밀 필터가 풀을
+    # 과도하게 조일 수 있다. 결과가 부족하면 두 필터를 빼고 1회 재시도,
+    # 정밀 매치(1차)를 앞에 두고 id dedup 병합 — 정확도는 지키고 리콜만 보강.
+    if len(rows) < settings.SEARCH_FILTER_RELAX_MIN and (
+        params.get("p_subcategory") is not None or params.get("p_color_family") is not None
+    ):
+        relaxed = dict(params, p_subcategory=None, p_color_family=None)
+        logger.info(
+            "[STEP 4.55][search] precision-filter relax retry — strict_count=%d (<%d) subcat=%r color=%r dropped",
+            len(rows),
+            settings.SEARCH_FILTER_RELAX_MIN,
+            params.get("p_subcategory"),
+            params.get("p_color_family"),
+        )
+        try:
+            relaxed_rows = await SearchRepository.search(relaxed)
+        except RpcContractError as exc:
+            logger.error(
+                "[STEP 4.55][search] relax retry contract drift -- keeping strict rows (row_index=%s exc=%s)",
+                exc.row_index,
+                type(exc).__name__,
+            )
+            relaxed_rows = []
+        seen_ids = {r.get("id") for r in rows}
+        rows = rows + [r for r in relaxed_rows if r.get("id") not in seen_ids]
+        rows = rows[: settings.SEARCH_DEFAULT_K]
+
     state.raw_candidates = rows
     state.counts["raw"] = len(rows)
 

@@ -487,6 +487,7 @@ async def run_text_only_search(
     *,
     text_query: str,
     category: str | None = None,
+    subcategory: str | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -524,7 +525,9 @@ async def run_text_only_search(
     item = AnalyzedItem(
         id="agent-v2-text",
         category=category or "apparel",
-        subcategory=None,
+        # 2026-07-15: Vision/호출자 subcategory 그대로 운반 — 정규화(canonical
+        # vocab 매칭)는 search_service._resolve_precision_filters 단일 지점.
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=text_query,
@@ -600,6 +603,7 @@ async def run_blended_search(
     chat_id: int | None = None,
     alpha: float = 0.7,
     category: str | None = None,
+    subcategory: str | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -637,6 +641,7 @@ async def run_blended_search(
         return await run_text_only_search(
             text_query=modifier_query,
             category=category,
+            subcategory=subcategory,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -652,7 +657,7 @@ async def run_blended_search(
     item = AnalyzedItem(
         id="agent-blended",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=modifier_query,
@@ -721,6 +726,7 @@ async def run_smart_blended_search(
     chat_id: int | None = None,
     prior_outfit_context: str | None = None,
     category: str | None = None,
+    subcategory: str | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -775,6 +781,7 @@ async def run_smart_blended_search(
         return await run_text_only_search(
             text_query=modifier_query,
             category=category,
+            subcategory=subcategory,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -818,7 +825,7 @@ async def run_smart_blended_search(
     item = AnalyzedItem(
         id="agent-smart-blended",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=modifier_query,
@@ -858,6 +865,7 @@ async def run_image_search(
     image_url: str,
     text_query: str,
     category: str | None = None,
+    subcategory: str | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -880,7 +888,7 @@ async def run_image_search(
     item = AnalyzedItem(
         id="agent-v2",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=text_query,
@@ -1072,8 +1080,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # still apply the knit family gate. Mirrors refine_search PR #112.
     if pinned_embedding is not None:
         category = pinned_category or ctx.get("vision_category")
+        # Pinned anchor: 이전 Vision 턴의 subcategory 를 새 anchor 에 누출하지
+        # 않는다 (fit/color 클리어와 동일한 원칙 — refine_search PR #112).
+        subcategory = None
     else:
-        category = ctx.get("vision_category")
+        # 2026-07-15 배선 수정: 순수 텍스트 턴은 vision_category 가 None 이라
+        # LLM `category` arg 가 family gate 에 전혀 닿지 않았다 (gender 재검색
+        # 경로만 args 를 stash 하는 비대칭). Vision 우선, 없으면 args 로 폴백 —
+        # args 는 자유형("hoodie")이어도 to_canonical_family / subcategory_vocab
+        # 이 정규화하고, 미인식 값은 `other`/None 으로 fail-open.
+        category = ctx.get("vision_category") or args.get("category")
+        subcategory = ctx.get("vision_subcategory")
     fit = args.get("fit")
     color_family = args.get("color_family")
 
@@ -1127,6 +1144,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 image_url=str(ctx_image),
                 text_query=query,
                 category=category,
+                subcategory=subcategory,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1154,6 +1172,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 chat_id=ctx.get("chat_id"),
                 prior_outfit_context=prior_ctx or None,
                 category=category,
+                subcategory=subcategory,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1164,6 +1183,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             cands = await run_text_only_search(
                 text_query=text_query,
                 category=category,
+                subcategory=subcategory,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,

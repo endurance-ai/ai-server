@@ -53,7 +53,10 @@ def test_canonical_set_is_exactly_the_20_spec_tokens():
 
 @pytest.mark.parametrize("token", sorted(_EXPECTED_20))
 def test_all_20_canonical_tokens_identity_passthrough(token):
-    assert to_canonical_family(token) == token
+    # 2026-07-15 — sneakers 는 identity 예외: products.category 정규화(14+other)
+    # 이후 sneakers family 상품이 0행이라 shoes 로 리맵된다 (게이트 무력화 방지).
+    expected = "shoes" if token == "sneakers" else token
+    assert to_canonical_family(token) == expected
 
 
 # The 7 bot Vision enum values (vision_prompt.py:150) → canonical family.
@@ -148,7 +151,7 @@ def test_every_alias_target_is_a_canonical_token():
         ("blazer", "outerwear"),
         ("coat", "outerwear"),
         ("trench", "outerwear"),
-        ("sneaker", "sneakers"),
+        ("sneaker", "shoes"),
         ("boots", "shoes"),
         ("loafers", "shoes"),
         ("heels", "shoes"),
@@ -167,3 +170,11 @@ def test_expanded_llm_vocabulary_engages_family_gate(raw, expected):
 def test_never_returns_none():
     for raw in (None, "", "garbage", "Top", "shoes", "C", 0, "  "):
         assert to_canonical_family(raw if isinstance(raw, (str, type(None))) else str(raw)) is not None
+
+
+# 2026-07-15 — products.category 정규화(14 family + other) 반영: sneakers
+# family 는 상품 행이 0 이라 게이트를 걸면 rung 3 폴백으로 family gate 가
+# 통째로 무력화된다. sneakers 로 resolve 되는 모든 입력은 shoes 로 리맵.
+@pytest.mark.parametrize("raw", ["sneakers", "Sneakers", "sneaker", "trainers", " SNEAKERS "])
+def test_sneakers_family_remapped_to_shoes(raw):
+    assert to_canonical_family(raw) == "shoes"
