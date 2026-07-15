@@ -112,3 +112,30 @@ Phase 4 (enhance_query 재활성 + description rerank) 전후 비교 기준으�
 
 - [ ] p9 사람 판정 (report_p8p9_on.html) → Phase 4 baseline S율 확정
 - [ ] Phase 4 구현 후 p9 재실행 → 전후 비교
+
+---
+
+## 4차: p_gender 하드 필터 전후 비교 (2026-07-16, PR #149 배포 검증)
+
+2차 남성 검증에서 실측된 gender 누수(burgundy cardigan 여S→남F)에 대한 조치.
+RPC 8-arg (`p_gender` — `gender && ARRAY[p_gender,'unisex']`, 전 rung 무완화)
++ 봇 3경로 구조화 gender 전달. 남성 매트릭스 p1(컬러)+p4(무드) 40쿼리 A/B.
+
+### 객관 지표 — 여성 전용 상품 누수율 (결과 400건 × DB gender 배열 대조)
+
+| | 배포 전 (off) | 배포 후 (on) |
+|---|---|---|
+| **여성 전용 상품 혼입** | **71/400 (17.8%)** | **0/400** |
+| 결과 부족(기아) | 없음 (전부 10건) | 없음 (전부 10건) |
+
+단건 프로브에서도 동일: women+cargo-pants 필터 off 시 top-20 중 10건이
+men-only → on 시 위반 0. 브랜드 EXACT 필터(p_brand_names + brand_node_cache
+canonical resolve)도 동시 배포 — Acne Studios 프로브 5/5.
+
+같이 배선된 것: LLM tool args 에 `category`/`brand` 신설 (category 는
+스키마에 없어 unknown_keys 로 거부되던 배선 — 순수 텍스트 턴의 family
+gate/서브카테고리가 이제 실제로 작동).
+
+- [ ] 남성 전체 문형(7개) 재검증 — 2차 S율(45~60%) 대비 gender 필터 반영
+  후 개선 폭 측정 (사람 판정 필요, report_men_genderon.html)
+- [ ] 남성 인디 카탈로그 확충 과제는 여전히 유효 (필터는 누수만 해결)
