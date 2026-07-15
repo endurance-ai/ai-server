@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     SEARCH_SUBCATEGORY_FILTER_ENABLED: bool = True
     SEARCH_COLOR_FILTER_ENABLED: bool = True
     SEARCH_FILTER_RELAX_MIN: int = 5
+    # 2026-07-16 — p_gender 상품 레벨 하드 필터 (gender[] && [g,'unisex']).
+    # 시맨틱 제약이라 완화 재시도 대상 아님. kill-switch.
+    SEARCH_GENDER_FILTER_ENABLED: bool = True
     # 다양성 cap — 2026-06-17 완화 (이전: brand=2, platform=3).
     # Langfuse 트레이스 분석에서 raw 50개 후보 중 45개가 cap 으로 잘려
     # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만

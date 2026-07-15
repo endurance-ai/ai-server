@@ -145,6 +145,28 @@ def _query_gender(text_query: str) -> str | None:
     return None
 
 
+def _resolve_brand_filter(raw: Any) -> list[str] | None:
+    """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
+
+    RPC 는 `brand_nodes.brand_name = ANY(p_brand_names)` EXACT 매치라 LLM
+    표기("acne studios", "ACNE")를 그대로 보내면 미스난다 —
+    `brand_node_cache.lookup` (lifespan 워밍, ~2.9k 브랜드)으로 canonical
+    `brand_name` 을 resolve. 미인식/캐시 미워밍이면 None (fail-open: 필터
+    없이 진행, 브랜드 토큰은 text_query 임베딩에 남아 soft 신호로 작동)."""
+    if not raw or not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        from app.infrastructure.repositories.brand_node_cache import lookup
+
+        attrs = lookup(raw)
+        if attrs is not None and attrs.brand_name:
+            return [attrs.brand_name]
+        logger.info("[tool.search_products] brand %r not in brand_node_cache — filter skipped (fail-open)", raw)
+    except Exception as exc:  # noqa: BLE001 — 브랜드 필터는 부가 기능, 검색을 막지 않는다
+        logger.warning("[tool.search_products] brand resolve failed: %r", exc)
+    return None
+
+
 def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
     """Render a `pipeline_failed:` suffix from an exception (review P1-C 260522).
 
@@ -488,6 +510,8 @@ async def run_text_only_search(
     text_query: str,
     category: str | None = None,
     subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -535,6 +559,8 @@ async def run_text_only_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -604,6 +630,8 @@ async def run_blended_search(
     alpha: float = 0.7,
     category: str | None = None,
     subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -642,6 +670,8 @@ async def run_blended_search(
             text_query=modifier_query,
             category=category,
             subcategory=subcategory,
+            gender=gender,
+            brand_filter=brand_filter,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -665,6 +695,8 @@ async def run_blended_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -727,6 +759,8 @@ async def run_smart_blended_search(
     prior_outfit_context: str | None = None,
     category: str | None = None,
     subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -782,6 +816,8 @@ async def run_smart_blended_search(
             text_query=modifier_query,
             category=category,
             subcategory=subcategory,
+            gender=gender,
+            brand_filter=brand_filter,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -833,6 +869,8 @@ async def run_smart_blended_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -866,6 +904,8 @@ async def run_image_search(
     text_query: str,
     category: str | None = None,
     subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -896,6 +936,8 @@ async def run_image_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=image_url,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -1094,6 +1136,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     fit = args.get("fit")
     color_family = args.get("color_family")
 
+    # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
+    # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
+    # (명시/핀 append/unisex 폴백), 거기서 역파싱하는 것이 단일 소스다.
+    # 'unisex' 는 search_service._resolve_gender 가 None(필터 off)으로 매핑.
+    structured_gender = _query_gender(text_query)
+
+    # 2026-07-16 — 브랜드 지정 요청 (LLM `brand` arg): brand_node_cache 로
+    # canonical brand_name 을 resolve 해서 p_brand_names EXACT 매치에 태운다.
+    # 미인식 브랜드는 필터 없이 진행 (fail-open — 브랜드 토큰은 text_query
+    # 임베딩에 그대로 남아 soft 신호로 작동).
+    brand_filter = _resolve_brand_filter(args.get("brand"))
+
     # Multi-turn image blending (Level 1 image-first refinement):
     # when no current image URL exists but an origin image URL is stored from
     # a prior Vision turn, blend the cached image vector with the text modifier
@@ -1145,6 +1199,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 text_query=query,
                 category=category,
                 subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1173,6 +1229,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 prior_outfit_context=prior_ctx or None,
                 category=category,
                 subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1184,6 +1242,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 text_query=text_query,
                 category=category,
                 subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,

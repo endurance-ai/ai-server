@@ -57,6 +57,7 @@ class SearchRepository:
         style_node_code: str | None = None,
         color_family: str | None = None,
         subcategory: str | None = None,
+        gender: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -112,6 +113,10 @@ class SearchRepository:
             # Vision colorFamily → v6 color gate (SPEC-SEARCH-V6-COLOR). None
             # → filter off (backward-compatible with pre-color rollout).
             "p_color_family": color_family or None,
+            # 2026-07-16 — 상품 레벨 gender 하드 필터. 'men'|'women' 만 유효
+            # (unisex/미확인 → None = 필터 off — 호출자 search_service 가 매핑).
+            # RPC: p.gender && ARRAY[p_gender,'unisex'] — unisex 상품 항상 포함.
+            "p_gender": gender,
             "p_limit": settings.SEARCH_DEFAULT_K,
         }
 

@@ -81,6 +81,20 @@ def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str |
     return sub, sub_family, color
 
 
+def _resolve_gender(req: Any) -> str | None:
+    """`RecommendRequest.gender` → v6 `p_gender` ('men'|'women'|None).
+
+    2026-07-16 — 상품 레벨 gender 하드 필터 (골든셋 2차 실측: 남성 쿼리에
+    여성 상품 누수). 'men'/'women' 만 필터로 태우고, 'unisex'/미확인/그 외
+    값은 None(필터 off) — RPC 가 `gender && ARRAY[p_gender,'unisex']` 라
+    unisex 상품은 어느 성별 요청에도 항상 포함된다. 시맨틱 제약이므로
+    완화 재시도에서 제거하지 않는다."""
+    if not settings.SEARCH_GENDER_FILTER_ENABLED:
+        return None
+    g = str(getattr(req, "gender", None) or "").strip().lower()
+    return g if g in ("men", "women") else None
+
+
 async def search_service(state: PipelineState) -> PipelineState:
     if state.embedding is None:
         raise RuntimeError("search_step requires state.embedding (call embed_step first)")
@@ -110,6 +124,8 @@ async def search_service(state: PipelineState) -> PipelineState:
     if sub_family is not None:
         category_for_gate = sub_family
 
+    gender_norm = _resolve_gender(req)
+
     params = SearchRepository.build_params(
         embedding=state.embedding,
         brand_filter=req.brand_filter,
@@ -117,6 +133,7 @@ async def search_service(state: PipelineState) -> PipelineState:
         style_node_code=style_node_code,
         color_family=color_norm,
         subcategory=sub_norm,
+        gender=gender_norm,
     )
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
@@ -126,12 +143,14 @@ async def search_service(state: PipelineState) -> PipelineState:
     # `degraded`. raw=Vision/app value, canonical=resolved 20-token.
     canonical = to_canonical_family(category_for_gate)
     logger.info(
-        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s subcat=%r color=%r style_node=%s→id=%s",
+        "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s "
+        "subcat=%r color=%r gender=%r style_node=%s→id=%s",
         req.item.category,
         canonical,
         "active" if canonical != "other" else "skipped(other)",
         sub_norm,
         color_norm,
+        gender_norm,
         style_node_code,
         params.get("p_style_node_id"),
     )

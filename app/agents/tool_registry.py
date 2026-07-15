@@ -82,6 +82,13 @@ class SearchProductsArgs(TypedDict, total=False):
     style_node_primary: str | None
     color_family: str | None
     fit: str | None
+    # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
+    # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
+    # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
+    category: str | None
+    # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
+    # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
+    brand: str | None
     min_price: float | None
     max_price: float | None
     exclude_keywords: list[str]
@@ -239,9 +246,17 @@ REGISTRY: dict[str, ToolMetadata] = {
         "name": "search_products",
         "description": (
             "Search the 78k-product catalog. Provide `text_query` plus optional "
-            "filters (style_node_primary, color_family, fit, price). Do "
+            "filters (category, brand, style_node_primary, color_family, fit, price). Do "
             "NOT provide an image_url — the tool handles imagery internally "
             "from session state. Returns top candidates with brand/title/price.\n"
+            "\n"
+            "  - `category`: the garment word of the query as ONE singular English "
+            "token (same word as in text_query — e.g. 'hoodie', 'sneakers', "
+            "'midi-dress', 'cargo-pants'). ALWAYS set it when the user asks for a "
+            "specific garment type; it powers a precise catalog filter.\n"
+            "  - `brand`: ONLY when the user explicitly names a brand "
+            "(e.g. '아크네 가디건' → brand='acne studios'). English brand name. "
+            "NEVER invent a brand the user didn't mention.\n"
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"

@@ -22,6 +22,13 @@
 -- 하위 호환: `p_color_family text DEFAULT NULL`. NULL 이면 필터 disable →
 -- 기존 caller (색 안 넘기는 코드경로) 는 byte-identical.
 -- 검증: 적용 후 `\df search_products_v6` 시그니처에 `p_color_family` 나오면 성공.
+--
+-- ── 성별 필터 (`p_gender`, 2026-07-16) ────────────────────────────────────
+-- `products.gender` 는 text[] (men/women/unisex, 100% 채움 + GIN 인덱스).
+-- 매칭: `p.gender && ARRAY[p_gender, 'unisex']` — 요청 성별 또는 unisex 상품.
+-- 호출자(AI 서버)는 men/women 만 보낸다: unisex 요청/미확인은 NULL(필터 off).
+-- 골든셋 2차 실측 문제(남성 쿼리에 여성 상품 누수) 해소용 상품 레벨 하드 필터.
+-- 시맨틱 제약이므로 어느 rung 에서도 완화하지 않는다 (in_stock 과 동급).
 
 BEGIN;
 
@@ -40,14 +47,15 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── 캐노니컬 정의 (7-arg + p_color_family hard filter) ─────────────────────
+-- ── 캐노니컬 정의 (8-arg: p_color_family + p_gender hard filters) ──────────
 CREATE OR REPLACE FUNCTION public.search_products_v6(
   query_embedding halfvec,
   p_style_node_id bigint DEFAULT NULL::bigint,
   p_category      text DEFAULT NULL::text,
   p_subcategory   text DEFAULT NULL::text,
   p_brand_names   text[] DEFAULT NULL::text[],
-  p_color_family  text DEFAULT NULL::text,  -- NEW: 16 canonical family (BLACK/GREY/…)
+  p_color_family  text DEFAULT NULL::text,  -- 16 canonical family (BLACK/GREY/…)
+  p_gender        text DEFAULT NULL::text,  -- NEW: 'men'|'women' (unisex 상품은 항상 포함)
   p_limit         integer DEFAULT 30
 )
  RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, distance double precision, degraded boolean)
@@ -88,7 +96,8 @@ BEGIN
       )
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
-      AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family));  -- NEW
+      AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))
+    AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex']);
   END IF;
 
   IF p_style_node_id IS NOT NULL AND v_node_fam_cnt > 0 THEN
@@ -113,7 +122,8 @@ BEGIN
         )
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
-        AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))  -- NEW
+        AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))
+        AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
       ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
       LIMIT p_limit;
     RETURN;
@@ -135,7 +145,8 @@ BEGIN
     )
     AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
     AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
-    AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family));  -- NEW
+    AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))
+    AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex']);
 
   IF v_node_count > 0 THEN
     RETURN QUERY
@@ -157,7 +168,8 @@ BEGIN
         )
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
-        AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))  -- NEW
+        AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))
+        AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
       ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
       LIMIT p_limit;
     RETURN;
@@ -175,7 +187,8 @@ BEGIN
     WHERE p.in_stock = true
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
-      AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))  -- NEW
+      AND (p_color_family IS NULL OR UPPER(p.color) = UPPER(p_color_family))
+      AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
     ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
     LIMIT p_limit;
 END;
