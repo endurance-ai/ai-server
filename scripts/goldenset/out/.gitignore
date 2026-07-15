@@ -1,0 +1,2 @@
+# 리포트 HTML 은 results.json 에서 --report-only 로 재생성 가능 — 커밋 제외
+*.html
