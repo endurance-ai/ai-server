@@ -1,6 +1,6 @@
 """Products API.
 
-GET  /v1/products/{id}          — 상품 상세 (crawler DB)
+GET  /v1/products/{id}          — 상품 상세 (crawler DB, 비로그인 허용)
 POST /v1/products/{id}/view     — 상품 조회 기록 (24h 중복 제거)
 GET  /v1/products/viewed        — 조회한 상품 목록 (세션 기준)
 POST /v1/products/{id}/link-check — 상품 URL 유효성 확인
@@ -326,7 +326,6 @@ async def list_viewed(
 async def get_product(
     product_id: int,
     search_id: UUID | None = Query(default=None),
-    user_id: UUID = Depends(get_current_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> ProductDetail:
     """상품 상세 조회 (crawler DB). search_id: 향후 추적용 예약 파라미터(현재 미사용)."""

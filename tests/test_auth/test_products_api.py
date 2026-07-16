@@ -95,10 +95,11 @@ async def test_get_product_not_found(client: AsyncClient, pool):
 
 
 @pytest.mark.asyncio
-async def test_get_product_requires_auth(client: AsyncClient, pool):
+async def test_get_product_allows_no_auth(client: AsyncClient, pool):
     product_id = await _insert_product(pool)
     resp = await client.get(f"/v1/products/{product_id}")
-    assert resp.status_code in (401, 403)
+    assert resp.status_code == 200
+    assert resp.json()["id"] == product_id
 
 
 # ── POST /v1/products/{id}/view ──────────────────────────────────────────────
