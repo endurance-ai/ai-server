@@ -1,0 +1,1491 @@
+{
+ "gender": "women",
+ "top_k": 10,
+ "precision": "on",
+ "generated_at": "2026-07-16 13:12:48",
+ "patterns": [
+  {
+   "id": "p9_situation_pure",
+   "name_ko": "[순수 상황/TPO] — Phase 4a 멀티 확장",
+   "tier": "t3",
+   "queries": [
+    {
+     "qid": "p9_situation_pure::elegant_midi_dress",
+     "ko": "결혼식 하객룩",
+     "en": "elegant midi dress",
+     "query": "women's elegant midi dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6199,
+     "error": null,
+     "results": [
+      {
+       "id": 599750,
+       "brand": "RASARIO",
+       "name": "Asymmetric draped satin gown with embroidered sleeves",
+       "price": 2480,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/files/Asymmetric-draped-satin-gown-with-embroidered-sleeves-Color-Powder-pink-RM22R009X040_34.jpg?v=1781365340",
+       "product_url": "https://therasario.com/products/asymmetric-draped-satin-gown-with-embroidered-sleeves",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 448552,
+       "brand": "Victoria Beckham",
+       "name": "open-back long-sleeve blouse",
+       "price": 673750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32748182_63169840_2048.webp?v=1763636812",
+       "product_url": "https://brownsfashion.com/products/victoria-beckham-open-back-long-sleeve-blouse-olmss2600162070",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blouse"
+      },
+      {
+       "id": 439379,
+       "brand": "Gianvito Rossi",
+       "name": "Sofia slingback heeled pumps",
+       "price": 1408750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/34033558_68800967_2048.webp?v=1781165499",
+       "product_url": "https://brownsfashion.com/products/gianvito-rossi-sofia-slingback-heeled-pumps-olsaw2600178827",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 599746,
+       "brand": "RASARIO",
+       "name": "Asymmetric draped satin gown with embroidered sleeves",
+       "price": 2600,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/files/Asymmetric-draped-satin-gown-with-embroidered-sleeves-Color-Green-RM22R009X880_34.png?v=1781360942",
+       "product_url": "https://therasario.com/products/asymmetric-draped-satin-gown-with-embroidered-sleeves-1",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 588297,
+       "brand": "Made Some",
+       "name": "habotai silk shirt burlesque",
+       "price": 515400,
+       "image_url": "https://cdn.shopify.com/s/files/1/1060/7516/0914/files/forte-forte_8053631239204_01_60b7a7c1-720d-4f90-b1c8-7901d2e79af3.jpg?v=1781182788",
+       "product_url": "https://www.forte-forte.com/products/habotai-silk-shirt-burlesque",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 459026,
+       "brand": "Rachel Comey",
+       "name": "Cheke Sling Back Heel in Black",
+       "price": 411840,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/273882_IMG_0045.jpg?v=1759513066",
+       "product_url": "https://www.mohawkgeneralstore.com/products/rachel-comey-cheke-sling-back-heel-black",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "heels"
+      },
+      {
+       "id": 580376,
+       "brand": "Oscar de la Renta",
+       "name": "Split Neck Wool Dress",
+       "price": 2781350,
+       "image_url": "https://cdn.shopify.com/s/files/1/0587/8156/4989/files/26RN215DSW_WIN_540.jpg?v=1758123173",
+       "product_url": "https://www.oscardelarenta.com/products/split-neck-wool-dress-26rn215dsw-win",
+       "platform": "oscardelarenta",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 473007,
+       "brand": "ZARA",
+       "name": "FINE BELT SATIN BLOUSE",
+       "price": 71357,
+       "image_url": "https://static.zara.net/assets/public/f6c7/95ba/c7bb4d769bee/f0e465c5381b/02094399401-a1/02094399401-a1.jpg?ts=1769622673238",
+       "product_url": "https://www.zara.com/us/en/satin-effect-blouse-with-thin-belt-p02094625.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "blouse"
+      },
+      {
+       "id": 447748,
+       "brand": "Manolo Blahnik",
+       "name": "Mayslibi buckle-detail slingback pumps",
+       "price": 1190000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/30915829_63688831_2048.webp?v=1766047064",
+       "product_url": "https://brownsfashion.com/products/manolo-blahnik-mayslibi-buckle-detail-slingback-pumps-olsss2600160824",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "heels"
+      },
+      {
+       "id": 599760,
+       "brand": "RASARIO",
+       "name": "Embroidered satin maxi dress with voluminous drapery",
+       "price": 1380,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/products/Embroidered-satin-maxi-dress-with-voluminous-drapery-Color-White-RM22R005X020_34.jpg?v=1781369491",
+       "product_url": "https://therasario.com/products/embroidered-satin-maxi-dress-with-voluminous-drapery-white",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::flowy_summer_maxi_dress",
+     "ko": "여름 휴가룩",
+     "en": "flowy summer maxi dress",
+     "query": "women's flowy summer maxi dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6752,
+     "error": null,
+     "results": [
+      {
+       "id": 471351,
+       "brand": "ZARA",
+       "name": "LONG RUCHED SATIN DRESS",
+       "price": 85657,
+       "image_url": "https://static.zara.net/assets/public/3b62/08a0/c8654e7484d5/dd43c7a6a6c5/04772335306-p/04772335306-p.jpg?ts=1775476109465",
+       "product_url": "https://www.zara.com/us/en/gathered-satin-effect-maxi-dress-p04772335.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 591489,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Neutral Beige)",
+       "price": 70800,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/6a1acf3b6dbd8e0c21d504b7c273e68c.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=462&cate_no=79&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 467508,
+       "brand": "Uniqlo",
+       "name": "Crochet Tote Bag",
+       "price": 57057,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/WesternCommon/imagesgoods/486322/item/goods_31_486322_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E486322-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "tote"
+      },
+      {
+       "id": 468105,
+       "brand": "ZARA",
+       "name": "셔링 새틴 롱 원피스",
+       "price": 59900,
+       "image_url": "https://static.zara.net/assets/public/3b62/08a0/c8654e7484d5/dd43c7a6a6c5/04772335306-p/04772335306-p.jpg?ts=1775476109465",
+       "product_url": "https://www.zara.com/kr/ko/%E1%84%89%E1%85%A7%E1%84%85%E1%85%B5%E1%86%BC-%E1%84%89%E1%85%A2%E1%84%90%E1%85%B5%E1%86%AB-%E1%84%85%E1%85%A9%E1%86%BC-%E1%84%8B%E1%85%AF%E1%86%AB%E1%84%91%E1%85%B5%E1%84%89%E1%85%B3-p04772335.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 591141,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Neutral Beige)",
+       "price": 106200,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/6a1acf3b6dbd8e0c21d504b7c273e68c.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=152&cate_no=66&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 466378,
+       "brand": "Uniqlo",
+       "name": "크로셰토트백",
+       "price": 59900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/AsianCommon/imagesgoods/486322/item/goods_31_486322_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E486322-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "tote"
+      },
+      {
+       "id": 474608,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION LIMITED EDITION RUFFLED DRESS",
+       "price": 241670,
+       "image_url": "https://static.zara.net/assets/public/cf88/37cd/2c594b1bb2a5/002636c7b18e/02412143406-000-a10/02412143406-000-a10.jpg?ts=1775817500884",
+       "product_url": "https://www.zara.com/us/en/zw-collection-limited-edition-ruffled-dress-p02412143.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 591488,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Off White)",
+       "price": 70800,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/59928c7ee456d4402dc90c834c9d20e0.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=463&cate_no=79&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 441090,
+       "brand": "Tory Burch",
+       "name": "Romy straw tote bag",
+       "price": 1102500,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32705455_68100997_2048.webp?v=1778749408",
+       "product_url": "https://brownsfashion.com/products/tory-burch-romy-straw-tote-bag-olbaw2600170522",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "tote"
+      },
+      {
+       "id": 474790,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION LIMITED EDITION FLOWY RUFFLED DRESS",
+       "price": 184470,
+       "image_url": "https://static.zara.net/assets/public/809a/3d48/a7fe44108c16/d8876abfd093/02417100300-p/02417100300-p.jpg?ts=1778767969320",
+       "product_url": "https://www.zara.com/us/en/zw-collection-flowy-ruffled-dress-limited-edition-p02417100.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::tailored_blazer",
+     "ko": "첫 출근룩",
+     "en": "tailored blazer",
+     "query": "women's tailored blazer",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 5373,
+     "error": null,
+     "results": [
+      {
+       "id": 592836,
+       "brand": "Matin Kim",
+       "name": "BACK OPEN POCKET POINT WOOL JACKET IN BLACK",
+       "price": 398000,
+       "image_url": "https://matinkim.com/web/product/medium/202408/65eeadfc806e92e36d67ee37f89d0c21.jpg",
+       "product_url": "https://matinkim.com/product/kimmatin/detail.html?product_no=6191&cate_no=133&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 477599,
+       "brand": "HEUGN",
+       "name": "유겐_ James [Light Blue]",
+       "price": 540000,
+       "image_url": "https://etcseoul.com/web/product/small/202603/02da17bed4a6f52f1fd0aa293683421a.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45634&cate_no=169&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 479193,
+       "brand": "GOLDWIN",
+       "name": "골드윈_ One Tuck Straight Pants [BLACK]",
+       "price": 340000,
+       "image_url": "https://etcseoul.com/web/product/small/202601/4700c8b1cc2d53fc1ccebc6f77b669a1.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45212&cate_no=103&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 442004,
+       "brand": "SAMUEL GUÃŒ YANG",
+       "name": "double-breasted boxy blazer",
+       "price": 1225000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/17160558_35491932_2048.webp?v=1777471540",
+       "product_url": "https://brownsfashion.com/products/samuel-gu-yang-double-breasted-boxy-blazer-lgs30w21p157511110",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 479130,
+       "brand": "MFPEN",
+       "name": "엠에프펜_ SERVICE TROUSERS [Black Tropical Wool]",
+       "price": 560000,
+       "image_url": "https://etcseoul.com/web/product/small/202603/1ac1c8a3261f27f191a371709d3b4798.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45619&cate_no=103&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 569605,
+       "brand": "Years Ago",
+       "name": "Y-901 Washed Stretch Cotton Drill Straight Chino Pants V.2, Black",
+       "price": 238000,
+       "image_url": "https://yearsago.kr/web/product/medium/202601/60ac9adc574f751d07c01da3ae579948.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=3146&cate_no=631&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "chinos"
+      },
+      {
+       "id": 440018,
+       "brand": "The Frankie Shop",
+       "name": "Bea peak-lapels blazer",
+       "price": 568750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/15304915_27387689_2048_05f2a6fa-fac7-4775-86e6-485c955f50c2.webp?v=1779961186",
+       "product_url": "https://brownsfashion.com/products/the-frankie-shop-bea-peak-lapels-blazer-lms30w20p9387gc103",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 534916,
+       "brand": "HGBB Studio",
+       "name": "Short Sleeve Knit Shirt (Asphalt)",
+       "price": 174000,
+       "image_url": "https://www.8division.com/web/product/big/202404/4ce5c47f606b3a8c35bc78740a517221.jpg",
+       "product_url": "https://www.8division.com/product/detail.html?product_no=35789&cate_no=218&display_group=1",
+       "platform": "8division",
+       "score": null,
+       "subcategory": "sweater"
+      },
+      {
+       "id": 437481,
+       "brand": "APC",
+       "name": "Elina pants",
+       "price": 307450,
+       "image_url": "https://cdn.shopify.com/s/files/1/0007/0051/4360/files/PSAIC-F08434LZZ_00.jpg?v=1689384430",
+       "product_url": "https://apc-us.com/products/psaic-f08434",
+       "platform": "apc-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 565728,
+       "brand": "TREEMINGBIRD",
+       "name": "Suede Piping Classic Set-up Jacket [ Black ]",
+       "price": 329000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202311/1779a03bf9903c87d1e1fd3eed6c8c56.jpg",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=1412&cate_no=238&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::romantic_slip_dress",
+     "ko": "데이트룩",
+     "en": "romantic slip dress",
+     "query": "women's romantic slip dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1697,
+     "error": null,
+     "results": [
+      {
+       "id": 597191,
+       "brand": "Fakiii",
+       "name": "Fakiii Ribbon Pintuck Slip Dress_Ivory",
+       "price": 239000,
+       "image_url": "https://fakiii.com/web/product/medium/202603/60bd3ff4b0dc6e31a652f8c872d7a83d.jpg",
+       "product_url": "https://fakiii.com/product/fakiii-ribbon-pintuck-slip-dressivory/199/category/46/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 592261,
+       "brand": "Matin Kim",
+       "name": "SLIT DETAIL BUTTON CARDIGAN IN LIGHT BLUE",
+       "price": 168000,
+       "image_url": "https://matinkim.com/web/product/medium/202503/68594d85710ff07ab90f00803faf3a45.jpg",
+       "product_url": "https://matinkim.com/product/detail.html?product_no=7346&cate_no=219&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 471311,
+       "brand": "ZARA",
+       "name": "MULTI-STRAP HEELED SANDALS",
+       "price": 85657,
+       "image_url": "https://static.zara.net/assets/public/5978/c848/3e784bcfa84a/0fb43f1d69ae/12318810500-p/12318810500-p.jpg?ts=1781780664289",
+       "product_url": "https://www.zara.com/us/en/multi-strap-heeled-sandals-p12318810.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 570447,
+       "brand": "FANCY CLUB",
+       "name": "LACE SLIP DRESS (PINK BEIGE) F26QD149",
+       "price": 68000,
+       "image_url": "https://nastyfancyclub.com/web/product/big/202604/2f8a79b07b783c677b7815a140034ad1.jpg",
+       "product_url": "https://nastyfancyclub.com/product/lace-slip-dress-pink-beige-f26qd149/3435/category/26/display/1/",
+       "platform": "nastyfancyclub",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 592263,
+       "brand": "Matin Kim",
+       "name": "SLIT DETAIL BUTTON CARDIGAN IN BLACK",
+       "price": 168000,
+       "image_url": "https://matinkim.com/web/product/medium/202503/9a0c0ea66b1f9a51030a4bddc911663e.jpg",
+       "product_url": "https://matinkim.com/product/detail.html?product_no=7348&cate_no=219&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 468055,
+       "brand": "ZARA",
+       "name": "멀티 스트랩 힐 샌들",
+       "price": 59900,
+       "image_url": "https://static.zara.net/assets/public/6430/a92f/f7c94d0fab2d/3bd5c7676f76/12318810500-e1/12318810500-e1.jpg?ts=1781518802219",
+       "product_url": "https://www.zara.com/kr/ko/%E1%84%86%E1%85%A5%E1%86%AF%E1%84%90%E1%85%B5-%E1%84%89%E1%85%B3%E1%84%90%E1%85%B3%E1%84%85%E1%85%A2%E1%86%B8-%E1%84%92%E1%85%B5%E1%86%AF-%E1%84%89%E1%85%A2%E1%86%AB%E1%84%83%E1%85%B3%E1%86%AF-p12318810.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "heels"
+      },
+      {
+       "id": 570448,
+       "brand": "FANCY CLUB",
+       "name": "LACE SLIP DRESS (GREEN) F26QD149",
+       "price": 68000,
+       "image_url": "https://nastyfancyclub.com/web/product/big/202604/b09548016534fbcf1375b73aa31e4cd4.jpg",
+       "product_url": "https://nastyfancyclub.com/product/lace-slip-dress-green-f26qd149/3434/category/26/display/1/",
+       "platform": "nastyfancyclub",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 477264,
+       "brand": "TONYWACK",
+       "name": "토니웩_ Merino Wool Cropped Cardigan [Brown]",
+       "price": 128000,
+       "image_url": "https://etcseoul.com/web/product/small/202412/3d8b879e366df638aab213e7b20882aa.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=40094&cate_no=450&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 447805,
+       "brand": "Gianvito Rossi",
+       "name": "85mm strappy leather sandals",
+       "price": 1216250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/31236509_61534253_2048.webp?v=1776327942",
+       "product_url": "https://brownsfashion.com/products/gianvito-rossi-85mm-strappy-leather-sandals-olsss2600172367",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 597190,
+       "brand": "Fakiii",
+       "name": "Fakiii Ribbon Pintuck Slip Dress_Black",
+       "price": 239000,
+       "image_url": "https://fakiii.com/web/product/medium/202603/b1896866ae0399d4a60b0befe9b91135.jpg",
+       "product_url": "https://fakiii.com/product/fakiii-ribbon-pintuck-slip-dressblack/200/category/46/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "slip-dress"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::graphic_crop_top",
+     "ko": "여름 페스티벌룩",
+     "en": "graphic crop top",
+     "query": "women's graphic crop top",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6449,
+     "error": null,
+     "results": [
+      {
+       "id": 447632,
+       "brand": "Dolce & Gabbana",
+       "name": "graphic-print T-shirt",
+       "price": 665000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32464738_63742016_2048.webp?v=1778753647",
+       "product_url": "https://brownsfashion.com/products/dolce-gabbana-graphic-print-t-shirt-olnss2600162170",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 592185,
+       "brand": "Matin Kim",
+       "name": "STITCH POINT DENIM SHORTS IN BLUE",
+       "price": 148000,
+       "image_url": "https://matinkim.com/web/product/medium/202505/ea074151ac9aa4ec4a2928f5928da5dd.jpg",
+       "product_url": "https://matinkim.com/product/detail.html?product_no=7737&cate_no=206&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 572375,
+       "brand": "Cayl",
+       "name": "stretch bucket hat / grey melange",
+       "price": 62000,
+       "image_url": "https://cayl.co.kr/web/product/big/202501/ef6b867b89939f556ed393ba627faa9f.jpg",
+       "product_url": "https://cayl.co.kr/product/stretch-bucket-hat-grey-melange/2378/category/44/display/1/",
+       "platform": "cayl",
+       "score": null,
+       "subcategory": "bucket-hat"
+      },
+      {
+       "id": 586541,
+       "brand": "YEEL",
+       "name": "ROCKSTAR CAP SLEEVE T-SHIRT BLACK",
+       "price": 82000,
+       "image_url": "https://yeel.kr/web/product/big/202606/29a5f49936f5af3c36f080f897545989.jpg",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=3331&cate_no=204&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 458346,
+       "brand": "Jesse Kamm",
+       "name": "Lake Short in Cowboy Blye",
+       "price": 479050,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/280527_IMG_0494.jpg?v=1774465246",
+       "product_url": "https://www.mohawkgeneralstore.com/products/jesse-kamm-lake-short",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "shorts"
+      },
+      {
+       "id": 480818,
+       "brand": "AND WANDER",
+       "name": "앤드원더_ PE/CO hat [d.blue]",
+       "price": 155000,
+       "image_url": "https://etcseoul.com/web/product/small/202409/ef66f4f54e7c6ee260d9cd07289235e7.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=38496&cate_no=26&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": "hat"
+      },
+      {
+       "id": 576830,
+       "brand": "RIGHE",
+       "name": "RIGHE RINGER T-SHIRT CHARCOAL",
+       "price": 49000,
+       "image_url": "https://ecimg.cafe24img.com/pg456b13286913076/righe/web/product/medium/20240716/eb563a2bc487bf704746f7067178348b.jpg",
+       "product_url": "https://righeofficial.com/product/righe-ringer-t-shirt-charcoal/251/category/76/display/1/",
+       "platform": "righeofficial",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 478953,
+       "brand": "TONYWACK",
+       "name": "토니웩_ HAND-PAINTED RAW HEM DENIM SHORTS [VINTAGE BLUE]",
+       "price": 128000,
+       "image_url": "https://etcseoul.com/web/product/small/202605/0b8e836ecd81f0f682750d657655ad05.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45866&cate_no=103&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 600749,
+       "brand": "Harriet Allure",
+       "name": "Angels Patch Bucket Hat",
+       "price": 115,
+       "image_url": "https://cdn.shopify.com/s/files/1/0945/0386/2617/files/W26SSAHA002CO01WH02_01.jpg?v=1768206876",
+       "product_url": "https://www.fiorucci.com/products/ss26-angels-patch-bucket-hat-womens-white",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "bucket-hat"
+      },
+      {
+       "id": 586748,
+       "brand": "YEEL",
+       "name": "RIVET LOGO CROP T-SHIRT BLACK",
+       "price": 48000,
+       "image_url": "https://yeel.kr/web/product/big/202305/5315be279e8cef6cc4d849ce40059b54.png",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=2572&cate_no=207&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "t-shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::warm_padded_coat",
+     "ko": "겨울 여행룩",
+     "en": "warm padded coat",
+     "query": "women's warm padded coat",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6170,
+     "error": null,
+     "results": [
+      {
+       "id": 471690,
+       "brand": "ZARA",
+       "name": "WATER REPELLENT WINDPROOF 60% DOWN 40% FEATHER HOODED PARKA",
+       "price": 145002,
+       "image_url": "https://static.zara.net/assets/public/194e/a094/cfad4d7580d4/048d04c32a96/03046247800-p/03046247800-p.jpg?ts=1760541964767",
+       "product_url": "https://www.zara.com/us/en/60-down-40-feather-water-repellent-windproof-hooded-anorak-p03046247.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "parka"
+      },
+      {
+       "id": 523623,
+       "brand": "Havati",
+       "name": "[CHURCHILLROMPER] HANDMADE PULLOVER (NAVY)",
+       "price": 298000,
+       "image_url": "https://havatishop.com/web/product/medium/202412/10962ca278482f5670ae16229e35feb4.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=18189&cate_no=126&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": "pullover"
+      },
+      {
+       "id": 437740,
+       "brand": "APC",
+       "name": "Michele knit beanie",
+       "price": 235950,
+       "image_url": "https://cdn.shopify.com/s/files/1/0007/0051/4360/files/WVBBR-M25075IAK_00_57237790-2a7c-4c13-8b6b-326a63fc7f90.jpg?v=1760124043",
+       "product_url": "https://apc-us.com/products/michele-knit-beanie-iak",
+       "platform": "apc-us",
+       "score": null,
+       "subcategory": "sweater"
+      },
+      {
+       "id": 522925,
+       "brand": "Havati",
+       "name": "[HORLISUN] NORTHCOVE RAGLAN HOOD GOOSEDOWN JACKET (CHARCOAL)",
+       "price": 569000,
+       "image_url": "https://havatishop.com/web/product/medium/202510/9595c12193502bd9d789ef5fcb2ab2be.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=17805&cate_no=136&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 446546,
+       "brand": "Balmain",
+       "name": "open-shoulder sweater",
+       "price": 2156000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/33753641_64604565_2048.webp?v=1780653689",
+       "product_url": "https://brownsfashion.com/products/balmain-open-shoulder-sweater-olnss2600172642",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "sweater"
+      },
+      {
+       "id": 484763,
+       "brand": "Another Office",
+       "name": "Solid Watch Cap (Deep navy)",
+       "price": 58000,
+       "image_url": "https://ecimg.cafe24img.com/pg351b03384059035/anotheroffice/web/product/big/20251016/b2dcff98c9cdb0c45c085a3aebe35c6e.jpg",
+       "product_url": "https://anotheroffice.co.kr/product/solid-watch-cap-deep-navy/1382/category/82/display/1/",
+       "platform": "anotheroffice",
+       "score": null,
+       "subcategory": "cap"
+      },
+      {
+       "id": 522919,
+       "brand": "Havati",
+       "name": "[WONDERLAND] LIGHT JACKET (BLACK)",
+       "price": 838000,
+       "image_url": "https://havatishop.com/web/product/medium/202510/58c572ac2d89d4cfdc724665b7de8601.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=18044&cate_no=136&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 523624,
+       "brand": "Havati",
+       "name": "[CHURCHILLROMPER] HANDMADE PULLOVER (BROWN)",
+       "price": 298000,
+       "image_url": "https://havatishop.com/web/product/medium/202412/a3dc73577f8577233ac9f5c3087e9427.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=18188&cate_no=126&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": "pullover"
+      },
+      {
+       "id": 463211,
+       "brand": "OAMC Peacemaker",
+       "name": "Wool Beanie Black",
+       "price": 46800,
+       "image_url": "https://cdn.shopify.com/s/files/1/0576/7705/4136/files/OAMCPeacemaker-Accessories-Beanies-BeanieBlack-PCM2OA10AFL0039999-20251027143812_0.jpg?v=1761644259",
+       "product_url": "https://slamjam.com/products/oamc-peacemaker-accessories-beanie-black-j320073",
+       "platform": "slam-jam",
+       "score": null,
+       "subcategory": "beanie"
+      },
+      {
+       "id": 522945,
+       "brand": "Havati",
+       "name": "[DOCUMENT] VARSITY DOWN JACKET (NAVY)",
+       "price": 548000,
+       "image_url": "https://havatishop.com/web/product/medium/202210/e60ed047002c16ef6f1ba48b18ffc320.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=10872&cate_no=136&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": "down-jacket"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::athletic_tank_top",
+     "ko": "운동 갈 때 입을 옷",
+     "en": "athletic tank top",
+     "query": "women's athletic tank top",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 2100,
+     "error": null,
+     "results": [
+      {
+       "id": 483843,
+       "brand": "GOYOWEAR",
+       "name": "REGEN DRY MESH SINGLET (ASH GREEN)",
+       "price": 43000,
+       "image_url": "https://goyowear.kr/web/product/medium/202504/dff36f8b26f681c517e06c156294af71.jpg",
+       "product_url": "https://goyowear.kr/product/regen-dry-mesh-singlet-ash-green/326/category/36/display/1/",
+       "platform": "goyowear",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 479876,
+       "brand": "OPTIMISTIC RUNNERS",
+       "name": "옵티미스틱 러너스_ Relaxed Shorts [Black]",
+       "price": 170000,
+       "image_url": "https://etcseoul.com/web/product/small/202603/25b85e8cc45d9175405bdc5b9844c5df.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45898&cate_no=1368&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 527843,
+       "brand": "Asics",
+       "name": "gel-cumulus 16, cream/beniimo purple",
+       "price": 179000,
+       "image_url": "https://shopamomento.com/web/product/medium/202604/4db98e733b073a42b4d71aec2a72d7d4.jpg",
+       "product_url": "https://shopamomento.com/product/detail.html?product_no=28026&cate_no=466&display_group=1",
+       "platform": "shopamomento",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 465042,
+       "brand": "Comme Des Garcons Homme Plus",
+       "name": "MEN'S T-SHIRT SS26 (WHITE)",
+       "price": 257400,
+       "image_url": "https://cdn.shopify.com/s/files/1/0051/0392/files/commes_des_garcon_homme_plus_mens_t-shirt_ss26_white_PQ-T042-S26_03.jpg?v=1777624223",
+       "product_url": "https://store.unionlosangeles.com/products/mens-t-shirt-ss26-white",
+       "platform": "union-la",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 451749,
+       "brand": "Kith Women",
+       "name": "Kith Women Nilah II Mesh Soccer Shorty - Black",
+       "price": 157300,
+       "image_url": "https://cdn.shopify.com/s/files/1/0094/2252/files/KHW060684-001-Front.jpg?v=1781543997",
+       "product_url": "https://kith.com/products/khw060684-001",
+       "platform": "kith",
+       "score": null,
+       "subcategory": "shorts"
+      },
+      {
+       "id": 527844,
+       "brand": "Asics",
+       "name": "gel-cumulus 16, black/black",
+       "price": 179000,
+       "image_url": "https://shopamomento.com/web/product/medium/202604/520b682f981f59f950c200e8fabf4490.jpg",
+       "product_url": "https://shopamomento.com/product/detail.html?product_no=28025&cate_no=466&display_group=1",
+       "platform": "shopamomento",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 483824,
+       "brand": "GOYOWEAR",
+       "name": "DIVISION ASKIN SLEEVELESS (BLACK)",
+       "price": 45000,
+       "image_url": "https://goyowear.kr/web/product/medium/202603/d5b967bfd15e8dde5181bf71c24c349b.jpg",
+       "product_url": "https://goyowear.kr/product/division-askin-sleeveless-black/61/category/36/display/1/",
+       "platform": "goyowear",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 479883,
+       "brand": "OPTIMISTIC RUNNERS",
+       "name": "옵티미스틱 러너스_ Perforated Shorts [Black]",
+       "price": 170000,
+       "image_url": "https://etcseoul.com/web/product/small/202607/28c3bda0ca10aefa46dcdefeb2fb4893.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45858&cate_no=1368&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 458628,
+       "brand": "Asics",
+       "name": "GT 2160 in White/Pure Silver",
+       "price": 207350,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/282990_IMG_0009.jpg?v=1770260729",
+       "product_url": "https://www.mohawkgeneralstore.com/products/asics-gt-2160-white-pure-silver",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 483806,
+       "brand": "GOYOWEAR",
+       "name": "FREEZE-CORE LOGO SLEEVELESS (BLACK)",
+       "price": 59000,
+       "image_url": "https://goyowear.kr/web/product/medium/202603/707dda01abee314cd797f8dbe7b233cc.jpg",
+       "product_url": "https://goyowear.kr/product/freeze-core-logo-sleeveless-black/441/category/36/display/1/",
+       "platform": "goyowear",
+       "score": null,
+       "subcategory": "tank-top"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::tailored_blazer",
+     "ko": "면접룩",
+     "en": "tailored blazer",
+     "query": "women's tailored blazer",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1496,
+     "error": null,
+     "results": [
+      {
+       "id": 592836,
+       "brand": "Matin Kim",
+       "name": "BACK OPEN POCKET POINT WOOL JACKET IN BLACK",
+       "price": 398000,
+       "image_url": "https://matinkim.com/web/product/medium/202408/65eeadfc806e92e36d67ee37f89d0c21.jpg",
+       "product_url": "https://matinkim.com/product/kimmatin/detail.html?product_no=6191&cate_no=133&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 459117,
+       "brand": "Comme Si",
+       "name": "La Shirt Classica in White",
+       "price": 393250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/274232_IMG_074.jpg?v=1755836574",
+       "product_url": "https://www.mohawkgeneralstore.com/products/comme-si-la-shirt-classica-white",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 479193,
+       "brand": "GOLDWIN",
+       "name": "골드윈_ One Tuck Straight Pants [BLACK]",
+       "price": 340000,
+       "image_url": "https://etcseoul.com/web/product/small/202601/4700c8b1cc2d53fc1ccebc6f77b669a1.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45212&cate_no=103&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 442004,
+       "brand": "SAMUEL GUÃŒ YANG",
+       "name": "double-breasted boxy blazer",
+       "price": 1225000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/17160558_35491932_2048.webp?v=1777471540",
+       "product_url": "https://brownsfashion.com/products/samuel-gu-yang-double-breasted-boxy-blazer-lgs30w21p157511110",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 477601,
+       "brand": "HEUGN",
+       "name": "유겐_ Alan [White]",
+       "price": 540000,
+       "image_url": "https://etcseoul.com/web/product/small/202603/ae681f3629dbff2c7b8e0af77d8ef0df.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45629&cate_no=169&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 581011,
+       "brand": "Viktor&Rolf Concept Store",
+       "name": "SATIN TROUSERS",
+       "price": 616200,
+       "image_url": "https://cdn.shopify.com/s/files/1/1455/9562/files/Model_front_TB0592499325.jpg?v=1763398199",
+       "product_url": "https://www.viktor-rolf.com/products/pants-black",
+       "platform": "viktor-rolf",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 440018,
+       "brand": "The Frankie Shop",
+       "name": "Bea peak-lapels blazer",
+       "price": 568750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/15304915_27387689_2048_05f2a6fa-fac7-4775-86e6-485c955f50c2.webp?v=1779961186",
+       "product_url": "https://brownsfashion.com/products/the-frankie-shop-bea-peak-lapels-blazer-lms30w20p9387gc103",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 570462,
+       "brand": "FANCY CLUB",
+       "name": "[NF] EYELET POINT SHIRT ONE-PIECE (WHT)_F21ZD291",
+       "price": 72000,
+       "image_url": "https://nastyfancyclub.com/web/product/big/202209/d7fb43c871c0034fa0336ac8f769bf70.jpg",
+       "product_url": "https://nastyfancyclub.com/product/nf-eyelet-point-shirt-one-piece-whtf21zd291/788/category/26/display/1/",
+       "platform": "nastyfancyclub",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 479130,
+       "brand": "MFPEN",
+       "name": "엠에프펜_ SERVICE TROUSERS [Black Tropical Wool]",
+       "price": 560000,
+       "image_url": "https://etcseoul.com/web/product/small/202603/1ac1c8a3261f27f191a371709d3b4798.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=45619&cate_no=103&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 565728,
+       "brand": "TREEMINGBIRD",
+       "name": "Suede Piping Classic Set-up Jacket [ Black ]",
+       "price": 329000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202311/1779a03bf9903c87d1e1fd3eed6c8c56.jpg",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=1412&cate_no=238&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::linen_shirt",
+     "ko": "한여름에 시원한 옷",
+     "en": "linen shirt",
+     "query": "women's linen shirt",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1588,
+     "error": null,
+     "results": [
+      {
+       "id": 591489,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Neutral Beige)",
+       "price": 70800,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/6a1acf3b6dbd8e0c21d504b7c273e68c.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=462&cate_no=79&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 594448,
+       "brand": "Years Ago",
+       "name": "Y-959 Japan Tipico Original Cotton Pants, Greige",
+       "price": 268000,
+       "image_url": "https://yearsago.kr/web/product/medium/202511/ca465c3100d469a2e0b83eead9fdc16d.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=4725&cate_no=651&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 466220,
+       "brand": "Uniqlo",
+       "name": "콤비네이션원피스(슬리브리스)",
+       "price": 49900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/482983/item/krgoods_41_482983_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E482983-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "knit-dress"
+      },
+      {
+       "id": 591141,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Neutral Beige)",
+       "price": 106200,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/6a1acf3b6dbd8e0c21d504b7c273e68c.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=152&cate_no=66&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 524022,
+       "brand": "Havati",
+       "name": "[DOCUMENT] RELAXED PAJAMA SHORTS (NAVY)",
+       "price": 128000,
+       "image_url": "https://havatishop.com/web/product/medium/202303/39c74d4d16e834f2ee633186a2f13a91.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=9113&cate_no=284&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 448207,
+       "brand": "Aje",
+       "name": "Mist ruched midi dress",
+       "price": 614250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/31888905_63416541_2048_2837dafd-acf7-4d78-a364-75c49eda712f.webp?v=1769683658",
+       "product_url": "https://brownsfashion.com/products/aje-mist-ruched-midi-dress-olmss2600165765",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 591488,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Off White)",
+       "price": 70800,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/59928c7ee456d4402dc90c834c9d20e0.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=463&cate_no=79&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 447393,
+       "brand": "Brandon Maxwell",
+       "name": "Sutton pintuck elongated shorts",
+       "price": 1445500,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/31944300_64226671_2048.webp?v=1767864167",
+       "product_url": "https://brownsfashion.com/products/brandon-maxwell-sutton-pintuck-elongated-shorts-olmss2600164512",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 467022,
+       "brand": "Uniqlo",
+       "name": "AIRism Cotton Camisole Bra Dress | Stripe",
+       "price": 28457,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/485284/item/usgoods_65_485284_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E485284-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 591140,
+       "brand": "The Nockin",
+       "name": "Ease Tencel Washed Over Shirt - Lightweight (Off White)",
+       "price": 106200,
+       "image_url": "https://ecimg.cafe24img.com/pg2398b31752624084/kodia2511/web/product/big/20260320/59928c7ee456d4402dc90c834c9d20e0.jpg",
+       "product_url": "https://thenockin.com/product/detail.html?product_no=153&cate_no=66&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::oversized_sweatshirt",
+     "ko": "캠퍼스룩",
+     "en": "oversized sweatshirt",
+     "query": "women's oversized sweatshirt",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1241,
+     "error": null,
+     "results": [
+      {
+       "id": 566150,
+       "brand": "TREEMINGBIRD",
+       "name": "Scratch Damage Boat Neck Sweat Shirt [ Black ]",
+       "price": 149000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202502/f04643035a5f70d07b2c1cbbf8dd3c4a.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2002&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 441556,
+       "brand": "The Row",
+       "name": "Eglitta jeans",
+       "price": 1610000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/26817639_64410275_2048.webp?v=1777559726",
+       "product_url": "https://brownsfashion.com/products/the-row-eglitta-jeans-olnaw2400122405",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 480416,
+       "brand": "MOONSTAR",
+       "name": "문스타_ Gym Classic [White]",
+       "price": 139000,
+       "image_url": "https://etcseoul.com/web/product/small/202008/ffe616dfbde52bcfa36698ec8f4afdf9.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=25660&cate_no=137&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 566153,
+       "brand": "TREEMINGBIRD",
+       "name": "Scratch Damage Boat Neck Sweat Shirt [ Charcoal ]",
+       "price": 149000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202503/cfbecf7a199f20c6c16d5e8c20ffc550.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2085&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 566538,
+       "brand": "TREEMINGBIRD",
+       "name": "Two-way Fit Balloon Denim Pants [ Light Blue ]",
+       "price": 179000,
+       "image_url": "https://treemingbird.com/web/product/medium/202503/693706e2c3e4bb1fc3b9d2a804b7851e.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2104&cate_no=56&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 480420,
+       "brand": "MOONSTAR",
+       "name": "문스타_ Gym Classic [D.NAVY]",
+       "price": 139000,
+       "image_url": "https://etcseoul.com/web/product/small/202008/79be6e815861445c29d418828f0d445e.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=26478&cate_no=137&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 566144,
+       "brand": "TREEMINGBIRD",
+       "name": "TMB Logo Piping Sweat Shirt [ Melange Gray ]",
+       "price": 159000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202502/c66c5e481a12ad92d47ad5606027d251.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2014&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 516141,
+       "brand": "ZARA",
+       "name": "Z1975 WIDE LEG JEANS WITH DARTS",
+       "price": 85657,
+       "image_url": "https://static.zara.net/assets/public/6fc6/5ee1/00d74f80afc3/c5359e1a27c1/fc686c05107ee2357ee6fbc00b238629/fc686c05107ee2357ee6fbc00b238629.jpg?ts=1775043087116&w=1024",
+       "product_url": "https://www.zara.com/us/en/z1975-wide-leg-jeans-with-darts-p05862096.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "wide-pants"
+      },
+      {
+       "id": 440215,
+       "brand": "Maison MIHARA YASUHIRO",
+       "name": "Hank warped-sole sneakers",
+       "price": 498750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/15744631_28800856_2048_27ada6e7-6c30-4bcb-b575-05a281ab112b.webp?v=1779959988",
+       "product_url": "https://brownsfashion.com/products/maison-mihara-yasuhiro-hank-warped-sole-sneakers-omsw22m00018416",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 566143,
+       "brand": "TREEMINGBIRD",
+       "name": "TMB Logo Piping Sweat Shirt [ Black ]",
+       "price": 159000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202502/a44297bcdd67e3c72b5104db8b0362ec.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2013&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::waterproof_trench_coat",
+     "ko": "장마철에 입을 옷",
+     "en": "waterproof trench coat",
+     "query": "women's waterproof trench coat",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6927,
+     "error": null,
+     "results": [
+      {
+       "id": 458739,
+       "brand": "Tibi",
+       "name": "Double Collar Frank Trench Coat in Dark Hazelnut",
+       "price": 2280850,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/276794_IMG_141.jpg?v=1767831300",
+       "product_url": "https://www.mohawkgeneralstore.com/products/tibi-double-collar-frank-trench-coat-dark-hazelnut",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 599051,
+       "brand": "hippiedippy",
+       "name": "rainbow dot rain boots",
+       "price": 20000,
+       "image_url": "https://ecimg.cafe24img.com/pg538b59795769072/hippiedippykr/web/product/medium/20260630/135fdfbd23e2578a282c45738f50037e.jpg",
+       "product_url": "https://hippiedippy.kr/product/detail.html?product_no=8812&cate_no=52&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 482384,
+       "brand": "YOKO SAKAMOTO",
+       "name": "Researcher Bag - Medium (Black)",
+       "price": 133700,
+       "image_url": "https://cafe24.poxo.com/ec01/swallowco/6d1lNM5QtO+rBkf6Tc60KopowPk3730Eys032Yj/NFNUnsu+IeLbhQ1Q+beHUvnh+0sz6DD6kgvdoVL+blmgUQ==/_/web/product/small/202604/061c770b7e54b1c06c4757331a275bac.jpg",
+       "product_url": "https://swallowlounge.co.kr/product/researcher-bag-medium-black/10040/category/1152/display/1/",
+       "platform": "swallowlounge",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 585638,
+       "brand": "paradigm film (패러다임 필름)",
+       "name": "[Ep.01] Mockneck Safari Wrap Coat (Charcoal)",
+       "price": 95600,
+       "image_url": "https://ecimg.cafe24img.com/pg2268b31810438008/paradigmflim/web/product/medium/20260127/63e1c0a7d24eb0a9575d03efeb471f30.jpg",
+       "product_url": "https://paradigmfilm.kr/product/detail.html?product_no=116&cate_no=112&display_group=1",
+       "platform": "paradigmfilm",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 441048,
+       "brand": "Burberry",
+       "name": "Marsh ankle rain boots",
+       "price": 866250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/29945804_59052366_2048.webp?v=1779355530",
+       "product_url": "https://brownsfashion.com/products/burberry-marsh-ankle-rain-boots-olsaw2600176223",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 524117,
+       "brand": "Havati",
+       "name": "[MAZI UNTITLED] S.POST BAG (BLACK)",
+       "price": 69000,
+       "image_url": "https://havatishop.com/web/product/medium/202309/bf1ce9f0c58c3719db93668504405f43.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=8225&cate_no=80&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 527111,
+       "brand": "Birrot",
+       "name": "oversized trench coat, black",
+       "price": 891000,
+       "image_url": "https://shopamomento.com/web/product/medium/202602/716159df0dcecdd5f6b9a31774b872e7.jpg",
+       "product_url": "https://shopamomento.com/product/detail.html?product_no=27204&cate_no=450&display_group=1",
+       "platform": "shopamomento",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 542995,
+       "brand": "MOONSTAR",
+       "name": "(unisex) et 027 marke modi / ash",
+       "price": 57500,
+       "image_url": "https://fr8ight.co.kr/web/product/big/202501/e88ae31506e97a1ba88e15861fbed764.jpg",
+       "product_url": "https://fr8ight.co.kr/product/unisex-et-027-marke-modi-ash/7857/category/55/display/1/",
+       "platform": "fr8ight",
+       "score": null,
+       "subcategory": "sneakers"
+      },
+      {
+       "id": 584513,
+       "brand": "DAWN FACTORY (던팩토리)",
+       "name": "BUDDY BAG SOLID BLACK 버디백 솔리드 블랙",
+       "price": 44850,
+       "image_url": "https://dawnfactory.co.kr/web/product/big/202606/52b73327035233eeb08f5d5eee5b3b15.jpg",
+       "product_url": "https://dawnfactory.co.kr/product/detail.html?product_no=146&cate_no=118&display_group=1",
+       "platform": "dawnfactory",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 520339,
+       "brand": "ROUGHSIDE",
+       "name": "트렌치 하프 코트 다크 네이비",
+       "price": 398000,
+       "image_url": "https://roughside.co.kr/web/product/big/202509/e3e967f09d780376e8dd30da32012290.jpg",
+       "product_url": "https://roughside.co.kr/product/detail.html?product_no=1906&cate_no=81&display_group=1",
+       "platform": "roughside",
+       "score": null,
+       "subcategory": "trench-coat"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::neat_knit_cardigan",
+     "ko": "명절에 입을 단정한 옷",
+     "en": "neat knit cardigan",
+     "query": "women's neat knit cardigan",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 6864,
+     "error": null,
+     "results": [
+      {
+       "id": 522961,
+       "brand": "Havati",
+       "name": "[HORLISUN] ANNETTE SUPERFINE WOOL HEAVY RIB KNIT CARDIGAN (MELANGE BURGUNDY)",
+       "price": 298000,
+       "image_url": "https://havatishop.com/web/product/medium/202509/e12a772a812cb921e4e53f741d3af9a4.jpg",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=17571&cate_no=137&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 597866,
+       "brand": "Made Some",
+       "name": "elegant pleated skirt ruby",
+       "price": 654000,
+       "image_url": "https://cdn.shopify.com/s/files/1/1060/7516/0914/files/forte-forte_8053631240651_01_1f3fd066-8497-4c19-9f1f-a76911854999.jpg?v=1781182807",
+       "product_url": "https://www.forte-forte.com/products/elegant-pleated-skirt-ruby",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "skirt"
+      },
+      {
+       "id": 473235,
+       "brand": "ZARA",
+       "name": "SMOCKED SHIRT",
+       "price": 71357,
+       "image_url": "https://static.zara.net/assets/public/89f3/583e/14fb4881acbf/ef1e351110fd/02089159400-h1/02089159400-h1.jpg?ts=1764927127225",
+       "product_url": "https://www.zara.com/us/en/smocked-shirt-p02089159.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 465804,
+       "brand": "Union Los Angeles",
+       "name": "Cole Sweater (Light Blue)",
+       "price": 414700,
+       "image_url": "https://cdn.shopify.com/s/files/1/0051/0392/files/030725_UNIONSP25_MODEL064.jpg?v=1741312972",
+       "product_url": "https://store.unionlosangeles.com/products/cole-sweater-light-blue",
+       "platform": "union-la",
+       "score": null,
+       "subcategory": "sweater"
+      },
+      {
+       "id": 458763,
+       "brand": "Pleats Please Issey Miyake",
+       "name": "Nov Pant in Brown",
+       "price": 815100,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/272161_IMG_0057.jpg?v=1766103268",
+       "product_url": "https://www.mohawkgeneralstore.com/products/pleats-please-issey-miyake-mc-nov-pant-brown",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 561718,
+       "brand": "mu:arvo",
+       "name": "VOLUME SLEEVED BLOUSE_BLACK",
+       "price": 49600,
+       "image_url": "https://muarvo.com/web/product/medium/202505/e8623c8c13b8aea249b45a107166b782.jpg",
+       "product_url": "https://muarvo.com/product/volume-sleeved-blouseblack/200/category/164/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "blouse"
+      },
+      {
+       "id": 604258,
+       "brand": "8DIVISION",
+       "name": "Cop Knit Cardigan (Grey)",
+       "price": 199000,
+       "image_url": "https://www.8division.com/web/product/big/202510/0c5f3b151287146802b340dfc4d9d9c1.jpg",
+       "product_url": "https://www.8division.com/product/detail.html?product_no=55834&cate_no=1789&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 561704,
+       "brand": "mu:arvo",
+       "name": "SHINING LONG PLEATS SKIRT_SILVER GREY",
+       "price": 55600,
+       "image_url": "https://muarvo.com/web/product/medium/202505/8aba69298b4733451523e2818acd9d17.jpg",
+       "product_url": "https://muarvo.com/product/shining-long-pleats-skirtsilver-grey/233/category/164/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "skirt"
+      },
+      {
+       "id": 561716,
+       "brand": "mu:arvo",
+       "name": "VOLUME SLEEVED BLOUSE_CREAM",
+       "price": 49600,
+       "image_url": "https://muarvo.com/web/product/medium/202505/7ae5658e1c355987d6537ddeebd756fd.jpg",
+       "product_url": "https://muarvo.com/product/volume-sleeved-blousecream/202/category/164/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "blouse"
+      },
+      {
+       "id": 542181,
+       "brand": "EASTLOGUE",
+       "name": "cozy cable cardigan / royal blue",
+       "price": 149000,
+       "image_url": "https://fr8ight.co.kr/web/product/big/202308/ab8dc70d020e425b0e4dc401cb486a03.jpg",
+       "product_url": "https://fr8ight.co.kr/product/cozy-cable-cardigan-royal-blue/4471/category/50/display/1/",
+       "platform": "fr8ight",
+       "score": null,
+       "subcategory": "cardigan"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

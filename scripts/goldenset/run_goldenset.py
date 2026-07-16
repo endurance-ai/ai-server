@@ -74,23 +74,36 @@ def _cand_to_dict(cand: Any) -> dict[str, Any]:
     }
 
 
-async def _run_one(sem: asyncio.Semaphore, pattern: dict, value: dict, gender: str) -> dict[str, Any]:
-    from app.agents.tools.search_products import run_text_only_search
+async def _run_one(
+    sem: asyncio.Semaphore, pattern: dict, value: dict, gender: str, precision: str
+) -> dict[str, Any]:
+    from app.agents.tools.search_products import run_multi_query_search, run_text_only_search
 
     en = value["en"]
     query = f"women's {en}" if gender == "women" else (f"men's {en}" if gender == "men" else en)
     qid = f"{pattern['id']}::{en.replace(' ', '_')}"
+    g = gender if gender in ("men", "women") else None
+    # Phase 4a — sub_queries 가 있고 precision on 이면 멀티 확장(실제 봇의 LLM
+    # sub_queries 를 통제값으로 재현). off 는 단일 검색(현행 baseline).
+    sub_queries = value.get("sub_queries") if precision == "on" else None
     async with sem:
         t0 = time.perf_counter()
         try:
-            cands = await run_text_only_search(
-                text_query=query,
-                category=value.get("category"),
-                # 2026-07-16 — v6 p_gender 하드 필터: 실제 봇 경로와 동일하게
-                # 구조화 성별도 전달 (none 런은 필터 off).
-                gender=gender if gender in ("men", "women") else None,
-                top_k=TOP_K,
-            )
+            if sub_queries:
+                cands = await run_multi_query_search(
+                    queries=[en, *sub_queries],
+                    gender=g,
+                    top_k=TOP_K,
+                )
+            else:
+                cands = await run_text_only_search(
+                    text_query=query,
+                    category=value.get("category"),
+                    # 2026-07-16 — v6 p_gender 하드 필터: 실제 봇 경로와 동일하게
+                    # 구조화 성별도 전달 (none 런은 필터 off).
+                    gender=g,
+                    top_k=TOP_K,
+                )
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             results = [_cand_to_dict(c) for c in cands]
             # 2026-07-15 — 자동 subcategory hit율 (라벨 있는 값만): 결과 row 의
@@ -164,7 +177,7 @@ async def run_matrix(pattern_ids: list[str] | None, gender: str, precision: str)
     }
     for p in patterns:
         print(f"\n=== {p['id']} — {p['name_ko']} ({len(p['values'])}개 값) ===", flush=True)
-        rows = await asyncio.gather(*[_run_one(sem, p, v, gender) for v in p["values"]])
+        rows = await asyncio.gather(*[_run_one(sem, p, v, gender, precision) for v in p["values"]])
         entry: dict[str, Any] = {"id": p["id"], "name_ko": p["name_ko"], "tier": p["tier"], "queries": list(rows)}
         # 패턴 단위 자동 지표 — target_subcategory 라벨이 있는 값들의 평균 hit율
         hits = [q["subcat_hit"] for q in rows if q.get("subcat_hit") is not None]

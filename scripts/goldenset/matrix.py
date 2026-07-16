@@ -285,26 +285,39 @@ PATTERNS: list[dict] = [
     },
     {
         # 2026-07-15 — 순수 상황(TPO) 쿼리: 아이템 단어 없이 상황만. 봇
-        # 사용자가 실제로 던지는 형태 ("결혼식 하객룩 추천해줘"). p7(상황+
-        # 아이템)과 달리 family gate 를 태울 카테고리 단서가 없어 현행
-        # 파이프라인의 맨실력 측정 = description/enhance_query (Phase 4)
-        # 착수 전 베이스라인.
+        # 사용자가 실제로 던지는 형태 ("결혼식 하객룩 추천해줘").
+        # 2026-07-16 Phase 4a: 각 값에 `sub_queries` (LLM 확장 재현용 통제값)
+        # 추가. 러너 --precision on = 멀티 확장(text_query 대표 + sub_queries
+        # 인터리브 병합), off = 단일 검색(현행 baseline). 실제 봇에선 LLM 이
+        # sub_queries 를 생성하지만, 하네스는 A/B 재현성을 위해 통제값 사용.
         "id": "p9_situation_pure",
-        "name_ko": "[순수 상황/TPO] — Phase 4 베이스라인",
+        "name_ko": "[순수 상황/TPO] — Phase 4a 멀티 확장",
         "tier": "t3",
         "values": [
-            {"ko": "결혼식 하객룩", "en": "elegant wedding guest outfit", "category": None},
-            {"ko": "여름 휴가룩", "en": "summer vacation resort outfit", "category": None},
-            {"ko": "첫 출근룩", "en": "first day at office business casual outfit", "category": None},
-            {"ko": "데이트룩", "en": "romantic date night outfit", "category": None},
-            {"ko": "여름 페스티벌룩", "en": "summer music festival outfit", "category": None},
-            {"ko": "겨울 여행룩", "en": "warm winter travel outfit", "category": None},
-            {"ko": "운동 갈 때 입을 옷", "en": "gym workout wear", "category": None},
-            {"ko": "면접룩", "en": "job interview formal outfit", "category": None},
-            {"ko": "한여름에 시원한 옷", "en": "breathable cool summer clothes", "category": None},
-            {"ko": "캠퍼스룩", "en": "casual campus look", "category": None},
-            {"ko": "장마철에 입을 옷", "en": "rainy season waterproof outfit", "category": None},
-            {"ko": "명절에 입을 단정한 옷", "en": "neat modest family gathering outfit", "category": None},
+            {"ko": "결혼식 하객룩", "en": "elegant midi dress",
+             "sub_queries": ["satin blouse", "slingback heels"], "category": None},
+            {"ko": "여름 휴가룩", "en": "flowy summer maxi dress",
+             "sub_queries": ["linen shirt", "straw tote bag"], "category": None},
+            {"ko": "첫 출근룩", "en": "tailored blazer",
+             "sub_queries": ["dress shirt", "straight trousers"], "category": None},
+            {"ko": "데이트룩", "en": "romantic slip dress",
+             "sub_queries": ["cropped cardigan", "strappy heels"], "category": None},
+            {"ko": "여름 페스티벌룩", "en": "graphic crop top",
+             "sub_queries": ["denim shorts", "bucket hat"], "category": None},
+            {"ko": "겨울 여행룩", "en": "warm padded coat",
+             "sub_queries": ["chunky knit sweater", "wool beanie"], "category": None},
+            {"ko": "운동 갈 때 입을 옷", "en": "athletic tank top",
+             "sub_queries": ["training shorts", "running shoes"], "category": None},
+            {"ko": "면접룩", "en": "tailored blazer",
+             "sub_queries": ["white dress shirt", "tailored trousers"], "category": None},
+            {"ko": "한여름에 시원한 옷", "en": "linen shirt",
+             "sub_queries": ["cotton shorts", "breathable sundress"], "category": None},
+            {"ko": "캠퍼스룩", "en": "oversized sweatshirt",
+             "sub_queries": ["wide jeans", "canvas sneakers"], "category": None},
+            {"ko": "장마철에 입을 옷", "en": "waterproof trench coat",
+             "sub_queries": ["ankle rain boots", "nylon crossbody bag"], "category": None},
+            {"ko": "명절에 입을 단정한 옷", "en": "neat knit cardigan",
+             "sub_queries": ["pleated midi skirt", "modest blouse"], "category": None},
         ],
     },
 ]
