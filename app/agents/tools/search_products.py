@@ -21,6 +21,7 @@ fabricated-placeholder-URL → Modal regression.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -622,6 +623,79 @@ async def run_text_only_search(
     return list(state.final_candidates or [])
 
 
+def _cand_id(cand: Any) -> Any:
+    """product_id 추출 (dict / Candidate 양쪽)."""
+    if isinstance(cand, dict):
+        return cand.get("id") or cand.get("product_id")
+    return getattr(cand, "id", None) or getattr(cand, "product_id", None)
+
+
+async def run_multi_query_search(
+    *,
+    queries: list[str],
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
+    top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
+) -> list[Any]:
+    """상황/TPO 쿼리 확장 (2026-07-16 Phase 4a).
+
+    "결혼식 하객룩" 같은 상황 쿼리는 단일 아이템으로 답할 수 없다 — LLM 이
+    2~3개 구성 아이템 쿼리("elegant midi dress" / "satin blouse" /
+    "slingback heels")로 확장하고, 여기서 각각을 **병렬** text 검색한 뒤
+    **인터리브 병합**(라운드로빈)해 하나의 코디 믹스를 만든다. gender 는
+    시스템이 모든 서브쿼리에 동일 적용(하드 필터) — 사용자가 여성 하객룩을
+    물으면 아이템 전부 여성.
+
+    각 서브쿼리는 자체 diversify(브랜드/플랫폼 캡)를 거친 뒤 병합되므로,
+    믹스는 아이템 종류가 다양하면서도 브랜드가 한쪽으로 쏠리지 않는다.
+    실패한 서브쿼리는 건너뛴다(부분 실패 허용)."""
+    results = await asyncio.gather(
+        *[
+            run_text_only_search(
+                text_query=q,
+                gender=gender,
+                brand_filter=brand_filter,
+                top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
+            )
+            for q in queries
+        ],
+        return_exceptions=True,
+    )
+    lists: list[list[Any]] = []
+    for q, r in zip(queries, results, strict=True):
+        if isinstance(r, list):
+            lists.append(r)
+        else:
+            logger.warning("[multi_query] sub-query %r failed: %r", q[:60], r)
+    # 라운드로빈 인터리브 + id dedup — top_k 까지.
+    merged: list[Any] = []
+    seen: set[Any] = set()
+    depth = max((len(lst) for lst in lists), default=0)
+    for i in range(depth):
+        for lst in lists:
+            if i < len(lst):
+                cand = lst[i]
+                cid = _cand_id(cand)
+                if cid is not None and cid in seen:
+                    continue
+                seen.add(cid)
+                merged.append(cand)
+                if len(merged) >= top_k:
+                    logger.info(
+                        "🔍 [multi_query] %d subq → %d merged (interleaved, top_k=%d)",
+                        len(lists),
+                        len(merged),
+                        top_k,
+                    )
+                    return merged
+    logger.info("🔍 [multi_query] %d subq → %d merged (interleaved)", len(lists), len(merged))
+    return merged
+
+
 async def run_blended_search(
     *,
     origin_url: str,
@@ -1188,8 +1262,38 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # can look up TasteProfile and re-order the v6 raw rows.
     user_key = ctx.get("user_key")
 
+    # 2026-07-16 Phase 4a — 상황/TPO 쿼리 확장 (멀티 쿼리). LLM 이 상황
+    # 쿼리에서만 sub_queries 를 채운다. 순수 텍스트 턴에서만 활성 (이미지/핀
+    # 앵커 턴은 단일 아이템 의도라 제외). text_query(대표) + sub_queries 를
+    # dedup 해 2개 이상이면 멀티 경로. structured_gender 는 모든 서브쿼리에
+    # 동일 적용된다.
+    multi_queries: list[str] | None = None
+    _sub_raw = args.get("sub_queries")
+    if not has_image and pinned_embedding is None and isinstance(_sub_raw, list) and _sub_raw:
+        _seen_q: set[str] = set()
+        _mq: list[str] = []
+        for q in [text_query, *_sub_raw]:
+            if not isinstance(q, str):
+                continue
+            qs = q.strip()
+            if qs and qs.lower() not in _seen_q:
+                _seen_q.add(qs.lower())
+                _mq.append(qs)
+        if len(_mq) >= 2:
+            multi_queries = _mq[:3]  # 레이턴시 상한 — 최대 3개 병렬 검색
+
     try:
-        if has_image:
+        if multi_queries is not None:
+            logger.info("🔍 [tool.search_products] situation multi-query: %r", multi_queries)
+            cands = await run_multi_query_search(
+                queries=multi_queries,
+                gender=structured_gender,
+                brand_filter=brand_filter,
+                top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
+            )
+        elif has_image:
             # Photo-pick: real resolved image drives the v6 query embedding.
             # text_query is informational only (v6 has no text param). NEVER an
             # LLM-supplied / placeholder URL.

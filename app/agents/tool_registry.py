@@ -89,6 +89,11 @@ class SearchProductsArgs(TypedDict, total=False):
     # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
     # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
     brand: str | None
+    # 2026-07-16 — 상황/TPO 쿼리("결혼식 하객룩")를 구성 아이템으로 확장.
+    # 특정 옷 이름이 없는 상황 쿼리에서만 2~3개 아이템 쿼리를 채운다.
+    # dispatch 가 각각 병렬 검색 후 인터리브 병합. gender 는 시스템이
+    # 각 쿼리에 적용하므로 순수 아이템 쿼리만 (gender 단어 불필요).
+    sub_queries: list[str]
     min_price: float | None
     max_price: float | None
     exclude_keywords: list[str]
@@ -286,7 +291,27 @@ REGISTRY: dict[str, ToolMetadata] = {
             '  ❌ "Grey Fitted T-Shirt for Men"          (caps, preposition)\n'
             "  ❌ \"men's grey tee that's fitted\"          (possessive, clause)\n"
             '  ❌ "fitted grey t-shirt for men"           (wrong order)\n'
-            '  ❌ "a pair of denim jeans"                 (article, redundant)'
+            '  ❌ "a pair of denim jeans"                 (article, redundant)\n'
+            "\n"
+            "[SITUATION / OCCASION QUERIES → sub_queries]\n"
+            "When the user asks for an OUTFIT for a SITUATION rather than a "
+            "specific garment (wedding guest, job interview, summer vacation, "
+            "date night, festival, first day at work), you CANNOT answer with "
+            "one garment. Instead:\n"
+            "  - Put the single best-fit garment in `text_query` (canonical form).\n"
+            "  - Put 1-2 MORE complementary garments in `sub_queries` (each in "
+            "the SAME canonical form). Aim for a coherent outfit: a top/dress + "
+            "a layer or shoes/bag — not 3 of the same thing.\n"
+            "  - Do NOT include gender words in sub_queries — the system applies "
+            "gender to every sub-query automatically.\n"
+            "  - Use sub_queries ONLY for situation queries. For a specific "
+            "garment request ('grey hoodie') leave sub_queries empty.\n"
+            "Example — user: '결혼식 하객룩 추천해줘' (women signal):\n"
+            '  text_query="elegant midi dress", '
+            'sub_queries=["satin blouse", "slingback heels"]\n'
+            "Example — user: '면접 때 입을 옷':\n"
+            '  text_query="tailored blazer", '
+            'sub_queries=["dress shirt", "straight trousers"]'
         ),
         "args_typeddict": SearchProductsArgs,
         "result_typeddict": SearchProductsResult,
