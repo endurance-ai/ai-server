@@ -74,9 +74,7 @@ def _cand_to_dict(cand: Any) -> dict[str, Any]:
     }
 
 
-async def _run_one(
-    sem: asyncio.Semaphore, pattern: dict, value: dict, gender: str, precision: str
-) -> dict[str, Any]:
+async def _run_one(sem: asyncio.Semaphore, pattern: dict, value: dict, gender: str, precision: str) -> dict[str, Any]:
     from app.agents.tools.search_products import run_multi_query_search, run_text_only_search
 
     en = value["en"]
