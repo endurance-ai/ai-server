@@ -248,7 +248,11 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
             )
         await conn.commit()
 
-    written = await refresh_auto_sections(pool)
+    # usd_krw=1.0 로 고정 — 실 환율(수백~수천 KRW/USD)을 쓰면 위 테스트용 가격들이
+    # 전부 임계값 아래로 들어가 버려 under-100 분리 검증이 무의미해진다. 실시간 FX
+    # 조회 자체(네트워크 호출)를 이 단위 테스트 범위 밖으로 둬 결정론적으로 유지.
+    with patch("app.services.curation_refresh._fetch_usd_to_krw", return_value=1.0):
+        written = await refresh_auto_sections(pool)
     assert written >= 2  # women: popular + under-100 (trending은 신호 없음 → skip)
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
