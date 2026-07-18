@@ -5,7 +5,9 @@ lifespan에서 asyncio 태스크로 기동 (`_modal_keep_warm_loop` 패턴). 주
      - popular          : 최근 7d ai.product_views 상위 (브랜드당 2개 캡)
      - trending-search  : 최근 7d ai.searches 결과셋에 가장 자주 등장한 상품
      - under-100        : price < $100 재고 상품, 조회수 순
-       (v6 RPC에 가격 필터가 없어 검색이 아닌 DB 직접 쿼리 — 스펙 결정 사항)
+       (v6 RPC에 가격 필터가 없어 검색이 아닌 DB 직접 쿼리 — 스펙 결정 사항.
+       products.price는 KRW 저장이라 $100 상한은 매 refresh 사이클마다 Frankfurter
+       API에서 실시간 USD→KRW 환율을 조회해 계산한다 — 고정 환율 상수 사용 안 함)
   2. 노션 "큐레이션 구좌" DB → editorial 구좌 동기화 (NOTION_TOKEN 설정 시)
      - 활성 체크 해제 / 노션에서 사라진 페이지 → is_active=false
 
@@ -74,6 +76,34 @@ _TRENDING_SQL = f"""
     LIMIT %(limit)s
 """  # noqa: S608
 
+# products.price는 항상 KRW로 저장됨 (crawler/src/import-products.ts가 임포트 시점에
+# crawler/src/lib/fx.ts FX_TO_KRW로 USD/EUR/GBP -> KRW 변환 후 적재). "Under $100"은
+# 원화 100원이 아니라 $100 상당 KRW 상한이어야 하므로, 상수 대신 매 refresh 사이클마다
+# _fetch_usd_to_krw()가 조회한 실시간 환율(%(usd_krw)s)을 곱해 상한을 계산한다.
+_FX_API_URL = "https://api.frankfurter.dev/v1/latest"
+_FALLBACK_USD_TO_KRW = 1430.0  # API 실패 시에만 사용하는 최후 폴백 (fail-open)
+
+
+async def _fetch_usd_to_krw() -> float:
+    """Frankfurter API(ECB 기준, 무료/무키)에서 쿼리 시점 USD→KRW 환율 조회.
+
+    실패 시 폴백 고정값 반환 — 이 refresher는 전체 fail-open 정책이라 환율
+    조회 실패가 다른 auto 구좌 계산을 막지 않아야 한다.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(_FX_API_URL, params={"from": "USD", "to": "KRW"})
+            resp.raise_for_status()
+            return float(resp.json()["rates"]["KRW"])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "🗂 [curation] USD→KRW FX fetch failed, using fallback %.0f: %r",
+            _FALLBACK_USD_TO_KRW,
+            exc,
+        )
+        return _FALLBACK_USD_TO_KRW
+
+
 _UNDER_100_SQL = f"""
     SELECT p.id
     FROM public.products p
@@ -83,7 +113,7 @@ _UNDER_100_SQL = f"""
         WHERE viewed_at > now() - interval '{_SIGNAL_WINDOW}'
         GROUP BY product_id
     ) v ON v.product_id = p.id
-    WHERE p.in_stock AND p.price IS NOT NULL AND p.price < 100 AND p.price > 0
+    WHERE p.in_stock AND p.price IS NOT NULL AND p.price < (100 * %(usd_krw)s) AND p.price > 0
       AND {_GENDER_MATCH_SQL}
     ORDER BY v.cnt DESC NULLS LAST, p.last_seen_at DESC NULLS LAST, p.id
     LIMIT %(limit)s
@@ -132,11 +162,14 @@ async def _upsert_section(
 async def refresh_auto_sections(pool: AsyncConnectionPool) -> int:
     """auto 구좌 계산 + upsert. 결과가 빈 구좌는 건드리지 않는다 (기존 행 유지)."""
     written = 0
+    # under-100 SQL만 usd_krw를 참조 — 다른 섹션 SQL에는 해당 named param이 없으므로
+    # 딕셔너리에 같이 넘겨도 무시된다. 사이클당 1회만 조회해 API 호출을 절약.
+    usd_krw = await _fetch_usd_to_krw()
     for gender in _GENDERS:
         for section_id, sql, title, subtitle, sort_order in _AUTO_SECTIONS:
             try:
                 async with pool.connection() as conn, conn.cursor() as cur:
-                    await cur.execute(sql, {"gender": gender, "limit": _SECTION_SIZE})
+                    await cur.execute(sql, {"gender": gender, "limit": _SECTION_SIZE, "usd_krw": usd_krw})
                     product_ids = [int(r[0]) for r in await cur.fetchall()]
                 if not product_ids:
                     logger.info("🗂 [curation] %s/%s empty — keep existing row", section_id, gender)
