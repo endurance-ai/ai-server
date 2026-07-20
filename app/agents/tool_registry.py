@@ -82,6 +82,18 @@ class SearchProductsArgs(TypedDict, total=False):
     style_node_primary: str | None
     color_family: str | None
     fit: str | None
+    # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
+    # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
+    # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
+    category: str | None
+    # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
+    # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
+    brand: str | None
+    # 2026-07-16 — 상황/TPO 쿼리("결혼식 하객룩")를 구성 아이템으로 확장.
+    # 특정 옷 이름이 없는 상황 쿼리에서만 2~3개 아이템 쿼리를 채운다.
+    # dispatch 가 각각 병렬 검색 후 인터리브 병합. gender 는 시스템이
+    # 각 쿼리에 적용하므로 순수 아이템 쿼리만 (gender 단어 불필요).
+    sub_queries: list[str]
     min_price: float | None
     max_price: float | None
     exclude_keywords: list[str]
@@ -239,9 +251,17 @@ REGISTRY: dict[str, ToolMetadata] = {
         "name": "search_products",
         "description": (
             "Search the 78k-product catalog. Provide `text_query` plus optional "
-            "filters (style_node_primary, color_family, fit, price). Do "
+            "filters (category, brand, style_node_primary, color_family, fit, price). Do "
             "NOT provide an image_url — the tool handles imagery internally "
             "from session state. Returns top candidates with brand/title/price.\n"
+            "\n"
+            "  - `category`: the garment word of the query as ONE singular English "
+            "token (same word as in text_query — e.g. 'hoodie', 'sneakers', "
+            "'midi-dress', 'cargo-pants'). ALWAYS set it when the user asks for a "
+            "specific garment type; it powers a precise catalog filter.\n"
+            "  - `brand`: ONLY when the user explicitly names a brand "
+            "(e.g. '아크네 가디건' → brand='acne studios'). English brand name. "
+            "NEVER invent a brand the user didn't mention.\n"
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"
@@ -271,7 +291,27 @@ REGISTRY: dict[str, ToolMetadata] = {
             '  ❌ "Grey Fitted T-Shirt for Men"          (caps, preposition)\n'
             "  ❌ \"men's grey tee that's fitted\"          (possessive, clause)\n"
             '  ❌ "fitted grey t-shirt for men"           (wrong order)\n'
-            '  ❌ "a pair of denim jeans"                 (article, redundant)'
+            '  ❌ "a pair of denim jeans"                 (article, redundant)\n'
+            "\n"
+            "[SITUATION / OCCASION QUERIES → sub_queries]\n"
+            "When the user asks for an OUTFIT for a SITUATION rather than a "
+            "specific garment (wedding guest, job interview, summer vacation, "
+            "date night, festival, first day at work), you CANNOT answer with "
+            "one garment. Instead:\n"
+            "  - Put the single best-fit garment in `text_query` (canonical form).\n"
+            "  - Put 1-2 MORE complementary garments in `sub_queries` (each in "
+            "the SAME canonical form). Aim for a coherent outfit: a top/dress + "
+            "a layer or shoes/bag — not 3 of the same thing.\n"
+            "  - Do NOT include gender words in sub_queries — the system applies "
+            "gender to every sub-query automatically.\n"
+            "  - Use sub_queries ONLY for situation queries. For a specific "
+            "garment request ('grey hoodie') leave sub_queries empty.\n"
+            "Example — user: '결혼식 하객룩 추천해줘' (women signal):\n"
+            '  text_query="elegant midi dress", '
+            'sub_queries=["satin blouse", "slingback heels"]\n'
+            "Example — user: '면접 때 입을 옷':\n"
+            '  text_query="tailored blazer", '
+            'sub_queries=["dress shirt", "straight trousers"]'
         ),
         "args_typeddict": SearchProductsArgs,
         "result_typeddict": SearchProductsResult,

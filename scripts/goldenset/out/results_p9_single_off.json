@@ -1,0 +1,1491 @@
+{
+ "gender": "women",
+ "top_k": 10,
+ "precision": "off",
+ "generated_at": "2026-07-16 13:12:22",
+ "patterns": [
+  {
+   "id": "p9_situation_pure",
+   "name_ko": "[순수 상황/TPO] — Phase 4a 멀티 확장",
+   "tier": "t3",
+   "queries": [
+    {
+     "qid": "p9_situation_pure::elegant_midi_dress",
+     "ko": "결혼식 하객룩",
+     "en": "elegant midi dress",
+     "query": "women's elegant midi dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 3267,
+     "error": null,
+     "results": [
+      {
+       "id": 599746,
+       "brand": "RASARIO",
+       "name": "Asymmetric draped satin gown with embroidered sleeves",
+       "price": 2600,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/files/Asymmetric-draped-satin-gown-with-embroidered-sleeves-Color-Green-RM22R009X880_34.png?v=1781360942",
+       "product_url": "https://therasario.com/products/asymmetric-draped-satin-gown-with-embroidered-sleeves-1",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 599750,
+       "brand": "RASARIO",
+       "name": "Asymmetric draped satin gown with embroidered sleeves",
+       "price": 2480,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/files/Asymmetric-draped-satin-gown-with-embroidered-sleeves-Color-Powder-pink-RM22R009X040_34.jpg?v=1781365340",
+       "product_url": "https://therasario.com/products/asymmetric-draped-satin-gown-with-embroidered-sleeves",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 599760,
+       "brand": "RASARIO",
+       "name": "Embroidered satin maxi dress with voluminous drapery",
+       "price": 1380,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/products/Embroidered-satin-maxi-dress-with-voluminous-drapery-Color-White-RM22R005X020_34.jpg?v=1781369491",
+       "product_url": "https://therasario.com/products/embroidered-satin-maxi-dress-with-voluminous-drapery-white",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 580376,
+       "brand": "Oscar de la Renta",
+       "name": "Split Neck Wool Dress",
+       "price": 2781350,
+       "image_url": "https://cdn.shopify.com/s/files/1/0587/8156/4989/files/26RN215DSW_WIN_540.jpg?v=1758123173",
+       "product_url": "https://www.oscardelarenta.com/products/split-neck-wool-dress-26rn215dsw-win",
+       "platform": "oscardelarenta",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 599758,
+       "brand": "RASARIO",
+       "name": "Draped satin maxi dress with voluminous shoulders",
+       "price": 970,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/products/Draped-satin-maxi-dress-with-voluminous-shoulders-Color-Black-RM22R007X010_34.jpg?v=1781369419",
+       "product_url": "https://therasario.com/products/draped-satin-maxi-dress-with-voluminous-shoulders-black",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 599743,
+       "brand": "RASARIO",
+       "name": "Draped satin maxi dress with voluminous shoulders",
+       "price": 580,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/products/Draped-satin-maxi-dress-with-voluminous-shoulders-Color-White-RM22R007X020_34.jpg?v=1781369406",
+       "product_url": "https://therasario.com/products/draped-satin-maxi-dress-with-voluminous-shoulders-white",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 448894,
+       "brand": "Solace London",
+       "name": "V-neck ruffled dress",
+       "price": 637000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32628650_62997363_2048.webp?v=1763024658",
+       "product_url": "https://brownsfashion.com/products/solace-london-v-neck-ruffled-dress-olmss2600158089",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 448597,
+       "brand": "Solace London",
+       "name": "Olivia maxi dress",
+       "price": 876750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/30116035_63072441_2048.webp?v=1779356735",
+       "product_url": "https://brownsfashion.com/products/solace-london-olivia-maxi-dress-olmss2600158080",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 448394,
+       "brand": "Mugler",
+       "name": "draped long-sleeve dress",
+       "price": 2045750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32399641_63381485_2048_bf585239-df0e-435e-9e26-409af89b5ae0.webp?v=1776328057",
+       "product_url": "https://brownsfashion.com/products/mugler-draped-long-sleeve-dress-olnss2600165637",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 443804,
+       "brand": "Rebecca Vallance",
+       "name": "Harlynn V-neck midi dress",
+       "price": 943250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/33454178_65292926_2048_7738253f-ce13-456b-afea-9356a9dce6ed.webp?v=1776328179",
+       "product_url": "https://brownsfashion.com/products/rebecca-vallance-harlynn-v-neck-midi-dress-olmss2600169370",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "midi-dress"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::flowy_summer_maxi_dress",
+     "ko": "여름 휴가룩",
+     "en": "flowy summer maxi dress",
+     "query": "women's flowy summer maxi dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 2880,
+     "error": null,
+     "results": [
+      {
+       "id": 471351,
+       "brand": "ZARA",
+       "name": "LONG RUCHED SATIN DRESS",
+       "price": 85657,
+       "image_url": "https://static.zara.net/assets/public/3b62/08a0/c8654e7484d5/dd43c7a6a6c5/04772335306-p/04772335306-p.jpg?ts=1775476109465",
+       "product_url": "https://www.zara.com/us/en/gathered-satin-effect-maxi-dress-p04772335.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 468105,
+       "brand": "ZARA",
+       "name": "셔링 새틴 롱 원피스",
+       "price": 59900,
+       "image_url": "https://static.zara.net/assets/public/3b62/08a0/c8654e7484d5/dd43c7a6a6c5/04772335306-p/04772335306-p.jpg?ts=1775476109465",
+       "product_url": "https://www.zara.com/kr/ko/%E1%84%89%E1%85%A7%E1%84%85%E1%85%B5%E1%86%BC-%E1%84%89%E1%85%A2%E1%84%90%E1%85%B5%E1%86%AB-%E1%84%85%E1%85%A9%E1%86%BC-%E1%84%8B%E1%85%AF%E1%86%AB%E1%84%91%E1%85%B5%E1%84%89%E1%85%B3-p04772335.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 474608,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION LIMITED EDITION RUFFLED DRESS",
+       "price": 241670,
+       "image_url": "https://static.zara.net/assets/public/cf88/37cd/2c594b1bb2a5/002636c7b18e/02412143406-000-a10/02412143406-000-a10.jpg?ts=1775817500884",
+       "product_url": "https://www.zara.com/us/en/zw-collection-limited-edition-ruffled-dress-p02412143.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 474790,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION LIMITED EDITION FLOWY RUFFLED DRESS",
+       "price": 184470,
+       "image_url": "https://static.zara.net/assets/public/809a/3d48/a7fe44108c16/d8876abfd093/02417100300-p/02417100300-p.jpg?ts=1778767969320",
+       "product_url": "https://www.zara.com/us/en/zw-collection-flowy-ruffled-dress-limited-edition-p02417100.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 469153,
+       "brand": "ZARA",
+       "name": "ZW 컬렉션 LIMITED EDITION 루즈 프릴 원피스",
+       "price": 149900,
+       "image_url": "https://static.zara.net/assets/public/809a/3d48/a7fe44108c16/d8876abfd093/02417100300-p/02417100300-p.jpg?ts=1778767969320",
+       "product_url": "https://www.zara.com/kr/ko/zw-%E1%84%8F%E1%85%A5%E1%86%AF%E1%84%85%E1%85%A6%E1%86%A8%E1%84%89%E1%85%A7%E1%86%AB-limited-edition-%E1%84%85%E1%85%AE%E1%84%8C%E1%85%B3%E1%84%91%E1%85%B5%E1%86%BA-%E1%84%91%E1%85%B3%E1%84%85%E1%85%B5%E1%86%AF-%E1%84%8B%E1%85%AF%E1%86%AB%E1%84%91%E1%85%B5%E1%84%89%E1%85%B3-p02417100.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 444105,
+       "brand": "Sportmax",
+       "name": "Panino scoop-neck maxi dress",
+       "price": 710500,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/33216412_66129289_2048.webp?v=1779356751",
+       "product_url": "https://brownsfashion.com/products/sportmax-panino-scoop-neck-maxi-dress-olnss2600166981",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 599720,
+       "brand": "RASARIO",
+       "name": "Draped cutout chiffon maxi dress",
+       "price": 740,
+       "image_url": "https://cdn.shopify.com/s/files/1/0083/7740/1410/products/Draped-cutout-chiffon-maxi-dress-Color-Powdery-RS23S039X010_34.jpg?v=1781367215",
+       "product_url": "https://therasario.com/products/draped-cutout-chiffon-maxi-dress-powdery",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 439179,
+       "brand": "ARCINA ORI",
+       "name": "Florence halterneck pleated maxi dress",
+       "price": 883750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/34764187_69221532_2048.webp?v=1781771959",
+       "product_url": "https://brownsfashion.com/products/arcina-ori-florence-halterneck-pleated-maxi-dress-olmaw2600177531",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 439223,
+       "brand": "TOVE",
+       "name": "Ouida pleated maxi dress",
+       "price": 1128750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/33523877_69105410_2048.webp?v=1781775478",
+       "product_url": "https://brownsfashion.com/products/tove-ouida-pleated-maxi-dress-olmaw2600173885",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "maxi-dress"
+      },
+      {
+       "id": 457897,
+       "brand": "Comoli",
+       "name": "Pile Bare Top Salopette Pant in Black",
+       "price": 879450,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/282248_IMG_122.jpg?v=1778198530",
+       "product_url": "https://www.mohawkgeneralstore.com/products/comoli-pile-bare-top-salopette",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::tailored_blazer",
+     "ko": "첫 출근룩",
+     "en": "tailored blazer",
+     "query": "women's tailored blazer",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 2537,
+     "error": null,
+     "results": [
+      {
+       "id": 442004,
+       "brand": "SAMUEL GUÃŒ YANG",
+       "name": "double-breasted boxy blazer",
+       "price": 1225000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/17160558_35491932_2048.webp?v=1777471540",
+       "product_url": "https://brownsfashion.com/products/samuel-gu-yang-double-breasted-boxy-blazer-lgs30w21p157511110",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 592836,
+       "brand": "Matin Kim",
+       "name": "BACK OPEN POCKET POINT WOOL JACKET IN BLACK",
+       "price": 398000,
+       "image_url": "https://matinkim.com/web/product/medium/202408/65eeadfc806e92e36d67ee37f89d0c21.jpg",
+       "product_url": "https://matinkim.com/product/kimmatin/detail.html?product_no=6191&cate_no=133&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 436843,
+       "brand": "MAX MARA",
+       "name": "Single-breasted Wool Piqué Blazer",
+       "price": 776880,
+       "image_url": "https://cdn.shopify.com/s/files/1/0557/6743/3394/files/2611911021600001-SINGLE-BREASTED-MAXMARA-Donna-20260211103350_0.jpg?v=1770809431",
+       "product_url": "https://antonioli.eu/products/woman-max-mara-clothing-blazers-2611911021600-001",
+       "platform": "antonioli",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 455011,
+       "brand": "GUIZIO",
+       "name": "GUIZIO Oversized Blazer - Black",
+       "price": 354640,
+       "image_url": "https://cdn.shopify.com/s/files/1/0094/2252/files/DGF25701W170-BLK-FRONT_ebb06d46-1d65-4f9a-b949-fa2fcfae1160.jpg?v=1758567151",
+       "product_url": "https://kith.com/products/dgf25701w170-blk",
+       "platform": "kith",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 440018,
+       "brand": "The Frankie Shop",
+       "name": "Bea peak-lapels blazer",
+       "price": 568750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/15304915_27387689_2048_05f2a6fa-fac7-4775-86e6-485c955f50c2.webp?v=1779961186",
+       "product_url": "https://brownsfashion.com/products/the-frankie-shop-bea-peak-lapels-blazer-lms30w20p9387gc103",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 600835,
+       "brand": "Roman Pell",
+       "name": "Wool Single Breasted Jacket",
+       "price": 1310000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0757/5922/3024/files/RP047Black_Wool_1_hires.jpg?v=1783910094",
+       "product_url": "https://romanpell.com/products/rp047-wool-single-breasted-jacket-wool-black",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 474033,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION CAPRI PANTS",
+       "price": 114257,
+       "image_url": "https://static.zara.net/assets/public/72d7/099b/4e9945b098e3/33686199f57b/02347972712-a1/02347972712-a1.jpg?ts=1776328633701",
+       "product_url": "https://www.zara.com/us/en/zw-collection-capri-pants-p02347972.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 448700,
+       "brand": "Norma Kamali",
+       "name": "notched-lapel belted blazer",
+       "price": 722750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/20954276_51531970_2048.webp?v=1770285970",
+       "product_url": "https://brownsfashion.com/products/norma-kamali-notched-lapel-belted-blazer-olrss2600169924",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 448593,
+       "brand": "Sportmax",
+       "name": "buttoned double-breasted blazer",
+       "price": 1275750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32275219_63129025_2048.webp?v=1763636744",
+       "product_url": "https://brownsfashion.com/products/sportmax-buttoned-double-breasted-blazer-olnss2600160046",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 482939,
+       "brand": "Sienne",
+       "name": "179,000 State Cotton JacketBlack9th",
+       "price": 179000,
+       "image_url": "https://sienneboutique.com/web/product/big/202602/c801941b7ad51f45234b559c19d1d5bb.jpg",
+       "product_url": "https://sienneboutique.com/product/detail.html?product_no=3671&cate_no=54&display_group=1",
+       "platform": "sienneboutique",
+       "score": null,
+       "subcategory": "overcoat"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::romantic_slip_dress",
+     "ko": "데이트룩",
+     "en": "romantic slip dress",
+     "query": "women's romantic slip dress",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1165,
+     "error": null,
+     "results": [
+      {
+       "id": 570447,
+       "brand": "FANCY CLUB",
+       "name": "LACE SLIP DRESS (PINK BEIGE) F26QD149",
+       "price": 68000,
+       "image_url": "https://nastyfancyclub.com/web/product/big/202604/2f8a79b07b783c677b7815a140034ad1.jpg",
+       "product_url": "https://nastyfancyclub.com/product/lace-slip-dress-pink-beige-f26qd149/3435/category/26/display/1/",
+       "platform": "nastyfancyclub",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 597191,
+       "brand": "Fakiii",
+       "name": "Fakiii Ribbon Pintuck Slip Dress_Ivory",
+       "price": 239000,
+       "image_url": "https://fakiii.com/web/product/medium/202603/60bd3ff4b0dc6e31a652f8c872d7a83d.jpg",
+       "product_url": "https://fakiii.com/product/fakiii-ribbon-pintuck-slip-dressivory/199/category/46/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 570448,
+       "brand": "FANCY CLUB",
+       "name": "LACE SLIP DRESS (GREEN) F26QD149",
+       "price": 68000,
+       "image_url": "https://nastyfancyclub.com/web/product/big/202604/b09548016534fbcf1375b73aa31e4cd4.jpg",
+       "product_url": "https://nastyfancyclub.com/product/lace-slip-dress-green-f26qd149/3434/category/26/display/1/",
+       "platform": "nastyfancyclub",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 471556,
+       "brand": "ZARA",
+       "name": "SATIN MIDI LACE DRESS",
+       "price": 155870,
+       "image_url": "https://static.zara.net/assets/public/c70c/424f/10ba45f18800/d418314f667f/05344701902-p/05344701902-p.jpg?ts=1781249450153",
+       "product_url": "https://www.zara.com/us/en/satin-lace-midi-dress-p05344701.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 468262,
+       "brand": "ZARA",
+       "name": "레이스 새틴 미디 원피스",
+       "price": 119900,
+       "image_url": "https://static.zara.net/assets/public/c70c/424f/10ba45f18800/d418314f667f/05344701902-p/05344701902-p.jpg?ts=1781249450153",
+       "product_url": "https://www.zara.com/kr/ko/%E1%84%85%E1%85%A6%E1%84%8B%E1%85%B5%E1%84%89%E1%85%B3-%E1%84%89%E1%85%A2%E1%84%90%E1%85%B5%E1%86%AB-%E1%84%86%E1%85%B5%E1%84%83%E1%85%B5-%E1%84%8B%E1%85%AF%E1%86%AB%E1%84%91%E1%85%B5%E1%84%89%E1%85%B3-p05344701.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 475229,
+       "brand": "ZARA",
+       "name": "PLEATED LACE COMBINATION DRESS",
+       "price": 241670,
+       "image_url": "https://static.zara.net/assets/public/8611/3d84/a1754cda9327/6b0e335ba106/01758644605-a4/01758644605-a4.jpg?ts=1770816132958",
+       "product_url": "https://www.zara.com/us/en/pleated-lace-combination-dress-p01758644.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 469414,
+       "brand": "ZARA",
+       "name": "플리츠 레이스 콤비 원피스",
+       "price": 189900,
+       "image_url": "https://static.zara.net/assets/public/8611/3d84/a1754cda9327/6b0e335ba106/01758644605-a4/01758644605-a4.jpg?ts=1770816132958",
+       "product_url": "https://www.zara.com/kr/ko/%E1%84%91%E1%85%B3%E1%86%AF%E1%84%85%E1%85%B5%E1%84%8E%E1%85%B3-%E1%84%85%E1%85%A6%E1%84%8B%E1%85%B5%E1%84%89%E1%85%B3-%E1%84%8F%E1%85%A9%E1%86%B7%E1%84%87%E1%85%B5-%E1%84%8B%E1%85%AF%E1%86%AB%E1%84%91%E1%85%B5%E1%84%89%E1%85%B3-p01758644.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 527819,
+       "brand": "Simone Rocha",
+       "name": "slip dress w/ deep lace trim, ivory",
+       "price": 825000,
+       "image_url": "https://shopamomento.com/web/product/medium/202507/08ee5138b9b5c9dfabb77a66b33de4ee.jpg",
+       "product_url": "https://shopamomento.com/product/detail.html?product_no=24103&cate_no=465&display_group=1",
+       "platform": "shopamomento",
+       "score": null,
+       "subcategory": "slip-dress"
+      },
+      {
+       "id": 447724,
+       "brand": "Róhe",
+       "name": "lace-detail midi dress",
+       "price": 1174250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/33127119_63754495_2048.webp?v=1766047150",
+       "product_url": "https://brownsfashion.com/products/r-he-lace-detail-midi-dress-olmss2600165909",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "midi-dress"
+      },
+      {
+       "id": 474979,
+       "brand": "ZARA",
+       "name": "GATHERED SATIN EFFECT MIDI DRESS",
+       "price": 85657,
+       "image_url": "https://static.zara.net/assets/public/d91a/0931/9e044a7ea1b3/9dcc8f991cd8/02309533306-p/02309533306-p.jpg?ts=1770827652691",
+       "product_url": "https://www.zara.com/us/en/ruched-satin-effect-midi-dress-p02309533.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "midi-dress"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::graphic_crop_top",
+     "ko": "여름 페스티벌룩",
+     "en": "graphic crop top",
+     "query": "women's graphic crop top",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1184,
+     "error": null,
+     "results": [
+      {
+       "id": 586748,
+       "brand": "YEEL",
+       "name": "RIVET LOGO CROP T-SHIRT BLACK",
+       "price": 48000,
+       "image_url": "https://yeel.kr/web/product/big/202305/5315be279e8cef6cc4d849ce40059b54.png",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=2572&cate_no=207&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 592379,
+       "brand": "Matin Kim",
+       "name": "MTK 16 GRAFFITI LOGO ASYMMETRIC TOP IN GREY",
+       "price": 68000,
+       "image_url": "https://matinkim.com/web/product/medium/202606/e74f00fb1fca5f5487a602b442df1a4b.jpg",
+       "product_url": "https://matinkim.com/product/detail.html?product_no=9222&cate_no=27&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 586541,
+       "brand": "YEEL",
+       "name": "ROCKSTAR CAP SLEEVE T-SHIRT BLACK",
+       "price": 82000,
+       "image_url": "https://yeel.kr/web/product/big/202606/29a5f49936f5af3c36f080f897545989.jpg",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=3331&cate_no=204&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 586801,
+       "brand": "YEEL",
+       "name": "Logo Crop Top Black",
+       "price": 58000,
+       "image_url": "https://yeel.kr/web/product/big/202301/f58689bb50aa15eeaf350d60ec750b87.png",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=2500&cate_no=208&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "crop-top"
+      },
+      {
+       "id": 447632,
+       "brand": "Dolce & Gabbana",
+       "name": "graphic-print T-shirt",
+       "price": 665000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32464738_63742016_2048.webp?v=1778753647",
+       "product_url": "https://brownsfashion.com/products/dolce-gabbana-graphic-print-t-shirt-olnss2600162170",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 586800,
+       "brand": "YEEL",
+       "name": "Logo Crop Top White",
+       "price": 58000,
+       "image_url": "https://yeel.kr/web/product/big/202301/3ff3f7ff273fd83b68f5b303e3ea54db.png",
+       "product_url": "https://yeel.kr/product/detail.html?product_no=2501&cate_no=208&display_group=1",
+       "platform": "yeel",
+       "score": null,
+       "subcategory": "crop-top"
+      },
+      {
+       "id": 592380,
+       "brand": "Matin Kim",
+       "name": "MTK 16 GRAFFITI LOGO ASYMMETRIC TOP IN NAVY",
+       "price": 68000,
+       "image_url": "https://matinkim.com/web/product/medium/202605/be353cee488f6974f148ff351ba4735d.jpg",
+       "product_url": "https://matinkim.com/product/detail.html?product_no=9221&cate_no=27&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 601828,
+       "brand": "UNAFFECTED X SCARFACE",
+       "name": "(WOMAN) BTTF PERFECT WAY T-SHIRT",
+       "price": 108000,
+       "image_url": "https://unaffected.co.kr/web/product/big/202604/7028989d702c0f3c6471e0b83a328c1a.jpg",
+       "product_url": "https://unaffected.co.kr/product/woman-bttf-perfect-way-t-shirt-black/744/category/109/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 541308,
+       "brand": "UNAFFECTED X BACK TO THE FUTURE",
+       "name": "(woman) bttf perfect way t-shirt / black",
+       "price": 108000,
+       "image_url": "https://fr8ight.co.kr/web/product/big/202604/370de144d63ebb45cfad164f1ab2851e.jpg",
+       "product_url": "https://fr8ight.co.kr/product/woman-bttf-perfect-way-t-shirt-black/13398/category/47/display/1/",
+       "platform": "fr8ight",
+       "score": null,
+       "subcategory": "t-shirt"
+      },
+      {
+       "id": 576830,
+       "brand": "RIGHE",
+       "name": "RIGHE RINGER T-SHIRT CHARCOAL",
+       "price": 49000,
+       "image_url": "https://ecimg.cafe24img.com/pg456b13286913076/righe/web/product/medium/20240716/eb563a2bc487bf704746f7067178348b.jpg",
+       "product_url": "https://righeofficial.com/product/righe-ringer-t-shirt-charcoal/251/category/76/display/1/",
+       "platform": "righeofficial",
+       "score": null,
+       "subcategory": "t-shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::warm_padded_coat",
+     "ko": "겨울 여행룩",
+     "en": "warm padded coat",
+     "query": "women's warm padded coat",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1259,
+     "error": null,
+     "results": [
+      {
+       "id": 471690,
+       "brand": "ZARA",
+       "name": "WATER REPELLENT WINDPROOF 60% DOWN 40% FEATHER HOODED PARKA",
+       "price": 145002,
+       "image_url": "https://static.zara.net/assets/public/194e/a094/cfad4d7580d4/048d04c32a96/03046247800-p/03046247800-p.jpg?ts=1760541964767",
+       "product_url": "https://www.zara.com/us/en/60-down-40-feather-water-repellent-windproof-hooded-anorak-p03046247.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "parka"
+      },
+      {
+       "id": 600903,
+       "brand": "SCULPTOR",
+       "name": "LINER COAT W LT.GREEN",
+       "price": 2240000,
+       "image_url": "https://cafe24img.poxo.com/superagency1/web/product/big/202410/ba16eb74b0113323cf0978781880348a.jpg",
+       "product_url": "https://sculpstore.com/product/liner-coat-w-ltgreen/19302/category/64/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 467429,
+       "brand": "Uniqlo",
+       "name": "Seamless Down Parka",
+       "price": 257257,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/478577/item/usgoods_01_478577_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E478577-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "parka"
+      },
+      {
+       "id": 563297,
+       "brand": "AUTUMN",
+       "name": "러쉬패딩",
+       "price": null,
+       "image_url": "https://autumnshop.kr/web/product/big/202411/0524e6b9291aa71c6409b394bf04f1f2.webp",
+       "product_url": "https://autumnshop.kr/product/러쉬패딩/1713/category/42/display/1/",
+       "platform": "autumnshop",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 472026,
+       "brand": "ZARA",
+       "name": "LONG WATER REPELLENT WINDPROOF HOODED PUFFER COAT",
+       "price": 187902,
+       "image_url": "https://static.zara.net/assets/public/4a93/7c12/0cb2424783a0/1aef1d459af3/03046275800-e1/03046275800-e1.jpg?ts=1763720492385",
+       "product_url": "https://www.zara.com/us/en/long-water-repellent-windproof-hoodie-puffer-coat-p03046275.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "down-jacket"
+      },
+      {
+       "id": 471584,
+       "brand": "ZARA",
+       "name": "WINDPROOF RUBBERIZED SEMI-LONG ANORAK",
+       "price": 102102,
+       "image_url": "https://static.zara.net/assets/public/116c/3304/f3b540e49f95/426d485a4c02/03046022505-a3/03046022505-a3.jpg?ts=1768391742618",
+       "product_url": "https://www.zara.com/us/en/rubberized-windproof-semi-long-anorak-p03046022.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 471632,
+       "brand": "ZARA",
+       "name": "WATER REPELLENT WINDPROOF PUFFER JACKET WITH HOODIE",
+       "price": 184470,
+       "image_url": "https://static.zara.net/assets/public/76ca/0ae3/012548aebc55/a0ce55793f4d/04749814800-p/04749814800-p.jpg?ts=1763568075591",
+       "product_url": "https://www.zara.com/us/en/water-repellent-windproof-puffer-jacket-with-hoodie-p04749814.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "down-jacket"
+      },
+      {
+       "id": 467427,
+       "brand": "Uniqlo",
+       "name": "PUFFTECH Parka",
+       "price": 128557,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/469871/item/usgoods_06_469871_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E469871-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "parka"
+      },
+      {
+       "id": 563194,
+       "brand": "AUTUMN",
+       "name": "웰트오버패딩",
+       "price": null,
+       "image_url": "https://autumnshop.kr/web/product/big/202512/6261e91c5730f7f97b8363a54c39a215.webp",
+       "product_url": "https://autumnshop.kr/product/웰트오버패딩/7428/category/42/display/1/",
+       "platform": "autumnshop",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 604185,
+       "brand": "8DIVISION",
+       "name": "Anorak Puffer (Latte)",
+       "price": 360000,
+       "image_url": "https://www.8division.com/web/product/big/202310/7dd29ef8e34117b56a94572b8f9581e5.jpg",
+       "product_url": "https://www.8division.com/product/detail.html?product_no=29997&cate_no=1141&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::athletic_tank_top",
+     "ko": "운동 갈 때 입을 옷",
+     "en": "athletic tank top",
+     "query": "women's athletic tank top",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1384,
+     "error": null,
+     "results": [
+      {
+       "id": 484013,
+       "brand": "OJOS",
+       "name": "i:e Breathform Running Tank Top / White",
+       "price": 88000,
+       "image_url": "https://www.ojos.kr/web/product/medium/202605/6364ad610cbd96d7af021a6369ae712d.jpg",
+       "product_url": "https://www.ojos.kr/product/detail.html?product_no=2253&cate_no=261&display_group=1",
+       "platform": "ojos",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 573312,
+       "brand": "JUNGDO",
+       "name": "BACK WEAVE SLEEVELESS . WHITE",
+       "price": 56000,
+       "image_url": "https://ecimg.cafe24img.com/pg813b47161090067/meanjungdo/web/product/medium/20250703/fdbdb30085fa2fc968599b58f639bfc9.jpg",
+       "product_url": "https://jung-do.kr/product/back-weave-sleeveless-white/57/category/45/display/1/",
+       "platform": "jungdo",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 483839,
+       "brand": "GOYOWEAR",
+       "name": "W LIGHT ASKIN SINGLET (CREAM)",
+       "price": 42000,
+       "image_url": "https://goyowear.kr/web/product/medium/202504/b4c21c206583c3a07bedc56546964594.jpg",
+       "product_url": "https://goyowear.kr/product/w-light-askin-singlet-cream/320/category/36/display/1/",
+       "platform": "goyowear",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 573314,
+       "brand": "JUNGDO",
+       "name": "BACK WEAVE SLEEVELESS . BLACK",
+       "price": 56000,
+       "image_url": "https://ecimg.cafe24img.com/pg813b47161090067/meanjungdo/web/product/medium/20250703/a041f2b345f795218ac5a9255b8c2ea8.jpg",
+       "product_url": "https://jung-do.kr/product/back-weave-sleeveless-black/59/category/45/display/1/",
+       "platform": "jungdo",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 585968,
+       "brand": "SOSA",
+       "name": "Aero Singlet (Ice Blue)",
+       "price": 64000,
+       "image_url": "https://ecimg.cafe24img.com/pg2028b45048436012/jhyerin197/web/product/big/20260507/0f3c1ce4ee3825b74643c56cc03970cf.jpg",
+       "product_url": "https://sosa.co.kr/product/detail.html?product_no=88&cate_no=26&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 483838,
+       "brand": "GOYOWEAR",
+       "name": "W LIGHT ASKIN SINGLET (LIGHT BLUE)",
+       "price": 42000,
+       "image_url": "https://goyowear.kr/web/product/medium/202504/53735533b3756d186aa16874d33530f7.jpg",
+       "product_url": "https://goyowear.kr/product/w-light-askin-singlet-light-blue/319/category/36/display/1/",
+       "platform": "goyowear",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 484014,
+       "brand": "OJOS",
+       "name": "i:e Breathform Running Tank Top / Mint",
+       "price": 88000,
+       "image_url": "https://www.ojos.kr/web/product/medium/202605/2cc6ed906576b709073bdab210c0f685.jpg",
+       "product_url": "https://www.ojos.kr/product/detail.html?product_no=2254&cate_no=261&display_group=1",
+       "platform": "ojos",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 593640,
+       "brand": "MMM",
+       "name": "[WHITE, 2차 7/20 예약배송] Ribbed Tank Sleeveless (10colors)",
+       "price": 52000,
+       "image_url": "https://mmmcorp.co.kr/web/product/medium/202604/3abd41f561e4e17f9f2004bf9639ac3a.jpg",
+       "product_url": "https://mmmcorp.co.kr/product/white-2%EC%B0%A8-720-%EC%98%88%EC%95%BD%EB%B0%B0%EC%86%A1-ribbed-tank-sleeveless-10colors/109/category/157/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 585446,
+       "brand": "MMM (엠엠엠)",
+       "name": "[WHITE, 2차 7/20 예약배송] Ribbed Tank Sleeveless (10colors)",
+       "price": 52000,
+       "image_url": "https://mmmcorp.co.kr/web/product/medium/202604/3abd41f561e4e17f9f2004bf9639ac3a.jpg",
+       "product_url": "https://mmmcorp.co.kr/product/white-2차-720-예약배송-ribbed-tank-sleeveless-10colors/109/category/50/display/1/",
+       "platform": "mmmcorp",
+       "score": null,
+       "subcategory": "tank-top"
+      },
+      {
+       "id": 583032,
+       "brand": "AGOW",
+       "name": "Wavefit Tank Sky Blue Woman",
+       "price": 45500,
+       "image_url": "https://ecimg.cafe24img.com/pg1670b75506676030/agow2025/web/product/big/20250503/3dfe6208dc8c7522d9de649c91b2d4b1.jpg",
+       "product_url": "https://agowlife.com/product/detail.html?product_no=47&cate_no=42&display_group=1",
+       "platform": "agowlife",
+       "score": null,
+       "subcategory": "tank-top"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::tailored_blazer",
+     "ko": "면접룩",
+     "en": "tailored blazer",
+     "query": "women's tailored blazer",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 587,
+     "error": null,
+     "results": [
+      {
+       "id": 442004,
+       "brand": "SAMUEL GUÃŒ YANG",
+       "name": "double-breasted boxy blazer",
+       "price": 1225000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/17160558_35491932_2048.webp?v=1777471540",
+       "product_url": "https://brownsfashion.com/products/samuel-gu-yang-double-breasted-boxy-blazer-lgs30w21p157511110",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 592836,
+       "brand": "Matin Kim",
+       "name": "BACK OPEN POCKET POINT WOOL JACKET IN BLACK",
+       "price": 398000,
+       "image_url": "https://matinkim.com/web/product/medium/202408/65eeadfc806e92e36d67ee37f89d0c21.jpg",
+       "product_url": "https://matinkim.com/product/kimmatin/detail.html?product_no=6191&cate_no=133&display_group=1",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 436843,
+       "brand": "MAX MARA",
+       "name": "Single-breasted Wool Piqué Blazer",
+       "price": 776880,
+       "image_url": "https://cdn.shopify.com/s/files/1/0557/6743/3394/files/2611911021600001-SINGLE-BREASTED-MAXMARA-Donna-20260211103350_0.jpg?v=1770809431",
+       "product_url": "https://antonioli.eu/products/woman-max-mara-clothing-blazers-2611911021600-001",
+       "platform": "antonioli",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 455011,
+       "brand": "GUIZIO",
+       "name": "GUIZIO Oversized Blazer - Black",
+       "price": 354640,
+       "image_url": "https://cdn.shopify.com/s/files/1/0094/2252/files/DGF25701W170-BLK-FRONT_ebb06d46-1d65-4f9a-b949-fa2fcfae1160.jpg?v=1758567151",
+       "product_url": "https://kith.com/products/dgf25701w170-blk",
+       "platform": "kith",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 440018,
+       "brand": "The Frankie Shop",
+       "name": "Bea peak-lapels blazer",
+       "price": 568750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/15304915_27387689_2048_05f2a6fa-fac7-4775-86e6-485c955f50c2.webp?v=1779961186",
+       "product_url": "https://brownsfashion.com/products/the-frankie-shop-bea-peak-lapels-blazer-lms30w20p9387gc103",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 600835,
+       "brand": "Roman Pell",
+       "name": "Wool Single Breasted Jacket",
+       "price": 1310000,
+       "image_url": "https://cdn.shopify.com/s/files/1/0757/5922/3024/files/RP047Black_Wool_1_hires.jpg?v=1783910094",
+       "product_url": "https://romanpell.com/products/rp047-wool-single-breasted-jacket-wool-black",
+       "platform": "shopify",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 474033,
+       "brand": "ZARA",
+       "name": "ZW COLLECTION CAPRI PANTS",
+       "price": 114257,
+       "image_url": "https://static.zara.net/assets/public/72d7/099b/4e9945b098e3/33686199f57b/02347972712-a1/02347972712-a1.jpg?ts=1776328633701",
+       "product_url": "https://www.zara.com/us/en/zw-collection-capri-pants-p02347972.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 448700,
+       "brand": "Norma Kamali",
+       "name": "notched-lapel belted blazer",
+       "price": 722750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/20954276_51531970_2048.webp?v=1770285970",
+       "product_url": "https://brownsfashion.com/products/norma-kamali-notched-lapel-belted-blazer-olrss2600169924",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 448593,
+       "brand": "Sportmax",
+       "name": "buttoned double-breasted blazer",
+       "price": 1275750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32275219_63129025_2048.webp?v=1763636744",
+       "product_url": "https://brownsfashion.com/products/sportmax-buttoned-double-breasted-blazer-olnss2600160046",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "blazer"
+      },
+      {
+       "id": 482939,
+       "brand": "Sienne",
+       "name": "179,000 State Cotton JacketBlack9th",
+       "price": 179000,
+       "image_url": "https://sienneboutique.com/web/product/big/202602/c801941b7ad51f45234b559c19d1d5bb.jpg",
+       "product_url": "https://sienneboutique.com/product/detail.html?product_no=3671&cate_no=54&display_group=1",
+       "platform": "sienneboutique",
+       "score": null,
+       "subcategory": "overcoat"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::linen_shirt",
+     "ko": "한여름에 시원한 옷",
+     "en": "linen shirt",
+     "query": "women's linen shirt",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1093,
+     "error": null,
+     "results": [
+      {
+       "id": 466130,
+       "brand": "Uniqlo",
+       "name": "리넨블렌드이지쇼트팬츠",
+       "price": 29900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/485251/item/krgoods_37_485251_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E485251-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "shorts"
+      },
+      {
+       "id": 470366,
+       "brand": "ZARA",
+       "name": "100% 린넨 레귤러핏 셔츠",
+       "price": 79900,
+       "image_url": "https://static.zara.net/assets/public/46e1/0262/29e640419b46/6b15b926fa7f/03090110620-e1/03090110620-e1.jpg?ts=1776693590169",
+       "product_url": "https://www.zara.com/kr/ko/100-%E1%84%85%E1%85%B5%E1%86%AB%E1%84%82%E1%85%A6%E1%86%AB-%E1%84%85%E1%85%A6%E1%84%80%E1%85%B2%E1%86%AF%E1%84%85%E1%85%A5%E1%84%91%E1%85%B5%E1%86%BA-%E1%84%89%E1%85%A7%E1%84%8E%E1%85%B3-p03090110.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 466131,
+       "brand": "Uniqlo",
+       "name": "리넨블렌드이지쇼트팬츠(스트라이프)",
+       "price": 29900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/485575/item/krgoods_63_485575_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E485575-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "shorts"
+      },
+      {
+       "id": 467369,
+       "brand": "Uniqlo",
+       "name": "Linen Blend Easy Shorts | Stripe",
+       "price": 28457,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/485575/item/usgoods_63_485575_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E485575-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 465994,
+       "brand": "Uniqlo",
+       "name": "프리미엄리넨셔츠",
+       "price": 39900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/475647/item/krgoods_00_475647_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E475647-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 456724,
+       "brand": "Orlebar Brown",
+       "name": "Orlebar Brown Giles Linen Tailored Fit Shirt - White",
+       "price": 393250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0094/2252/files/OB274659-FRONT_95335543-eec3-4bec-a0fc-d94841d76fb2.jpg?v=1772036507",
+       "product_url": "https://kith.com/products/ob274659",
+       "platform": "kith",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 468273,
+       "brand": "ZARA",
+       "name": "ZW 컬렉션 린넨 포켓 셔츠",
+       "price": 79900,
+       "image_url": "https://static.zara.net/assets/public/d7c1/ac2e/4539481898a1/8dec27d034b7/04344243619-p/04344243619-p.jpg?ts=1780057889791",
+       "product_url": "https://www.zara.com/kr/ko/zw-%E1%84%8F%E1%85%A5%E1%86%AF%E1%84%85%E1%85%A6%E1%86%A8%E1%84%89%E1%85%A7%E1%86%AB-100-%E1%84%85%E1%85%B5%E1%86%AB%E1%84%82%E1%85%A6%E1%86%AB-%E1%84%91%E1%85%A9%E1%84%8F%E1%85%A6%E1%86%BA-%E1%84%89%E1%85%A7%E1%84%8E%E1%85%B3-p05344010.html",
+       "platform": "zara-kr",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 570169,
+       "brand": "BLANK03",
+       "name": "linen pocket shirt (black)",
+       "price": 178000,
+       "image_url": "https://blank03.com/web/product/medium/202605/b9a62f884c5f02231c32ac2598212fcf.jpg",
+       "product_url": "https://blank03.com/product/linen-pocket-shirt-black/1077/category/50/display/1/",
+       "platform": "blank03",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 465997,
+       "brand": "Uniqlo",
+       "name": "프리미엄리넨스키퍼박시셔츠(반팔)",
+       "price": 49900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/484256/item/krgoods_12_484256_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E484256-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 450956,
+       "brand": "Drakes - UK/ROW",
+       "name": "Khaki Linen Short Sleeve Camp Collar Military Shirt",
+       "price": 428750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0640/6121/0837/files/cts47DR2A4F26090-02400.jpg?v=1772553831",
+       "product_url": "https://www.drakes.com/products/khaki-linen-short-sleeve-camp-collar-military-shirt",
+       "platform": "drakes",
+       "score": null,
+       "subcategory": "shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::oversized_sweatshirt",
+     "ko": "캠퍼스룩",
+     "en": "oversized sweatshirt",
+     "query": "women's oversized sweatshirt",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1375,
+     "error": null,
+     "results": [
+      {
+       "id": 458727,
+       "brand": "Dries Van Noten",
+       "name": "Crewneck Sweatshirt in Grey Melange",
+       "price": 636350,
+       "image_url": "https://cdn.shopify.com/s/files/1/0653/6981/files/282429_IMG_010.jpg?v=1767837678",
+       "product_url": "https://www.mohawkgeneralstore.com/products/dries-van-noten-hax-3611-sweater-grey-melange",
+       "platform": "mohawk-general",
+       "score": null,
+       "subcategory": "sweatshirt"
+      },
+      {
+       "id": 466348,
+       "brand": "Uniqlo",
+       "name": "히트텍울트라웜레깅스(10부)",
+       "price": 34900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/480966/item/krgoods_09_480966_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E480966-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 566150,
+       "brand": "TREEMINGBIRD",
+       "name": "Scratch Damage Boat Neck Sweat Shirt [ Black ]",
+       "price": 149000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202502/f04643035a5f70d07b2c1cbbf8dd3c4a.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2002&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      },
+      {
+       "id": 467407,
+       "brand": "Uniqlo",
+       "name": "HEATTECH Ultra Warm Leggings",
+       "price": 49907,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/480966/item/usgoods_09_480966_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E480966-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 466083,
+       "brand": "Uniqlo",
+       "name": "스무드코튼크루넥스웨터",
+       "price": 49900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/475053/item/krgoods_01_475053_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E475053-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "sweater"
+      },
+      {
+       "id": 465991,
+       "brand": "Uniqlo",
+       "name": "GU퍼프스웨트셔츠",
+       "price": 29900,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/kr/imagesgoods/483184/item/krgoods_09_483184_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/kr/ko/products/E483184-000",
+       "platform": "uniqlo-kr",
+       "score": null,
+       "subcategory": "sweatshirt"
+      },
+      {
+       "id": 575343,
+       "brand": "NOTHINGEVERYTHING",
+       "name": "SOFT SWEATSHIRT IN PETAL PINK",
+       "price": 113000,
+       "image_url": "https://nothingeverything.kr/web/product/big/202602/e1b142ae23ee9c3f2116463d46bb886f.jpg",
+       "product_url": "https://nothingeverything.kr/product/detail.html?product_no=764&cate_no=76&display_group=1",
+       "platform": "nothingeverything",
+       "score": null,
+       "subcategory": "sweatshirt"
+      },
+      {
+       "id": 554916,
+       "brand": "editable scenario",
+       "name": "상품명",
+       "price": 149000,
+       "image_url": "https://editablescenario.com/web/product/medium/202502/364933e24250fbc0bc50dce5d851c126.jpg",
+       "product_url": "https://editablescenario.com/product/refeat-volume-sweatshirts-ivory/156/category/45/display/1/",
+       "platform": "editablescenario",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 523535,
+       "brand": "Havati",
+       "name": "[BEHEAVYER] DISTRESSED REVERSEWEAVE SWEAT SHIRTS (DUST BLUE)",
+       "price": 159000,
+       "image_url": "https://havatishop.com/web/product/medium/202602/0948d774aead2b53efd3bd1265f10f22.png",
+       "product_url": "https://havatishop.com/product/detail.html?product_no=18786&cate_no=125&display_group=1",
+       "platform": "havati",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 566153,
+       "brand": "TREEMINGBIRD",
+       "name": "Scratch Damage Boat Neck Sweat Shirt [ Charcoal ]",
+       "price": 149000,
+       "image_url": "https://cafe24img.poxo.com/treemingbirdhds/web/product/medium/202503/cfbecf7a199f20c6c16d5e8c20ffc550.png",
+       "product_url": "https://treemingbird.com/product/detail.html?product_no=2085&cate_no=25&display_group=1",
+       "platform": "treemingbird",
+       "score": null,
+       "subcategory": "shirt"
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::waterproof_trench_coat",
+     "ko": "장마철에 입을 옷",
+     "en": "waterproof trench coat",
+     "query": "women's waterproof trench coat",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1500,
+     "error": null,
+     "results": [
+      {
+       "id": 585638,
+       "brand": "paradigm film (패러다임 필름)",
+       "name": "[Ep.01] Mockneck Safari Wrap Coat (Charcoal)",
+       "price": 95600,
+       "image_url": "https://ecimg.cafe24img.com/pg2268b31810438008/paradigmflim/web/product/medium/20260127/63e1c0a7d24eb0a9575d03efeb471f30.jpg",
+       "product_url": "https://paradigmfilm.kr/product/detail.html?product_no=116&cate_no=112&display_group=1",
+       "platform": "paradigmfilm",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 467430,
+       "brand": "Uniqlo",
+       "name": "Trench Coat | Relaxed",
+       "price": 85657,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/479223/item/usgoods_31_479223_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E479223-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 448249,
+       "brand": "Burberry",
+       "name": "double-breasted cotton coat",
+       "price": 2320500,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/22404191_59009973_2048.webp?v=1777558497",
+       "product_url": "https://brownsfashion.com/products/burberry-double-breasted-cotton-coat-olnss2600173940",
+       "platform": "browns",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 448854,
+       "brand": "Burberry",
+       "name": "hooded belted nylon trench coat",
+       "price": 1898750,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/32591411_63021931_2048.webp?v=1775725947",
+       "product_url": "https://brownsfashion.com/products/burberry-hooded-belted-nylon-trench-coat-olnss2600160589",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 520339,
+       "brand": "ROUGHSIDE",
+       "name": "트렌치 하프 코트 다크 네이비",
+       "price": 398000,
+       "image_url": "https://roughside.co.kr/web/product/big/202509/e3e967f09d780376e8dd30da32012290.jpg",
+       "product_url": "https://roughside.co.kr/product/detail.html?product_no=1906&cate_no=81&display_group=1",
+       "platform": "roughside",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 570207,
+       "brand": "BLANK03",
+       "name": "belted half trench coat (beige)",
+       "price": 329000,
+       "image_url": "https://blank03.com/web/product/medium/202503/9a4cf6ff42388f58deca4e332036ed66.jpg",
+       "product_url": "https://blank03.com/product/belted-half-trench-coat-beige/1214/category/51/display/1/",
+       "platform": "blank03",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 448237,
+       "brand": "Burberry",
+       "name": "double-breasted cotton trench coat",
+       "price": 3316250,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/22363579_58640324_2048.webp?v=1777558498",
+       "product_url": "https://brownsfashion.com/products/burberry-double-breasted-cotton-trench-coat-olnss2600173938",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 527137,
+       "brand": "Renaissance Renaissance",
+       "name": "ann coat, beige",
+       "price": 2230000,
+       "image_url": "https://shopamomento.com/web/product/medium/202509/5218e1c92b2f99af21678edf489c8b1e.jpg",
+       "product_url": "https://shopamomento.com/product/detail.html?product_no=24640&cate_no=450&display_group=1",
+       "platform": "shopamomento",
+       "score": null,
+       "subcategory": null
+      },
+      {
+       "id": 471642,
+       "brand": "ZARA",
+       "name": "OVERSIZED BELTED TRENCH COAT ZW COLLECTION",
+       "price": 241670,
+       "image_url": "https://static.zara.net/assets/public/2309/dc0b/2ece4c7996ed/dfb6761e7829/00518048400-a5/00518048400-a5.jpg?ts=1771506878677",
+       "product_url": "https://www.zara.com/us/en/oversized-belted-trench-coat-zw-collection-p00518048.html",
+       "platform": "zara-us",
+       "score": null,
+       "subcategory": "trench-coat"
+      },
+      {
+       "id": 595216,
+       "brand": "TAEY",
+       "name": "overfit padded coat (taupe)",
+       "price": 406000,
+       "image_url": "https://taey.kr/web/product/medium/202511/4952d73318ea7916acba4ec89d4d9a96.jpg",
+       "product_url": "https://taey.kr/product/overfit-padded-coat-taupe/234/category/30/display/1/",
+       "platform": "cafe24",
+       "score": null,
+       "subcategory": null
+      }
+     ]
+    },
+    {
+     "qid": "p9_situation_pure::neat_knit_cardigan",
+     "ko": "명절에 입을 단정한 옷",
+     "en": "neat knit cardigan",
+     "query": "women's neat knit cardigan",
+     "category": null,
+     "target_subcategory": null,
+     "subcat_hit": null,
+     "elapsed_ms": 1804,
+     "error": null,
+     "results": [
+      {
+       "id": 477375,
+       "brand": "TAIGA TAKAHASHI",
+       "name": "타이가 타카하시_ LOT.506 DB CARDIGAN [LIGHT GRAY]",
+       "price": 1060000,
+       "image_url": "https://etcseoul.com/web/product/small/202508/8dfd93885aebfb43db2b8d0d9d591e21.jpg",
+       "product_url": "https://etcseoul.com/product/detail.html?product_no=43013&cate_no=450&display_group=1",
+       "platform": "etcseoul",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 467289,
+       "brand": "Uniqlo",
+       "name": "Merino Cardigan",
+       "price": 71357,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/469411/item/usgoods_05_469411_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E469411-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 567511,
+       "brand": "Years Ago",
+       "name": "Rover Wool Cardigan 01-2, Indigo Pink",
+       "price": 288000,
+       "image_url": "https://yearsago.kr/web/product/medium/202210/40d4bf13fa20d96a5d29784f05ae6acb.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=1594&cate_no=312&display_group=1",
+       "platform": "yearsago",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 482767,
+       "brand": "BLANKROOM",
+       "name": "ROUND CARDIGAN_MID GRAY",
+       "price": 189000,
+       "image_url": "https://blankroom.house/web/product/medium/202603/8e8f5d4abac192951a427ca344b716b9.jpg",
+       "product_url": "https://blankroom.house/product/detail.html?product_no=1948&cate_no=51&display_group=1",
+       "platform": "blankroom",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 467295,
+       "brand": "Uniqlo",
+       "name": "Crochet V-Neck Cardigan",
+       "price": 71357,
+       "image_url": "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/485724/item/usgoods_38_485724_3x4.jpg",
+       "product_url": "https://www.uniqlo.com/us/en/products/E485724-000",
+       "platform": "uniqlo-us",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 442995,
+       "brand": "OUR LEGACY",
+       "name": "Micro button-up cardigan",
+       "price": 668500,
+       "image_url": "https://cdn.shopify.com/s/files/1/0883/3702/3240/files/34325407_65366915_2048_111b79b6-d7c2-48ef-b2e5-583ef88c3c9a.webp?v=1775727810",
+       "product_url": "https://brownsfashion.com/products/our-legacy-micro-button-up-cardigan-olgss2600163011",
+       "platform": "browns",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 567496,
+       "brand": "Years Ago",
+       "name": "Rover Wool Cardigan 01-2, Black",
+       "price": 288000,
+       "image_url": "https://yearsago.kr/web/product/medium/202209/f17240b7e390c1f2b0e3fde18fc1d4bf.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=3782&cate_no=312&display_group=1",
+       "platform": "yearsago",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 567498,
+       "brand": "Years Ago",
+       "name": "Rover Wool Cardigan 01-2, Dark Navy",
+       "price": 288000,
+       "image_url": "https://yearsago.kr/web/product/medium/202209/30decd66cab24cd7f5df29588b6c8047.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=3780&cate_no=312&display_group=1",
+       "platform": "yearsago",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 521953,
+       "brand": "Another Office",
+       "name": "w. Peachskin V-Neck Cardigan (Faded Indigo)",
+       "price": 110600,
+       "image_url": "https://ecimg.cafe24img.com/pg351b03384059035/anotheroffice/web/product/big/20251002/2f7d2a2713cb14e31ec829e8faf9cc47.jpg",
+       "product_url": "https://anotheroffice.co.kr/product/w-peachskin-v-neck-cardigan-faded-indigo/1066/category/80/display/1/",
+       "platform": "anotheroffice",
+       "score": null,
+       "subcategory": "cardigan"
+      },
+      {
+       "id": 567512,
+       "brand": "Years Ago",
+       "name": "Rover Wool Cardigan 01-2, Melange Brown",
+       "price": 288000,
+       "image_url": "https://yearsago.kr/web/product/medium/202210/b0457a4a4ec3049d2ff9b124f1877ed7.jpg",
+       "product_url": "https://yearsago.kr/product/detail.html?product_no=1593&cate_no=312&display_group=1",
+       "platform": "yearsago",
+       "score": null,
+       "subcategory": "cardigan"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

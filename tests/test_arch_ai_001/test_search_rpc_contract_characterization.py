@@ -24,8 +24,10 @@ literal `None`. The v6 FILTER 2 canonical family gate now receives
 which the single-source Vision-alias map normalizes to the canonical token
 `"tops"`. The snapshot is re-pointed from `None` → `"tops"` accordingly (the
 SAME locked-snapshot safety intent, now anchored to the v6 family-gate
-value). `p_subcategory` stays `None` (products.subcategory is 100% NULL
-repo-wide — narrowing is a guaranteed no-op).
+value). `p_subcategory` (2026-07-15 활성화) stays `None` for THIS request:
+`item.subcategory="knit"` is not a canonical vocab token — the fail-open
+path (모르는 값 전달 = EXACT·무완화 필터라 0결과). Recognized values are
+asserted in tests/test_search_precision_filters.py.
 """
 
 from __future__ import annotations
@@ -82,6 +84,8 @@ async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
         # SPEC-SEARCH-V6-COLOR: color filter param — None here (fixture has
         # no color_family). Backward-compatible with pre-color rollout.
         "p_color_family": None,
+        # 2026-07-16 — p_gender 하드 필터 (req.gender 미지정 → None = off)
+        "p_gender": None,
         "p_limit": 50,
     }
 
@@ -102,6 +106,7 @@ async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture
         "p_brand_names",
         # SPEC-SEARCH-V6-COLOR added — 7-key param dict (was 6).
         "p_color_family",
+        "p_gender",
         "p_limit",
     }
 

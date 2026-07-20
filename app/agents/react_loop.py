@@ -362,6 +362,21 @@ def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
     `to_canonical_family(None)` → `other` → family gate skipped (correct
     graceful behavior; never fabricate a category).
     """
+    return _selected_vision_item_value(state, sess, "category")
+
+
+def _selected_vision_subcategory(state: WorkingState, sess: Any) -> str | None:
+    """The selected Vision item's `subcategory` (Vision v2 enum — e.g.
+    "hoodie", "sneakers"). Same resolution + photo-turn gate as
+    `_selected_vision_category` (stale-leak 방지 동일 적용). 2026-07-15:
+    백엔드 products.subcategory 정규화에 맞춰 v6 `p_subcategory` 정밀
+    필터로 플럼빙 — canonical vocab 매칭/fail-open 은
+    search_service._resolve_precision_filters 담당."""
+    return _selected_vision_item_value(state, sess, "subcategory")
+
+
+def _selected_vision_item_value(state: WorkingState, sess: Any, key: str) -> str | None:
+    """Shared resolution for selected-Vision-item fields (photo-turn gated)."""
     has_fresh_image = bool(state.image_url)
     has_picker_callback = state.selected_item_index is not None
     if not (has_fresh_image or has_picker_callback):
@@ -370,16 +385,16 @@ def _selected_vision_category(state: WorkingState, sess: Any) -> str | None:
     items = _detected_items(state, sess)
     idx = state.selected_item_index
     if idx is not None and isinstance(idx, int) and 0 <= idx < len(items):
-        cat = items[idx].get("category")
-        return str(cat).strip() if cat else None
+        val = items[idx].get(key)
+        return str(val).strip() if val else None
     vsi = state.vision_selected_item
     if vsi is not None:
-        cat = getattr(vsi, "category", None)
-        if cat:
-            return str(cat).strip()
+        val = getattr(vsi, key, None)
+        if val:
+            return str(val).strip()
     if items:
-        cat = items[0].get("category")
-        return str(cat).strip() if cat else None
+        val = items[0].get(key)
+        return str(val).strip() if val else None
     return None
 
 
@@ -445,6 +460,8 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         # (NOT the style-node letter). `search_products` passes THIS as the
         # search `category` arg → normalized to a canonical 20-token.
         "vision_category": _selected_vision_category(state, sess),
+        # 2026-07-15 — Vision item subcategory (정밀 필터). photo-turn gate 동일.
+        "vision_subcategory": _selected_vision_subcategory(state, sess),
         # Per-request mobile filter UI values (chat API). search_products /
         # refine_search read these as overrides: req_gender wins over the
         # profile pin (per-request only, no persist); req_price_max is the

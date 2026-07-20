@@ -21,6 +21,7 @@ fabricated-placeholder-URL → Modal regression.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -142,6 +143,28 @@ def _query_gender(text_query: str) -> str | None:
     for g in _GENDER_TOKENS:
         if g in tokens:
             return g
+    return None
+
+
+def _resolve_brand_filter(raw: Any) -> list[str] | None:
+    """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
+
+    RPC 는 `brand_nodes.brand_name = ANY(p_brand_names)` EXACT 매치라 LLM
+    표기("acne studios", "ACNE")를 그대로 보내면 미스난다 —
+    `brand_node_cache.lookup` (lifespan 워밍, ~2.9k 브랜드)으로 canonical
+    `brand_name` 을 resolve. 미인식/캐시 미워밍이면 None (fail-open: 필터
+    없이 진행, 브랜드 토큰은 text_query 임베딩에 남아 soft 신호로 작동)."""
+    if not raw or not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        from app.infrastructure.repositories.brand_node_cache import lookup
+
+        attrs = lookup(raw)
+        if attrs is not None and attrs.brand_name:
+            return [attrs.brand_name]
+        logger.info("[tool.search_products] brand %r not in brand_node_cache — filter skipped (fail-open)", raw)
+    except Exception as exc:  # noqa: BLE001 — 브랜드 필터는 부가 기능, 검색을 막지 않는다
+        logger.warning("[tool.search_products] brand resolve failed: %r", exc)
     return None
 
 
@@ -487,6 +510,9 @@ async def run_text_only_search(
     *,
     text_query: str,
     category: str | None = None,
+    subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -524,7 +550,9 @@ async def run_text_only_search(
     item = AnalyzedItem(
         id="agent-v2-text",
         category=category or "apparel",
-        subcategory=None,
+        # 2026-07-15: Vision/호출자 subcategory 그대로 운반 — 정규화(canonical
+        # vocab 매칭)는 search_service._resolve_precision_filters 단일 지점.
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=text_query,
@@ -532,6 +560,8 @@ async def run_text_only_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -593,6 +623,79 @@ async def run_text_only_search(
     return list(state.final_candidates or [])
 
 
+def _cand_id(cand: Any) -> Any:
+    """product_id 추출 (dict / Candidate 양쪽)."""
+    if isinstance(cand, dict):
+        return cand.get("id") or cand.get("product_id")
+    return getattr(cand, "id", None) or getattr(cand, "product_id", None)
+
+
+async def run_multi_query_search(
+    *,
+    queries: list[str],
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
+    top_k: int = 15,
+    style_node_primary: str | None = None,
+    user_key: str | None = None,
+) -> list[Any]:
+    """상황/TPO 쿼리 확장 (2026-07-16 Phase 4a).
+
+    "결혼식 하객룩" 같은 상황 쿼리는 단일 아이템으로 답할 수 없다 — LLM 이
+    2~3개 구성 아이템 쿼리("elegant midi dress" / "satin blouse" /
+    "slingback heels")로 확장하고, 여기서 각각을 **병렬** text 검색한 뒤
+    **인터리브 병합**(라운드로빈)해 하나의 코디 믹스를 만든다. gender 는
+    시스템이 모든 서브쿼리에 동일 적용(하드 필터) — 사용자가 여성 하객룩을
+    물으면 아이템 전부 여성.
+
+    각 서브쿼리는 자체 diversify(브랜드/플랫폼 캡)를 거친 뒤 병합되므로,
+    믹스는 아이템 종류가 다양하면서도 브랜드가 한쪽으로 쏠리지 않는다.
+    실패한 서브쿼리는 건너뛴다(부분 실패 허용)."""
+    results = await asyncio.gather(
+        *[
+            run_text_only_search(
+                text_query=q,
+                gender=gender,
+                brand_filter=brand_filter,
+                top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
+            )
+            for q in queries
+        ],
+        return_exceptions=True,
+    )
+    lists: list[list[Any]] = []
+    for q, r in zip(queries, results, strict=True):
+        if isinstance(r, list):
+            lists.append(r)
+        else:
+            logger.warning("[multi_query] sub-query %r failed: %r", q[:60], r)
+    # 라운드로빈 인터리브 + id dedup — top_k 까지.
+    merged: list[Any] = []
+    seen: set[Any] = set()
+    depth = max((len(lst) for lst in lists), default=0)
+    for i in range(depth):
+        for lst in lists:
+            if i < len(lst):
+                cand = lst[i]
+                cid = _cand_id(cand)
+                if cid is not None and cid in seen:
+                    continue
+                seen.add(cid)
+                merged.append(cand)
+                if len(merged) >= top_k:
+                    logger.info(
+                        "🔍 [multi_query] %d subq → %d merged (interleaved, top_k=%d)",
+                        len(lists),
+                        len(merged),
+                        top_k,
+                    )
+                    return merged
+    logger.info("🔍 [multi_query] %d subq → %d merged (interleaved)", len(lists), len(merged))
+    return merged
+
+
 async def run_blended_search(
     *,
     origin_url: str,
@@ -600,6 +703,9 @@ async def run_blended_search(
     chat_id: int | None = None,
     alpha: float = 0.7,
     category: str | None = None,
+    subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -637,6 +743,9 @@ async def run_blended_search(
         return await run_text_only_search(
             text_query=modifier_query,
             category=category,
+            subcategory=subcategory,
+            gender=gender,
+            brand_filter=brand_filter,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -652,7 +761,7 @@ async def run_blended_search(
     item = AnalyzedItem(
         id="agent-blended",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=modifier_query,
@@ -660,6 +769,8 @@ async def run_blended_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -721,6 +832,9 @@ async def run_smart_blended_search(
     chat_id: int | None = None,
     prior_outfit_context: str | None = None,
     category: str | None = None,
+    subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -775,6 +889,9 @@ async def run_smart_blended_search(
         return await run_text_only_search(
             text_query=modifier_query,
             category=category,
+            subcategory=subcategory,
+            gender=gender,
+            brand_filter=brand_filter,
             fit=fit,
             color_family=color_family,
             top_k=top_k,
@@ -818,7 +935,7 @@ async def run_smart_blended_search(
     item = AnalyzedItem(
         id="agent-smart-blended",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=modifier_query,
@@ -826,6 +943,8 @@ async def run_smart_blended_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -858,6 +977,9 @@ async def run_image_search(
     image_url: str,
     text_query: str,
     category: str | None = None,
+    subcategory: str | None = None,
+    gender: str | None = None,
+    brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
     top_k: int = 15,
@@ -880,7 +1002,7 @@ async def run_image_search(
     item = AnalyzedItem(
         id="agent-v2",
         category=category or "apparel",
-        subcategory=None,
+        subcategory=subcategory,
         fit=fit,
         color_family=color_family,
         search_query=text_query,
@@ -888,6 +1010,8 @@ async def run_image_search(
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
     req = RecommendRequest(
         item=item,
+        gender=gender,
+        brand_filter=brand_filter,
         image_url=image_url,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
@@ -1072,10 +1196,31 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # still apply the knit family gate. Mirrors refine_search PR #112.
     if pinned_embedding is not None:
         category = pinned_category or ctx.get("vision_category")
+        # Pinned anchor: 이전 Vision 턴의 subcategory 를 새 anchor 에 누출하지
+        # 않는다 (fit/color 클리어와 동일한 원칙 — refine_search PR #112).
+        subcategory = None
     else:
-        category = ctx.get("vision_category")
+        # 2026-07-15 배선 수정: 순수 텍스트 턴은 vision_category 가 None 이라
+        # LLM `category` arg 가 family gate 에 전혀 닿지 않았다 (gender 재검색
+        # 경로만 args 를 stash 하는 비대칭). Vision 우선, 없으면 args 로 폴백 —
+        # args 는 자유형("hoodie")이어도 to_canonical_family / subcategory_vocab
+        # 이 정규화하고, 미인식 값은 `other`/None 으로 fail-open.
+        category = ctx.get("vision_category") or args.get("category")
+        subcategory = ctx.get("vision_subcategory")
     fit = args.get("fit")
     color_family = args.get("color_family")
+
+    # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
+    # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
+    # (명시/핀 append/unisex 폴백), 거기서 역파싱하는 것이 단일 소스다.
+    # 'unisex' 는 search_service._resolve_gender 가 None(필터 off)으로 매핑.
+    structured_gender = _query_gender(text_query)
+
+    # 2026-07-16 — 브랜드 지정 요청 (LLM `brand` arg): brand_node_cache 로
+    # canonical brand_name 을 resolve 해서 p_brand_names EXACT 매치에 태운다.
+    # 미인식 브랜드는 필터 없이 진행 (fail-open — 브랜드 토큰은 text_query
+    # 임베딩에 그대로 남아 soft 신호로 작동).
+    brand_filter = _resolve_brand_filter(args.get("brand"))
 
     # Multi-turn image blending (Level 1 image-first refinement):
     # when no current image URL exists but an origin image URL is stored from
@@ -1117,8 +1262,38 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # can look up TasteProfile and re-order the v6 raw rows.
     user_key = ctx.get("user_key")
 
+    # 2026-07-16 Phase 4a — 상황/TPO 쿼리 확장 (멀티 쿼리). LLM 이 상황
+    # 쿼리에서만 sub_queries 를 채운다. 순수 텍스트 턴에서만 활성 (이미지/핀
+    # 앵커 턴은 단일 아이템 의도라 제외). text_query(대표) + sub_queries 를
+    # dedup 해 2개 이상이면 멀티 경로. structured_gender 는 모든 서브쿼리에
+    # 동일 적용된다.
+    multi_queries: list[str] | None = None
+    _sub_raw = args.get("sub_queries")
+    if not has_image and pinned_embedding is None and isinstance(_sub_raw, list) and _sub_raw:
+        _seen_q: set[str] = set()
+        _mq: list[str] = []
+        for q in [text_query, *_sub_raw]:
+            if not isinstance(q, str):
+                continue
+            qs = q.strip()
+            if qs and qs.lower() not in _seen_q:
+                _seen_q.add(qs.lower())
+                _mq.append(qs)
+        if len(_mq) >= 2:
+            multi_queries = _mq[:3]  # 레이턴시 상한 — 최대 3개 병렬 검색
+
     try:
-        if has_image:
+        if multi_queries is not None:
+            logger.info("🔍 [tool.search_products] situation multi-query: %r", multi_queries)
+            cands = await run_multi_query_search(
+                queries=multi_queries,
+                gender=structured_gender,
+                brand_filter=brand_filter,
+                top_k=top_k,
+                style_node_primary=style_node_primary,
+                user_key=user_key,
+            )
+        elif has_image:
             # Photo-pick: real resolved image drives the v6 query embedding.
             # text_query is informational only (v6 has no text param). NEVER an
             # LLM-supplied / placeholder URL.
@@ -1127,6 +1302,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 image_url=str(ctx_image),
                 text_query=query,
                 category=category,
+                subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1154,6 +1332,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 chat_id=ctx.get("chat_id"),
                 prior_outfit_context=prior_ctx or None,
                 category=category,
+                subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,
@@ -1164,6 +1345,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             cands = await run_text_only_search(
                 text_query=text_query,
                 category=category,
+                subcategory=subcategory,
+                gender=structured_gender,
+                brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
                 top_k=top_k,

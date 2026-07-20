@@ -55,6 +55,15 @@ class Settings(BaseSettings):
 
     # 검색 파라미터 기본값
     SEARCH_DEFAULT_K: int = 50  # RPC top-k
+    # 2026-07-15 정밀 필터 (백엔드 products.subcategory/color 정규화 연동).
+    # v6 의 p_subcategory/p_color_family 는 EXACT·무완화 필터 — kill-switch 로
+    # 즉시 회귀 가능하도록 개별 플래그. RELAX_MIN 미만이면 필터 제거 재시도.
+    SEARCH_SUBCATEGORY_FILTER_ENABLED: bool = True
+    SEARCH_COLOR_FILTER_ENABLED: bool = True
+    SEARCH_FILTER_RELAX_MIN: int = 5
+    # 2026-07-16 — p_gender 상품 레벨 하드 필터 (gender[] && [g,'unisex']).
+    # 시맨틱 제약이라 완화 재시도 대상 아님. kill-switch.
+    SEARCH_GENDER_FILTER_ENABLED: bool = True
     # 다양성 cap — 2026-06-17 완화 (이전: brand=2, platform=3).
     # Langfuse 트레이스 분석에서 raw 50개 후보 중 45개가 cap 으로 잘려
     # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만
@@ -102,6 +111,13 @@ class Settings(BaseSettings):
     # When true, fall back to InMemory stores if Postgres probe fails. Set to "false" in production.
     MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
     SESSION_CLEANUP_INTERVAL_S: int = 300
+
+    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
+    # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
+    CURATION_REFRESH_ENABLED: bool = True
+    CURATION_REFRESH_INTERVAL_S: int = 3600
+    NOTION_TOKEN: str = ""
+    NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
     # 소비자 소셜 로그인 (SPEC-AUTH-SOCIAL-001)
     GOOGLE_CLIENT_ID: str = ""  # Google Cloud Console > OAuth 2.0 (iOS type)

@@ -94,6 +94,8 @@ def patch_pipeline(monkeypatch):
 # SPEC-SEARCH-V6-001 family-gate re-point: the request item is category="top",
 # which to_canonical_family normalizes to the canonical token "tops" — so
 # p_category is "tops" (was None pre-family-gate). p_subcategory stays None
+# (2026-07-15 활성화 후에도: item.subcategory="knit" 은 canonical vocab
+# 미인식 → fail-open None — tests/test_search_precision_filters.py 참조)
 # (products.subcategory is 100% NULL repo-wide → narrowing is a no-op).
 def _expected_v6_params() -> dict[str, Any]:
     return {
@@ -105,6 +107,7 @@ def _expected_v6_params() -> dict[str, Any]:
         # SPEC-SEARCH-V6-COLOR: color filter param — None here (fixture has no
         # color_family). See tests/test_search_color_filter.py for the on path.
         "p_color_family": None,
+        "p_gender": None,
         "p_limit": 50,
     }
 

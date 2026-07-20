@@ -299,6 +299,9 @@ async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumb
         cands = await run_text_only_search(
             text_query=text_query,
             category=pending.get("category"),
+            # 2026-07-16 — v6 p_gender 하드 필터: 카드에서 고른 성별 그대로.
+            # 'unisex' 는 search_service._resolve_gender 가 None(필터 off) 매핑.
+            gender=g,
             top_k=int(pending.get("top_k") or 15),
             style_node_primary=getattr(state, "vision_outfit_style_node_primary", None),
             user_key=user_key_for(state.from_user_id, state.chat_id),
