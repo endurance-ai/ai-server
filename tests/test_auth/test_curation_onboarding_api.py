@@ -43,22 +43,26 @@ async def _insert_product(
     gender: list[str] | None = None,
     brand_node_id: int | None = None,
     in_stock: bool = True,
+    name: str = "Test Product",
+    category: str = "tops",
 ) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO public.products (brand, name, price, gender, image_url, product_url, brand_node_id, in_stock)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+            INSERT INTO public.products
+                (brand, name, price, gender, image_url, product_url, brand_node_id, in_stock, category)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 brand,
-                "Test Product",
+                name,
                 price,
                 gender or ["women"],
                 "https://img.test/i.jpg",
                 f"https://shop.test/{uuid4()}",
                 brand_node_id,
                 in_stock,
+                category,
             ),
         )
         row = await cur.fetchone()
@@ -237,9 +241,9 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
     from app.services.curation_refresh import refresh_auto_sections
 
     _auth, user_id = await _login(client)
-    cheap = await _insert_product(pool, brand="Cheap", price=42.0)
-    pricey = await _insert_product(pool, brand="Pricey", price=250.0)
-    viewed = await _insert_product(pool, brand="Hot", price=120.0)
+    cheap = await _insert_product(pool, brand="Cheap", price=42000)
+    pricey = await _insert_product(pool, brand="Pricey", price=250000)
+    viewed = await _insert_product(pool, brand="Hot", price=120000)
     async with pool.connection() as conn, conn.cursor() as cur:
         for _ in range(3):
             await cur.execute(
@@ -248,15 +252,38 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
             )
         await conn.commit()
 
-    # usd_krw=1.0 로 고정 — 실 환율(수백~수천 KRW/USD)을 쓰면 위 테스트용 가격들이
-    # 전부 임계값 아래로 들어가 버려 under-100 분리 검증이 무의미해진다. 실시간 FX
-    # 조회 자체(네트워크 호출)를 이 단위 테스트 범위 밖으로 둬 결정론적으로 유지.
-    with patch("app.services.curation_refresh._fetch_usd_to_krw", return_value=1.0):
-        written = await refresh_auto_sections(pool)
+    written = await refresh_auto_sections(pool)
     assert written >= 2  # women: popular + under-100 (trending은 신호 없음 → skip)
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = {s["id"]: s for s in resp.json()["sections"]}
     assert [p["product_id"] for p in sections["popular"]["products"]] == [viewed]
     under = [p["product_id"] for p in sections["under-100"]["products"]]
-    assert cheap in under and pricey not in under and viewed not in under
+    # 상한(15만원) 위인 pricey만 탈락. viewed는 12만원이라 조회수 순으로 맨 앞에 온다.
+    assert cheap in under and viewed in under and pricey not in under
+    assert under[0] == viewed
+
+
+@pytest.mark.asyncio
+async def test_refresh_under100_filters_bad_data(client: AsyncClient, pool):
+    """구좌 데이터 품질 가드 — 크롤 이상치가 under-100 구좌에 노출되지 않는다."""
+    from app.services.curation_refresh import refresh_auto_sections
+
+    ok = await _insert_product(pool, brand="Clean", price=42000)
+    unconverted_fx = await _insert_product(pool, brand="FxBug", price=145)  # $145가 KRW로 오탐
+    preorder_deposit = await _insert_product(pool, brand="Preorder", price=10000)  # 예약금
+    swim = await _insert_product(pool, brand="Swim", price=99000, category="swimwear")
+    swim_miscategorized = await _insert_product(pool, brand="MisCat", price=99000, name="TRIANGLE BIKINI TOP")
+    junk_brand = await _insert_product(pool, brand="판매가 : 125,000", price=125000)
+    dupes = [await _insert_product(pool, brand="SameBrand", price=50000 + i) for i in range(3)]
+
+    await refresh_auto_sections(pool)
+
+    resp = await client.get("/v1/curation", params={"gender": "women"})
+    sections = {s["id"]: s for s in resp.json()["sections"]}
+    under = [p["product_id"] for p in sections["under-100"]["products"]]
+
+    assert ok in under
+    for excluded in (unconverted_fx, preorder_deposit, swim, swim_miscategorized, junk_brand):
+        assert excluded not in under
+    assert len([pid for pid in dupes if pid in under]) == 2  # 브랜드당 2개 캡
