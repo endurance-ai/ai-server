@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     UPLOADS_S3_SESSION_TOKEN: str = ""
     UPLOADS_PUBLIC_BASE_URL: str = ""
     UPLOADS_KEY_PREFIX: str = "uploads"
-    UPLOADS_MAX_SIZE_BYTES: int = 1_048_576
+    UPLOADS_MAX_SIZE_BYTES: int = 10_485_760
     UPLOADS_PRESIGN_EXPIRES_SECONDS: int = 300
     # Standard AWS env fallback for upload signing.
     AWS_ACCESS_KEY_ID: str = ""
