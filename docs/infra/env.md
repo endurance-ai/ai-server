@@ -38,7 +38,7 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `UPLOADS_S3_SESSION_TOKEN` | `""` | 임시 자격증명 사용 시 session token. 비어 있으면 `AWS_SESSION_TOKEN` fallback |
 | `UPLOADS_PUBLIC_BASE_URL` | `""` | CloudFront/public CDN base URL |
 | `UPLOADS_KEY_PREFIX` | `uploads` | S3 object key prefix |
-| `UPLOADS_MAX_SIZE_BYTES` | `1048576` | API가 허용하는 최대 이미지 크기. 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
+| `UPLOADS_MAX_SIZE_BYTES` | `10485760` | API가 허용하는 최대 이미지 크기(10MB). 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
 | `UPLOADS_PRESIGN_EXPIRES_SECONDS` | `300` | presigned URL TTL. 런타임에서 60~3600초로 clamp |
 
 ## Telegram 메신저 채널 (SPEC-MSG-001)
