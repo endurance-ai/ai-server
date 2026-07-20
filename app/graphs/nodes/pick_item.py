@@ -25,6 +25,7 @@ from app.graphs.nodes._trace import node_done, node_enter, node_skip
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import SessionState, get_store
 from app.infrastructure.memory.taste_profile import user_key_for
+from app.infrastructure.repositories.category_family import to_canonical_family
 from app.observability.conversation_log import emit
 from app.observability.langfuse import observe
 
@@ -122,17 +123,130 @@ def _parse_indices_from_text(text: str, max_index: int) -> list[int]:
     return [i - 1 for i in found]
 
 
-def _ko_label(it: dict) -> str:
-    """Korean-friendly label for a detected item.
+# ── Picker 버튼 표시용 짧은 카테고리 라벨 (표시 전용) ──────────────────────
+# 이전에는 버튼에 긴 Vision `searchQueryKo`("피티드 크롭 롱슬리브 … 니트 탑
+# 여성")를 그대로 노출해 사용자가 매번 읽고 해석해야 했다. 버튼에는 짧은
+# 대분류(상의/하의/선글라스/신발 …)만 보여주고, 실제 검색은 콜백 `item:{i}`
+# → `detected_items[i]` 의 full searchQuery/keywords 를 그대로 쓰므로(아래
+# `pick_item` 콜백 경로) 검색 품질에는 아무 영향이 없다 — 표시만 짧게.
 
-    Vision LLM emits English `label` (== item.name) and `description` (== item.detail).
-    For KO output we prefer `searchQueryKo` (already Korean keyword phrase) when present,
-    falling back to the English label so the user still sees something meaningful.
-    """
-    sq_ko = (it.get("searchQueryKo") or "").strip()
-    if sq_ko:
-        return sq_ko
-    return it.get("label") or "아이템"
+# canonical family(20종) → 짧은 한글 라벨. `to_canonical_family` 가 Vision
+# category/subcategory/label 을 이 20종 중 하나로 정규화해 준다.
+_FAMILY_LABEL_KO: dict[str, str] = {
+    "tops": "상의",
+    "bottoms": "하의",
+    "dresses": "원피스",
+    "outerwear": "아우터",
+    "knitwear": "니트",
+    "shoes": "신발",
+    "sneakers": "스니커즈",
+    "bags": "가방",
+    "accessories": "액세서리",
+    "eyewear": "선글라스",
+    "jewelry": "주얼리",
+    "headwear": "모자",
+    "underwear": "언더웨어",
+    "swimwear": "수영복",
+    "activewear": "액티브웨어",
+    "homeware": "홈웨어",
+    "fragrance": "향수",
+    "beauty": "뷰티",
+    "lifestyle": "라이프스타일",
+}
+
+# category(=family) 만으로는 뭉뚱그려지는 케이스를 subcategory 로 정밀화한다.
+# (예: accessories → 선글라스/모자/시계, shoes → 스니커즈/부츠/힐)
+_SUBCATEGORY_LABEL_KO: dict[str, str] = {
+    "sunglasses": "선글라스",
+    "eyewear": "선글라스",
+    "glasses": "안경",
+    "hat": "모자",
+    "cap": "모자",
+    "beanie": "비니",
+    "bucket-hat": "버킷햇",
+    "scarf": "스카프",
+    "belt": "벨트",
+    "watch": "시계",
+    "necklace": "목걸이",
+    "earrings": "귀걸이",
+    "ring": "반지",
+    "bracelet": "팔찌",
+    "backpack": "백팩",
+    "tote": "토트백",
+    "crossbody": "크로스백",
+    "clutch": "클러치",
+    "sneakers": "스니커즈",
+    "boots": "부츠",
+    "heels": "힐",
+    "sandals": "샌들",
+    "loafers": "로퍼",
+}
+
+# 같은 라벨이 중복될 때(예: 상의 2개) 색상으로 구분하기 위한 colorFamily→한글.
+_COLOR_FAMILY_KO: dict[str, str] = {
+    "black": "블랙",
+    "white": "화이트",
+    "grey": "그레이",
+    "gray": "그레이",
+    "beige": "베이지",
+    "brown": "브라운",
+    "navy": "네이비",
+    "blue": "블루",
+    "green": "그린",
+    "red": "레드",
+    "pink": "핑크",
+    "purple": "퍼플",
+    "yellow": "옐로우",
+    "orange": "오렌지",
+    "cream": "크림",
+    "khaki": "카키",
+    "ivory": "아이보리",
+    "burgundy": "버건디",
+}
+
+
+def _short_label(it: dict, lang: str) -> str:
+    """Picker 버튼용 짧은 카테고리 라벨. subcategory 정밀맵 → canonical family 순."""
+    sub = (it.get("subcategory") or "").strip().lower()
+    if lang == "ko" and sub in _SUBCATEGORY_LABEL_KO:
+        return _SUBCATEGORY_LABEL_KO[sub]
+    # category 우선, 비어 있으면 subcategory/label 로 family 추론.
+    src = (it.get("category") or "").strip() or sub or (it.get("label") or "").strip()
+    fam = to_canonical_family(src)
+    if lang == "ko":
+        if fam != "other" and fam in _FAMILY_LABEL_KO:
+            return _FAMILY_LABEL_KO[fam]
+        return "아이템"
+    # EN — subcategory(짧은 영문) 우선, 없으면 family, 그래도 없으면 "Item".
+    if sub:
+        return sub.replace("-", " ").title()
+    if fam != "other":
+        return fam.title()
+    return "Item"
+
+
+def _color_hint(it: dict, lang: str) -> str:
+    """중복 라벨 구분용 색상 힌트 (KO 는 한글, EN 은 영문 title-case)."""
+    fam = (it.get("colorFamily") or "").strip().lower()
+    if not fam:
+        return ""
+    return _COLOR_FAMILY_KO.get(fam, "") if lang == "ko" else fam.title()
+
+
+def _picker_labels(items: list[dict], lang: str) -> list[str]:
+    """각 아이템의 짧은 라벨을 만들고, 중복되면 색상 힌트로 구분한다."""
+    labels = [_short_label(it, lang) for it in items]
+    counts: dict[str, int] = {}
+    for lbl in labels:
+        counts[lbl] = counts.get(lbl, 0) + 1
+    out: list[str] = []
+    for lbl, it in zip(labels, items):
+        if counts[lbl] > 1:
+            color = _color_hint(it, lang)
+            out.append(f"{lbl} ({color})" if color else lbl)
+        else:
+            out.append(lbl)
+    return out
 
 
 async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en") -> None:
@@ -154,16 +268,15 @@ async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en
         plural = "" if n == 1 else "s"
         body = f"Found {n} item{plural} in the photo 👀  Which one are you after?"
 
-    # Each item becomes its own row so the long Vision-generated labels don't
-    # collide horizontally. Truncate via the module-level `_LABEL_CAP`.
+    # 버튼에는 긴 Vision 문구 대신 짧은 카테고리 라벨만 노출한다(표시 전용 —
+    # 검색은 콜백 `item:{i}` 인덱스로 full keywords 를 그대로 사용). 중복 라벨은
+    # `_picker_labels` 가 색상 힌트로 구분한다.
+    shortlist = items[:4]
+    labels = _picker_labels(shortlist, lang)
     buttons: list[list[tuple[str, str]]] = []
-    for i, it in enumerate(items[:4]):
+    for i, _it in enumerate(shortlist):
         num_em = NUMBER_EMOJI[i] if i < len(NUMBER_EMOJI) else f"{i + 1}."
-        if lang == "ko":
-            label = _ko_label(it)
-        else:
-            label = it.get("label") or "item"
-        text = f"{num_em} {label}"
+        text = f"{num_em} {labels[i]}"
         if len(text) > _LABEL_CAP:
             text = text[: _LABEL_CAP - 1].rstrip() + "…"
         buttons.append([(text, f"item:{i}")])
