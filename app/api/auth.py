@@ -7,6 +7,7 @@ POST /v1/auth/logout   — revoke refresh_token (logout)
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +15,7 @@ from fastapi.security import HTTPBearer
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from app.channels import discord_notify
 from app.core import jwt as jwt_utils
 from app.core.di import provide_db_pool
 from app.core.social_auth.apple import AppleClaims, verify_apple_token
@@ -57,8 +59,13 @@ async def _upsert_user(
     email: str | None,
     display_name: str | None,
     avatar_url: str | None,
-) -> UUID:
-    """Insert or update user_profiles. Returns user_id."""
+) -> tuple[UUID, bool]:
+    """Insert or update user_profiles. Returns (user_id, is_new).
+
+    `is_new` uses the Postgres `xmax = 0` idiom: a freshly INSERTed row has
+    xmax 0, while an ON CONFLICT UPDATE (returning login) does not. This lets
+    the caller distinguish a brand-new signup from a returning login.
+    """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -70,10 +77,17 @@ async def _upsert_user(
                 display_name = COALESCE(EXCLUDED.display_name, ai.user_profiles.display_name),
                 avatar_url   = COALESCE(EXCLUDED.avatar_url, ai.user_profiles.avatar_url),
                 updated_at   = now()
-            RETURNING user_id
+            RETURNING user_id, (xmax = 0) AS is_new
             """,
             (provider, provider_id, email, display_name, avatar_url),
         )
+        row = await cur.fetchone()
+    return row[0], row[1]
+
+
+async def _count_users(pool: AsyncConnectionPool) -> int:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT COUNT(*) FROM ai.user_profiles")
         row = await cur.fetchone()
     return row[0]
 
@@ -132,7 +146,7 @@ async def social_login(
     """Verify Google or Apple id_token, upsert user_profiles, issue JWT pair."""
     if body.provider == "google":
         claims: GoogleClaims | AppleClaims = verify_google_token(body.id_token)
-        user_id = await _upsert_user(
+        user_id, is_new = await _upsert_user(
             pool,
             "google",
             claims.sub,
@@ -142,12 +156,18 @@ async def social_login(
         )
     elif body.provider == "apple":
         claims = verify_apple_token(body.id_token)
-        user_id = await _upsert_user(pool, "apple", claims.sub, claims.email, None, None)
+        user_id, is_new = await _upsert_user(pool, "apple", claims.sub, claims.email, None, None)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported provider: {body.provider}",
         )
+
+    # New signup → fire an anonymous Discord notification (fire-and-forget,
+    # fail-open — never blocks or breaks the login response).
+    if is_new:
+        total_users = await _count_users(pool)
+        asyncio.create_task(discord_notify.notify_signup(provider=body.provider, total_users=total_users))
 
     access_token = jwt_utils.create_access_token(user_id)
     raw_refresh, token_hash = jwt_utils.create_refresh_token()

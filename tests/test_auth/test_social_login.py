@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -54,6 +55,39 @@ async def test_same_user_gets_same_user_id(client: AsyncClient):
         r2 = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "b"})
 
     assert r1.json()["user_id"] == r2.json()["user_id"]
+
+
+@pytest.mark.asyncio
+async def test_new_signup_fires_discord_notification(client: AsyncClient):
+    """First login for a provider_id is a new signup → notify once with the total."""
+    with (
+        patch("app.api.auth.verify_google_token", return_value=_google_claims("notify-new-sub")),
+        patch("app.api.auth.discord_notify.notify_signup", new=AsyncMock()) as notify,
+    ):
+        resp = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "a"})
+        await asyncio.sleep(0.05)  # let the fire-and-forget task run
+
+    assert resp.status_code == 200
+    notify.assert_awaited_once()
+    kwargs = notify.await_args.kwargs
+    assert kwargs["provider"] == "google"
+    assert kwargs["total_users"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_returning_login_does_not_notify(client: AsyncClient):
+    """Second login with the same provider_id is an update, not a signup → no notify."""
+    with (
+        patch("app.api.auth.verify_google_token", return_value=_google_claims("notify-returning-sub")),
+        patch("app.api.auth.discord_notify.notify_signup", new=AsyncMock()) as notify,
+    ):
+        await client.post("/v1/auth/social", json={"provider": "google", "id_token": "a"})
+        await asyncio.sleep(0.05)
+        notify.reset_mock()
+        await client.post("/v1/auth/social", json={"provider": "google", "id_token": "b"})
+        await asyncio.sleep(0.05)
+
+    notify.assert_not_awaited()
 
 
 @pytest.mark.asyncio
