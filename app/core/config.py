@@ -153,6 +153,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_USERNAME: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""
     TELEGRAM_API_BASE: str = "https://api.telegram.org"
+
+    # Discord signup notification webhook — empty = feature off (silent no-op).
+    # Named specifically (not DISCORD_WEBHOOK_URL, which deploy.ai.sh reserves)
+    # so multiple Discord webhooks can coexist.
+    DISCORD_SIGNUP_WEBHOOK_URL: str = ""
     TELEGRAM_PUBLIC_URL: str = ""
     # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
     # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
