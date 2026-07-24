@@ -43,7 +43,7 @@ async def notify_signup(*, provider: str, total_users: int) -> None:
     if not webhook_url:
         return  # feature off — silent no-op
 
-    content = f"🎉 **{total_users}**번째 유저 가입! ({provider})"
+    content = f"🎉 kikoai에 **{total_users}**번째 유저 가입! ({provider})"
     try:
         resp = await _get_client().post(webhook_url, json={"content": content})
         if resp.status_code >= 400:
