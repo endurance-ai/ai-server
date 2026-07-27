@@ -208,6 +208,7 @@ async def test_curation_guest_requires_gender_param(client: AsyncClient):
 async def test_curation_guest_empty_sections_ok_with_women_chips(client: AsyncClient):
     resp = await client.get("/v1/curation", params={"gender": "women"})
     assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "private, no-store"
     data = resp.json()
     assert data["gender"] == "women"
     assert data["sections"] == []  # 빈 구좌여도 200 (클라 캐시 폴백)
@@ -252,6 +253,45 @@ async def test_curation_profile_gender_overrides_param(client: AsyncClient, pool
 async def test_curation_invalid_token_treated_as_guest(client: AsyncClient):
     resp = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": "Bearer not-a-jwt"})
     assert resp.status_code == 200  # 만료/무효 토큰이 메인 화면을 막지 않는다
+
+
+@pytest.mark.asyncio
+async def test_curation_impressions_require_auth_and_deduplicate(client: AsyncClient, pool):
+    product_style_node = 17
+    brand_id = await _insert_brand(pool, "Impression Brand", node_id=product_style_node)
+    product_id = await _insert_product(pool, brand="Impression Brand", brand_node_id=brand_id)
+    await _insert_section(pool, section_id="popular", gender="women", product_ids=[product_id])
+    payload = {"items": [{"section_id": "popular", "product_id": product_id, "position": 0}]}
+
+    unauthenticated = await client.post("/v1/curation/impressions", json=payload)
+    assert unauthenticated.status_code in (401, 403)
+
+    auth, user_id = await _login(client)
+    first = await client.post(
+        "/v1/curation/impressions",
+        json=payload,
+        headers={"Authorization": auth},
+    )
+    duplicate = await client.post(
+        "/v1/curation/impressions",
+        json=payload,
+        headers={"Authorization": auth},
+    )
+    assert first.status_code == 200
+    assert first.json() == {"recorded": 1}
+    assert duplicate.json() == {"recorded": 0}
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT section_id, product_id, style_node_id, position
+            FROM ai.curation_impressions
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        rows = await cur.fetchall()
+    assert rows == [("popular", product_id, product_style_node, 0)]
 
 
 # ── curation refresher (auto sections) ────────────────────────────────────────
