@@ -15,14 +15,16 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.api.deps import get_optional_user_id
+from app.api.deps import get_current_user_id, get_optional_user_id
 from app.core.di import provide_db_pool
 from app.core.gender import db_to_app
 from app.services.curation_chips import Chip, chips_for
+from app.services.curation_refresh import select_candidate_ids
+from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
 
@@ -57,6 +59,20 @@ class CurationResponse(BaseModel):
     chips: list[Chip]
 
 
+class CurationImpression(BaseModel):
+    section_id: str = Field(min_length=1, max_length=100)
+    product_id: int
+    position: int | None = Field(default=None, ge=0, le=100)
+
+
+class CurationImpressionRequest(BaseModel):
+    items: list[CurationImpression] = Field(min_length=1, max_length=50)
+
+
+class CurationImpressionResponse(BaseModel):
+    recorded: int
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -67,7 +83,11 @@ async def _profile_gender(pool: AsyncConnectionPool, user_id: UUID) -> str | Non
     return db_to_app(row[0]) if row else None
 
 
-async def _load_sections(pool: AsyncConnectionPool, gender: str) -> list[CurationSection]:
+async def _load_sections(
+    pool: AsyncConnectionPool,
+    gender: str,
+    user_id: UUID | None = None,
+) -> list[CurationSection]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -80,19 +100,88 @@ async def _load_sections(pool: AsyncConnectionPool, gender: str) -> list[Curatio
         )
         section_rows = await cur.fetchall()
 
+        selected_by_section: dict[str, list[int]] = {}
+        excluded_ids: set[int] = set()
+        taste_scores: dict[int, float] = {}
+        if user_id is not None:
+            await cur.execute(
+                """
+                SELECT style_node_id,
+                       greatest(-20.0, least(
+                           20.0,
+                           score * power(
+                               0.5,
+                               greatest(0, extract(epoch FROM (now() - last_event_at)))
+                                   / (30 * 24 * 60 * 60)
+                           )
+                       ))
+                FROM ai.user_style_scores
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            taste_scores = {int(r[0]): float(r[1]) for r in await cur.fetchall()}
+
+        for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
+            if slot_type != "auto" or user_id is None or not taste_scores:
+                selected = [
+                    int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
+                ]
+            else:
+                await cur.execute(
+                    """
+                    SELECT product_id, is_hot, base_score, base_rank, brand_key,
+                           brand_node_id, style_node_id
+                    FROM ai.curation_candidates
+                    WHERE section_id = %s AND gender = %s
+                    ORDER BY is_hot DESC, base_rank
+                    """,
+                    (section_id, gender),
+                )
+                candidate_rows = [
+                    {
+                        "product_id": int(r[0]),
+                        "is_hot": bool(r[1]),
+                        "base_score": float(r[2]),
+                        "base_rank": int(r[3]),
+                        "brand_key": r[4],
+                        "brand_node_id": r[5],
+                        "style_node_id": int(r[6]) if r[6] is not None else None,
+                    }
+                    for r in await cur.fetchall()
+                ]
+                selected = select_candidate_ids(
+                    candidate_rows,
+                    section_id=section_id,
+                    excluded_ids=excluded_ids,
+                    taste_scores=taste_scores,
+                    seed=f"{user_id}:{gender}:{section_id}",
+                )
+                if not selected:
+                    selected = [
+                        int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
+                    ]
+            selected_by_section[section_id] = selected
+            excluded_ids.update(selected)
+
         # 구좌별 product_ids를 한 번에 하이드레이션 (results.py의 unnest 패턴).
         all_ids: list[int] = []
         for r in section_rows:
-            all_ids.extend(r[4][:_PRODUCTS_PER_SECTION] if r[4] else [])
+            all_ids.extend(selected_by_section.get(r[0], []))
         products: dict[int, CurationProduct] = {}
         if all_ids:
             await cur.execute(
                 """
                 SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url
                 FROM public.products p
-                WHERE p.id = ANY(%s) AND p.in_stock
+                WHERE p.id = ANY(%s)
+                  AND p.in_stock
+                  AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
+                  AND p.price >= 5000
+                  AND %s = ANY(p.gender)
+                  AND NOT ('unisex' = ANY(p.gender))
                 """,
-                (list(dict.fromkeys(all_ids)),),
+                (list(dict.fromkeys(all_ids)), gender),
             )
             for pid, brand, name, price, image_url, product_url in await cur.fetchall():
                 products[int(pid)] = CurationProduct(
@@ -106,7 +195,8 @@ async def _load_sections(pool: AsyncConnectionPool, gender: str) -> list[Curatio
 
     sections: list[CurationSection] = []
     for section_id, slot_type, title, subtitle, product_ids in section_rows:
-        hydrated = [products[pid] for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if pid in products]
+        selected = selected_by_section.get(section_id, (product_ids or [])[:_PRODUCTS_PER_SECTION])
+        hydrated = [products[pid] for pid in selected if pid in products]
         sections.append(
             CurationSection(id=section_id, slot_type=slot_type, title=title, subtitle=subtitle, products=hydrated)
         )
@@ -118,6 +208,7 @@ async def _load_sections(pool: AsyncConnectionPool, gender: str) -> list[Curatio
 
 @router.get("/curation", response_model=CurationResponse)
 async def get_curation(
+    response: Response,
     gender: Literal["women", "men"] | None = Query(default=None),
     user_id: UUID | None = Depends(get_optional_user_id),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
@@ -133,5 +224,20 @@ async def get_curation(
             detail="gender is required (query param for guests, profile for logged-in users)",
         )
 
-    sections = await _load_sections(pool, resolved)
+    sections = await _load_sections(pool, resolved, user_id)
+    response.headers["Cache-Control"] = "private, no-store"
     return CurationResponse(gender=resolved, sections=sections, chips=chips_for(resolved))
+
+
+@router.post("/curation/impressions", response_model=CurationImpressionResponse)
+async def create_curation_impressions(
+    body: CurationImpressionRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> CurationImpressionResponse:
+    recorded = await record_impressions(
+        pool,
+        user_id=user_id,
+        items=[(item.section_id, item.product_id, item.position) for item in body.items],
+    )
+    return CurationImpressionResponse(recorded=recorded)

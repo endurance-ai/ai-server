@@ -1,26 +1,19 @@
-"""메인 큐레이션 구좌 백그라운드 refresher.
+"""Notion-backed curation metadata sync and daily auto-candidate refresh.
 
-lifespan에서 asyncio 태스크로 기동 (`_modal_keep_warm_loop` 패턴). 주기마다:
-  1. auto 구좌 3종을 자체 DB 신호로 계산해 ai.curation_sections upsert
-     - popular          : 최근 7d ai.product_views 상위 (브랜드당 2개 캡)
-     - trending-search  : 최근 7d ai.searches 결과셋에 가장 자주 등장한 상품
-     - under-100        : 15,000~150,000 KRW 일상복 재고 상품, 조회수 순
-       (v6 RPC에 가격 필터가 없어 검색이 아닌 DB 직접 쿼리 — 스펙 결정 사항.
-       products.price는 KRW 저장. 상한은 실시간 USD 환율이 아니라 고정 15만원 —
-       매일 흔들리는 상한에 실익이 없어 외부 FX API 의존을 제거했다)
-  2. 노션 "큐레이션 구좌" DB → editorial 구좌 동기화 (NOTION_TOKEN 설정 시)
-     - 활성 체크 해제 / 노션에서 사라진 페이지 → is_active=false
-
-전체 fail-open: 어떤 단계가 실패해도 기존 행이 유지된다(stale-while-error).
-GET /v1/curation은 이 테이블만 읽으므로 refresher 실패가 응답을 막지 않는다.
+The app never reads Notion. This service copies the operating database into
+Supabase/Postgres, then refreshes auto products once per KST day.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
+from collections import Counter
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from psycopg_pool import AsyncConnectionPool
@@ -29,169 +22,235 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_KST = ZoneInfo("Asia/Seoul")
 _GENDERS = ("women", "men")
-_SECTION_SIZE = 20
-_SIGNAL_WINDOW = "7 days"
-
+_AUTO_IDS = ("popular", "trending-search", "under-100")
+_SECTION_SIZE = 12
+_CANDIDATES_PER_POOL = 60
 _NOTION_API = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
 
-# products.gender 는 TEXT[] ('women'/'men'/'unisex' — crawler 어휘).
-# unisex는 양쪽 구좌에 노출, gender 미기입 상품은 제외.
-_GENDER_MATCH_SQL = "(%(gender)s = ANY(p.gender) OR 'unisex' = ANY(p.gender))"
-
-
-# ── auto sections ─────────────────────────────────────────────────────────────
-
-_POPULAR_SQL = f"""
-    SELECT id FROM (
-        SELECT p.id, v.cnt,
-               ROW_NUMBER() OVER (PARTITION BY p.brand ORDER BY v.cnt DESC, p.id) AS rn
-        FROM (
-            SELECT product_id, count(*) AS cnt
-            FROM ai.product_views
-            WHERE viewed_at > now() - interval '{_SIGNAL_WINDOW}'
-            GROUP BY product_id
-        ) v
-        JOIN public.products p ON p.id = v.product_id
-        WHERE p.in_stock AND {_GENDER_MATCH_SQL}
-    ) ranked
-    WHERE rn <= 2
-    ORDER BY cnt DESC, id
-    LIMIT %(limit)s
-"""  # noqa: S608 — 상수 interp only
-
-_TRENDING_SQL = f"""
-    SELECT p.id
-    FROM (
-        SELECT t.pid, count(*) AS cnt
-        FROM ai.searches s
-        CROSS JOIN LATERAL unnest(s.product_ids[1:10]) AS t(pid)
-        WHERE s.created_at > now() - interval '{_SIGNAL_WINDOW}'
-        GROUP BY t.pid
-    ) x
-    JOIN public.products p ON p.id = x.pid
-    WHERE p.in_stock AND {_GENDER_MATCH_SQL}
-    ORDER BY x.cnt DESC, p.id
-    LIMIT %(limit)s
-"""  # noqa: S608
-
-# products.price는 항상 KRW로 저장됨 (crawler/src/import-products.ts가 임포트 시점에
-# crawler/src/lib/fx.ts FX_TO_KRW로 USD/EUR/GBP -> KRW 변환 후 적재).
-_PRICE_MIN_KRW = 15000
-_PRICE_MAX_KRW = 150000
-
-# "일상적인 옷" 구좌 — swimwear/underwear/jewelry/headwear/eyewear/accessories 배제.
-_EVERYDAY_CATEGORIES = ["tops", "bottoms", "dresses", "outerwear", "knitwear", "shoes", "bags"]
-
-# 카테고리가 tops/bottoms로 오분류된 수영복이 남아 이름 레벨에서 한 번 더 거른다.
-_SWIM_NAME_RE = "(bikini|비키니|swimsuit|래쉬가드|rashguard|monokini)"
-
-# 하한(15,000원)은 크롤 데이터 품질 가드다. price < 1,000원 행 ~2.7k건은 외화가
-# KRW로 오탐되어 미변환 저장된 것이고(예: $145 -> price=145), 정확히 10,000원인
-# 행들은 예약 상품의 예약금이 판매가 자리에 수집된 것이다. brand 3종 가드도 같은
-# 성격 — 파싱 실패로 "판매가 : 125,000" 같은 레이블이 brand에 들어간 행을 막는다.
-# 근본 원인은 크롤러 쪽이며 별도 작업으로 추적한다.
-_UNDER_100_SQL = f"""
-    SELECT id FROM (
-        SELECT p.id, v.cnt,
-               ROW_NUMBER() OVER (PARTITION BY p.brand ORDER BY v.cnt DESC NULLS LAST, p.id) AS rn
-        FROM public.products p
-        LEFT JOIN (
-            SELECT product_id, count(*) AS cnt
-            FROM ai.product_views
-            WHERE viewed_at > now() - interval '{_SIGNAL_WINDOW}'
-            GROUP BY product_id
-        ) v ON v.product_id = p.id
-        WHERE p.in_stock
-          AND p.price BETWEEN {_PRICE_MIN_KRW} AND {_PRICE_MAX_KRW}
-          AND p.category = ANY(%(categories)s)
-          AND p.name !~* '{_SWIM_NAME_RE}'
-          AND p.brand IS NOT NULL AND btrim(p.brand) <> '' AND p.brand !~ ':' AND p.brand <> p.name
-          AND p.image_url IS NOT NULL
-          AND {_GENDER_MATCH_SQL}
-    ) ranked
-    WHERE rn <= 2
-    ORDER BY cnt DESC NULLS LAST, md5(id::text || current_date::text)
-    LIMIT %(limit)s
-"""  # noqa: S608 — 상수 interp only
-
-_AUTO_SECTIONS: tuple[tuple[str, str, str, str | None, int], ...] = (
-    # (section_id, sql, title, subtitle, sort_order)
-    ("popular", _POPULAR_SQL, "지금 인기 브랜드", "요즘 가장 많이 보는 스타일", 1),
-    ("trending-search", _TRENDING_SQL, "지금 뜨는 검색", "다른 사람들이 찾은 아이템", 2),
-    ("under-100", _UNDER_100_SQL, "Under $100", "부담 없는 가격, 확실한 스타일", 3),
+_WINTER_NAME_RE = "패딩|기모|플리스|무스탕|puffer|fleece"
+_BASE_EXCLUDED_CATEGORIES = ("other",)
+_SUMMER_EXCLUDED_CATEGORIES = ("outerwear", "knitwear")
+_SUMMER_EXCLUDED_SUBCATEGORIES = ("hoodie", "sweater", "cardigan")
+_MEN_ONLY_EXCLUDED_SUBCATEGORIES = (
+    "skirt",
+    "heels",
+    "bikini",
+    "bra",
+    "blouse",
+    "crop-top",
+    "hairbands",
 )
 
 
-async def _upsert_section(
-    pool: AsyncConnectionPool,
+def _quality_sql() -> str:
+    # Explicit labels only. Any array containing unisex is excluded, including
+    # ['women', 'unisex'] and ['men', 'unisex'].
+    winter_name_gate = f"AND p.name !~* '{_WINTER_NAME_RE}'" if settings.CURATION_SEASON.lower() == "summer" else ""
+    return f"""
+        p.in_stock
+        AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
+        AND p.price >= 5000
+        AND %(gender)s = ANY(p.gender)
+        AND NOT ('unisex' = ANY(p.gender))
+        AND length(btrim(p.brand)) BETWEEN 1 AND 40
+        AND p.brand NOT ILIKE '%%상품명%%'
+        AND p.brand <> p.name
+        AND COALESCE(bn.wiki->>'status', '') NOT IN ('제외', 'excluded', 'discontinued')
+        AND NOT (COALESCE(p.category, '') = ANY(%(excluded_categories)s))
+        AND NOT (COALESCE(p.subcategory, '') = ANY(%(excluded_subcategories)s))
+        {winter_name_gate}
+    """
+
+
+def _candidate_sql(section_id: str) -> str:
+    if section_id == "popular":
+        signal_ctes = """
+            views AS (
+                SELECT product_id, count(*)::float AS n
+                FROM ai.product_views
+                WHERE viewed_at > now() - interval '7 days'
+                GROUP BY product_id
+            ),
+            saves AS (
+                SELECT product_id::bigint AS product_id, count(*)::float AS n
+                FROM ai.saves
+                WHERE product_id ~ '^[0-9]+$'
+                  AND created_at > now() - interval '7 days'
+                GROUP BY product_id::bigint
+            ),
+            outbound AS (
+                SELECT (metadata->>'product_id')::bigint AS product_id, count(*)::float AS n
+                FROM ai.taste_signal_events
+                WHERE signal_type = 'outbound'
+                  AND occurred_at > now() - interval '7 days'
+                  AND metadata->>'product_id' ~ '^[0-9]+$'
+                GROUP BY (metadata->>'product_id')::bigint
+            )
+        """
+        score = """
+            COALESCE(v.n, 0) + 3 * COALESCE(sv.n, 0) + 4 * COALESCE(o.n, 0)
+                + ln(1 + COALESCE(p.review_count, 0))
+        """
+        joins = """
+            LEFT JOIN views v ON v.product_id = p.id
+            LEFT JOIN saves sv ON sv.product_id = p.id
+            LEFT JOIN outbound o ON o.product_id = p.id
+        """
+        extra = ""
+    elif section_id == "trending-search":
+        signal_ctes = """
+            recent_search AS (
+                SELECT x.pid AS product_id, count(*)::float / 2 AS n
+                FROM ai.searches s
+                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
+                WHERE s.created_at > now() - interval '2 days'
+                GROUP BY x.pid
+            ),
+            prior_search AS (
+                SELECT x.pid AS product_id, count(*)::float / 7 AS n
+                FROM ai.searches s
+                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
+                WHERE s.created_at <= now() - interval '2 days'
+                  AND s.created_at > now() - interval '9 days'
+                GROUP BY x.pid
+            )
+        """
+        score = "greatest(0, COALESCE(rs.n, 0) - COALESCE(ps.n, 0))"
+        joins = """
+            LEFT JOIN recent_search rs ON rs.product_id = p.id
+            LEFT JOIN prior_search ps ON ps.product_id = p.id
+        """
+        extra = ""
+    else:
+        signal_ctes = ""
+        score = "0::float"
+        joins = ""
+        extra = "AND p.price <= 150000"
+
+    signal_prefix = f"{signal_ctes}," if signal_ctes else ""
+    return f"""
+        WITH
+        {signal_prefix}
+        eligible AS (
+            SELECT
+                p.id AS product_id,
+                COALESCE(NULLIF(lower(btrim(p.brand)), ''), p.id::text) AS brand_key,
+                p.brand_node_id,
+                bn.primary_style_node_id AS style_node_id,
+                COALESCE(bn.wiki->>'status', '') IN ('완료', '진행중') AS is_hot,
+                {score} AS base_score
+            FROM public.products p
+            LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+            {joins}
+            WHERE {_quality_sql()}
+              {extra}
+        ),
+        brand_limited AS (
+            SELECT *,
+                row_number() OVER (
+                    PARTITION BY is_hot, brand_key
+                    ORDER BY base_score DESC,
+                             md5(product_id::text || current_date::text)
+                ) AS brand_rank
+            FROM eligible
+        ),
+        pool_ranked AS (
+            SELECT *,
+                row_number() OVER (
+                    PARTITION BY is_hot
+                    ORDER BY base_score DESC,
+                             md5(product_id::text || current_date::text)
+                ) AS pool_rank
+            FROM brand_limited
+            WHERE brand_rank <= 6
+        )
+        SELECT product_id, is_hot, base_score, pool_rank, brand_key,
+               brand_node_id, style_node_id
+        FROM pool_ranked
+        WHERE pool_rank <= {_CANDIDATES_PER_POOL}
+        ORDER BY is_hot DESC, pool_rank
+    """  # noqa: S608 -- all interpolation is module-owned SQL
+
+
+def _query_params(gender: str) -> dict[str, Any]:
+    categories = list(_BASE_EXCLUDED_CATEGORIES)
+    subcategories: list[str] = []
+    if settings.CURATION_SEASON.lower() == "summer":
+        categories.extend(_SUMMER_EXCLUDED_CATEGORIES)
+        subcategories.extend(_SUMMER_EXCLUDED_SUBCATEGORIES)
+    if gender == "men":
+        categories.append("dresses")
+        subcategories.extend(_MEN_ONLY_EXCLUDED_SUBCATEGORIES)
+    return {
+        "gender": gender,
+        "excluded_categories": categories,
+        "excluded_subcategories": subcategories,
+    }
+
+
+def _stable_tie(seed: str, product_id: int) -> int:
+    return int(hashlib.sha256(f"{seed}:{product_id}".encode()).hexdigest()[:16], 16)
+
+
+def select_candidate_ids(
+    rows: list[dict[str, Any]],
     *,
     section_id: str,
-    gender: str,
-    slot_type: str,
-    title: str,
-    subtitle: str | None,
-    product_ids: list[int],
-    sort_order: int,
-    is_active: bool = True,
-) -> None:
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO ai.curation_sections
-                (section_id, gender, slot_type, title, subtitle, product_ids, sort_order, is_active, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
-            ON CONFLICT (section_id, gender) DO UPDATE SET
-                slot_type = EXCLUDED.slot_type,
-                title = EXCLUDED.title,
-                subtitle = EXCLUDED.subtitle,
-                product_ids = EXCLUDED.product_ids,
-                sort_order = EXCLUDED.sort_order,
-                is_active = EXCLUDED.is_active,
-                updated_at = now()
-            """,
-            (section_id, gender, slot_type, title, subtitle, product_ids, sort_order, is_active),
-        )
-        await conn.commit()
+    excluded_ids: set[int],
+    taste_scores: dict[int, float] | None = None,
+    seed: str,
+    require_full: bool = True,
+) -> list[int]:
+    """Select hot 8 + overall 4 with per-section brand cap and stable ties."""
+    usable = [r for r in rows if int(r["product_id"]) not in excluded_ids]
+    if not usable:
+        return []
+    count = len(usable)
+    taste_scores = taste_scores or {}
+
+    def rank_value(row: dict[str, Any]) -> tuple[float, int]:
+        base = 1.0 - (max(1, int(row["base_rank"])) - 1) / max(1, count - 1)
+        taste = (max(-20.0, min(20.0, taste_scores.get(row.get("style_node_id"), 0.0))) + 20.0) / 40.0
+        if not taste_scores:
+            combined = base
+        elif section_id == "under-100":
+            combined = 0.3 * base + 0.7 * taste
+        else:
+            combined = 0.7 * base + 0.3 * taste
+        return combined, -_stable_tie(seed, int(row["product_id"]))
+
+    ranked = sorted(usable, key=rank_value, reverse=True)
+    selected: list[int] = []
+    brands: Counter[str] = Counter()
+
+    def take(source: list[dict[str, Any]], target: int) -> None:
+        for row in source:
+            if len(selected) >= target:
+                return
+            pid = int(row["product_id"])
+            brand = str(row["brand_key"])
+            if pid in selected or brands[brand] >= 2:
+                continue
+            selected.append(pid)
+            brands[brand] += 1
+
+    take([r for r in ranked if r["is_hot"]], 8)
+    # Do not weaken the quota when hot inventory is short.
+    if len(selected) < 8:
+        return [] if require_full else selected
+    take([r for r in ranked if not r["is_hot"]], _SECTION_SIZE)
+    if require_full and len(selected) != _SECTION_SIZE:
+        return []
+    return selected
 
 
-async def refresh_auto_sections(pool: AsyncConnectionPool) -> int:
-    """auto 구좌 계산 + upsert. 결과가 빈 구좌는 건드리지 않는다 (기존 행 유지)."""
-    written = 0
-    # under-100 SQL만 categories를 참조 — 다른 섹션 SQL에는 해당 named param이
-    # 없으므로 딕셔너리에 같이 넘겨도 무시된다.
-    params = {"limit": _SECTION_SIZE, "categories": _EVERYDAY_CATEGORIES}
-    for gender in _GENDERS:
-        for section_id, sql, title, subtitle, sort_order in _AUTO_SECTIONS:
-            try:
-                async with pool.connection() as conn, conn.cursor() as cur:
-                    await cur.execute(sql, {"gender": gender, **params})
-                    product_ids = [int(r[0]) for r in await cur.fetchall()]
-                if not product_ids:
-                    logger.info("🗂 [curation] %s/%s empty — keep existing row", section_id, gender)
-                    continue
-                await _upsert_section(
-                    pool,
-                    section_id=section_id,
-                    gender=gender,
-                    slot_type="auto",
-                    title=title,
-                    subtitle=subtitle,
-                    product_ids=product_ids,
-                    sort_order=sort_order,
-                )
-                written += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("🗂 [curation] auto %s/%s failed: %r", section_id, gender, exc)
-    return written
-
-
-# ── editorial (Notion sync) ───────────────────────────────────────────────────
+# ── Notion operating database ────────────────────────────────────────────────
 
 
 def _notion_plain_text(prop: dict[str, Any] | None) -> str:
-    """title/rich_text property → concatenated plain text."""
     if not prop:
         return ""
     fragments = prop.get("title") or prop.get("rich_text") or []
@@ -199,42 +258,65 @@ def _notion_plain_text(prop: dict[str, Any] | None) -> str:
 
 
 def _parse_product_ids(raw: str) -> list[int]:
-    """'123, 456 789' → [123, 456, 789]. product_id 리스트 형식 협의 전 관대한 파서."""
-    return [int(tok) for tok in re.findall(r"\d+", raw)][:_SECTION_SIZE]
+    return list(dict.fromkeys(int(tok) for tok in re.findall(r"\d+", raw)))[:_SECTION_SIZE]
 
 
 def _parse_notion_page(page: dict[str, Any]) -> dict[str, Any] | None:
-    """노션 "큐레이션 구좌" 행 → 구좌 dict. 필수(구좌명) 누락 시 None."""
     props = page.get("properties", {})
 
-    def _get(*names: str) -> dict[str, Any] | None:
-        for name in names:
-            if name in props:
-                return props[name]
+    def get(name: str) -> dict[str, Any]:
+        return props.get(name) or {}
+
+    title = _notion_plain_text(get("구좌명"))
+    section_id = _notion_plain_text(get("구좌 ID")).strip().lower()
+    slot_type = ((get("slot_type").get("select") or {}).get("name") or "").strip().lower()
+    if not title or slot_type not in ("auto", "editorial"):
+        return None
+    if slot_type == "auto" and section_id not in _AUTO_IDS:
+        return None
+    if slot_type == "editorial" and not re.fullmatch(r"editorial-[a-z0-9]+(?:-[a-z0-9]+)*", section_id):
         return None
 
-    title = _notion_plain_text(_get("구좌명", "title", "Name"))
-    if not title:
+    gender_options = get("gender_scope").get("multi_select") or []
+    genders = [str(o.get("name", "")).lower() for o in gender_options]
+    genders = [g for g in _GENDERS if g in genders]
+    # The connected operating DB is a legacy Notion database whose schema API
+    # cannot add columns. Its three fixed auto rows are intentionally shared by
+    # both genders; keep those rows syncable until gender_scope is added in UI.
+    if not genders and slot_type == "auto":
+        genders = list(_GENDERS)
+    if not genders:
         return None
-    subtitle = _notion_plain_text(_get("서브타이틀", "subtitle")) or None
-    order_prop = _get("순서", "order") or {}
-    sort_order = int(order_prop.get("number") or 100)
-    active_prop = _get("활성", "active") or {}
-    is_active = bool(active_prop.get("checkbox", True))
-    product_ids = _parse_product_ids(_notion_plain_text(_get("상품", "products")))
-    gender_prop = _get("성별", "gender") or {}
-    gender_sel = ((gender_prop.get("select") or {}).get("name") or "").strip().lower()
-    genders = [gender_sel] if gender_sel in _GENDERS else list(_GENDERS)  # 성별 미지정 → 양쪽 노출
 
     return {
-        "section_id": f"editorial-{page['id'].replace('-', '')[:12]}",
+        "source_page_id": page["id"],
+        "section_id": section_id,
+        "slot_type": slot_type,
         "title": title,
-        "subtitle": subtitle,
-        "sort_order": sort_order,
-        "is_active": is_active,
-        "product_ids": product_ids,
+        "subtitle": _notion_plain_text(get("서브타이틀")) or None,
+        "sort_order": int(get("순서").get("number") or 100),
+        "is_active": bool(get("활성").get("checkbox", False)),
+        "product_ids": _parse_product_ids(_notion_plain_text(get("상품"))),
         "genders": genders,
     }
+
+
+def _validate_snapshot(sections: list[dict[str, Any]]) -> None:
+    ids = [s["section_id"] for s in sections]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate curation section id")
+    for gender in _GENDERS:
+        active = [s for s in sections if s["is_active"] and gender in s["genders"]]
+        if not 3 <= len(active) <= 6:
+            raise ValueError(f"{gender}: active sections must be 3..6")
+        ordered = sorted(active, key=lambda s: (s["sort_order"], s["section_id"]))
+        seen_editorial = False
+        for section in ordered:
+            seen_editorial = seen_editorial or section["slot_type"] == "editorial"
+            if seen_editorial and section["slot_type"] == "auto":
+                raise ValueError(f"{gender}: auto section after editorial")
+            if section["slot_type"] == "editorial" and len(section["product_ids"]) != _SECTION_SIZE:
+                raise ValueError(f"{section['section_id']}: active editorial requires 12 unique products")
 
 
 async def _fetch_notion_pages() -> list[dict[str, Any]]:
@@ -245,7 +327,7 @@ async def _fetch_notion_pages() -> list[dict[str, Any]]:
             body: dict[str, Any] = {"page_size": 50}
             if cursor:
                 body["start_cursor"] = cursor
-            resp = await client.post(
+            response = await client.post(
                 f"{_NOTION_API}/databases/{settings.NOTION_CURATION_DB_ID}/query",
                 headers={
                     "Authorization": f"Bearer {settings.NOTION_TOKEN}",
@@ -253,88 +335,217 @@ async def _fetch_notion_pages() -> list[dict[str, Any]]:
                 },
                 json=body,
             )
-            resp.raise_for_status()
-            data = resp.json()
+            response.raise_for_status()
+            data = response.json()
             pages.extend(data.get("results", []))
             if not data.get("has_more"):
                 return pages
             cursor = data.get("next_cursor")
 
 
-async def sync_editorial_sections(pool: AsyncConnectionPool) -> int:
-    """노션 editorial 구좌 동기화. 노션 미설정이면 no-op."""
+async def sync_notion_sections(pool: AsyncConnectionPool) -> int:
     if not (settings.NOTION_TOKEN and settings.NOTION_CURATION_DB_ID):
         return 0
-
-    pages = await _fetch_notion_pages()
-    seen_ids: list[str] = []
+    parsed = [s for page in await _fetch_notion_pages() if (s := _parse_notion_page(page)) is not None]
+    _validate_snapshot(parsed)
+    seen: list[str] = []
     written = 0
-    for page in pages:
-        parsed = _parse_notion_page(page)
-        if parsed is None:
-            continue
-        seen_ids.append(parsed["section_id"])
-        for gender in parsed["genders"]:
-            await _upsert_section(
-                pool,
-                section_id=parsed["section_id"],
-                gender=gender,
-                slot_type="editorial",
-                title=parsed["title"],
-                subtitle=parsed["subtitle"],
-                product_ids=parsed["product_ids"],
-                sort_order=parsed["sort_order"],
-                is_active=parsed["is_active"],
-            )
-            written += 1
-
-    # 노션에서 삭제된 editorial 구좌는 비활성화 (auto 구좌는 건드리지 않음).
     async with pool.connection() as conn, conn.cursor() as cur:
+        for section in parsed:
+            for gender in section["genders"]:
+                seen.append(f"{section['section_id']}:{gender}")
+                product_ids = section["product_ids"] if section["slot_type"] == "editorial" else []
+                await cur.execute(
+                    """
+                    INSERT INTO ai.curation_sections
+                        (section_id, gender, slot_type, title, subtitle, product_ids,
+                         sort_order, is_active, source_page_id, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (section_id, gender) DO UPDATE SET
+                        slot_type = EXCLUDED.slot_type,
+                        title = EXCLUDED.title,
+                        subtitle = EXCLUDED.subtitle,
+                        product_ids = CASE
+                            WHEN EXCLUDED.slot_type = 'editorial' THEN EXCLUDED.product_ids
+                            ELSE ai.curation_sections.product_ids
+                        END,
+                        sort_order = EXCLUDED.sort_order,
+                        is_active = EXCLUDED.is_active,
+                        source_page_id = EXCLUDED.source_page_id,
+                        updated_at = now()
+                    """,
+                    (
+                        section["section_id"],
+                        gender,
+                        section["slot_type"],
+                        section["title"],
+                        section["subtitle"],
+                        product_ids,
+                        section["sort_order"],
+                        section["is_active"],
+                        section["source_page_id"],
+                    ),
+                )
+                written += 1
         await cur.execute(
             """
             UPDATE ai.curation_sections
             SET is_active = false, updated_at = now()
-            WHERE slot_type = 'editorial' AND NOT (section_id = ANY(%s)) AND is_active
+            WHERE NOT ((section_id || ':' || gender) = ANY(%s)) AND is_active
             """,
-            (seen_ids or [""],),
+            (seen or [""],),
         )
         await conn.commit()
     return written
 
 
-# ── loop ──────────────────────────────────────────────────────────────────────
+# Backward-compatible name used by existing tests/callers.
+sync_editorial_sections = sync_notion_sections
+
+
+# ── Daily auto candidates ────────────────────────────────────────────────────
+
+
+async def refresh_auto_sections(
+    pool: AsyncConnectionPool,
+    section_ids: tuple[str, ...] = _AUTO_IDS,
+    *,
+    strict_quota: bool = True,
+) -> int:
+    generated_for = datetime.now(tz=_KST).date()
+    written = 0
+    for gender in _GENDERS:
+        excluded_ids: set[int] = set()
+        for section_id in section_ids:
+            try:
+                async with pool.connection() as conn, conn.cursor() as cur:
+                    await cur.execute(_candidate_sql(section_id), _query_params(gender))
+                    raw = await cur.fetchall()
+                    rows = [
+                        {
+                            "product_id": int(r[0]),
+                            "is_hot": bool(r[1]),
+                            "base_score": float(r[2]),
+                            "base_rank": int(r[3]),
+                            "brand_key": r[4],
+                            "brand_node_id": r[5],
+                            "style_node_id": r[6],
+                        }
+                        for r in raw
+                    ]
+                    selected = select_candidate_ids(
+                        rows,
+                        section_id=section_id,
+                        excluded_ids=excluded_ids,
+                        seed=f"guest:{gender}:{section_id}:{generated_for}",
+                        require_full=strict_quota,
+                    )
+                    if not selected:
+                        logger.warning("🗂 [curation] no valid candidates %s/%s", section_id, gender)
+                        continue
+                    await cur.execute(
+                        "DELETE FROM ai.curation_candidates WHERE section_id = %s AND gender = %s",
+                        (section_id, gender),
+                    )
+                    for row in rows:
+                        await cur.execute(
+                            """
+                            INSERT INTO ai.curation_candidates
+                                (section_id, gender, product_id, is_hot, base_score, base_rank,
+                                 brand_key, brand_node_id, style_node_id, generated_for)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                section_id,
+                                gender,
+                                row["product_id"],
+                                row["is_hot"],
+                                row["base_score"],
+                                row["base_rank"],
+                                row["brand_key"],
+                                row["brand_node_id"],
+                                row["style_node_id"],
+                                generated_for,
+                            ),
+                        )
+                    await cur.execute(
+                        """
+                        UPDATE ai.curation_sections
+                        SET product_ids = %s, products_updated_at = now()
+                        WHERE section_id = %s AND gender = %s AND slot_type = 'auto'
+                        """,
+                        (selected, section_id, gender),
+                    )
+                    await conn.commit()
+                excluded_ids.update(selected)
+                written += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("🗂 [curation] auto %s/%s failed: %r", section_id, gender, exc)
+    return written
+
+
+async def _auto_refresh_due(pool: AsyncConnectionPool) -> bool:
+    today = datetime.now(tz=_KST).date()
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT count(*)
+            FROM ai.curation_sections s
+            WHERE s.slot_type = 'auto'
+              AND s.section_id = ANY(%s)
+              AND cardinality(s.product_ids) = %s
+              AND (s.products_updated_at AT TIME ZONE 'Asia/Seoul')::date = %s
+              AND EXISTS (
+                  SELECT 1
+                  FROM ai.curation_candidates c
+                  WHERE c.section_id = s.section_id
+                    AND c.gender = s.gender
+                    AND c.generated_for = %s
+              )
+            """,
+            (list(_AUTO_IDS), _SECTION_SIZE, today, today),
+        )
+        row = await cur.fetchone()
+    return not row or int(row[0]) != len(_AUTO_IDS) * len(_GENDERS)
 
 
 async def refresh_once(pool: AsyncConnectionPool) -> None:
-    auto_n = await refresh_auto_sections(pool)
+    notion_n = 0
     try:
-        editorial_n = await sync_editorial_sections(pool)
+        notion_n = await sync_notion_sections(pool)
     except Exception as exc:  # noqa: BLE001
-        editorial_n = 0
-        logger.warning("🗂 [curation] notion sync failed: %r", exc)
-    logger.info("🗂 [curation] refresh done · auto=%d editorial=%d", auto_n, editorial_n)
+        logger.warning("🗂 [curation] notion snapshot rejected: %r", exc)
+    auto_n = await refresh_auto_sections(pool) if await _auto_refresh_due(pool) else 0
+    negative_n = 0
+    try:
+        from app.services.curation_taste import attribute_negative_impressions
+
+        negative_n = await attribute_negative_impressions(pool)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("🗂 [curation] negative attribution failed: %r", exc)
+    logger.info(
+        "🗂 [curation] refresh done · notion=%d auto=%d negative=%d",
+        notion_n,
+        auto_n,
+        negative_n,
+    )
 
 
 async def curation_refresh_loop() -> None:
-    """lifespan 백그라운드 태스크 본체. 시작 직후 1회 + 주기 반복."""
-    interval = max(60, settings.CURATION_REFRESH_INTERVAL_S)
-    logger.info("🗂 [curation] refresh loop started · interval=%ds", interval)
+    interval = max(900, settings.CURATION_REFRESH_INTERVAL_S)
+    logger.info("🗂 [curation] sync loop started · notion interval=%ds", interval)
     while True:
         try:
             from app.providers import db_pool
 
-            pool = db_pool._pool  # noqa: SLF001 — lifespan에서 init 실패 시 None
-            if pool is None:
-                logger.info("🗂 [curation] db pool unavailable — skip cycle")
-            else:
+            pool = db_pool._pool  # noqa: SLF001
+            if pool is not None:
                 await refresh_once(pool)
         except asyncio.CancelledError:
-            logger.info("🗂 [curation] refresh loop cancelled")
             raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("🗂 [curation] refresh cycle raised: %r", exc)
         try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
-            logger.info("🗂 [curation] refresh loop cancelled")
             raise

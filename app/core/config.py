@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -115,7 +116,8 @@ class Settings(BaseSettings):
     # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
     # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
     CURATION_REFRESH_ENABLED: bool = True
-    CURATION_REFRESH_INTERVAL_S: int = 3600
+    CURATION_REFRESH_INTERVAL_S: int = 900
+    CURATION_SEASON: Literal["summer", "winter"] = "summer"
     NOTION_TOKEN: str = ""
     NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
