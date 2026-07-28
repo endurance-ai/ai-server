@@ -11,6 +11,7 @@ Add Save는 명세대로 {save_id, product_id, created_at} 만 반환.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
+from app.services.curation_taste import record_product_signal
 
 router = APIRouter(prefix="/v1", tags=["saves"])
 
@@ -84,6 +86,14 @@ async def add_save(
 
     if not row:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already saved")
+    if body.product_id.isdigit():
+        await record_product_signal(
+            pool,
+            user_id=user_id,
+            product_id=int(body.product_id),
+            signal_type="save",
+            dedupe_key=f"save:{row[0]}",
+        )
     return SaveItem(save_id=str(row[0]), product_id=row[1], created_at=row[2].isoformat())
 
 
@@ -168,3 +178,11 @@ async def remove_save(
         row = await cur.fetchone()
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Save not found")
+    if product_id.isdigit():
+        await record_product_signal(
+            pool,
+            user_id=user_id,
+            product_id=int(product_id),
+            signal_type="unsave",
+            dedupe_key=f"unsave:{row[0]}:{datetime.now(tz=UTC).isoformat()}",
+        )

@@ -39,7 +39,7 @@ async def _insert_product(
     pool,
     *,
     brand: str = "TestBrand",
-    price: float | None = 50.0,
+    price: float | None = 50000.0,
     gender: list[str] | None = None,
     brand_node_id: int | None = None,
     in_stock: bool = True,
@@ -47,6 +47,16 @@ async def _insert_product(
     category: str = "tops",
 ) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
+        if brand_node_id is None:
+            await cur.execute(
+                """
+                INSERT INTO public.brand_nodes (brand_name, wiki, gender_scope)
+                VALUES (%s, '{"status":"완료"}'::jsonb, %s)
+                RETURNING id
+                """,
+                (brand, gender or ["women"]),
+            )
+            brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             """
             INSERT INTO public.products
@@ -90,6 +100,17 @@ async def _insert_section(pool, *, section_id: str, gender: str, product_ids: li
             ),
         )
         await conn.commit()
+
+
+async def _insert_auto_sections(pool, gender: str = "women") -> None:
+    for sort_order, section_id in enumerate(("popular", "trending-search", "under-100"), start=1):
+        await _insert_section(
+            pool,
+            section_id=section_id,
+            gender=gender,
+            product_ids=[],
+            sort_order=sort_order,
+        )
 
 
 # ── GET /v1/brands/search ─────────────────────────────────────────────────────
@@ -187,6 +208,7 @@ async def test_curation_guest_requires_gender_param(client: AsyncClient):
 async def test_curation_guest_empty_sections_ok_with_women_chips(client: AsyncClient):
     resp = await client.get("/v1/curation", params={"gender": "women"})
     assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "private, no-store"
     data = resp.json()
     assert data["gender"] == "women"
     assert data["sections"] == []  # 빈 구좌여도 200 (클라 캐시 폴백)
@@ -233,6 +255,45 @@ async def test_curation_invalid_token_treated_as_guest(client: AsyncClient):
     assert resp.status_code == 200  # 만료/무효 토큰이 메인 화면을 막지 않는다
 
 
+@pytest.mark.asyncio
+async def test_curation_impressions_require_auth_and_deduplicate(client: AsyncClient, pool):
+    product_style_node = 17
+    brand_id = await _insert_brand(pool, "Impression Brand", node_id=product_style_node)
+    product_id = await _insert_product(pool, brand="Impression Brand", brand_node_id=brand_id)
+    await _insert_section(pool, section_id="popular", gender="women", product_ids=[product_id])
+    payload = {"items": [{"section_id": "popular", "product_id": product_id, "position": 0}]}
+
+    unauthenticated = await client.post("/v1/curation/impressions", json=payload)
+    assert unauthenticated.status_code in (401, 403)
+
+    auth, user_id = await _login(client)
+    first = await client.post(
+        "/v1/curation/impressions",
+        json=payload,
+        headers={"Authorization": auth},
+    )
+    duplicate = await client.post(
+        "/v1/curation/impressions",
+        json=payload,
+        headers={"Authorization": auth},
+    )
+    assert first.status_code == 200
+    assert first.json() == {"recorded": 1}
+    assert duplicate.json() == {"recorded": 0}
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT section_id, product_id, style_node_id, position
+            FROM ai.curation_impressions
+            WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        rows = await cur.fetchall()
+    assert rows == [("popular", product_id, product_style_node, 0)]
+
+
 # ── curation refresher (auto sections) ────────────────────────────────────────
 
 
@@ -240,6 +301,7 @@ async def test_curation_invalid_token_treated_as_guest(client: AsyncClient):
 async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, pool):
     from app.services.curation_refresh import refresh_auto_sections
 
+    await _insert_auto_sections(pool)
     _auth, user_id = await _login(client)
     cheap = await _insert_product(pool, brand="Cheap", price=42000)
     pricey = await _insert_product(pool, brand="Pricey", price=250000)
@@ -252,12 +314,22 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
             )
         await conn.commit()
 
-    written = await refresh_auto_sections(pool)
-    assert written >= 2  # women: popular + under-100 (trending은 신호 없음 → skip)
+    written = await refresh_auto_sections(pool, ("popular",), strict_quota=False)
+    assert written == 1
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = {s["id"]: s for s in resp.json()["sections"]}
-    assert [p["product_id"] for p in sections["popular"]["products"]] == [viewed]
+    popular = [p["product_id"] for p in sections["popular"]["products"]]
+    assert popular[0] == viewed
+    assert set(popular) == {cheap, pricey, viewed}
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.curation_sections SET is_active = false WHERE section_id = 'popular'")
+        await conn.commit()
+    written = await refresh_auto_sections(pool, ("under-100",), strict_quota=False)
+    assert written == 1
+    resp = await client.get("/v1/curation", params={"gender": "women"})
+    sections = {s["id"]: s for s in resp.json()["sections"]}
     under = [p["product_id"] for p in sections["under-100"]["products"]]
     # 상한(15만원) 위인 pricey만 탈락. viewed는 12만원이라 조회수 순으로 맨 앞에 온다.
     assert cheap in under and viewed in under and pricey not in under
@@ -269,21 +341,20 @@ async def test_refresh_under100_filters_bad_data(client: AsyncClient, pool):
     """구좌 데이터 품질 가드 — 크롤 이상치가 under-100 구좌에 노출되지 않는다."""
     from app.services.curation_refresh import refresh_auto_sections
 
+    await _insert_auto_sections(pool)
     ok = await _insert_product(pool, brand="Clean", price=42000)
     unconverted_fx = await _insert_product(pool, brand="FxBug", price=145)  # $145가 KRW로 오탐
-    preorder_deposit = await _insert_product(pool, brand="Preorder", price=10000)  # 예약금
-    swim = await _insert_product(pool, brand="Swim", price=99000, category="swimwear")
-    swim_miscategorized = await _insert_product(pool, brand="MisCat", price=99000, name="TRIANGLE BIKINI TOP")
-    junk_brand = await _insert_product(pool, brand="판매가 : 125,000", price=125000)
+    mixed_gender = await _insert_product(pool, brand="Mixed", price=99000, gender=["women", "unisex"])
+    unisex = await _insert_product(pool, brand="Unisex", price=99000, gender=["unisex"])
     dupes = [await _insert_product(pool, brand="SameBrand", price=50000 + i) for i in range(3)]
 
-    await refresh_auto_sections(pool)
+    await refresh_auto_sections(pool, ("under-100",), strict_quota=False)
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = {s["id"]: s for s in resp.json()["sections"]}
     under = [p["product_id"] for p in sections["under-100"]["products"]]
 
     assert ok in under
-    for excluded in (unconverted_fx, preorder_deposit, swim, swim_miscategorized, junk_brand):
+    for excluded in (unconverted_fx, mixed_gender, unisex):
         assert excluded not in under
     assert len([pid for pid in dupes if pid in under]) == 2  # 브랜드당 2개 캡

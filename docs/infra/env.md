@@ -185,6 +185,18 @@ Gap2 Reflexion은 기존 SPEC-AGENTIC-CRITIQUE-001 env를 재사용 (live depend
 
 텍스트 임베딩을 Postgres에 캐싱해 Modal cold-start(~26s) 우회. migration 0007에서 테이블 생성. 별도 env flag 없음 — `DB_URL`/`DB_TOKEN` 재사용.
 
+## 메인 큐레이션
+
+| 키 | 기본 | 용도 |
+|----|-----|------|
+| `CURATION_REFRESH_ENABLED` | `true` | Notion 메타데이터 동기화와 auto 후보 갱신 백그라운드 루프 |
+| `CURATION_REFRESH_INTERVAL_S` | `900` | Notion 동기화·실패 재시도 간격. 최소 15분으로 클램프 |
+| `CURATION_SEASON` | `summer` | `summer`는 아우터·니트·겨울 키워드를 제외하고, `winter`는 기본 품질 게이트만 유지 |
+| `NOTION_TOKEN` | (선택) | 큐레이션 운영 DB 읽기용 Notion integration token |
+| `NOTION_CURATION_DB_ID` | (선택) | `GET /v1/curation` 메타데이터 원본 Notion database ID |
+
+auto 상품은 KST 날짜별 1회 생성하며, Notion 메타데이터 동기화가 완료되지 않았거나 6개 성별·구좌 조합 중 일부가 실패하면 다음 루프에서 재시도한다. 앱은 Notion을 직접 읽지 않고 `ai.curation_sections` 캐시만 읽는다.
+
 ## 앱 메타
 
 | 키 | 기본 |

@@ -432,7 +432,12 @@ def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn
 
 
 async def _persist_search(
-    pool: AsyncConnectionPool, user_id: UUID, session_id: UUID, title: str
+    pool: AsyncConnectionPool,
+    user_id: UUID,
+    session_id: UUID,
+    title: str,
+    *,
+    taste_signal_type: str = "search",
 ) -> tuple[str, int] | None:
     """그래프 결과셋(sess.last_results)을 ai.searches 한 행으로 영속화하고 (search_id, total) 반환.
 
@@ -498,6 +503,17 @@ async def _persist_search(
     except Exception:
         logger.exception("[chat_service] search persist failed user=%s", user_id)
         return None
+    try:
+        from app.services.curation_taste import record_search_result_signals
+
+        await record_search_result_signals(
+            pool,
+            user_id=user_id,
+            search_id=new_id,
+            signal_type=taste_signal_type,
+        )
+    except Exception:
+        logger.debug("[chat_service] search taste signal failed", exc_info=True)
     return str(new_id), total
 
 
@@ -692,7 +708,13 @@ async def invoke_streaming(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    persisted = await _persist_search(pool, user_id, resolved_session_id, text)
+    persisted = await _persist_search(
+        pool,
+        user_id,
+        resolved_session_id,
+        text,
+        taste_signal_type="image" if attached_image_url else "search",
+    )
     search_id = persisted[0] if persisted else None
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs, search_id)
 
@@ -788,7 +810,13 @@ async def invoke_streaming_callback(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    persisted = await _persist_search(pool, user_id, session_id, trace_text)
+    persisted = await _persist_search(
+        pool,
+        user_id,
+        session_id,
+        trace_text,
+        taste_signal_type="chip",
+    )
     search_id = persisted[0] if persisted else None
     if assistant_content:
         await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)

@@ -9,7 +9,9 @@ POST /v1/products/{id}/link-check — 상품 URL 유효성 확인
 from __future__ import annotations
 
 import logging
-from uuid import UUID
+from datetime import UTC, datetime
+from typing import Literal
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
+from app.services.curation_taste import record_product_signal
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +90,25 @@ class ProductDetail(BaseModel):
 
 
 class RecordViewRequest(BaseModel):
-    session_id: UUID
+    session_id: UUID | None = None
     source_search_id: UUID | None = None
     dwell_ms: int | None = None
+    source: str | None = Field(default=None, max_length=50)
+    section_id: str | None = Field(default=None, max_length=100)
 
 
 class RecordViewResponse(BaseModel):
     recorded: bool
     view_id: str | None = None
+
+
+class OutboundRequest(BaseModel):
+    source: Literal["curation", "search", "pdp", "wishlist", "history"] | None = None
+    section_id: str | None = Field(default=None, max_length=100)
+
+
+class OutboundResponse(BaseModel):
+    recorded: bool
 
 
 class ViewedProduct(BaseModel):
@@ -361,7 +375,7 @@ async def record_view(
             (
                 user_id,
                 product_id,
-                body.session_id,
+                body.session_id or uuid4(),
                 body.source_search_id,
                 body.dwell_ms,
                 user_id,
@@ -371,8 +385,34 @@ async def record_view(
         row = await cur.fetchone()
 
     if row:
+        await record_product_signal(
+            pool,
+            user_id=user_id,
+            product_id=product_id,
+            signal_type="view",
+            dedupe_key=f"view:{user_id}:{product_id}:{datetime.now(tz=UTC).date()}",
+            metadata={"source": body.source, "section_id": body.section_id},
+        )
         return RecordViewResponse(recorded=True, view_id=str(row[0]))
     return RecordViewResponse(recorded=False)
+
+
+@router.post("/products/{product_id}/outbound", response_model=OutboundResponse)
+async def record_outbound(
+    product_id: int,
+    body: OutboundRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> OutboundResponse:
+    recorded = await record_product_signal(
+        pool,
+        user_id=user_id,
+        product_id=product_id,
+        signal_type="outbound",
+        dedupe_key=f"outbound:{user_id}:{product_id}:{datetime.now(tz=UTC).date()}",
+        metadata={"source": body.source, "section_id": body.section_id},
+    )
+    return OutboundResponse(recorded=recorded)
 
 
 @router.post("/products/{product_id}/link-check", response_model=LinkCheckResponse, status_code=status.HTTP_200_OK)

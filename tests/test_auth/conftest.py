@@ -50,7 +50,10 @@ def _bootstrap(dsn: str) -> None:
                 id          BIGSERIAL PRIMARY KEY,
                 brand_name  TEXT NOT NULL,
                 brand_name_normalized TEXT,
-                primary_style_node_id BIGINT
+                primary_style_node_id BIGINT,
+                secondary_style_node_id BIGINT,
+                gender_scope TEXT[],
+                wiki JSONB NOT NULL DEFAULT '{}'::jsonb
             )
         """)
         cur.execute("""
@@ -75,6 +78,7 @@ def _bootstrap(dsn: str) -> None:
                 color          TEXT,
                 tags           TEXT[],
                 product_code   TEXT,
+                review_count   INT NOT NULL DEFAULT 0,
                 brand_node_id  BIGINT REFERENCES public.brand_nodes(id),
                 crawled_at     TIMESTAMPTZ DEFAULT now(),
                 last_seen_at   TIMESTAMPTZ DEFAULT now(),
@@ -123,6 +127,10 @@ async def _truncate(pool) -> AsyncGenerator[None]:
             """
             TRUNCATE
                 ai.curation_sections,
+                ai.curation_candidates,
+                ai.curation_impressions,
+                ai.taste_signal_events,
+                ai.user_style_scores,
                 ai.user_brand_picks,
                 ai.searches,
                 ai.product_views,
