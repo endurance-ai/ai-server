@@ -1,7 +1,7 @@
 """add product_features (VLM enrichment: retrieval_text + feature_metadata + text_embedding)
 
-Revision ID: 0021
-Revises: 0020
+Revision ID: 0022
+Revises: 0021
 Create Date: 2026-07-23
 
 - public.product_features: 상품 이미지 VLM 1회 분석 산출물 저장.
@@ -25,8 +25,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0021"
-down_revision: str | Sequence[str] | None = "0020"
+revision: str = "0022"
+down_revision: str | Sequence[str] | None = "0021"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
