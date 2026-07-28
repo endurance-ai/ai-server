@@ -32,6 +32,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # pgvector 활성화 (0007 패턴) — IF NOT EXISTS 라 dev-app(이미 설치)에선 no-op,
+    # CI testcontainers(pgvector/pgvector:pg16) 에선 새로 활성화. halfvec/vector 는
+    # fully-qualified `public.*` 로 참조 — CI 에서 unqualified 타입명이 catalog 갱신
+    # race 로 not-found 발생하는 이슈 회피.
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS public.product_features (
@@ -43,7 +48,7 @@ def upgrade() -> None:
             feature_metadata JSONB NOT NULL,
 
             -- retrieval_text 텍스트 임베딩 (이미지와 동일 768-dim 공간)
-            text_embedding   HALFVEC(768),
+            text_embedding   public.halfvec(768),
             embedding_model  TEXT,
 
             -- 추적성 (재생성/증분 배치 기준)
@@ -59,7 +64,7 @@ def upgrade() -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_product_features_text_hnsw
             ON public.product_features
-            USING hnsw (text_embedding halfvec_cosine_ops)
+            USING hnsw (text_embedding public.halfvec_cosine_ops)
             WITH (m = 16, ef_construction = 200)
         """
     )
