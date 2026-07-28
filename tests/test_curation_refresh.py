@@ -122,3 +122,38 @@ def test_candidate_selection_enforces_hot_overall_brand_and_cross_section_quotas
     assert len([pid for pid in selected if pid <= 10]) == 8
     assert len([pid for pid in selected if pid > 10]) == 4
     assert 1 not in selected
+
+
+def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
+    rows = [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+        }
+        for pid in range(1, 21)
+    ]
+    baseline = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        seed="taste-regression",
+    )
+    taste_scores = {pid: -20.0 for pid in range(1, 21)}
+    taste_scores[8] = 20.0
+    personalized = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        taste_scores=taste_scores,
+        seed="taste-regression",
+    )
+
+    assert baseline[0] == 1
+    assert personalized[0] == 8
+    assert len(personalized) == 12
+    assert len([pid for pid in personalized if pid <= 10]) == 8
+    assert len([pid for pid in personalized if pid > 10]) == 4
