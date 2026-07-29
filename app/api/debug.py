@@ -316,6 +316,27 @@ class ResolveResponse(BaseModel):
     error: str | None = None
 
 
+class EditorialCandidatesRequest(BaseModel):
+    concept: str = Field(..., min_length=2, max_length=500)
+    gender: str = Field(default="women", pattern="^(women|men|unisex)$")
+    limit: int = Field(default=30, ge=6, le=48)
+
+
+@router.post(
+    "/editorial-candidates",
+    dependencies=[Depends(verify_internal_token)],
+)
+async def editorial_candidates(req: EditorialCandidatesRequest) -> Any:
+    """Natural-language concept → multi-query recall → vision quality review."""
+    from app.services.editorial_candidates import generate_editorial_candidates
+
+    return await generate_editorial_candidates(
+        concept=req.concept.strip(),
+        gender=req.gender,
+        limit=req.limit,
+    )
+
+
 @router.post(
     "/resolve-url",
     response_model=ResolveResponse,
