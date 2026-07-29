@@ -23,7 +23,11 @@ from app.api.deps import get_current_user_id, get_optional_user_id
 from app.core.di import provide_db_pool
 from app.core.gender import db_to_app
 from app.services.curation_chips import Chip, chips_for
-from app.services.curation_refresh import select_candidate_ids
+from app.services.curation_refresh import (
+    GENDER_MATCH_SQL,
+    PRODUCT_FEATURES_JOIN,
+    select_candidate_ids,
+)
 from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
@@ -170,18 +174,20 @@ async def _load_sections(
             all_ids.extend(selected_by_section.get(r[0], []))
         products: dict[int, CurationProduct] = {}
         if all_ids:
+            # 성별 술어는 curation_refresh 와 같은 3단 다리를 공유한다 — 후보를
+            # 뽑을 때와 하이드레이션할 때의 기준이 갈리면 구좌가 조용히 빈다.
             await cur.execute(
-                """
+                f"""
                 SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url
                 FROM public.products p
-                WHERE p.id = ANY(%s)
+                {PRODUCT_FEATURES_JOIN}
+                WHERE p.id = ANY(%(ids)s)
                   AND p.in_stock
                   AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
                   AND p.price >= 5000
-                  AND %s = ANY(p.gender)
-                  AND NOT ('unisex' = ANY(p.gender))
-                """,
-                (list(dict.fromkeys(all_ids)), gender),
+                  AND {GENDER_MATCH_SQL}
+                """,  # noqa: S608 -- 보간되는 값은 모두 모듈 소유 상수
+                {"ids": list(dict.fromkeys(all_ids)), "gender": gender},
             )
             for pid, brand, name, price, image_url, product_url in await cur.fetchall():
                 products[int(pid)] = CurationProduct(
