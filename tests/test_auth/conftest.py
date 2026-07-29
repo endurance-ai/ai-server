@@ -85,6 +85,18 @@ def _bootstrap(dsn: str) -> None:
                 updated_at     TIMESTAMPTZ DEFAULT now()
             )
         """)
+        # Enrichment output (created by direct DDL on dev-app, not alembic).
+        # Minimal shape: only the columns the feature-signal path reads.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.product_features (
+                product_id       BIGINT PRIMARY KEY REFERENCES public.products(id) ON DELETE CASCADE,
+                retrieval_text   TEXT,
+                feature_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                feature_version  TEXT,
+                vlm_model        TEXT,
+                generated_at     TIMESTAMPTZ DEFAULT now()
+            )
+        """)
 
 
 def _migrate(dsn: str) -> None:
@@ -130,7 +142,9 @@ async def _truncate(pool) -> AsyncGenerator[None]:
                 ai.curation_candidates,
                 ai.curation_impressions,
                 ai.taste_signal_events,
+                ai.taste_feature_events,
                 ai.user_style_scores,
+                ai.user_feature_scores,
                 ai.user_brand_picks,
                 ai.searches,
                 ai.product_views,
@@ -149,7 +163,9 @@ async def _truncate(pool) -> AsyncGenerator[None]:
             CASCADE
             """
         )
-        await cur.execute("TRUNCATE public.products, public.brand_nodes RESTART IDENTITY CASCADE")
+        await cur.execute(
+            "TRUNCATE public.product_features, public.products, public.brand_nodes RESTART IDENTITY CASCADE"
+        )
         await conn.commit()
 
 

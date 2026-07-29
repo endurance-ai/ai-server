@@ -25,6 +25,114 @@ WEIGHTS = {
     "no_interaction": -1.0,
 }
 
+# Visual-feature axes unlocked by Product Enrichment (public.product_features).
+# style_tags/silhouette overlap with the style-node axis (already handled by
+# record_style_signal) and are intentionally excluded here to avoid double-counting.
+_SKIP_VALUES = {"", "n/a", "none", "null"}
+
+
+def feature_pairs(metadata: dict[str, Any] | None) -> list[tuple[str, str]]:
+    """Flatten a product's feature_metadata into (axis, value) preference pairs."""
+    if not metadata:
+        return []
+    pairs: list[tuple[str, str]] = []
+
+    def _add(axis: str, raw: Any) -> None:
+        if not isinstance(raw, str):
+            return
+        value = raw.strip()
+        if value.lower() in _SKIP_VALUES:
+            return
+        pairs.append((axis, value))
+
+    _add("color", metadata.get("primary_color"))
+    _add("fit", metadata.get("fit"))
+    _add("pattern", metadata.get("pattern"))
+    _add("neckline", metadata.get("neckline"))
+    materials = metadata.get("material")
+    if isinstance(materials, list):
+        for m in materials:
+            _add("material", m)
+    return pairs
+
+
+async def record_feature_signals(
+    pool: AsyncConnectionPool,
+    *,
+    user_id: UUID,
+    product_id: int,
+    signal_type: str,
+    dedupe_key: str,
+    weight: float | None = None,
+) -> int:
+    """Fan one product signal out to its visual-feature axes (color/fit/material/...).
+
+    Reads public.product_features.feature_metadata for the product and upserts a
+    decayed score per (axis, value) into ai.user_feature_scores, mirroring the
+    style-node math. Idempotent per (dedupe_key, axis, value) via
+    ai.taste_feature_events. No-op for products without enrichment.
+    """
+    signal_weight = WEIGHTS[signal_type] if weight is None else weight
+    now = datetime.now(tz=UTC)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT feature_metadata FROM public.product_features WHERE product_id = %s",
+            (product_id,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return 0
+        pairs = feature_pairs(row[0])
+        if not pairs:
+            return 0
+
+        written = 0
+        for axis, value in pairs:
+            await cur.execute(
+                """
+                INSERT INTO ai.taste_feature_events
+                    (dedupe_key, user_id, axis, value, signal_type, weight, product_id, occurred_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (dedupe_key) DO NOTHING
+                RETURNING event_id
+                """,
+                (f"{dedupe_key}:{axis}:{value}", user_id, axis, value, signal_type, signal_weight, product_id, now),
+            )
+            if await cur.fetchone() is None:
+                continue
+            await cur.execute(
+                """
+                INSERT INTO ai.user_feature_scores
+                    (user_id, axis, value, score, signal_count, last_event_at, updated_at)
+                VALUES (%s, %s, %s, %s, 1, %s, %s)
+                ON CONFLICT (user_id, axis, value) DO UPDATE SET
+                    score = greatest(
+                        -20.0,
+                        least(
+                            20.0,
+                            ai.user_feature_scores.score
+                                * power(
+                                    0.5,
+                                    greatest(
+                                        0,
+                                        extract(epoch FROM (
+                                            EXCLUDED.last_event_at - ai.user_feature_scores.last_event_at
+                                        ))
+                                    ) / %s
+                                )
+                                + EXCLUDED.score
+                        )
+                    ),
+                    signal_count = ai.user_feature_scores.signal_count + 1,
+                    last_event_at = greatest(ai.user_feature_scores.last_event_at, EXCLUDED.last_event_at),
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (user_id, axis, value, signal_weight, now, now, HALF_LIFE_SECONDS),
+            )
+            written += 1
+        await conn.commit()
+    return written
+
 
 async def record_style_signal(
     pool: AsyncConnectionPool,
@@ -119,7 +227,7 @@ async def record_product_signal(
         )
         await conn.commit()
     payload = {"product_id": product_id, **(metadata or {})}
-    return await record_style_signal(
+    style_recorded = await record_style_signal(
         pool,
         user_id=user_id,
         style_node_id=int(row[0]) if row and row[0] is not None else None,
@@ -127,6 +235,17 @@ async def record_product_signal(
         dedupe_key=dedupe_key,
         metadata=payload,
     )
+    # Fan the same signal out to the product's visual-feature axes (color/fit/
+    # material/pattern/neckline). Independent of the style-node path so enriched
+    # products still teach feature taste even when the brand has no style node.
+    await record_feature_signals(
+        pool,
+        user_id=user_id,
+        product_id=product_id,
+        signal_type=signal_type,
+        dedupe_key=dedupe_key,
+    )
+    return style_recorded
 
 
 async def record_search_result_signals(
