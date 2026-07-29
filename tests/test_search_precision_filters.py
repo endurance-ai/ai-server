@@ -109,14 +109,25 @@ async def test_unrecognized_subcategory_fails_open(monkeypatch):
     assert spy.calls[0]["p_category"] == "tops"  # category 경로 유지
 
 
-# ── color alias ─────────────────────────────────────────────────────────────
+# ── color canonical passthrough ─────────────────────────────────────────────
 
 
-async def test_color_multi_aliased_to_multicolor(monkeypatch):
+async def test_color_family_passed_through_uppercase(monkeypatch):
+    """색 출처가 product_features.primary_color 로 이관되면서(2026-07-29)
+    Vision color_family 를 그대로 넘기면 맞는다 — 구 _COLOR_ALIAS
+    (multi→multicolor, gray→grey) 땜빵은 제거됨. RPC 가 `= UPPER(...)` 로
+    비교하므로 대문자 canonical 표기로 전달한다."""
     spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
     _install(monkeypatch, spy)
     await search_service(_state(category="Top", color_family="MULTI"))
-    assert spy.calls[0]["p_color_family"] == "multicolor"
+    assert spy.calls[0]["p_color_family"] == "MULTI"
+
+
+async def test_color_family_lowercase_input_normalized(monkeypatch):
+    spy = _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install(monkeypatch, spy)
+    await search_service(_state(category="Top", color_family="grey"))
+    assert spy.calls[0]["p_color_family"] == "GREY"
 
 
 # ── 완화 재시도 ─────────────────────────────────────────────────────────────
