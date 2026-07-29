@@ -40,17 +40,6 @@ logger = logging.getLogger(__name__)
 # repository (single source for the pgvector format alongside the param map).
 embedding_to_pgvector = _embedding_to_pgvector
 
-# 2026-07-15 — p_color_family EXACT 매치 보정용 최소 alias. products.color 는
-# 크롤러 원본값(Black/BLACK/Charcoal/"제품명 참조"…)이라 Vision color_family
-# enum 과 완전히 겹치지 않는다. RPC 가 양측 UPPER 비교하므로 케이스는 무관,
-# 철자만 보정한다 (MULTI → DB "Multicolor", gray → DB "Grey").
-_COLOR_ALIAS: dict[str, str] = {
-    "multi": "multicolor",
-    "multi-color": "multicolor",
-    "multicolour": "multicolor",
-    "gray": "grey",
-}
-
 
 def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str | None]:
     """`(subcategory, subcategory_family, color_family)` 정밀 필터 해석.
@@ -73,11 +62,17 @@ def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str |
         if sub is None:
             sub, sub_family = normalize_subcategory(getattr(item, "category", None))
 
+    # 2026-07-29 — 색 출처가 products.color(크롤러 원본값) → product_features
+    # (VLM primary_color) 로 바뀌면서 alias 보정이 불필요해졌다. 구 _COLOR_ALIAS
+    # (multi→multicolor, gray→grey) 는 크롤러가 뱉던 자유형 문자열에 Vision enum
+    # 을 억지로 맞추려던 땜빵이었는데, primary_color 는 Vision 과 **정확히 같은
+    # 16 family enum** 이라 그대로 넘기면 맞는다. 대문자로 보내 RPC 의
+    # `= UPPER(p_color_family)` 와 표기를 일치시킨다.
     color: str | None = None
     if settings.SEARCH_COLOR_FILTER_ENABLED:
-        c = str(getattr(item, "color_family", None) or "").strip().lower()
+        c = str(getattr(item, "color_family", None) or "").strip().upper()
         if c:
-            color = _COLOR_ALIAS.get(c, c)
+            color = c
     return sub, sub_family, color
 
 
@@ -86,9 +81,13 @@ def _resolve_gender(req: Any) -> str | None:
 
     2026-07-16 — 상품 레벨 gender 하드 필터 (골든셋 2차 실측: 남성 쿼리에
     여성 상품 누수). 'men'/'women' 만 필터로 태우고, 'unisex'/미확인/그 외
-    값은 None(필터 off) — RPC 가 `gender && ARRAY[p_gender,'unisex']` 라
-    unisex 상품은 어느 성별 요청에도 항상 포함된다. 시맨틱 제약이므로
-    완화 재시도에서 제거하지 않는다."""
+    값은 None(필터 off). unisex 상품은 어느 성별 요청에도 항상 포함된다.
+    시맨틱 제약이므로 완화 재시도에서 제거하지 않는다.
+
+    2026-07-29 — 이 함수는 그대로다. 바뀐 건 RPC 쪽 매칭 소스로,
+    `product_features.feature_metadata->>'gender'` → `products.gender` →
+    fail-open 3단 다리를 탄다 (크롤러가 gender 생성을 멈춘 상태의 과도기).
+    호출부 계약('men'|'women'|None)은 동일하다."""
     if not settings.SEARCH_GENDER_FILTER_ENABLED:
         return None
     g = str(getattr(req, "gender", None) or "").strip().lower()
