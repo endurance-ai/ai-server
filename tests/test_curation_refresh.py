@@ -157,3 +157,63 @@ def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
     assert len(personalized) == 12
     assert len([pid for pid in personalized if pid <= 10]) == 8
     assert len([pid for pid in personalized if pid > 10]) == 4
+
+
+def _feature_rows() -> list[dict]:
+    # Product 8 is black; everything else beige. All hot, unique brands.
+    return [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+            "feature_metadata": {"primary_color": "black" if pid == 8 else "beige"},
+        }
+        for pid in range(1, 21)
+    ]
+
+
+def test_candidate_selection_uses_feature_scores_without_weakening_quotas():
+    rows = _feature_rows()
+    baseline = select_candidate_ids(rows, section_id="under-100", excluded_ids=set(), seed="feat")
+    # Loves black, dislikes beige — the lone black product should surface to #1.
+    feature_scores = {("color", "beige"): -20.0, ("color", "black"): 20.0}
+    personalized = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        feature_scores=feature_scores,
+        seed="feat",
+    )
+    assert baseline[0] == 1
+    assert personalized[0] == 8
+    assert len(personalized) == 12
+    assert len([pid for pid in personalized if pid <= 10]) == 8
+    assert len([pid for pid in personalized if pid > 10]) == 4
+
+
+def test_candidate_selection_missing_feature_metadata_is_neutral():
+    # feature_scores present but rows carry no enriched metadata → every product
+    # contributes the neutral 0.5, so ordering falls back to base rank (no crash).
+    rows = [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+        }
+        for pid in range(1, 21)
+    ]
+    selected = select_candidate_ids(
+        rows,
+        section_id="popular",
+        excluded_ids=set(),
+        feature_scores={("color", "black"): 20.0},
+        seed="neutral",
+    )
+    assert selected[0] == 1
+    assert len(selected) == 12

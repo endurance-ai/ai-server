@@ -107,38 +107,39 @@ async def _load_sections(
         selected_by_section: dict[str, list[int]] = {}
         excluded_ids: set[int] = set()
         taste_scores: dict[int, float] = {}
+        feature_scores: dict[tuple[str, str], float] = {}
         if user_id is not None:
+            # Both taste axes share the style-engine decay (half-life 30d, clamp
+            # [-20, 20]) applied inline so a stale profile weakens on its own.
+            _decay = (
+                "greatest(-20.0, least(20.0, score * power(0.5, "
+                "greatest(0, extract(epoch FROM (now() - last_event_at))) / (30 * 24 * 60 * 60))))"
+            )
             await cur.execute(
-                """
-                SELECT style_node_id,
-                       greatest(-20.0, least(
-                           20.0,
-                           score * power(
-                               0.5,
-                               greatest(0, extract(epoch FROM (now() - last_event_at)))
-                                   / (30 * 24 * 60 * 60)
-                           )
-                       ))
-                FROM ai.user_style_scores
-                WHERE user_id = %s
-                """,
+                f"SELECT style_node_id, {_decay} FROM ai.user_style_scores WHERE user_id = %s",  # noqa: S608
                 (user_id,),
             )
             taste_scores = {int(r[0]): float(r[1]) for r in await cur.fetchall()}
+            await cur.execute(
+                f"SELECT axis, value, {_decay} FROM ai.user_feature_scores WHERE user_id = %s",  # noqa: S608
+                (user_id,),
+            )
+            feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
         for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
-            if slot_type != "auto" or user_id is None or not taste_scores:
+            if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
                 selected = [
                     int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
                 ]
             else:
                 await cur.execute(
                     """
-                    SELECT product_id, is_hot, base_score, base_rank, brand_key,
-                           brand_node_id, style_node_id
-                    FROM ai.curation_candidates
-                    WHERE section_id = %s AND gender = %s
-                    ORDER BY is_hot DESC, base_rank
+                    SELECT c.product_id, c.is_hot, c.base_score, c.base_rank, c.brand_key,
+                           c.brand_node_id, c.style_node_id, pf.feature_metadata
+                    FROM ai.curation_candidates c
+                    LEFT JOIN public.product_features pf ON pf.product_id = c.product_id
+                    WHERE c.section_id = %s AND c.gender = %s
+                    ORDER BY c.is_hot DESC, c.base_rank
                     """,
                     (section_id, gender),
                 )
@@ -151,6 +152,7 @@ async def _load_sections(
                         "brand_key": r[4],
                         "brand_node_id": r[5],
                         "style_node_id": int(r[6]) if r[6] is not None else None,
+                        "feature_metadata": r[7],
                     }
                     for r in await cur.fetchall()
                 ]
@@ -159,6 +161,7 @@ async def _load_sections(
                     section_id=section_id,
                     excluded_ids=excluded_ids,
                     taste_scores=taste_scores,
+                    feature_scores=feature_scores,
                     seed=f"{user_id}:{gender}:{section_id}",
                 )
                 if not selected:
