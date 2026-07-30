@@ -74,8 +74,6 @@ def _bootstrap(dsn: str) -> None:
                 in_stock       BOOLEAN NOT NULL DEFAULT TRUE,
                 platform       TEXT NOT NULL DEFAULT '',
                 gender         TEXT[],
-                description    TEXT,
-                color          TEXT,
                 tags           TEXT[],
                 product_code   TEXT,
                 review_count   INT NOT NULL DEFAULT 0,
@@ -85,16 +83,18 @@ def _bootstrap(dsn: str) -> None:
                 updated_at     TIMESTAMPTZ DEFAULT now()
             )
         """)
-        # Enrichment output (created by direct DDL on dev-app, not alembic).
-        # Minimal shape: only the columns the feature-signal path reads.
+        # VLM 피처 — gender/color 의 단일 출처 (migration 095). PDP 의 color 가
+        # 여기서 나오므로 products 조회 테스트에 필수. feature-signal path(색/핏/소재
+        # 취향 fan-out)도 같은 테이블의 feature_metadata 를 읽는다.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS public.product_features (
                 product_id       BIGINT PRIMARY KEY REFERENCES public.products(id) ON DELETE CASCADE,
-                retrieval_text   TEXT,
+                retrieval_text   TEXT NOT NULL DEFAULT '',
                 feature_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-                feature_version  TEXT,
-                vlm_model        TEXT,
-                generated_at     TIMESTAMPTZ DEFAULT now()
+                feature_version  TEXT NOT NULL DEFAULT 'test',
+                vlm_model        TEXT NOT NULL DEFAULT 'test',
+                generated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
 

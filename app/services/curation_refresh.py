@@ -45,16 +45,35 @@ _MEN_ONLY_EXCLUDED_SUBCATEGORIES = (
 )
 
 
+# 성별 3단 다리 — search_products_v6.sql 과 같은 계단을 쓴다.
+#   ① product_features (VLM 스칼라 'men'|'women'|'unisex')
+#   ② products.gender  (크롤러 레거시 배열)
+#   ③ 둘 다 없으면 제외
+# 검색은 ③에서 fail-open 하지만 큐레이션은 fail-closed 다. 메인 피드에 성별이
+# 어긋난 상품이 노출되는 비용이 신규 상품 등장이 VLM 배치 한 주기 늦는 비용보다
+# 크고, 후보 풀(60)이 슬롯(12)보다 넉넉해 굶지 않는다.
+# 두 계단 모두 unisex 를 제외한다 — 명시 라벨만 올린다(기존 동작 보존).
+# 🧹 VLM gender 커버리지가 충분해지면 ②를 지우고 products.gender 를 DROP 한다.
+PRODUCT_FEATURES_JOIN = "LEFT JOIN public.product_features pf ON pf.product_id = p.id"
+
+GENDER_MATCH_SQL = """
+        CASE
+            WHEN pf.feature_metadata->>'gender' IS NOT NULL
+                THEN pf.feature_metadata->>'gender' = %(gender)s
+            WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
+                THEN %(gender)s = ANY(p.gender) AND NOT ('unisex' = ANY(p.gender))
+            ELSE false
+        END
+"""
+
+
 def _quality_sql() -> str:
-    # Explicit labels only. Any array containing unisex is excluded, including
-    # ['women', 'unisex'] and ['men', 'unisex'].
     winter_name_gate = f"AND p.name !~* '{_WINTER_NAME_RE}'" if settings.CURATION_SEASON.lower() == "summer" else ""
     return f"""
         p.in_stock
         AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
         AND p.price >= 5000
-        AND %(gender)s = ANY(p.gender)
-        AND NOT ('unisex' = ANY(p.gender))
+        AND {GENDER_MATCH_SQL}
         AND length(btrim(p.brand)) BETWEEN 1 AND 40
         AND p.brand NOT ILIKE '%%상품명%%'
         AND p.brand <> p.name
@@ -144,6 +163,7 @@ def _candidate_sql(section_id: str) -> str:
                 {score} AS base_score
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+            {PRODUCT_FEATURES_JOIN}
             {joins}
             WHERE {_quality_sql()}
               {extra}

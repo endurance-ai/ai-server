@@ -82,7 +82,9 @@ class ProductDetail(BaseModel):
     in_stock: bool
     platform: str
     gender: list[str] | None
-    description: str | None
+    # 2026-07-29 — color 출처가 products.color → product_features.feature_metadata
+    # ->>'primary_color' (VLM) 로 이관. products.description 은 제거됨 (모바일
+    # PDP 가 렌더링하지 않아 소비처가 없었다).
     color: str | None
     tags: list[str] | None
     brand_node: BrandNode | None
@@ -145,12 +147,20 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
                 p.id, p.brand, p.name, p.category, p.subcategory,
                 p.price, p.original_price, p.sale_price,
                 p.image_url, p.images, p.product_url,
-                p.in_stock, p.platform, p.gender,
-                p.description, p.color, p.tags,
+                p.in_stock, p.platform,
+                -- VLM(스칼라) 우선, 없으면 크롤러 레거시 배열. 응답 형태는
+                -- list[str] | None 유지 — 🧹 products.gender DROP 시 CASE 제거.
+                CASE
+                    WHEN pf.feature_metadata->>'gender' IS NOT NULL
+                        THEN ARRAY[pf.feature_metadata->>'gender']
+                    ELSE p.gender
+                END AS gender,
+                pf.feature_metadata->>'primary_color' AS color, p.tags,
                 p.brand_node_id,
                 bn.brand_name, bn.brand_name_normalized
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+            LEFT JOIN public.product_features pf ON pf.product_id = p.id
             WHERE p.id = %s
             """,
             (product_id,),
@@ -159,7 +169,7 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
     if not row:
         return None
     brand_node = (
-        BrandNode(id=row[17], brand_name=row[18], brand_name_normalized=row[19]) if row[17] is not None else None
+        BrandNode(id=row[16], brand_name=row[17], brand_name_normalized=row[18]) if row[16] is not None else None
     )
     return ProductDetail(
         id=row[0],
@@ -176,9 +186,8 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
         in_stock=row[11],
         platform=row[12],
         gender=list(row[13]) if row[13] else None,
-        description=row[14],
-        color=row[15],
-        tags=list(row[16]) if row[16] else None,
+        color=row[14],
+        tags=list(row[15]) if row[15] else None,
         brand_node=brand_node,
     )
 
