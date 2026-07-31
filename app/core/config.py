@@ -199,6 +199,7 @@ class Settings(BaseSettings):
     PERSONALIZE_KEYWORD_W: float = 0.02
     PERSONALIZE_PRICE_FIT_W: float = 0.05
     PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
+    PERSONALIZE_FEATURE_W: float = 0.15
 
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7

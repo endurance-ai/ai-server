@@ -94,6 +94,34 @@ def _resolve_gender(req: Any) -> str | None:
     return g if g in ("men", "women") else None
 
 
+async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
+    """Attach `public.product_features.feature_metadata` to candidate rows in place.
+
+    v6 RPC rows carry only distance/brand/… — the visual features live in a
+    separate table, so the feature re-rank fetches them for the current candidate
+    set in one batch. Fail-open: pool down or a missing row just leaves
+    `feature_metadata` unset (scored as neutral).
+    """
+    ids = [int(r["id"]) for r in rows if str(r.get("id") or "").isdigit()]
+    if not ids:
+        return
+    from app.providers import db_pool
+
+    pool = db_pool._pool  # noqa: SLF001
+    if pool is None:
+        return
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT product_id, feature_metadata FROM public.product_features WHERE product_id = ANY(%s)",
+            (ids,),
+        )
+        meta = {int(r[0]): r[1] for r in await cur.fetchall()}
+    for r in rows:
+        rid = str(r.get("id") or "")
+        if rid.isdigit():
+            r["feature_metadata"] = meta.get(int(rid))
+
+
 async def search_service(state: PipelineState) -> PipelineState:
     if state.embedding is None:
         raise RuntimeError("search_step requires state.embedding (call embed_step first)")
@@ -247,17 +275,26 @@ async def search_service(state: PipelineState) -> PipelineState:
     if settings.PERSONALIZE_RERANK_ENABLED and rows and state.user_key:
         try:
             from app.infrastructure.memory.taste_profile import get_taste_store
+            from app.scoring import feature_scores_cache
 
             profile = get_taste_store().get_or_create(state.user_key)
+            # Visual-feature taste (ai.user_feature_scores) is only primed for the
+            # app-auth'd search path; Telegram / internal /recommend read None here
+            # and stay unchanged. When present, attach each candidate's enriched
+            # features (one batch query) so the rerank can score color/fit/material.
+            feature_scores = feature_scores_cache.get(state.user_key)
+            if feature_scores:
+                await _attach_feature_metadata(rows)
             weights = RerankWeights(
                 liked_brand=settings.PERSONALIZE_LIKED_BRAND_W,
                 disliked_brand=settings.PERSONALIZE_DISLIKED_BRAND_W,
                 keyword=settings.PERSONALIZE_KEYWORD_W,
                 price_fit=settings.PERSONALIZE_PRICE_FIT_W,
                 gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
+                feature=settings.PERSONALIZE_FEATURE_W,
             )
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
-            state.raw_candidates = _personalize_rerank(rows, profile, weights=weights)
+            state.raw_candidates = _personalize_rerank(rows, profile, weights=weights, feature_scores=feature_scores)
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:
                 logger.info("[STEP 4.65][rerank] reorder applied before=%s after=%s", before_top3, after_top3)

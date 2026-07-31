@@ -156,6 +156,34 @@ async def _sync_gender_to_taste_profile(
         logger.debug("[chat_service] gender sync skipped", exc_info=True)
 
 
+async def _prime_feature_scores(pool: AsyncConnectionPool, user_id: UUID, synthetic_chat_id: int) -> None:
+    """Load the user's decayed visual-feature taste into the search-side cache.
+
+    ai.user_feature_scores is keyed by the app auth UUID, but search_service only
+    sees the derived user_key — this is the one place with both. Same 30d-half-life
+    decay as the style axis. Fail-open: a miss just means the search re-rank falls
+    back to its non-feature order.
+    """
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT axis, value,
+                       greatest(-20.0, least(20.0, score * power(0.5,
+                           greatest(0, extract(epoch FROM (now() - last_event_at))) / (30 * 24 * 60 * 60))))
+                FROM ai.user_feature_scores
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
+        from app.scoring import feature_scores_cache
+
+        feature_scores_cache.put(user_key_for(None, synthetic_chat_id), scores)
+    except Exception as exc:  # noqa: BLE001 — never break the turn
+        logger.debug("[feature-prime] skipped: %r", exc)
+
+
 async def _get_app_user_tier(pool: AsyncConnectionPool, user_id: UUID) -> str:
     """Return the app subscription tier cached on user_profiles."""
     try:
@@ -533,6 +561,7 @@ async def invoke(
     """
     resolved_session_id = await get_or_create_session(pool, user_id, session_id)
     await _sync_gender_to_taste_profile(pool, user_id, _user_id_to_chat_id(user_id))
+    await _prime_feature_scores(pool, user_id, _user_id_to_chat_id(user_id))
 
     # Persist user message
     await append_message(pool, resolved_session_id, "user", text)
@@ -637,6 +666,7 @@ async def invoke_streaming(
         return
 
     await _sync_gender_to_taste_profile(pool, user_id, synthetic_chat_id)
+    await _prime_feature_scores(pool, user_id, synthetic_chat_id)
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 
