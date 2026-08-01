@@ -331,9 +331,10 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = {s["id"]: s for s in resp.json()["sections"]}
     under = [p["product_id"] for p in sections["under-100"]["products"]]
-    # 상한(15만원) 위인 pricey만 탈락. viewed는 12만원이라 조회수 순으로 맨 앞에 온다.
+    # 상한(15만원) 위인 pricey만 탈락. under-100 은 popular 과 달리 조회수 점수가
+    # 없어(score=0::float) 순서는 md5(product_id||current_date) 로만 섞인다 —
+    # 날짜마다 바뀌므로 순서(under[0])는 단언하지 않고 membership 만 확인한다.
     assert cheap in under and viewed in under and pricey not in under
-    assert under[0] == viewed
 
 
 @pytest.mark.asyncio
