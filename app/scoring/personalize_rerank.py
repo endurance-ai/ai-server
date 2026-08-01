@@ -119,6 +119,7 @@ def _score_candidate(
     profile: TasteProfile | None,
     w: RerankWeights,
     feature_scores: dict[tuple[str, str], float] | None = None,
+    exclude_axes: frozenset[str] | None = None,
 ) -> float:
     """Compute personalized score for one row. Higher = better.
 
@@ -126,12 +127,16 @@ def _score_candidate(
     attached `feature_metadata`) contributes a centered term in [-w.feature,
     +w.feature] — 0 when the product has no enriched features or the user has no
     matching signal, so it never shifts the baseline for cold users.
+
+    `exclude_axes` are the feature axes the query already pinned (adaptive α):
+    they are dropped from the feature match so taste fills only the open axes.
     """
     distance = float(c.get("distance", 1.0))
     score = 1.0 - distance
 
     if feature_scores:
-        score += w.feature * (mean_feature_pref(c.get("feature_metadata"), feature_scores) - 0.5) * 2.0
+        pref = mean_feature_pref(c.get("feature_metadata"), feature_scores, exclude_axes)
+        score += w.feature * (pref - 0.5) * 2.0
 
     if profile is None:
         return score
@@ -173,6 +178,7 @@ def rerank(
     *,
     weights: RerankWeights,
     feature_scores: dict[tuple[str, str], float] | None = None,
+    exclude_axes: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return `candidates` re-ordered by personalized score (desc).
 
@@ -196,7 +202,7 @@ def rerank(
     # scores fall back to original insertion order — preserves "RPC
     # distance ASC" as the deterministic tie-breaker.
     scored: list[tuple[float, dict[str, Any]]] = [
-        (_score_candidate(c, profile, weights, feature_scores), c) for c in candidates
+        (_score_candidate(c, profile, weights, feature_scores, exclude_axes), c) for c in candidates
     ]
     reranked = [c for _, c in sorted(scored, key=lambda kv: -kv[0])]
 
