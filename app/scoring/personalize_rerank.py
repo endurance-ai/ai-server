@@ -30,6 +30,7 @@ from typing import Any
 from app.infrastructure.memory.taste_profile import TasteProfile
 from app.infrastructure.repositories.brand_node_cache import lookup as _lookup_brand
 from app.infrastructure.repositories.brand_node_cache import normalize_brand
+from app.scoring.feature_taste import mean_feature_pref
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class RerankWeights:
     keyword: float = 0.02
     price_fit: float = 0.05
     gender_mismatch: float = 0.10
+    feature: float = 0.15
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -114,12 +116,25 @@ def _gender_penalty(profile_gender: str, brand_gender_lean: str, weight: float) 
 
 def _score_candidate(
     c: dict[str, Any],
-    profile: TasteProfile,
+    profile: TasteProfile | None,
     w: RerankWeights,
+    feature_scores: dict[tuple[str, str], float] | None = None,
 ) -> float:
-    """Compute personalized score for one row. Higher = better."""
+    """Compute personalized score for one row. Higher = better.
+
+    `feature_scores` (from ai.user_feature_scores, matched against the row's
+    attached `feature_metadata`) contributes a centered term in [-w.feature,
+    +w.feature] — 0 when the product has no enriched features or the user has no
+    matching signal, so it never shifts the baseline for cold users.
+    """
     distance = float(c.get("distance", 1.0))
     score = 1.0 - distance
+
+    if feature_scores:
+        score += w.feature * (mean_feature_pref(c.get("feature_metadata"), feature_scores) - 0.5) * 2.0
+
+    if profile is None:
+        return score
 
     brand_text = str(c.get("brand") or "")
     norm = normalize_brand(brand_text)
@@ -157,23 +172,32 @@ def rerank(
     profile: TasteProfile | None,
     *,
     weights: RerankWeights,
+    feature_scores: dict[tuple[str, str], float] | None = None,
 ) -> list[dict[str, Any]]:
     """Return `candidates` re-ordered by personalized score (desc).
 
+    Two personalization axes may apply: the brand/keyword/price/gender
+    `TasteProfile` and the visual-feature `feature_scores` (matched against each
+    row's attached `feature_metadata`). Either axis alone triggers the reorder.
+
     Stable sort: ties (e.g., score equal because no signal applied) keep
-    their RPC order. Empty list / no profile / no signal → return the
+    their RPC order. Empty list / neither axis with signal → return the
     input unchanged.
 
     The function never drops candidates — diversify handles cap and dedup
     after this step.
     """
-    if not candidates or profile is None or not _has_any_signal(profile):
+    has_profile_signal = profile is not None and _has_any_signal(profile)
+    if not candidates or (not has_profile_signal and not feature_scores):
         return candidates
+    profile = profile if has_profile_signal else None
 
     # Score once, then stable sort. Python's `sorted` is stable, so equal
     # scores fall back to original insertion order — preserves "RPC
     # distance ASC" as the deterministic tie-breaker.
-    scored: list[tuple[float, dict[str, Any]]] = [(_score_candidate(c, profile, weights), c) for c in candidates]
+    scored: list[tuple[float, dict[str, Any]]] = [
+        (_score_candidate(c, profile, weights, feature_scores), c) for c in candidates
+    ]
     reranked = [c for _, c in sorted(scored, key=lambda kv: -kv[0])]
 
     # Cheap observability — peek at the top-3 shuffle. Per-row scores are
