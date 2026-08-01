@@ -19,6 +19,7 @@ import httpx
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
+from app.services.curation_taste import feature_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -215,31 +216,69 @@ def _stable_tie(seed: str, product_id: int) -> int:
     return int(hashlib.sha256(f"{seed}:{product_id}".encode()).hexdigest()[:16], 16)
 
 
+def _norm_taste(score: float) -> float:
+    """Map a decayed taste score in [-20, 20] onto [0, 1]. 0 → 0.5 (neutral)."""
+    return (max(-20.0, min(20.0, score)) + 20.0) / 40.0
+
+
+def _feature_taste(metadata: Any, feature_scores: dict[tuple[str, str], float]) -> float:
+    """Mean normalized preference over a product's (axis, value) feature pairs.
+
+    Reuses `feature_pairs` (the same extractor that recorded the signals) so the
+    scoring axis/value keys match the stored scores exactly. A product with no
+    enriched features — or a cold user with no matching signal — contributes the
+    neutral 0.5, so it neither helps nor hurts the ranking.
+    """
+    pairs = feature_pairs(metadata if isinstance(metadata, dict) else None)
+    if not pairs:
+        return 0.5
+    return sum(_norm_taste(feature_scores.get(p, 0.0)) for p in pairs) / len(pairs)
+
+
 def select_candidate_ids(
     rows: list[dict[str, Any]],
     *,
     section_id: str,
     excluded_ids: set[int],
     taste_scores: dict[int, float] | None = None,
+    feature_scores: dict[tuple[str, str], float] | None = None,
     seed: str,
     require_full: bool = True,
 ) -> list[int]:
-    """Select hot 8 + overall 4 with per-section brand cap and stable ties."""
+    """Select hot 8 + overall 4 with per-section brand cap and stable ties.
+
+    Personalization blends taste onto the base rank. The style-node axis
+    (`taste_scores`) is joined by the visual-feature axes (`feature_scores`,
+    matched against each row's `feature_metadata`). When the user has feature
+    signals the taste budget is split style/feature (0.15/0.15, or 0.35/0.35 for
+    under-100); style-only users keep the original style weight (0.3 / 0.7) so
+    the shipped behavior does not regress. With neither axis, ordering falls back
+    to base rank.
+    """
     usable = [r for r in rows if int(r["product_id"]) not in excluded_ids]
     if not usable:
         return []
     count = len(usable)
     taste_scores = taste_scores or {}
+    feature_scores = feature_scores or {}
+    personalized = bool(taste_scores or feature_scores)
+    under_100 = section_id == "under-100"
 
     def rank_value(row: dict[str, Any]) -> tuple[float, int]:
         base = 1.0 - (max(1, int(row["base_rank"])) - 1) / max(1, count - 1)
-        taste = (max(-20.0, min(20.0, taste_scores.get(row.get("style_node_id"), 0.0))) + 20.0) / 40.0
-        if not taste_scores:
+        if not personalized:
             combined = base
-        elif section_id == "under-100":
-            combined = 0.3 * base + 0.7 * taste
         else:
-            combined = 0.7 * base + 0.3 * taste
+            style = _norm_taste(taste_scores.get(row.get("style_node_id"), 0.0))
+            if feature_scores:
+                feature = _feature_taste(row.get("feature_metadata"), feature_scores)
+                combined = (
+                    0.3 * base + 0.35 * style + 0.35 * feature
+                    if under_100
+                    else 0.7 * base + 0.15 * style + 0.15 * feature
+                )
+            else:
+                combined = 0.3 * base + 0.7 * style if under_100 else 0.7 * base + 0.3 * style
         return combined, -_stable_tie(seed, int(row["product_id"]))
 
     ranked = sorted(usable, key=rank_value, reverse=True)
