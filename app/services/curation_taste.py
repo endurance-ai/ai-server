@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import math
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -9,7 +12,14 @@ from uuid import UUID
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+logger = logging.getLogger(__name__)
+
 HALF_LIFE_SECONDS = 30 * 24 * 60 * 60
+
+# A result set is heterogeneous (12 different products), so a (axis, value) pair
+# must appear in at least this fraction of the enriched results to count as the
+# search's "defining" feature — filters diffuse per-item fit/material noise.
+_RESULT_FEATURE_DOMINANCE = 0.4
 
 WEIGHTS = {
     "outbound": 4.0,
@@ -56,6 +66,69 @@ def feature_pairs(metadata: dict[str, Any] | None) -> list[tuple[str, str]]:
     return pairs
 
 
+async def _apply_feature_event(
+    cur: Any,
+    *,
+    user_id: UUID,
+    axis: str,
+    value: str,
+    signal_type: str,
+    signal_weight: float,
+    dedupe_key: str,
+    product_id: int | None,
+    now: datetime,
+) -> bool:
+    """Append one idempotent feature event and upsert the decayed score.
+
+    Returns True when newly applied, False when `dedupe_key` already existed
+    (no double-count). Shared by the per-product fan-out (record_feature_signals)
+    and the result-set dominant fan-out (record_result_feature_signals). Caller
+    owns the connection/commit.
+    """
+    await cur.execute(
+        """
+        INSERT INTO ai.taste_feature_events
+            (dedupe_key, user_id, axis, value, signal_type, weight, product_id, occurred_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (dedupe_key) DO NOTHING
+        RETURNING event_id
+        """,
+        (dedupe_key, user_id, axis, value, signal_type, signal_weight, product_id, now),
+    )
+    if await cur.fetchone() is None:
+        return False
+    await cur.execute(
+        """
+        INSERT INTO ai.user_feature_scores
+            (user_id, axis, value, score, signal_count, last_event_at, updated_at)
+        VALUES (%s, %s, %s, %s, 1, %s, %s)
+        ON CONFLICT (user_id, axis, value) DO UPDATE SET
+            score = greatest(
+                -20.0,
+                least(
+                    20.0,
+                    ai.user_feature_scores.score
+                        * power(
+                            0.5,
+                            greatest(
+                                0,
+                                extract(epoch FROM (
+                                    EXCLUDED.last_event_at - ai.user_feature_scores.last_event_at
+                                ))
+                            ) / %s
+                        )
+                        + EXCLUDED.score
+                )
+            ),
+            signal_count = ai.user_feature_scores.signal_count + 1,
+            last_event_at = greatest(ai.user_feature_scores.last_event_at, EXCLUDED.last_event_at),
+            updated_at = EXCLUDED.updated_at
+        """,
+        (user_id, axis, value, signal_weight, now, now, HALF_LIFE_SECONDS),
+    )
+    return True
+
+
 async def record_feature_signals(
     pool: AsyncConnectionPool,
     *,
@@ -88,48 +161,18 @@ async def record_feature_signals(
 
         written = 0
         for axis, value in pairs:
-            await cur.execute(
-                """
-                INSERT INTO ai.taste_feature_events
-                    (dedupe_key, user_id, axis, value, signal_type, weight, product_id, occurred_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (dedupe_key) DO NOTHING
-                RETURNING event_id
-                """,
-                (f"{dedupe_key}:{axis}:{value}", user_id, axis, value, signal_type, signal_weight, product_id, now),
-            )
-            if await cur.fetchone() is None:
-                continue
-            await cur.execute(
-                """
-                INSERT INTO ai.user_feature_scores
-                    (user_id, axis, value, score, signal_count, last_event_at, updated_at)
-                VALUES (%s, %s, %s, %s, 1, %s, %s)
-                ON CONFLICT (user_id, axis, value) DO UPDATE SET
-                    score = greatest(
-                        -20.0,
-                        least(
-                            20.0,
-                            ai.user_feature_scores.score
-                                * power(
-                                    0.5,
-                                    greatest(
-                                        0,
-                                        extract(epoch FROM (
-                                            EXCLUDED.last_event_at - ai.user_feature_scores.last_event_at
-                                        ))
-                                    ) / %s
-                                )
-                                + EXCLUDED.score
-                        )
-                    ),
-                    signal_count = ai.user_feature_scores.signal_count + 1,
-                    last_event_at = greatest(ai.user_feature_scores.last_event_at, EXCLUDED.last_event_at),
-                    updated_at = EXCLUDED.updated_at
-                """,
-                (user_id, axis, value, signal_weight, now, now, HALF_LIFE_SECONDS),
-            )
-            written += 1
+            if await _apply_feature_event(
+                cur,
+                user_id=user_id,
+                axis=axis,
+                value=value,
+                signal_type=signal_type,
+                signal_weight=signal_weight,
+                dedupe_key=f"{dedupe_key}:{axis}:{value}",
+                product_id=product_id,
+                now=now,
+            ):
+                written += 1
         await conn.commit()
     return written
 
@@ -248,6 +291,66 @@ async def record_product_signal(
     return style_recorded
 
 
+async def record_result_feature_signals(
+    pool: AsyncConnectionPool,
+    *,
+    user_id: UUID,
+    search_id: UUID | str,
+    signal_type: str,
+) -> int:
+    """Fan the *dominant* visual features of a result set out to the feature axes.
+
+    Unlike a single product interaction, a result set (top 12) is heterogeneous —
+    fanning every (axis, value) would flatten the profile with diffuse fit/material
+    noise. So only pairs shared by ≥`_RESULT_FEATURE_DOMINANCE` of the enriched
+    results (the search's defining colour/pattern/…) are counted. Idempotent per
+    (signal_type, search_id, axis, value). No-op when nothing is enriched or dominant.
+    """
+    signal_weight = WEIGHTS[signal_type]
+    now = datetime.now(tz=UTC)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT pf.feature_metadata
+            FROM ai.searches s
+            CROSS JOIN LATERAL unnest(s.product_ids[1:12]) pid
+            JOIN public.product_features pf ON pf.product_id = pid
+            WHERE s.search_id = %s
+              AND s.user_id = %s
+            """,
+            (search_id, user_id),
+        )
+        metadatas = [r[0] for r in await cur.fetchall()]
+        n = len(metadatas)
+        if n == 0:
+            return 0
+        # Count products carrying each pair (per-product dedup so one product with
+        # duplicate materials doesn't inflate its own vote).
+        counts: Counter[tuple[str, str]] = Counter()
+        for md in metadatas:
+            counts.update(set(feature_pairs(md)))
+        threshold = max(2, math.ceil(n * _RESULT_FEATURE_DOMINANCE))
+        dominant = sorted(pair for pair, c in counts.items() if c >= threshold)
+        if not dominant:
+            return 0
+        written = 0
+        for axis, value in dominant:
+            if await _apply_feature_event(
+                cur,
+                user_id=user_id,
+                axis=axis,
+                value=value,
+                signal_type=signal_type,
+                signal_weight=signal_weight,
+                dedupe_key=f"{signal_type}:{search_id}:{axis}:{value}",
+                product_id=None,
+                now=now,
+            ):
+                written += 1
+        await conn.commit()
+    return written
+
+
 async def record_search_result_signals(
     pool: AsyncConnectionPool,
     *,
@@ -255,7 +358,13 @@ async def record_search_result_signals(
     search_id: UUID | str,
     signal_type: str,
 ) -> int:
-    """Apply one signal to each distinct style represented in a result set."""
+    """Apply one signal to each distinct style represented in a result set.
+
+    Also fans the result set's dominant visual features out to the feature axes
+    (Phase 6) so search-heavy users — who rarely tap individual products — still
+    build a colour/fit/material profile, not just a style-node one. Fail-open on
+    the feature path: the style signal is the primary contract.
+    """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -282,6 +391,10 @@ async def record_search_result_signals(
             metadata={"search_id": str(search_id)},
         ):
             written += 1
+    try:
+        await record_result_feature_signals(pool, user_id=user_id, search_id=search_id, signal_type=signal_type)
+    except Exception:  # noqa: BLE001 — supplementary to the style signal above
+        logger.debug("[taste] result-set feature fan-out skipped", exc_info=True)
     return written
 
 
