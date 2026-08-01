@@ -43,6 +43,52 @@ def test_rerank_no_signal_no_feature_is_noop():
     assert out is cands
 
 
+def test_mean_feature_pref_excludes_pinned_axes():
+    # Phase 6-② adaptive α — "blanks = taste": a query-pinned axis is dropped
+    # from the match so taste only speaks for the axes the user left open.
+    meta = {"primary_color": "black", "fit": "slim"}
+    scores = {("color", "black"): 20.0, ("fit", "slim"): -20.0}
+    # Both axes → loved color + disliked fit average to neutral.
+    assert mean_feature_pref(meta, scores) == 0.5
+    # Query pinned color → only the (disliked) fit remains.
+    assert mean_feature_pref(meta, scores, {"color"}) == 0.0
+    # Query pinned fit → only the (loved) color remains.
+    assert mean_feature_pref(meta, scores, {"fit"}) == 1.0
+    # Every axis pinned → nothing left for taste → neutral (taste stays silent).
+    assert mean_feature_pref(meta, scores, {"color", "fit"}) == 0.5
+
+
+def test_rerank_excludes_query_pinned_axis():
+    # Same setup as the feature-only reorder, but the user explicitly searched a
+    # colour — the pinned color axis must not let taste flip the RPC order.
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.10, "feature_metadata": {"primary_color": "beige"}},
+        {"id": "2", "brand": "B", "distance": 0.12, "feature_metadata": {"primary_color": "black"}},
+    ]
+    scores = {("color", "black"): 20.0, ("color", "beige"): -20.0}
+    # Without masking the loved black wins (#2 first) — see the 5a test above.
+    unmasked = rerank(cands, None, weights=RerankWeights(feature=0.15), feature_scores=scores)
+    assert [c["id"] for c in unmasked] == ["2", "1"]
+    # With color pinned, taste is silent on color → distance order preserved.
+    masked = rerank(
+        cands, None, weights=RerankWeights(feature=0.15), feature_scores=scores, exclude_axes=frozenset({"color"})
+    )
+    assert [c["id"] for c in masked] == ["1", "2"]
+
+
+def test_query_pinned_axes_maps_slots_to_feature_axes():
+    from types import SimpleNamespace
+
+    from app.services.search_service import _query_pinned_axes
+
+    # color_family / fit / fabric → the three query-expressible feature axes.
+    item = SimpleNamespace(color_family="BLACK", fit="oversized", fabric="cotton")
+    assert _query_pinned_axes(item) == frozenset({"color", "fit", "material"})
+    # Blank / whitespace slots are not pinned — taste fills them.
+    assert _query_pinned_axes(SimpleNamespace(color_family="BLACK", fit=None, fabric="  ")) == frozenset({"color"})
+    assert _query_pinned_axes(SimpleNamespace(color_family=None, fit=None, fabric=None)) == frozenset()
+
+
 def test_feature_scores_cache_roundtrip():
     feature_scores_cache.clear()
     assert feature_scores_cache.get("c:1") is None

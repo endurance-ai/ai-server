@@ -94,6 +94,26 @@ def _resolve_gender(req: Any) -> str | None:
     return g if g in ("men", "women") else None
 
 
+def _query_pinned_axes(item: Any) -> frozenset[str]:
+    """Feature axes the query specified explicitly → excluded from the feature
+    re-rank (adaptive α, "blanks = taste"): learned taste fills only the axes the
+    user left open and never overrides an explicit intent (the color/subcategory
+    hard filters already enforce the pinned ones).
+
+    Only color/fit/material are expressible in the request contract
+    (`AnalyzedItem.color_family`/`fit`/`fabric`); pattern/neckline are never
+    query-pinned, so taste always speaks for them.
+    """
+    pinned: set[str] = set()
+    if str(getattr(item, "color_family", None) or "").strip():
+        pinned.add("color")
+    if str(getattr(item, "fit", None) or "").strip():
+        pinned.add("fit")
+    if str(getattr(item, "fabric", None) or "").strip():
+        pinned.add("material")
+    return frozenset(pinned)
+
+
 async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
     """Attach `public.product_features.feature_metadata` to candidate rows in place.
 
@@ -283,6 +303,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             # and stay unchanged. When present, attach each candidate's enriched
             # features (one batch query) so the rerank can score color/fit/material.
             feature_scores = feature_scores_cache.get(state.user_key)
+            exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
             if feature_scores:
                 await _attach_feature_metadata(rows)
             weights = RerankWeights(
@@ -293,8 +314,15 @@ async def search_service(state: PipelineState) -> PipelineState:
                 gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
                 feature=settings.PERSONALIZE_FEATURE_W,
             )
+            if exclude_axes:
+                logger.info(
+                    "[STEP 4.65][rerank] adaptive-α: query pinned axes=%s → excluded from feature match",
+                    sorted(exclude_axes),
+                )
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
-            state.raw_candidates = _personalize_rerank(rows, profile, weights=weights, feature_scores=feature_scores)
+            state.raw_candidates = _personalize_rerank(
+                rows, profile, weights=weights, feature_scores=feature_scores, exclude_axes=exclude_axes
+            )
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:
                 logger.info("[STEP 4.65][rerank] reorder applied before=%s after=%s", before_top3, after_top3)
