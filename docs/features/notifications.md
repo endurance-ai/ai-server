@@ -64,27 +64,27 @@ The production topic is the exact iOS bundle identifier: `com.kikoai.app`.
 1. Sign in to Apple Developer with an Account Holder or Admin role. Open
    **Certificates, Identifiers & Profiles → Identifiers**, select the explicit
    App ID for `com.kikoai.app`, enable **Push Notifications**, and save.
-2. Open **Keys**, create a key such as `kiko APNs provider`, enable **Apple Push
-   Notifications service (APNs)**, register it, and download `AuthKey_<KEY_ID>.p8`.
-   Apple permits this download once; put it in a secrets manager immediately.
-   Do not commit it or copy it into the app bundle.
-3. Record the 10-character Key ID shown for the key and the 10-character Team ID
-   from Membership details. One APNs signing key works for both development and
-   production and can serve multiple apps in the same team.
+2. Open **Keys** and create two topic-specific APNs keys for `com.kikoai.app`:
+   one restricted to Sandbox and one restricted to Production. Download each
+   `AuthKey_<KEY_ID>.p8`. Apple permits each download once; put both in a secrets
+   manager immediately. Do not commit them or copy them into the app bundle.
+   Legacy APNs keys created before environment scoping may still support both
+   environments, but new deployments should keep the credentials separate.
+3. Record both 10-character Key IDs and the 10-character Team ID from Membership
+   details.
 4. Regenerate the iOS provisioning profiles/build after enabling the capability.
    The signed development app must contain `aps-environment=development`; an
    App Store/TestFlight archive uses `production`. Verify the built entitlement,
    not an assumed build-name mapping.
-5. Configure the worker secret values. The same `.p8` and Key ID may be assigned
-   to both environment-specific variables:
+5. Configure the worker with the corresponding environment-specific secrets:
 
    ```dotenv
    APNS_TOPIC=com.kikoai.app
    APNS_TEAM_ID=<APPLE_TEAM_ID>
-   APNS_SANDBOX_KEY_ID=<APNS_KEY_ID>
-   APNS_SANDBOX_AUTH_KEY_B64=<BASE64_OF_P8>
-   APNS_PRODUCTION_KEY_ID=<APNS_KEY_ID>
-   APNS_PRODUCTION_AUTH_KEY_B64=<BASE64_OF_P8>
+   APNS_SANDBOX_KEY_ID=<SANDBOX_APNS_KEY_ID>
+   APNS_SANDBOX_AUTH_KEY_B64=<BASE64_OF_SANDBOX_P8>
+   APNS_PRODUCTION_KEY_ID=<PRODUCTION_APNS_KEY_ID>
+   APNS_PRODUCTION_AUTH_KEY_B64=<BASE64_OF_PRODUCTION_P8>
    NOTIFICATION_WORKER_ENABLED=true
    ```
 
