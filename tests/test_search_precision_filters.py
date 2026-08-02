@@ -229,3 +229,73 @@ async def test_relax_retry_preserves_gender(monkeypatch):
     assert len(spy.calls) == 2
     assert spy.calls[1]["p_subcategory"] is None
     assert spy.calls[1]["p_gender"] == "women"
+
+
+# ── SPEC-SEARCH-HYBRID-001 — 텍스트 쿼리 하이브리드 라우팅 ─────────────────────
+
+
+def test_build_params_hybrid_adds_blend_knobs():
+    """하이브리드 param 은 v6 게이트 키를 그대로 두고 블렌드 노브만 추가한다."""
+    params = SearchRepository.build_params_hybrid(
+        embedding=_EMBED,
+        brand_filter=None,
+        category="hoodie",
+        subcategory="hoodie",
+        color_family="black",
+        w_text=0.3,
+        pool=100,
+    )
+    # 게이트 키는 build_params 와 동일 시맨틱
+    assert params["p_category"] == "tops"
+    assert params["p_subcategory"] == "hoodie"
+    assert params["p_color_family"] == "black"
+    # 블렌드 노브
+    assert params["p_w_text"] == 0.3
+    assert params["p_pool"] == 100
+
+
+def _install_dual(monkeypatch, v6_spy: _RpcSpy, hybrid_spy: _RpcSpy) -> None:
+    monkeypatch.setattr(SearchRepository, "search", staticmethod(v6_spy))
+    monkeypatch.setattr(SearchRepository, "search_hybrid", staticmethod(hybrid_spy))
+    monkeypatch.setattr(settings, "BRAND_2TOWER_ENABLED", False, raising=False)
+    monkeypatch.setattr(settings, "PERSONALIZE_RERANK_ENABLED", False, raising=False)
+
+
+async def test_hybrid_routing_when_flag_on_and_text(monkeypatch):
+    """플래그 ON + 순수 텍스트(state.hybrid_text) → hybrid RPC 로 라우팅, v6 미호출."""
+    v6, hyb = _RpcSpy([_rows(9)]), _RpcSpy([_rows(1, 2, 3, 4, 5)])
+    _install_dual(monkeypatch, v6, hyb)
+    monkeypatch.setattr(settings, "SEARCH_HYBRID_ENABLED", True, raising=False)
+    monkeypatch.setattr(settings, "SEARCH_HYBRID_W_TEXT", 0.3, raising=False)
+    monkeypatch.setattr(settings, "SEARCH_HYBRID_POOL", 100, raising=False)
+    state = _state(category="Top")
+    state.hybrid_text = True
+    await search_service(state)
+    assert len(hyb.calls) == 1
+    assert hyb.calls[0]["p_w_text"] == 0.3
+    assert hyb.calls[0]["p_pool"] == 100
+    assert v6.calls == []
+
+
+async def test_v6_routing_when_not_text(monkeypatch):
+    """이미지/blended 경로(hybrid_text=False)는 플래그 ON 이어도 v6 유지."""
+    v6, hyb = _RpcSpy([_rows(1, 2, 3, 4, 5)]), _RpcSpy([_rows(9)])
+    _install_dual(monkeypatch, v6, hyb)
+    monkeypatch.setattr(settings, "SEARCH_HYBRID_ENABLED", True, raising=False)
+    state = _state(category="Top")
+    state.hybrid_text = False
+    await search_service(state)
+    assert len(v6.calls) == 1
+    assert hyb.calls == []
+
+
+async def test_v6_routing_when_flag_off(monkeypatch):
+    """플래그 OFF → 순수 텍스트여도 v6 이미지 단독 경로 (byte-identical 회귀)."""
+    v6, hyb = _RpcSpy([_rows(1, 2, 3, 4, 5)]), _RpcSpy([_rows(9)])
+    _install_dual(monkeypatch, v6, hyb)
+    monkeypatch.setattr(settings, "SEARCH_HYBRID_ENABLED", False, raising=False)
+    state = _state(category="Top")
+    state.hybrid_text = True
+    await search_service(state)
+    assert len(v6.calls) == 1
+    assert hyb.calls == []

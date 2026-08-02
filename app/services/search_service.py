@@ -173,15 +173,37 @@ async def search_service(state: PipelineState) -> PipelineState:
 
     gender_norm = _resolve_gender(req)
 
-    params = SearchRepository.build_params(
-        embedding=state.embedding,
-        brand_filter=req.brand_filter,
-        category=category_for_gate,
-        style_node_code=style_node_code,
-        color_family=color_norm,
-        subcategory=sub_norm,
-        gender=gender_norm,
-    )
+    # SPEC-SEARCH-HYBRID-001 — 순수 텍스트 쿼리(state.hybrid_text)이고 플래그 ON 이면
+    # 이미지⊕텍스트 임베딩 블렌드 RPC 로 라우팅. 그 외(사진/blended/pinned-anchor,
+    # 또는 플래그 OFF)는 v6 이미지 단독 경로로 byte-identical. 게이트 키가 동일해
+    # 아래 완화 재시도·진단 로깅은 두 경로를 균일하게 다룬다.
+    use_hybrid = settings.SEARCH_HYBRID_ENABLED and getattr(state, "hybrid_text", False)
+    if use_hybrid:
+        params = SearchRepository.build_params_hybrid(
+            embedding=state.embedding,
+            brand_filter=req.brand_filter,
+            category=category_for_gate,
+            style_node_code=style_node_code,
+            color_family=color_norm,
+            subcategory=sub_norm,
+            gender=gender_norm,
+            w_text=settings.SEARCH_HYBRID_W_TEXT,
+            pool=settings.SEARCH_HYBRID_POOL,
+        )
+        _do_search = SearchRepository.search_hybrid
+        rpc_name = "search_products_hybrid_v1"
+    else:
+        params = SearchRepository.build_params(
+            embedding=state.embedding,
+            brand_filter=req.brand_filter,
+            category=category_for_gate,
+            style_node_code=style_node_code,
+            color_family=color_norm,
+            subcategory=sub_norm,
+            gender=gender_norm,
+        )
+        _do_search = SearchRepository.search
+        rpc_name = "search_products_v6"
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
     # OWN post-RPC node-presence `degraded` (logged separately below): this
@@ -205,7 +227,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     # RPC 입력 파라미터 — query_embedding 은 길어서 dim 만
     diag_params = {k: v for k, v in params.items() if k != "query_embedding"}
     diag_params["query_embedding_dim"] = len(state.embedding)
-    logger.info("[STEP 4.5][search] DB RPC 호출 시작 — fn=search_products_v6 params=%s", diag_params)
+    logger.info("[STEP 4.5][search] DB RPC 호출 시작 — fn=%s params=%s", rpc_name, diag_params)
 
     # REQ-AI-006: SearchRepository.search raises RpcContractError when the RPC
     # returns a row violating the documented contract. Catch it at the SERVICE
@@ -219,7 +241,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     # The drift is still surfaced (REQ-AI-006 "surface, not silent") via this
     # ERROR log + the Langfuse trace, without leaking row content.
     try:
-        rows = await SearchRepository.search(params)
+        rows = await _do_search(params)
     except RpcContractError as exc:
         logger.error(
             "[STEP 4.5][search] RPC contract drift -- failing open to empty result (row_index=%s exc=%s)",
@@ -246,7 +268,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             params.get("p_color_family"),
         )
         try:
-            relaxed_rows = await SearchRepository.search(relaxed)
+            relaxed_rows = await _do_search(relaxed)
         except RpcContractError as exc:
             logger.error(
                 "[STEP 4.55][search] relax retry contract drift -- keeping strict rows (row_index=%s exc=%s)",
