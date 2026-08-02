@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # the repository, not scattered string literals (SPEC-SEARCH-V6-001).
 _RPC_NAME = "search_products_v6"
 
+# SPEC-SEARCH-HYBRID-001 — text-query image⊕text blend RPC. Same gate
+# semantics as v6 but ranks by a normalized blend of the image-space and
+# text-space (product_features.text_embedding) cosine distances. Text path only.
+_RPC_NAME_HYBRID = "search_products_hybrid_v1"
+
 
 def embedding_to_pgvector(values: list[float]) -> str:
     """pgvector text input format: '[v1,v2,...]'."""
@@ -119,6 +124,55 @@ class SearchRepository:
             "p_gender": gender,
             "p_limit": settings.SEARCH_DEFAULT_K,
         }
+
+    @staticmethod
+    def build_params_hybrid(
+        *,
+        embedding: list[float],
+        brand_filter: list[str] | None,
+        category: str | None = None,
+        style_node_code: str | None = None,
+        color_family: str | None = None,
+        subcategory: str | None = None,
+        gender: str | None = None,
+        w_text: float,
+        pool: int,
+    ) -> dict[str, Any]:
+        """Construct the `search_products_hybrid_v1` RPC param dict (SPEC-SEARCH-HYBRID-001).
+
+        Gate keys are IDENTICAL to `build_params` (same normalization: category →
+        canonical family, style letter → id, color/subcategory/gender contracts)
+        so the relax-retry and diagnostics in search_service treat both param
+        shapes uniformly. Adds only the blend knobs `p_w_text` / `p_pool`; the
+        RPC computes both the image- and text-space cosine distances over the
+        two-kNN union and orders by the min-max-normalized blend.
+        """
+        return {
+            "query_embedding": embedding_to_pgvector(embedding),
+            "p_style_node_id": _style_code_to_id(style_node_code),
+            "p_category": to_canonical_family(category),
+            "p_subcategory": subcategory,
+            "p_brand_names": brand_filter,
+            "p_color_family": color_family or None,
+            "p_gender": gender,
+            "p_w_text": w_text,
+            "p_pool": pool,
+            "p_limit": settings.SEARCH_DEFAULT_K,
+        }
+
+    @staticmethod
+    async def search_hybrid(params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Invoke the `search_products_hybrid_v1` RPC (SPEC-SEARCH-HYBRID-001).
+
+        Same dispatch seam + contract validation as `search`. The returned
+        `distance` is the normalized blend score (0..1, ASC=better) rather than a
+        raw cosine — downstream (Candidate.score = 1 - distance, personalize
+        rerank base) treats it identically since both are ASC-ordered fit scores.
+        """
+        from app.services.database_service import DatabaseService
+
+        rows = await DatabaseService.rpc(_RPC_NAME_HYBRID, params)
+        return validate_rpc_rows(rows)
 
     @staticmethod
     async def search(params: dict[str, Any]) -> list[dict[str, Any]]:

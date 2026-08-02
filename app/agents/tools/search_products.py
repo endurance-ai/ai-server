@@ -567,6 +567,11 @@ async def run_text_only_search(
         style_node=style_node,
     )
     state = PipelineState(request=req, user_key=user_key)
+    # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes
+    # to the image⊕text blend RPC. `override_embedding` is a product IMAGE
+    # vector (pinned-product anchor) — keep v6 image ranking for that case since
+    # a text_embedding blend against an image query vector is cross-modal.
+    state.hybrid_text = override_embedding is None
     # Bypass embed_step (image path) — inject a REAL text embedding instead.
     # The sentinel URL never reaches Modal.
     # Invariant guard (review P1-1): both current callers already ensure a
