@@ -84,6 +84,22 @@ async def add_save(
         )
         row = await cur.fetchone()
 
+        if row and body.product_id.isdigit():
+            await cur.execute(
+                """
+                INSERT INTO ai.saved_product_baseline
+                    (user_id, product_id, baseline_price, baseline_in_stock, baseline_at)
+                SELECT %s, p.id, p.price, p.in_stock, now()
+                FROM public.products p
+                WHERE p.id = %s
+                ON CONFLICT (user_id, product_id) DO UPDATE SET
+                    baseline_price = EXCLUDED.baseline_price,
+                    baseline_in_stock = EXCLUDED.baseline_in_stock,
+                    baseline_at = now()
+                """,
+                (user_id, int(body.product_id)),
+            )
+
     if not row:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already saved")
     if body.product_id.isdigit():
@@ -176,6 +192,11 @@ async def remove_save(
             (user_id, product_id),
         )
         row = await cur.fetchone()
+        if row and product_id.isdigit():
+            await cur.execute(
+                "DELETE FROM ai.saved_product_baseline WHERE user_id = %s AND product_id = %s",
+                (user_id, int(product_id)),
+            )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Save not found")
     if product_id.isdigit():

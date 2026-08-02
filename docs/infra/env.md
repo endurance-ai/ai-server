@@ -25,6 +25,29 @@
 ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflarestorage.com
 ```
 
+## APNs notification worker
+
+The notification worker is a separate process and is disabled by default. Its
+schedule, APNs credentials, sandbox/production routing, rollout, and mobile
+contract are documented in [`../features/notifications.md`](../features/notifications.md).
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `NOTIFICATION_WORKER_ENABLED` | `false` | Worker kill switch |
+| `APNS_TOPIC` | `com.kikoai.app` | APNs topic / iOS bundle identifier |
+| `APNS_TEAM_ID` | `""` | Apple Developer Team ID |
+| `APNS_SANDBOX_KEY_ID` | `""` | Development APNs signing key ID |
+| `APNS_SANDBOX_AUTH_KEY_B64` / `_PATH` | `""` | Development `.p8`, base64 or mounted path |
+| `APNS_PRODUCTION_KEY_ID` | `""` | Production APNs signing key ID |
+| `APNS_PRODUCTION_AUTH_KEY_B64` / `_PATH` | `""` | Production `.p8`, base64 or mounted path |
+| `NOTIFY_TIMEZONE` | `Asia/Seoul` | Policy timezone |
+| `NOTIFY_WORKER_POLL_S` | `30` | Scheduler/delivery poll interval |
+| `NOTIFY_DELIVERY_BATCH_SIZE` | `100` | Claimed deliveries per cycle |
+| `NOTIFY_APNS_CONCURRENCY` | `20` | Maximum concurrent APNs requests |
+| `NOTIFY_MAX_DELIVERY_ATTEMPTS` | `5` | Delivery attempt cap before expiry |
+
+Do not place `.p8` material in client-visible env, logs, Git, or the mobile app.
+
 ## Uploads
 
 `POST /v1/uploads` 가 S3 presigned PUT URL을 발급하고, 최종 `image_url`은 CloudFront base URL + object key로 반환한다. 클라이언트는 응답의 `upload_url`로 직접 PUT하며, PUT 요청에는 요청했던 `Content-Type` 헤더를 그대로 포함해야 한다.

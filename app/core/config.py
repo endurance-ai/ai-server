@@ -121,9 +121,55 @@ class Settings(BaseSettings):
     NOTION_TOKEN: str = ""
     NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
+    # 알림 1차 — 재입고 / 가격 하락 / 관심 브랜드 신규 상품 (scripts/notify_batch.py)
+    # 가격 하락 임계치. 찜한 시점(또는 마지막 알림 시점) 기준가 대비 비율.
+    NOTIFY_PRICE_DROP_THRESHOLD: float = 0.15
+    # 브랜드 신규 상품 알림은 주 N일까지만 (스팸 방지 — 실측 ≈400 유저-상품 쌍/일).
+    NOTIFY_BRAND_NEW_WEEKLY_CAP: int = 3
+    # 한 다이제스트에 담는 브랜드 신규 상품 최대 개수. 초과분은 이벤트로 기록하지
+    # 않아 보존창 안에서 다음 발송 가능일 후보로 다시 나온다.
+    NOTIFY_BRAND_NEW_MAX_ITEMS: int = 5
+    # 신규 상품 보존창(일). 매 회차 이 창을 훑고 이미 알림 나간 (user, product) 만
+    # 제외한다 — 워터마크가 아니다. 성별은 VLM 배치가 채우므로 신상은 항상 잠시
+    # 성별 미해결 상태를 거친다. 창은 VLM 주기보다 넉넉히 길어야 그 사이에 놓치지
+    # 않는다 (VLM 일배치 기준 14일이면 한참 여유).
+    NOTIFY_NEW_PRODUCT_WINDOW_D: int = 14
+
+    # Standalone worker. The process exits without doing work unless enabled.
+    NOTIFICATION_WORKER_ENABLED: bool = False
+    NOTIFY_TIMEZONE: str = "Asia/Seoul"
+    NOTIFY_QUIET_START_HOUR: int = 21
+    NOTIFY_QUIET_END_HOUR: int = 9
+    NOTIFY_SAVED_SCAN_TIME: str = "09:00"
+    NOTIFY_SAVED_SEND_TIME: str = "09:30"
+    NOTIFY_BRAND_SCAN_TIME: str = "10:30"
+    NOTIFY_BRAND_SEND_TIME: str = "11:00"
+    NOTIFY_WORKER_POLL_S: int = 30
+    NOTIFY_DELIVERY_BATCH_SIZE: int = 100
+    NOTIFY_APNS_CONCURRENCY: int = 20
+    NOTIFY_MAX_DELIVERY_ATTEMPTS: int = 5
+
+    # APNs — environment-specific topic keys. Base64 avoids multiline .env
+    # parsing mistakes. Legacy APNS_* values remain a production fallback.
+    APNS_TOPIC: str = "com.kikoai.app"
+    ANDROID_PACKAGE: str = "com.kikoai.app"
+    APNS_SANDBOX_AUTH_KEY_B64: str = ""
+    APNS_SANDBOX_AUTH_KEY_PATH: str = ""
+    APNS_SANDBOX_KEY_ID: str = ""
+    APNS_PRODUCTION_AUTH_KEY_B64: str = ""
+    APNS_PRODUCTION_AUTH_KEY_PATH: str = ""
+    APNS_PRODUCTION_KEY_ID: str = ""
+    APNS_AUTH_KEY: str = ""  # .p8 PEM 본문 (개행 포함). 파일 대신 env 로 넣을 때.
+    APNS_AUTH_KEY_PATH: str = ""  # 또는 .p8 파일 경로. 둘 다 있으면 본문 우선.
+    APNS_KEY_ID: str = ""
+    APNS_TEAM_ID: str = ""
+    APNS_BUNDLE_ID: str = ""  # legacy alias; APNS_TOPIC is authoritative
+    APNS_USE_SANDBOX: bool = False
+    APNS_TIMEOUT_S: float = 10.0
+
     # 소비자 소셜 로그인 (SPEC-AUTH-SOCIAL-001)
     GOOGLE_CLIENT_ID: str = ""  # Google Cloud Console > OAuth 2.0 (iOS type)
-    APPLE_CLIENT_ID: str = ""  # iOS Bundle ID (e.g. com.kiko.app)
+    APPLE_CLIENT_ID: str = ""  # iOS Bundle ID (com.kikoai.app)
     JWT_SECRET: str = ""  # HS256 signing key (32+ chars). Empty = dev skip.
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30

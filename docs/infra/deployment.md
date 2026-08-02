@@ -27,9 +27,16 @@ merge → deploy-dev.yml             EC2 t4g.medium (ap-northeast-2)         (T4
 | `litellm-db` | LiteLLM 메타 (Postgres) | (내부) | 256M |
 | `langfuse-web` | Langfuse UI/API | 3000 | 512M |
 | `langfuse-db` | Langfuse 데이터 (Postgres) | (내부) | 512M |
+| `notification-worker` | APNs 감지·outbox 발송 (별도 프로세스, 추가 배포 필요) | 없음 | 256M 권장 |
 | **합계** | | | **~2.85GB** (4GB 캡 내) |
 
 > AI 서버 자체는 stateless. 영속 데이터는 Supabase + Langfuse Postgres 만.
+
+Notification worker code and connection contract are included in this repo, but
+the external `aws-infra` compose stack is intentionally not changed here. Add a
+service using the same image and `python -m app.workers.notification_worker`
+only after migrations and secrets are ready. See
+[`../features/notifications.md`](../features/notifications.md).
 
 ## EC2 정보
 

@@ -59,6 +59,7 @@ def _bootstrap(dsn: str) -> None:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS public.products (
                 id             BIGSERIAL PRIMARY KEY,
+                created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
                 brand          TEXT NOT NULL,
                 name           TEXT NOT NULL,
                 category       TEXT,
@@ -138,6 +139,12 @@ async def _truncate(pool) -> AsyncGenerator[None]:
         await cur.execute(
             """
             TRUNCATE
+                ai.notification_deliveries,
+                ai.notification_message_events,
+                ai.notification_messages,
+                ai.notifications,
+                ai.notification_job_state,
+                ai.saved_product_baseline,
                 ai.curation_sections,
                 ai.curation_candidates,
                 ai.curation_impressions,
