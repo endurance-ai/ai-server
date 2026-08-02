@@ -21,6 +21,12 @@ class PipelineState:
     # /recommend path (no per-user context) → rerank is a no-op.
     user_key: str | None = None
 
+    # SPEC-SEARCH-HYBRID-001 — 순수 텍스트 쿼리 여부. True 면 search_service 가
+    # 이미지⊕텍스트 임베딩 블렌드 RPC(search_products_hybrid_v1)로 랭킹한다.
+    # 사진/blended/pinned-anchor 경로는 query_embedding 이 이미지 벡터라 False
+    # (v6 이미지 단독 랭킹 유지 — text_embedding 블렌드는 cross-modal 미검증).
+    hybrid_text: bool = False
+
     # 중간 산출물
     embedding: list[float] | None = None
     raw_candidates: list[dict[str, Any]] = field(default_factory=list)

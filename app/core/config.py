@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -64,6 +65,17 @@ class Settings(BaseSettings):
     # 2026-07-16 — p_gender 상품 레벨 하드 필터 (gender[] && [g,'unisex']).
     # 시맨틱 제약이라 완화 재시도 대상 아님. kill-switch.
     SEARCH_GENDER_FILTER_ENABLED: bool = True
+    # SPEC-SEARCH-HYBRID-001 — 텍스트 쿼리 하이브리드(이미지⊕텍스트 임베딩) 랭킹.
+    # 텍스트 쿼리를 상품 이미지 임베딩에만 매칭하면 CLIP 계열 modality gap 으로
+    # distance 가 뭉쳐(0.86±0.015) 랭킹 신호가 흐리다. product_features.text_embedding
+    # (동일 FashionSigLIP 텍스트 임베딩)과의 text↔text 거리를 블렌드하면 색/소재/패턴
+    # attribute precision@15 이 골든셋 172쿼리에서 0.70→0.81 로 오른다(w_text=0.3 이
+    # best-of-both — 순수 텍스트 교체는 소재/패턴 회귀라 폐기). search_products_hybrid_v1
+    # RPC 사용. 순수 텍스트 경로 전용(사진/blended/pinned-anchor 는 이미지 벡터라 제외).
+    # kill-switch: off → 기존 v6 이미지 단독 경로로 즉시 byte-identical 회귀.
+    SEARCH_HYBRID_ENABLED: bool = False
+    SEARCH_HYBRID_W_TEXT: float = 0.3  # 블렌드 텍스트 가중 (0=이미지 단독, 1=텍스트 단독)
+    SEARCH_HYBRID_POOL: int = 100  # 공간별 kNN 풀 크기 (union 후보 상한 ~2*pool)
     # 다양성 cap — 2026-06-17 완화 (이전: brand=2, platform=3).
     # Langfuse 트레이스 분석에서 raw 50개 후보 중 45개가 cap 으로 잘려
     # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만
@@ -115,7 +127,8 @@ class Settings(BaseSettings):
     # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
     # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
     CURATION_REFRESH_ENABLED: bool = True
-    CURATION_REFRESH_INTERVAL_S: int = 3600
+    CURATION_REFRESH_INTERVAL_S: int = 900
+    CURATION_SEASON: Literal["summer", "winter"] = "summer"
     NOTION_TOKEN: str = ""
     NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
@@ -134,7 +147,7 @@ class Settings(BaseSettings):
     UPLOADS_S3_SESSION_TOKEN: str = ""
     UPLOADS_PUBLIC_BASE_URL: str = ""
     UPLOADS_KEY_PREFIX: str = "uploads"
-    UPLOADS_MAX_SIZE_BYTES: int = 1_048_576
+    UPLOADS_MAX_SIZE_BYTES: int = 10_485_760
     UPLOADS_PRESIGN_EXPIRES_SECONDS: int = 300
     # Standard AWS env fallback for upload signing.
     AWS_ACCESS_KEY_ID: str = ""
@@ -153,6 +166,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_USERNAME: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""
     TELEGRAM_API_BASE: str = "https://api.telegram.org"
+
+    # Discord signup notification webhook — empty = feature off (silent no-op).
+    # Named specifically (not DISCORD_WEBHOOK_URL, which deploy.ai.sh reserves)
+    # so multiple Discord webhooks can coexist.
+    DISCORD_SIGNUP_WEBHOOK_URL: str = ""
     TELEGRAM_PUBLIC_URL: str = ""
     # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
     # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
@@ -186,12 +204,19 @@ class Settings(BaseSettings):
     # 0.6~0.8, so a +0.10 liked-brand bump shifts ordering for tied/close
     # candidates without overpowering the embedding signal. All knobs are
     # env-tunable so the live A/B can sweep them without code changes.
+    # 2026-08-03 (SPEC-SEARCH-HYBRID-001) — relevance-priority 하향. 골든셋 격리
+    # 측정: 재정렬 feature 항이 top-5 attribute precision 을 평균 −0.085(소재 −0.17)
+    # 낮춘다. base 후보 간 거리 격차(하이브리드 블렌드 스프레드 ~0.05~0.08, v6 이미지
+    # ~0.015)보다 가중이 커 relevance 를 뒤엎기 때문. "취향보다 검색이 먼저" 정책에
+    # 맞춰 지배적 항(feature/liked/disliked)을 ~절반으로 낮춰 tie-breaker 로 강등한다.
+    # 전부 env-tunable — 라이브 A/B 로 재상향 가능. (이전: 0.10/0.20/0.15)
     PERSONALIZE_RERANK_ENABLED: bool = True
-    PERSONALIZE_LIKED_BRAND_W: float = 0.10
-    PERSONALIZE_DISLIKED_BRAND_W: float = 0.20
+    PERSONALIZE_LIKED_BRAND_W: float = 0.05
+    PERSONALIZE_DISLIKED_BRAND_W: float = 0.10
     PERSONALIZE_KEYWORD_W: float = 0.02
     PERSONALIZE_PRICE_FIT_W: float = 0.05
     PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
+    PERSONALIZE_FEATURE_W: float = 0.06
 
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7

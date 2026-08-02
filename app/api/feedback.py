@@ -13,6 +13,7 @@ from pydantic import BaseModel, field_validator
 
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
+from app.services.curation_taste import record_search_result_signals
 
 router = APIRouter(prefix="/v1", tags=["feedback"])
 
@@ -81,5 +82,13 @@ async def submit_feedback(
 
     if not row:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to save feedback")
+
+    if body.search_id is not None:
+        await record_search_result_signals(
+            pool,
+            user_id=user_id,
+            search_id=body.search_id,
+            signal_type=("conversation_like" if body.rating == "positive" else "conversation_dislike"),
+        )
 
     return FeedbackResponse(feedback_id=str(row[0]), exported_to_training=False)

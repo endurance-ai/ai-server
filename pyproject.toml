@@ -32,6 +32,10 @@ dependencies = [
     # SPEC-AUTH-SOCIAL-001 — Google/Apple social login verification
     "google-auth>=2.29",
     "python-jose[cryptography]>=3.3",
+    # Vision 전처리 런타임 의존 — vision._resize_for_vision 이 업로드 이미지를
+    # Bedrock 5MB 한도 아래(1024px)로 다운스케일. 누락 시 원본이 그대로 전송되어
+    # 대형 사진이 400(image exceeds 5 MB)으로 Vision 실패. (embed 그룹과 별개)
+    "Pillow>=10.0",
 ]
 
 [dependency-groups]

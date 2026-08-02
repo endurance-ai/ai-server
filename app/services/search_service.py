@@ -40,17 +40,6 @@ logger = logging.getLogger(__name__)
 # repository (single source for the pgvector format alongside the param map).
 embedding_to_pgvector = _embedding_to_pgvector
 
-# 2026-07-15 — p_color_family EXACT 매치 보정용 최소 alias. products.color 는
-# 크롤러 원본값(Black/BLACK/Charcoal/"제품명 참조"…)이라 Vision color_family
-# enum 과 완전히 겹치지 않는다. RPC 가 양측 UPPER 비교하므로 케이스는 무관,
-# 철자만 보정한다 (MULTI → DB "Multicolor", gray → DB "Grey").
-_COLOR_ALIAS: dict[str, str] = {
-    "multi": "multicolor",
-    "multi-color": "multicolor",
-    "multicolour": "multicolor",
-    "gray": "grey",
-}
-
 
 def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str | None]:
     """`(subcategory, subcategory_family, color_family)` 정밀 필터 해석.
@@ -73,11 +62,17 @@ def _resolve_precision_filters(item: Any) -> tuple[str | None, str | None, str |
         if sub is None:
             sub, sub_family = normalize_subcategory(getattr(item, "category", None))
 
+    # 2026-07-29 — 색 출처가 products.color(크롤러 원본값) → product_features
+    # (VLM primary_color) 로 바뀌면서 alias 보정이 불필요해졌다. 구 _COLOR_ALIAS
+    # (multi→multicolor, gray→grey) 는 크롤러가 뱉던 자유형 문자열에 Vision enum
+    # 을 억지로 맞추려던 땜빵이었는데, primary_color 는 Vision 과 **정확히 같은
+    # 16 family enum** 이라 그대로 넘기면 맞는다. 대문자로 보내 RPC 의
+    # `= UPPER(p_color_family)` 와 표기를 일치시킨다.
     color: str | None = None
     if settings.SEARCH_COLOR_FILTER_ENABLED:
-        c = str(getattr(item, "color_family", None) or "").strip().lower()
+        c = str(getattr(item, "color_family", None) or "").strip().upper()
         if c:
-            color = _COLOR_ALIAS.get(c, c)
+            color = c
     return sub, sub_family, color
 
 
@@ -86,13 +81,65 @@ def _resolve_gender(req: Any) -> str | None:
 
     2026-07-16 — 상품 레벨 gender 하드 필터 (골든셋 2차 실측: 남성 쿼리에
     여성 상품 누수). 'men'/'women' 만 필터로 태우고, 'unisex'/미확인/그 외
-    값은 None(필터 off) — RPC 가 `gender && ARRAY[p_gender,'unisex']` 라
-    unisex 상품은 어느 성별 요청에도 항상 포함된다. 시맨틱 제약이므로
-    완화 재시도에서 제거하지 않는다."""
+    값은 None(필터 off). unisex 상품은 어느 성별 요청에도 항상 포함된다.
+    시맨틱 제약이므로 완화 재시도에서 제거하지 않는다.
+
+    2026-07-29 — 이 함수는 그대로다. 바뀐 건 RPC 쪽 매칭 소스로,
+    `product_features.feature_metadata->>'gender'` → `products.gender` →
+    fail-open 3단 다리를 탄다 (크롤러가 gender 생성을 멈춘 상태의 과도기).
+    호출부 계약('men'|'women'|None)은 동일하다."""
     if not settings.SEARCH_GENDER_FILTER_ENABLED:
         return None
     g = str(getattr(req, "gender", None) or "").strip().lower()
     return g if g in ("men", "women") else None
+
+
+def _query_pinned_axes(item: Any) -> frozenset[str]:
+    """Feature axes the query specified explicitly → excluded from the feature
+    re-rank (adaptive α, "blanks = taste"): learned taste fills only the axes the
+    user left open and never overrides an explicit intent (the color/subcategory
+    hard filters already enforce the pinned ones).
+
+    Only color/fit/material are expressible in the request contract
+    (`AnalyzedItem.color_family`/`fit`/`fabric`); pattern/neckline are never
+    query-pinned, so taste always speaks for them.
+    """
+    pinned: set[str] = set()
+    if str(getattr(item, "color_family", None) or "").strip():
+        pinned.add("color")
+    if str(getattr(item, "fit", None) or "").strip():
+        pinned.add("fit")
+    if str(getattr(item, "fabric", None) or "").strip():
+        pinned.add("material")
+    return frozenset(pinned)
+
+
+async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
+    """Attach `public.product_features.feature_metadata` to candidate rows in place.
+
+    v6 RPC rows carry only distance/brand/… — the visual features live in a
+    separate table, so the feature re-rank fetches them for the current candidate
+    set in one batch. Fail-open: pool down or a missing row just leaves
+    `feature_metadata` unset (scored as neutral).
+    """
+    ids = [int(r["id"]) for r in rows if str(r.get("id") or "").isdigit()]
+    if not ids:
+        return
+    from app.providers import db_pool
+
+    pool = db_pool._pool  # noqa: SLF001
+    if pool is None:
+        return
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT product_id, feature_metadata FROM public.product_features WHERE product_id = ANY(%s)",
+            (ids,),
+        )
+        meta = {int(r[0]): r[1] for r in await cur.fetchall()}
+    for r in rows:
+        rid = str(r.get("id") or "")
+        if rid.isdigit():
+            r["feature_metadata"] = meta.get(int(rid))
 
 
 async def search_service(state: PipelineState) -> PipelineState:
@@ -126,15 +173,37 @@ async def search_service(state: PipelineState) -> PipelineState:
 
     gender_norm = _resolve_gender(req)
 
-    params = SearchRepository.build_params(
-        embedding=state.embedding,
-        brand_filter=req.brand_filter,
-        category=category_for_gate,
-        style_node_code=style_node_code,
-        color_family=color_norm,
-        subcategory=sub_norm,
-        gender=gender_norm,
-    )
+    # SPEC-SEARCH-HYBRID-001 — 순수 텍스트 쿼리(state.hybrid_text)이고 플래그 ON 이면
+    # 이미지⊕텍스트 임베딩 블렌드 RPC 로 라우팅. 그 외(사진/blended/pinned-anchor,
+    # 또는 플래그 OFF)는 v6 이미지 단독 경로로 byte-identical. 게이트 키가 동일해
+    # 아래 완화 재시도·진단 로깅은 두 경로를 균일하게 다룬다.
+    use_hybrid = settings.SEARCH_HYBRID_ENABLED and getattr(state, "hybrid_text", False)
+    if use_hybrid:
+        params = SearchRepository.build_params_hybrid(
+            embedding=state.embedding,
+            brand_filter=req.brand_filter,
+            category=category_for_gate,
+            style_node_code=style_node_code,
+            color_family=color_norm,
+            subcategory=sub_norm,
+            gender=gender_norm,
+            w_text=settings.SEARCH_HYBRID_W_TEXT,
+            pool=settings.SEARCH_HYBRID_POOL,
+        )
+        _do_search = SearchRepository.search_hybrid
+        rpc_name = "search_products_hybrid_v1"
+    else:
+        params = SearchRepository.build_params(
+            embedding=state.embedding,
+            brand_filter=req.brand_filter,
+            category=category_for_gate,
+            style_node_code=style_node_code,
+            color_family=color_norm,
+            subcategory=sub_norm,
+            gender=gender_norm,
+        )
+        _do_search = SearchRepository.search
+        rpc_name = "search_products_v6"
 
     # Family-gate verification hook (SPEC-SEARCH-V6-001). Distinct from v6's
     # OWN post-RPC node-presence `degraded` (logged separately below): this
@@ -158,7 +227,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     # RPC 입력 파라미터 — query_embedding 은 길어서 dim 만
     diag_params = {k: v for k, v in params.items() if k != "query_embedding"}
     diag_params["query_embedding_dim"] = len(state.embedding)
-    logger.info("[STEP 4.5][search] DB RPC 호출 시작 — fn=search_products_v6 params=%s", diag_params)
+    logger.info("[STEP 4.5][search] DB RPC 호출 시작 — fn=%s params=%s", rpc_name, diag_params)
 
     # REQ-AI-006: SearchRepository.search raises RpcContractError when the RPC
     # returns a row violating the documented contract. Catch it at the SERVICE
@@ -172,7 +241,7 @@ async def search_service(state: PipelineState) -> PipelineState:
     # The drift is still surfaced (REQ-AI-006 "surface, not silent") via this
     # ERROR log + the Langfuse trace, without leaking row content.
     try:
-        rows = await SearchRepository.search(params)
+        rows = await _do_search(params)
     except RpcContractError as exc:
         logger.error(
             "[STEP 4.5][search] RPC contract drift -- failing open to empty result (row_index=%s exc=%s)",
@@ -199,7 +268,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             params.get("p_color_family"),
         )
         try:
-            relaxed_rows = await SearchRepository.search(relaxed)
+            relaxed_rows = await _do_search(relaxed)
         except RpcContractError as exc:
             logger.error(
                 "[STEP 4.55][search] relax retry contract drift -- keeping strict rows (row_index=%s exc=%s)",
@@ -248,17 +317,34 @@ async def search_service(state: PipelineState) -> PipelineState:
     if settings.PERSONALIZE_RERANK_ENABLED and rows and state.user_key:
         try:
             from app.infrastructure.memory.taste_profile import get_taste_store
+            from app.scoring import feature_scores_cache
 
             profile = get_taste_store().get_or_create(state.user_key)
+            # Visual-feature taste (ai.user_feature_scores) is only primed for the
+            # app-auth'd search path; Telegram / internal /recommend read None here
+            # and stay unchanged. When present, attach each candidate's enriched
+            # features (one batch query) so the rerank can score color/fit/material.
+            feature_scores = feature_scores_cache.get(state.user_key)
+            exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
+            if feature_scores:
+                await _attach_feature_metadata(rows)
             weights = RerankWeights(
                 liked_brand=settings.PERSONALIZE_LIKED_BRAND_W,
                 disliked_brand=settings.PERSONALIZE_DISLIKED_BRAND_W,
                 keyword=settings.PERSONALIZE_KEYWORD_W,
                 price_fit=settings.PERSONALIZE_PRICE_FIT_W,
                 gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
+                feature=settings.PERSONALIZE_FEATURE_W,
             )
+            if exclude_axes:
+                logger.info(
+                    "[STEP 4.65][rerank] adaptive-α: query pinned axes=%s → excluded from feature match",
+                    sorted(exclude_axes),
+                )
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
-            state.raw_candidates = _personalize_rerank(rows, profile, weights=weights)
+            state.raw_candidates = _personalize_rerank(
+                rows, profile, weights=weights, feature_scores=feature_scores, exclude_axes=exclude_axes
+            )
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:
                 logger.info("[STEP 4.65][rerank] reorder applied before=%s after=%s", before_top3, after_top3)

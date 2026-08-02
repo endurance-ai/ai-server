@@ -50,7 +50,10 @@ def _bootstrap(dsn: str) -> None:
                 id          BIGSERIAL PRIMARY KEY,
                 brand_name  TEXT NOT NULL,
                 brand_name_normalized TEXT,
-                primary_style_node_id BIGINT
+                primary_style_node_id BIGINT,
+                secondary_style_node_id BIGINT,
+                gender_scope TEXT[],
+                wiki JSONB NOT NULL DEFAULT '{}'::jsonb
             )
         """)
         cur.execute("""
@@ -71,14 +74,27 @@ def _bootstrap(dsn: str) -> None:
                 in_stock       BOOLEAN NOT NULL DEFAULT TRUE,
                 platform       TEXT NOT NULL DEFAULT '',
                 gender         TEXT[],
-                description    TEXT,
-                color          TEXT,
                 tags           TEXT[],
                 product_code   TEXT,
+                review_count   INT NOT NULL DEFAULT 0,
                 brand_node_id  BIGINT REFERENCES public.brand_nodes(id),
                 crawled_at     TIMESTAMPTZ DEFAULT now(),
                 last_seen_at   TIMESTAMPTZ DEFAULT now(),
                 updated_at     TIMESTAMPTZ DEFAULT now()
+            )
+        """)
+        # VLM 피처 — gender/color 의 단일 출처 (migration 095). PDP 의 color 가
+        # 여기서 나오므로 products 조회 테스트에 필수. feature-signal path(색/핏/소재
+        # 취향 fan-out)도 같은 테이블의 feature_metadata 를 읽는다.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS public.product_features (
+                product_id       BIGINT PRIMARY KEY REFERENCES public.products(id) ON DELETE CASCADE,
+                retrieval_text   TEXT NOT NULL DEFAULT '',
+                feature_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                feature_version  TEXT NOT NULL DEFAULT 'test',
+                vlm_model        TEXT NOT NULL DEFAULT 'test',
+                generated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
 
@@ -123,6 +139,12 @@ async def _truncate(pool) -> AsyncGenerator[None]:
             """
             TRUNCATE
                 ai.curation_sections,
+                ai.curation_candidates,
+                ai.curation_impressions,
+                ai.taste_signal_events,
+                ai.taste_feature_events,
+                ai.user_style_scores,
+                ai.user_feature_scores,
                 ai.user_brand_picks,
                 ai.searches,
                 ai.product_views,
@@ -141,7 +163,9 @@ async def _truncate(pool) -> AsyncGenerator[None]:
             CASCADE
             """
         )
-        await cur.execute("TRUNCATE public.products, public.brand_nodes RESTART IDENTITY CASCADE")
+        await cur.execute(
+            "TRUNCATE public.product_features, public.products, public.brand_nodes RESTART IDENTITY CASCADE"
+        )
         await conn.commit()
 
 

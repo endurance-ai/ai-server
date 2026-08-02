@@ -13,6 +13,21 @@ async def client() -> AsyncGenerator[AsyncClient]:
         yield ac
 
 
+# Never send a real Discord signup notification from the test suite.
+#
+# `settings` loads `.env`, which in a dev checkout may hold a live
+# DISCORD_SIGNUP_WEBHOOK_URL. Any test that upserts a new user via
+# `/v1/auth/social` (testcontainers → fresh DB → is_new=True) would otherwise
+# fire a real webhook POST. This autouse fixture blanks the URL so the feature
+# is a no-op in tests regardless of local .env. Tests that assert on the
+# notification mock `discord_notify.notify_signup` directly.
+@pytest.fixture(autouse=True)
+def _disable_discord_webhook(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "DISCORD_SIGNUP_WEBHOOK_URL", "", raising=False)
+
+
 # SPEC-AGENTIC-CRITIQUE-001 — evaluator default fail-open in tests.
 #
 # The evaluator node calls LiteLLM via `LLMProvider.chat`. In the test env we

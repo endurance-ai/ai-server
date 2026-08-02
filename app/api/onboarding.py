@@ -9,6 +9,7 @@ POST /v1/onboarding — 로그인 완료 시 온보딩 로컬값(성별 + 브랜
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
 from app.core.gender import app_to_db
+from app.services.curation_taste import record_style_signal
 
 router = APIRouter(prefix="/v1", tags=["onboarding"])
 
@@ -83,5 +85,15 @@ async def save_onboarding(
                 (user_id, brand_id, node_by_brand.get(brand_id)),
             )
         await conn.commit()
+
+    for style_node_id in sorted({n for n in node_by_brand.values() if n is not None}):
+        await record_style_signal(
+            pool,
+            user_id=user_id,
+            style_node_id=style_node_id,
+            signal_type="onboarding",
+            dedupe_key=f"onboarding:{user_id}:{style_node_id}:{datetime.now(tz=UTC).date()}",
+            metadata={"brand_ids": [b for b in saved if node_by_brand.get(b) == style_node_id]},
+        )
 
     return OnboardingResponse(user_id=str(user_id), gender=body.gender, saved_brand_ids=saved)

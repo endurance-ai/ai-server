@@ -38,7 +38,7 @@ ALLOWED_IMAGE_HOSTS=pub-dddeb1e14cdf428caa5cfbad8e1f98da.r2.dev,r2.cloudflaresto
 | `UPLOADS_S3_SESSION_TOKEN` | `""` | 임시 자격증명 사용 시 session token. 비어 있으면 `AWS_SESSION_TOKEN` fallback |
 | `UPLOADS_PUBLIC_BASE_URL` | `""` | CloudFront/public CDN base URL |
 | `UPLOADS_KEY_PREFIX` | `uploads` | S3 object key prefix |
-| `UPLOADS_MAX_SIZE_BYTES` | `1048576` | API가 허용하는 최대 이미지 크기. 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
+| `UPLOADS_MAX_SIZE_BYTES` | `10485760` | API가 허용하는 최대 이미지 크기(10MB). 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
 | `UPLOADS_PRESIGN_EXPIRES_SECONDS` | `300` | presigned URL TTL. 런타임에서 60~3600초로 clamp |
 
 ## Telegram 메신저 채널 (SPEC-MSG-001)
@@ -184,6 +184,18 @@ Gap2 Reflexion은 기존 SPEC-AGENTIC-CRITIQUE-001 env를 재사용 (live depend
 ## 임베딩 캐시
 
 텍스트 임베딩을 Postgres에 캐싱해 Modal cold-start(~26s) 우회. migration 0007에서 테이블 생성. 별도 env flag 없음 — `DB_URL`/`DB_TOKEN` 재사용.
+
+## 메인 큐레이션
+
+| 키 | 기본 | 용도 |
+|----|-----|------|
+| `CURATION_REFRESH_ENABLED` | `true` | Notion 메타데이터 동기화와 auto 후보 갱신 백그라운드 루프 |
+| `CURATION_REFRESH_INTERVAL_S` | `900` | Notion 동기화·실패 재시도 간격. 최소 15분으로 클램프 |
+| `CURATION_SEASON` | `summer` | `summer`는 아우터·니트·겨울 키워드를 제외하고, `winter`는 기본 품질 게이트만 유지 |
+| `NOTION_TOKEN` | (선택) | 큐레이션 운영 DB 읽기용 Notion integration token |
+| `NOTION_CURATION_DB_ID` | (선택) | `GET /v1/curation` 메타데이터 원본 Notion database ID |
+
+auto 상품은 KST 날짜별 1회 생성하며, Notion 메타데이터 동기화가 완료되지 않았거나 6개 성별·구좌 조합 중 일부가 실패하면 다음 루프에서 재시도한다. 앱은 Notion을 직접 읽지 않고 `ai.curation_sections` 캐시만 읽는다.
 
 ## 앱 메타
 

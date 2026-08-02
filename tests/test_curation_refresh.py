@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from app.services.curation_chips import chips_for
-from app.services.curation_refresh import _parse_notion_page, _parse_product_ids
+from app.services.curation_refresh import (
+    _parse_notion_page,
+    _parse_product_ids,
+    select_candidate_ids,
+)
 
 
 def _page(props: dict) -> dict:
@@ -28,16 +32,18 @@ def test_parse_notion_page_full():
         _page(
             {
                 "구좌명": _title("지금 뜨는 베트남 핫걸 ST"),
+                "구좌 ID": _rich("editorial-vietnam-hotgirl"),
+                "slot_type": {"select": {"name": "editorial"}},
                 "서브타이틀": _rich("사이공 트렌드세터의 여름 무드"),
                 "상품": _rich("11, 22, 33"),
                 "순서": {"number": 4},
                 "활성": {"checkbox": True},
-                "성별": {"select": {"name": "women"}},
+                "gender_scope": {"multi_select": [{"name": "women"}]},
             }
         )
     )
     assert parsed is not None
-    assert parsed["section_id"] == "editorial-abcd12345678"
+    assert parsed["section_id"] == "editorial-vietnam-hotgirl"
     assert parsed["title"] == "지금 뜨는 베트남 핫걸 ST"
     assert parsed["subtitle"] == "사이공 트렌드세터의 여름 무드"
     assert parsed["product_ids"] == [11, 22, 33]
@@ -47,15 +53,40 @@ def test_parse_notion_page_full():
 
 
 def test_parse_notion_page_defaults_and_missing_title():
-    # 성별 미지정 → 양쪽 노출, 순서 미지정 → 100
-    parsed = _parse_notion_page(_page({"구좌명": _title("가을 무드"), "활성": {"checkbox": False}}))
+    parsed = _parse_notion_page(
+        _page(
+            {
+                "구좌명": _title("지금 인기 브랜드"),
+                "구좌 ID": _rich("popular"),
+                "slot_type": {"select": {"name": "auto"}},
+                "gender_scope": {"multi_select": [{"name": "women"}, {"name": "men"}]},
+                "활성": {"checkbox": False},
+            }
+        )
+    )
     assert parsed is not None
     assert parsed["genders"] == ["women", "men"]
     assert parsed["sort_order"] == 100
     assert parsed["is_active"] is False
     assert parsed["product_ids"] == []
-    # 구좌명 없는 행은 skip
+    # Required operating fields are fail-closed.
     assert _parse_notion_page(_page({"서브타이틀": _rich("x")})) is None
+    assert _parse_notion_page(_page({"구좌명": _title("missing id")})) is None
+
+
+def test_parse_legacy_auto_without_gender_scope_as_both_genders():
+    parsed = _parse_notion_page(
+        _page(
+            {
+                "구좌명": _title("Under $100"),
+                "구좌 ID": _rich("under-100"),
+                "slot_type": {"select": {"name": "auto"}},
+                "활성": {"checkbox": True},
+            }
+        )
+    )
+    assert parsed is not None
+    assert parsed["genders"] == ["women", "men"]
 
 
 def test_chips_contract():
@@ -66,3 +97,123 @@ def test_chips_contract():
         assert chip.label_ko and chip.query_en and chip.category
         assert chip.query_en.isascii()  # 한국어 라벨을 그대로 검색에 태우지 않는다
     assert chips_for("men") == []  # men 골든셋 등록 전까지 빈 배열 (스펙 v1.1)
+
+
+def test_candidate_selection_enforces_hot_overall_brand_and_cross_section_quotas():
+    rows = []
+    for pid in range(1, 21):
+        rows.append(
+            {
+                "product_id": pid,
+                "is_hot": pid <= 10,
+                "base_score": float(100 - pid),
+                "base_rank": pid if pid <= 10 else pid - 10,
+                "brand_key": f"brand-{(pid - 1) // 2}",
+                "style_node_id": pid,
+            }
+        )
+    selected = select_candidate_ids(
+        rows,
+        section_id="popular",
+        excluded_ids={1},
+        seed="test",
+    )
+    assert len(selected) == 12
+    assert len([pid for pid in selected if pid <= 10]) == 8
+    assert len([pid for pid in selected if pid > 10]) == 4
+    assert 1 not in selected
+
+
+def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
+    rows = [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+        }
+        for pid in range(1, 21)
+    ]
+    baseline = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        seed="taste-regression",
+    )
+    taste_scores = {pid: -20.0 for pid in range(1, 21)}
+    taste_scores[8] = 20.0
+    personalized = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        taste_scores=taste_scores,
+        seed="taste-regression",
+    )
+
+    assert baseline[0] == 1
+    assert personalized[0] == 8
+    assert len(personalized) == 12
+    assert len([pid for pid in personalized if pid <= 10]) == 8
+    assert len([pid for pid in personalized if pid > 10]) == 4
+
+
+def _feature_rows() -> list[dict]:
+    # Product 8 is black; everything else beige. All hot, unique brands.
+    return [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+            "feature_metadata": {"primary_color": "black" if pid == 8 else "beige"},
+        }
+        for pid in range(1, 21)
+    ]
+
+
+def test_candidate_selection_uses_feature_scores_without_weakening_quotas():
+    rows = _feature_rows()
+    baseline = select_candidate_ids(rows, section_id="under-100", excluded_ids=set(), seed="feat")
+    # Loves black, dislikes beige — the lone black product should surface to #1.
+    feature_scores = {("color", "beige"): -20.0, ("color", "black"): 20.0}
+    personalized = select_candidate_ids(
+        rows,
+        section_id="under-100",
+        excluded_ids=set(),
+        feature_scores=feature_scores,
+        seed="feat",
+    )
+    assert baseline[0] == 1
+    assert personalized[0] == 8
+    assert len(personalized) == 12
+    assert len([pid for pid in personalized if pid <= 10]) == 8
+    assert len([pid for pid in personalized if pid > 10]) == 4
+
+
+def test_candidate_selection_missing_feature_metadata_is_neutral():
+    # feature_scores present but rows carry no enriched metadata → every product
+    # contributes the neutral 0.5, so ordering falls back to base rank (no crash).
+    rows = [
+        {
+            "product_id": pid,
+            "is_hot": pid <= 10,
+            "base_score": float(100 - pid),
+            "base_rank": pid if pid <= 10 else pid - 10,
+            "brand_key": f"brand-{pid}",
+            "style_node_id": pid,
+        }
+        for pid in range(1, 21)
+    ]
+    selected = select_candidate_ids(
+        rows,
+        section_id="popular",
+        excluded_ids=set(),
+        feature_scores={("color", "black"): 20.0},
+        seed="neutral",
+    )
+    assert selected[0] == 1
+    assert len(selected) == 12
