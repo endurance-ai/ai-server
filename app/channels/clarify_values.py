@@ -43,6 +43,7 @@ AXIS_PROMPTS_KO: dict[str, str] = {
     "occasion": "어떤 자리에 어울리면 좋을까?",
     "subcategory_disambiguation": "조금 더 좁혀볼게. 어느 쪽이야?",
     "generic_fallback": "어떤 종류 옷 찾고 있어?",
+    "color": "어떤 색으로 볼까?",
 }
 
 
@@ -227,6 +228,26 @@ GENERIC_FALLBACK_OPTIONS: list[ClarifyOption] = [
 ]
 
 
+# 7) color — "블랙? 네이비?" 를 자유텍스트가 아닌 객관식 카드로. value 는 대문자화하면
+#    product_features.primary_color / v6 color_family 의 16-family enum 과 일치하므로
+#    ai.user_feature_scores(color 축)로 버튼 순서를 개인화할 수 있다(personalized_color_options).
+#    희소 색(MULTI/ORANGE/YELLOW/PURPLE)은 의도적 단일선택이 드물어 카드에서 제외.
+COLOR_OPTIONS: list[ClarifyOption] = [
+    ClarifyOption(value="black", label_ko="블랙", keywords_to_boost=["black"], searchQueryKo_augment="블랙"),
+    ClarifyOption(value="white", label_ko="화이트", keywords_to_boost=["white"], searchQueryKo_augment="화이트"),
+    ClarifyOption(value="grey", label_ko="그레이", keywords_to_boost=["grey", "gray"], searchQueryKo_augment="그레이"),
+    ClarifyOption(value="navy", label_ko="네이비", keywords_to_boost=["navy"], searchQueryKo_augment="네이비"),
+    ClarifyOption(value="blue", label_ko="블루", keywords_to_boost=["blue"], searchQueryKo_augment="블루"),
+    ClarifyOption(value="beige", label_ko="베이지", keywords_to_boost=["beige"], searchQueryKo_augment="베이지"),
+    ClarifyOption(value="brown", label_ko="브라운", keywords_to_boost=["brown"], searchQueryKo_augment="브라운"),
+    ClarifyOption(value="green", label_ko="그린", keywords_to_boost=["green"], searchQueryKo_augment="그린"),
+    ClarifyOption(value="khaki", label_ko="카키", keywords_to_boost=["khaki"], searchQueryKo_augment="카키"),
+    ClarifyOption(value="pink", label_ko="핑크", keywords_to_boost=["pink"], searchQueryKo_augment="핑크"),
+    ClarifyOption(value="red", label_ko="레드", keywords_to_boost=["red"], searchQueryKo_augment="레드"),
+    ClarifyOption(value="cream", label_ko="크림", keywords_to_boost=["cream"], searchQueryKo_augment="크림"),
+]
+
+
 # axis(snake_case) → 옵션 리스트
 AXIS_OPTIONS: dict[str, list[ClarifyOption]] = {
     "category_pick": CATEGORY_PICK_OPTIONS,
@@ -235,7 +256,31 @@ AXIS_OPTIONS: dict[str, list[ClarifyOption]] = {
     "occasion": OCCASION_OPTIONS,
     "subcategory_disambiguation": SUBCATEGORY_DISAMBIGUATION_OPTIONS,
     "generic_fallback": GENERIC_FALLBACK_OPTIONS,
+    "color": COLOR_OPTIONS,
 }
+
+_COLOR_AXIS = "color"
+
+
+def personalized_color_options(
+    feature_scores: dict[tuple[str, str], float] | None,
+    k: int = 6,
+) -> list[ClarifyOption]:
+    """Order the color options by the user's decayed color taste, loved first, top-k.
+
+    `feature_scores` keys are `("color", <UPPER enum>)` — exactly ai.user_feature_scores,
+    so a user who keeps saving black/navy sees those buttons first (this is where the
+    Phase-5 feature profile surfaces in the UX). No signal / cold user → the static
+    wardrobe order. Stable: equal-taste colors keep their COLOR_OPTIONS order.
+    """
+    scores = feature_scores or {}
+
+    def rank(idx_opt: tuple[int, ClarifyOption]) -> tuple[float, int]:
+        idx, opt = idx_opt
+        return (-scores.get((_COLOR_AXIS, opt.value.upper()), 0.0), idx)
+
+    ordered = [opt for _, opt in sorted(enumerate(COLOR_OPTIONS), key=rank)]
+    return ordered[: max(1, k)]
 
 
 def get_options(axis: str) -> list[ClarifyOption]:
@@ -257,6 +302,7 @@ __all__ = [
     "AXIS_OPTIONS",
     "AXIS_PROMPTS_KO",
     "CATEGORY_PICK_OPTIONS",
+    "COLOR_OPTIONS",
     "ClarifyOption",
     "FIT_OPTIONS",
     "FORMALITY_OPTIONS",
@@ -267,4 +313,5 @@ __all__ = [
     "SUBCATEGORY_DISAMBIGUATION_OPTIONS",
     "get_option",
     "get_options",
+    "personalized_color_options",
 ]

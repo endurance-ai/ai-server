@@ -5,7 +5,7 @@
 변환한다. LLM 호출 없음.
 
 Public surface:
-    - `ClarifyAxis` enum — 6개 축
+    - `ClarifyAxis` enum — 7개 축 (color 는 에이전트 tool 경유 개인화 카드)
     - `ClarifyDelta` dataclass — 콜백을 풀어 적용 가능한 상태로 만든 표현
     - `parse_callback(callback_data, vision_result) -> ClarifyDelta | None`
     - `pick_clarify_axis(vision_result) -> ClarifyAxis | None`
@@ -33,6 +33,7 @@ class ClarifyAxis(StrEnum):
     OCCASION = "occasion"
     SUBCATEGORY_DISAMBIGUATION = "subcategory_disambiguation"
     GENERIC_FALLBACK = "generic_fallback"
+    COLOR = "color"
 
 
 @dataclass(frozen=True)
