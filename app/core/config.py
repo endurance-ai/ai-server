@@ -149,8 +149,8 @@ class Settings(BaseSettings):
     # Standalone worker. The process exits without doing work unless enabled.
     NOTIFICATION_WORKER_ENABLED: bool = False
     NOTIFY_TIMEZONE: str = "Asia/Seoul"
-    NOTIFY_QUIET_START_HOUR: int = 21
-    NOTIFY_QUIET_END_HOUR: int = 9
+    NOTIFY_QUIET_START_HOUR: int = 22
+    NOTIFY_QUIET_END_HOUR: int = 8
     NOTIFY_SAVED_SCAN_TIME: str = "09:00"
     NOTIFY_SAVED_SEND_TIME: str = "09:30"
     NOTIFY_BRAND_SCAN_TIME: str = "10:30"
