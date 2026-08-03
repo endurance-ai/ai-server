@@ -200,8 +200,7 @@ async def test_logout_deactivates_only_the_current_device(client: AsyncClient, p
 
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT device_id::text, status FROM ai.devices "
-            "WHERE device_id IN (%s, %s) ORDER BY device_id",
+            "SELECT device_id::text, status FROM ai.devices WHERE device_id IN (%s, %s) ORDER BY device_id",
             (first.json()["device_id"], second.json()["device_id"]),
         )
         statuses = dict(await cur.fetchall())
