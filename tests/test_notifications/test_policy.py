@@ -120,39 +120,42 @@ def test_saved_kinds_lead_the_digest():
 def test_single_restock_digest():
     digest = build_digest([_event(KIND_RESTOCK, 7)], notification_ids=[42])
 
-    assert digest.title == "재입고 알림"
-    assert digest.body == "MAISON 린넨 셔츠 다시 입고됐어요"
+    assert digest.title == "찜한 린넨 셔츠이 재입고되었어요"
+    assert digest.body == ""
     assert digest.data == {"kind": KIND_RESTOCK, "product_ids": [7], "notification_ids": [42]}
 
 
-def test_price_drop_digest_shows_the_percentage():
-    digest = build_digest([_event(KIND_PRICE_DROP, 7, drop_pct=23)])
-    assert digest.body == "MAISON 린넨 셔츠 가격이 23% 내려갔어요"
+def test_price_drop_digest_shows_old_and_new_price():
+    digest = build_digest([_event(KIND_PRICE_DROP, 7, drop_pct=23, baseline_price=100_000.0)])
+    assert digest.title == "찜하신 MAISON 상품이 할인되었어요"
+    assert digest.body == "100,000원 → 80,000원"
 
 
 def test_brand_new_digest_collapses_to_a_count():
     digest = build_digest([_event(KIND_BRAND_NEW, i) for i in range(4)])
 
-    assert digest.title == "관심 브랜드 새 상품"
-    assert digest.body == "MAISON에 새 상품 4개가 올라왔어요"
+    assert digest.title == "MAISON에 신상 4개가 들어왔어요"
+    assert digest.body == ""
 
 
 def test_multi_brand_new_digest_drops_the_brand_name():
     events = [_event(KIND_BRAND_NEW, 1), _event(KIND_BRAND_NEW, 2, brand="OTHER")]
-    assert build_digest(events).body == "관심 브랜드에 새 상품 2개가 올라왔어요"
+    assert build_digest(events).title == "관심 브랜드에 신상 2개가 들어왔어요"
 
 
 def test_mixed_digest_is_one_push():
     digest = build_digest([_event(KIND_RESTOCK, 1), _event(KIND_BRAND_NEW, 2)], notification_ids=[1, 2])
 
-    assert digest.title == "kiko 알림"
-    assert digest.body == "MAISON 린넨 셔츠 다시 입고됐어요 외 1건"
+    assert digest.title == "찜한 상품 2개에 소식이 있어요"
+    assert digest.body == "MAISON 린넨 셔츠 다시 입고됐어요"
     assert digest.data["product_ids"] == [1, 2]
 
 
 def test_digest_survives_missing_product_metadata():
     event = Event(user_id=USER, kind=KIND_RESTOCK, product_id=1, payload={})
-    assert build_digest([event]).body == "찜한 상품 다시 입고됐어요"
+    digest = build_digest([event])
+    assert digest.title == "찜한 상품이 재입고되었어요"
+    assert digest.body == ""
 
 
 # ── 설정 API 회귀 가드 ────────────────────────────────────────────────────────
@@ -184,13 +187,13 @@ def test_saved_digest_waits_until_0930_kst_before_quiet_hours_end():
 
     assert scheduled_on.isoformat() == "2026-08-02"
     assert scheduled_at == datetime(2026, 8, 2, 0, 30, tzinfo=UTC)
-    assert expires_at == datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
+    assert expires_at == datetime(2026, 8, 2, 13, 0, tzinfo=UTC)  # 22:00 KST
 
 
-def test_after_2100_kst_rolls_to_the_next_morning():
+def test_after_2200_kst_rolls_to_the_next_morning():
     scheduled_on, scheduled_at, _expires_at = delivery_window(
         "saved_product_digest",
-        datetime(2026, 8, 2, 12, 0, tzinfo=UTC),  # 21:00 KST
+        datetime(2026, 8, 2, 13, 0, tzinfo=UTC),  # 22:00 KST
     )
 
     assert scheduled_on.isoformat() == "2026-08-03"

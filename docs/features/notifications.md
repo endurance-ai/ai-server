@@ -11,7 +11,7 @@ of this release.
 | Saved-product digest | Restock and price drop for saved products | 09:00 KST | 09:30 KST | One digest per user/day |
 | Followed-brand digest | Recent products from selected brands | 10:30 KST | 11:00 KST | Up to 5 items; max 3 accepted days in a rolling 7-day window |
 
-Quiet hours are 21:00–09:00 KST. A detector delayed into the active window
+Quiet hours are 22:00–08:00 KST. A detector delayed into the active window
 catches up immediately; work found during quiet hours is moved to the next
 category delivery time. Undelivered brand overflow remains eligible during the
 14-day candidate window.

@@ -280,31 +280,42 @@ def build_digest(events: list[Event], *, notification_ids: list[int] | None = No
     if not events:
         raise ValueError("build_digest requires at least one event")
 
-    primary = events[0]
-    lines = [_headline(e) for e in events]
-    body = lines[0] if len(events) == 1 else f"{lines[0]} 외 {len(events) - 1}건"
-
-    if len(events) > 1 and all(e.kind == KIND_BRAND_NEW for e in events):
+    kinds = {e.kind for e in events}
+    if kinds == {KIND_BRAND_NEW}:
         brands = {e.payload.get("brand") for e in events if e.payload.get("brand")}
         brand_label = next(iter(brands)) if len(brands) == 1 else "관심 브랜드"
-        body = f"{brand_label}에 새 상품 {len(events)}개가 올라왔어요"
+        title, body = f"{brand_label}에 신상 {len(events)}개가 들어왔어요", ""
+    elif len(events) == 1:
+        title, body = _single_copy(events[0])
+    else:
+        title, body = f"찜한 상품 {len(events)}개에 소식이 있어요", _headline(events[0])
 
     return Digest(
-        title=_TITLES[primary.kind] if len({e.kind for e in events}) == 1 else "kiko 알림",
+        title=title,
         body=body,
         data={
-            "kind": primary.kind,
+            "kind": events[0].kind,
             "product_ids": [e.product_id for e in events],
             "notification_ids": notification_ids or [],
         },
     )
 
 
-_TITLES = {
-    KIND_RESTOCK: "재입고 알림",
-    KIND_PRICE_DROP: "가격 하락 알림",
-    KIND_BRAND_NEW: "관심 브랜드 새 상품",
-}
+def _single_copy(event: Event) -> tuple[str, str]:
+    """찜 알림(가격 하락 · 재입고) 한 건짜리 문구. PRD 알림 문안 표 참조."""
+    if event.kind == KIND_PRICE_DROP:
+        brand = event.payload.get("brand")
+        title = f"찜하신 {brand} 상품이 할인되었어요" if brand else "찜한 상품이 할인되었어요"
+        body = _price_range(event.payload.get("baseline_price"), event.payload.get("price"))
+        return title, body
+    name = event.payload.get("name") or "상품"
+    return f"찜한 {name}이 재입고되었어요", ""
+
+
+def _price_range(baseline: float | None, price: float | None) -> str:
+    if baseline is None or price is None:
+        return ""
+    return f"{round(baseline):,}원 → {round(price):,}원"
 
 
 def _headline(event: Event) -> str:
