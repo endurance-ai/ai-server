@@ -244,7 +244,7 @@ def downgrade() -> None:
         USING (
             SELECT device_id,
                    row_number() OVER (
-                       PARTITION BY user_id, push_token
+                       PARTITION BY user_id, apns_token
                        ORDER BY registered_at DESC NULLS LAST, device_id DESC
                    ) AS keep_rank
             FROM ai.devices
