@@ -148,12 +148,16 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
                 p.price, p.original_price, p.sale_price,
                 p.image_url, p.images, p.product_url,
                 p.in_stock, p.platform,
-                -- VLM(스칼라) 우선, 없으면 크롤러 레거시 배열. 응답 형태는
-                -- list[str] | None 유지 — 🧹 products.gender DROP 시 CASE 제거.
+                -- 크롤러 정본(products.gender) 우선, 없으면 VLM 스칼라 폴백.
+                -- 2026-08-03 순위 역전 (search_products_v6.sql 헤더 참조).
+                -- 응답 형태는 list[str] | None 유지.
+                -- NULLIF 로 VLM 도 비었을 때 ARRAY[NULL] 이 아니라 NULL 을 낸다.
                 CASE
+                    WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
+                        THEN p.gender
                     WHEN pf.feature_metadata->>'gender' IS NOT NULL
                         THEN ARRAY[pf.feature_metadata->>'gender']
-                    ELSE p.gender
+                    ELSE NULL
                 END AS gender,
                 pf.feature_metadata->>'primary_color' AS color, p.tags,
                 p.brand_node_id,

@@ -42,26 +42,32 @@
 --   인덱스: idx_pf_primary_color (migration 095). 기존 jsonb_path_ops GIN 은
 --   `->>` 등치 비교를 타지 못하므로 표현식 btree 가 따로 필요하다.
 --
--- ── 성별 필터 (`p_gender`, 2026-07-16 도입 / 2026-07-29 3단 다리로 교체) ──
+-- ── 성별 필터 (`p_gender`) ──────────────────────────────────────────────
+-- 이력: 2026-07-16 도입 / 2026-07-29 VLM 우선 3단 다리 / **2026-08-03 순위 역전**
+--
 -- 호출자(AI 서버)는 men/women 만 보낸다: unisex 요청/미확인은 NULL(필터 off).
 -- 골든셋 2차 실측 문제(남성 쿼리에 여성 상품 누수) 해소용 상품 레벨 하드 필터.
 -- 시맨틱 제약이므로 어느 rung 에서도 완화하지 않는다 (in_stock 과 동급).
 --
 -- 매칭 우선순위 (CASE 3단):
---   1) pf.feature_metadata->>'gender' 가 있으면 그것만 본다   ← 최종 상태
---   2) 없으면 products.gender (text[]) 로 폴백                 ← 기존 154k 행
---   3) 둘 다 비었으면 통과 (fail-open)                          ← 신규 gender-less 행
+--   1) products.gender (text[]) 가 있으면 그것만 본다        ← 크롤러가 만드는 정본
+--   2) 없으면 pf.feature_metadata->>'gender' (VLM) 로 폴백    ← 잔존 행
+--   3) 둘 다 비었으면 통과 (fail-open)                        ← 백필 대기 행
 --
--- 왜 3단인가: 크롤러가 gender 생성을 멈추는(products.gender 를 NULL 로 두는)
---   시점과 VLM 이 feature_metadata.gender 를 채우는 시점이 어긋난다. 2단
---   COALESCE(..., 'unisex') 로 가면 features 가 비어있는 지금 **전 상품이 unisex 로
---   접혀 성별 필터가 통째로 무력화**된다 (도입 이유였던 여성/남성 누수가 부활).
---   반대로 fail-open 없이 strict 로 두면 신규 상품이 어떤 성별 검색에도 안 걸리고
---   조용히 사라진다. 3단이 그 사이를 메운다.
+-- 왜 2026-08-03 에 1)과 2)를 맞바꿨나: gender 출처를 VLM 으로 이관했으나 VLM
+--   성능이 기준에 못 미쳐 크롤러로 회귀했다. VLM 이 1순위로 남아 있는 동안은
+--   VLM 이 값을 내놓기만 하면 크롤러가 만든 15만 행의 멀쩡한 products.gender 를
+--   덮어썼다. 크롤러가 다시 단일 출처이므로 순위를 뒤집는다.
 --
--- 🧹 VLM gender 커버리지가 충분해지면 1)만 남기고 2)/3) 을 삭제할 것.
---   그때 products.gender 컬럼과 idx_products_gender 도 함께 DROP (migration 예정).
---   `chk_products_gender_required` 는 migration 096 에서 이미 해제됐다.
+-- fail-open 을 아직 유지하는 이유: 2026-07-30 ~ 08-03 사이 적재된 행은
+--   products.gender 가 NULL 이다(실측 6,780행). 백필 완료 전에 fail-open 을 빼면
+--   그 행들이 모든 성별 검색에서 사라진다. `_resolve_gender` 는 men/women 만
+--   보내므로 이건 가정이 아니라 확정된 동작이다.
+--
+-- 🧹 백필 완료 + `chk_products_gender_required` VALIDATE 후 2)/3) 을 삭제하고
+--   `AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])` 한 줄로
+--   축약할 것. 그때도 `LEFT JOIN product_features pf` 는 유지한다 — primary_color
+--   필터가 계속 쓴다.
 
 BEGIN;
 
@@ -136,10 +142,10 @@ BEGIN
       AND (
         p_gender IS NULL
         OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
              WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
                THEN p.gender && ARRAY[p_gender, 'unisex']
+             WHEN pf.feature_metadata->>'gender' IS NOT NULL
+               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
              ELSE true
            END
       );
@@ -174,10 +180,10 @@ BEGIN
         AND (
           p_gender IS NULL
           OR CASE
-               WHEN pf.feature_metadata->>'gender' IS NOT NULL
-                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
                WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
                  THEN p.gender && ARRAY[p_gender, 'unisex']
+               WHEN pf.feature_metadata->>'gender' IS NOT NULL
+                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
                ELSE true
              END
         )
@@ -209,10 +215,10 @@ BEGIN
     AND (
       p_gender IS NULL
       OR CASE
-           WHEN pf.feature_metadata->>'gender' IS NOT NULL
-             THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
            WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
              THEN p.gender && ARRAY[p_gender, 'unisex']
+           WHEN pf.feature_metadata->>'gender' IS NOT NULL
+             THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
            ELSE true
          END
     );
@@ -244,10 +250,10 @@ BEGIN
         AND (
           p_gender IS NULL
           OR CASE
-               WHEN pf.feature_metadata->>'gender' IS NOT NULL
-                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
                WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
                  THEN p.gender && ARRAY[p_gender, 'unisex']
+               WHEN pf.feature_metadata->>'gender' IS NOT NULL
+                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
                ELSE true
              END
         )
@@ -275,10 +281,10 @@ BEGIN
       AND (
         p_gender IS NULL
         OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
              WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
                THEN p.gender && ARRAY[p_gender, 'unisex']
+             WHEN pf.feature_metadata->>'gender' IS NOT NULL
+               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
              ELSE true
            END
       )

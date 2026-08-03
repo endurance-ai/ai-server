@@ -47,22 +47,25 @@ _MEN_ONLY_EXCLUDED_SUBCATEGORIES = (
 
 
 # 성별 3단 다리 — search_products_v6.sql 과 같은 계단을 쓴다.
-#   ① product_features (VLM 스칼라 'men'|'women'|'unisex')
-#   ② products.gender  (크롤러 레거시 배열)
+#   ① products.gender  (크롤러가 만드는 정본, text[])
+#   ② product_features (VLM 스칼라 'men'|'women'|'unisex') — 잔존 행 폴백
 #   ③ 둘 다 없으면 제외
+# 2026-08-03: ①과 ②를 맞바꿨다. gender 출처를 VLM 으로 이관했으나 성능이 기준에
+# 못 미쳐 크롤러로 회귀했고, VLM 이 1순위인 동안은 값을 내놓기만 하면 크롤러가
+# 만든 정본을 덮어썼다 (search_products_v6.sql 헤더 참조).
 # 검색은 ③에서 fail-open 하지만 큐레이션은 fail-closed 다. 메인 피드에 성별이
-# 어긋난 상품이 노출되는 비용이 신규 상품 등장이 VLM 배치 한 주기 늦는 비용보다
+# 어긋난 상품이 노출되는 비용이 신규 상품 등장이 한 배치 주기 늦는 비용보다
 # 크고, 후보 풀(60)이 슬롯(12)보다 넉넉해 굶지 않는다.
 # 두 계단 모두 unisex 를 제외한다 — 명시 라벨만 올린다(기존 동작 보존).
-# 🧹 VLM gender 커버리지가 충분해지면 ②를 지우고 products.gender 를 DROP 한다.
+# 🧹 백필 완료 후 ②를 지운다.
 PRODUCT_FEATURES_JOIN = "LEFT JOIN public.product_features pf ON pf.product_id = p.id"
 
 GENDER_MATCH_SQL = """
         CASE
-            WHEN pf.feature_metadata->>'gender' IS NOT NULL
-                THEN pf.feature_metadata->>'gender' = %(gender)s
             WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
                 THEN %(gender)s = ANY(p.gender) AND NOT ('unisex' = ANY(p.gender))
+            WHEN pf.feature_metadata->>'gender' IS NOT NULL
+                THEN pf.feature_metadata->>'gender' = %(gender)s
             ELSE false
         END
 """
