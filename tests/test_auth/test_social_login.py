@@ -172,3 +172,38 @@ async def test_revoke_then_refresh_returns_401(client: AsyncClient):
 
     retry = await client.post("/v1/auth/refresh", json={"refresh_token": refresh_token})
     assert retry.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_deactivates_only_the_current_device(client: AsyncClient, pool):
+    with patch("app.api.auth.verify_google_token", return_value=_google_claims("logout-device-sub")):
+        login = await client.post("/v1/auth/social", json={"provider": "google", "id_token": "t"})
+
+    body = login.json()
+    auth = {"Authorization": f"Bearer {body['access_token']}"}
+    first = await client.post(
+        "/v1/devices",
+        headers=auth,
+        json={"push_token": "tok-logout-current", "provider": "apns", "environment": "production"},
+    )
+    second = await client.post(
+        "/v1/devices",
+        headers=auth,
+        json={"push_token": "tok-logout-other", "provider": "apns", "environment": "production"},
+    )
+
+    logout = await client.post(
+        "/v1/auth/logout",
+        json={"refresh_token": body["refresh_token"], "device_id": first.json()["device_id"]},
+    )
+    assert logout.status_code == 204
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT device_id::text, status FROM ai.devices WHERE device_id IN (%s, %s) ORDER BY device_id",
+            (first.json()["device_id"], second.json()["device_id"]),
+        )
+        statuses = dict(await cur.fetchall())
+
+    assert statuses[first.json()["device_id"]] == "inactive"
+    assert statuses[second.json()["device_id"]] == "active"

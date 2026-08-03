@@ -36,3 +36,17 @@ services:
       resources:
         limits:
           memory: 1024M
+
+  notification-worker:
+    profiles: ["notifications"]
+    build: .
+    command: ["python", "-m", "app.workers.notification_worker"]
+    env_file:
+      - .env
+    environment:
+      - NOTIFICATION_WORKER_ENABLED=true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M

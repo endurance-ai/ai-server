@@ -44,6 +44,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class LogoutRequest(RefreshRequest):
+    device_id: UUID | None = None
+
+
 class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -127,12 +131,31 @@ async def _lookup_refresh_token(
     return row[0] if row else None
 
 
-async def _revoke_refresh_token(pool: AsyncConnectionPool, token_hash: str) -> None:
+async def _revoke_refresh_token(
+    pool: AsyncConnectionPool,
+    token_hash: str,
+    *,
+    device_id: UUID | None = None,
+) -> None:
     async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT user_id FROM ai.refresh_tokens WHERE token_hash = %s AND revoked_at IS NULL",
+            (token_hash,),
+        )
+        row = await cur.fetchone()
         await cur.execute(
             "UPDATE ai.refresh_tokens SET revoked_at = now() WHERE token_hash = %s",
             (token_hash,),
         )
+        if row and device_id is not None:
+            await cur.execute(
+                """
+                UPDATE ai.devices
+                SET status = 'inactive', disabled_at = now()
+                WHERE device_id = %s AND user_id = %s
+                """,
+                (device_id, row[0]),
+            )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -198,9 +221,9 @@ async def refresh_token(
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_token(
-    body: RefreshRequest,
+    body: LogoutRequest,
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> None:
     """Revoke a refresh_token (logout)."""
     token_hash = jwt_utils.hash_refresh_token(body.refresh_token)
-    await _revoke_refresh_token(pool, token_hash)
+    await _revoke_refresh_token(pool, token_hash, device_id=body.device_id)

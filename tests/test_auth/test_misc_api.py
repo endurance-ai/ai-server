@@ -114,6 +114,8 @@ async def test_register_device_success(client: AsyncClient):
     data = resp.json()
     assert "device_id" in data
     assert "registered_at" in data
+    assert data["provider"] == "apns"
+    assert data["environment"] == "production"
 
 
 @pytest.mark.asyncio
@@ -126,6 +128,112 @@ async def test_register_device_upsert(client: AsyncClient):
     assert r2.status_code == 201
     # upsert: same device_id
     assert r1.json()["device_id"] == r2.json()["device_id"]
+
+
+@pytest.mark.asyncio
+async def test_register_device_preferred_contract_and_environment_isolation(client: AsyncClient):
+    auth, _ = await _login(client)
+    payload = {"push_token": "tok-env", "provider": "apns", "platform": "ios"}
+
+    development = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={**payload, "environment": "development"},
+    )
+    production = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={**payload, "environment": "production"},
+    )
+
+    assert development.status_code == 201
+    assert production.status_code == 201
+    assert development.json()["environment"] == "development"
+    assert production.json()["environment"] == "production"
+    assert development.json()["device_id"] != production.json()["device_id"]
+
+
+@pytest.mark.asyncio
+async def test_register_device_keeps_identity_when_apns_rotates_token(client: AsyncClient, pool):
+    auth, _ = await _login(client)
+    first = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={"push_token": "tok-before-rotation", "provider": "apns", "environment": "production"},
+    )
+    rotated = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={
+            "device_id": first.json()["device_id"],
+            "push_token": "tok-after-rotation",
+            "provider": "apns",
+            "environment": "production",
+        },
+    )
+
+    assert rotated.status_code == 201
+    assert rotated.json()["device_id"] == first.json()["device_id"]
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT push_token FROM ai.devices WHERE device_id = %s", (first.json()["device_id"],))
+        assert (await cur.fetchone())[0] == "tok-after-rotation"
+
+
+@pytest.mark.asyncio
+async def test_register_device_transfers_endpoint_to_latest_authenticated_user(client: AsyncClient, pool):
+    first_auth, first_user_id = await _login(client)
+    second_auth, second_user_id = await _login(client)
+    payload = {
+        "push_token": "tok-owner-transfer",
+        "provider": "apns",
+        "environment": "production",
+        "platform": "ios",
+    }
+
+    first = await client.post("/v1/devices", headers={"Authorization": first_auth}, json=payload)
+    second = await client.post("/v1/devices", headers={"Authorization": second_auth}, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["device_id"] == second.json()["device_id"]
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT user_id::text, count(*) OVER ()
+            FROM ai.devices
+            WHERE provider = 'apns'
+              AND environment = 'production'
+              AND push_token = 'tok-owner-transfer'
+            """
+        )
+        owner_id, endpoint_count = await cur.fetchone()
+
+    assert owner_id == second_user_id
+    assert owner_id != first_user_id
+    assert endpoint_count == 1
+
+
+@pytest.mark.asyncio
+async def test_register_device_rejects_whitespace_token(client: AsyncClient):
+    auth, _ = await _login(client)
+    resp = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={"push_token": "bad token", "provider": "apns", "environment": "production"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_device_rejects_provider_platform_mismatch(client: AsyncClient):
+    auth, _ = await _login(client)
+    resp = await client.post(
+        "/v1/devices",
+        headers={"Authorization": auth},
+        json={"push_token": "ios-fcm", "provider": "fcm", "platform": "ios"},
+    )
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
