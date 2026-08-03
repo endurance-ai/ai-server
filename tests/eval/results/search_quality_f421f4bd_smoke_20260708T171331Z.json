@@ -1,0 +1,270 @@
+{
+  "meta": {
+    "sha": "f421f4bd",
+    "branch": "feat/search-eval-harness",
+    "label": "smoke",
+    "top_k": 5,
+    "timestamp": "20260708T171331Z",
+    "dataset_version": "1.1"
+  },
+  "summary": {
+    "total": 3,
+    "errors": 0,
+    "overall": {
+      "n": 3,
+      "quality_score_mean": 0.0,
+      "keyword_hit_mean": 0.0,
+      "color_hit_mean": 0.4,
+      "fit_hit_mean": 0.0,
+      "brand_diversity_mean": 4.333,
+      "distance_p50_mean": 0.934,
+      "subcat_hit_mean": 0.133,
+      "subcat_hit_tagged_mean": 0.222,
+      "tag_coverage_mean": 0.467
+    },
+    "by_type": {
+      "text_ko_basic": {
+        "n": 3,
+        "quality_score_mean": 0.0,
+        "keyword_hit_mean": 0.0,
+        "color_hit_mean": 0.4,
+        "fit_hit_mean": 0.0,
+        "brand_diversity_mean": 4.333,
+        "distance_p50_mean": 0.934,
+        "subcat_hit_mean": 0.133,
+        "subcat_hit_tagged_mean": 0.222,
+        "tag_coverage_mean": 0.467
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "text_ko_basic_hoodie_001",
+      "type": "text_ko_basic",
+      "input": "검정 오버사이즈 후드",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": 0.4,
+        "fit_hit": 0.0,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9288,
+        "subcat_hit": 0.4,
+        "subcat_hit_tagged": 0.667,
+        "tag_coverage": 0.6,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9209,
+            "sc": false,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9254,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9288,
+            "sc": false,
+            "kw": false,
+            "co": true,
+            "fi": false
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9297,
+            "sc": true,
+            "kw": false,
+            "co": false,
+            "fi": false
+          },
+          {
+            "id": 437994,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9309,
+            "sc": true,
+            "kw": false,
+            "co": false,
+            "fi": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_capri_002",
+      "type": "text_ko_basic",
+      "input": "카프리 팬츠",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 5,
+        "distance_p50": 0.9332,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 437324,
+            "brand": "COMME DES GARCONS PARFUMS",
+            "name": "Odeur Du Théa'Tre Du Cha'Telet 200 ml Perfumes",
+            "subcategory": "",
+            "distance": 0.9257,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 534778,
+            "brand": "032c",
+            "name": "''Game'' Layered Mesh Longsleeve (Faded Black)",
+            "subcategory": "",
+            "distance": 0.9296,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437993,
+            "brand": "b.Eautiful",
+            "name": "HIGETA CREWNECK SWEATSHIRT",
+            "subcategory": "sweatshirt",
+            "distance": 0.9332,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 465577,
+            "brand": "Patta",
+            "name": "Patta Gilded Acid Washed T-Shirt (Black)",
+            "subcategory": "t-shirt",
+            "distance": 0.9334,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 437371,
+            "brand": "WIENERBLUT",
+            "name": "Ex Voto Eau De Parfum 100 ml",
+            "subcategory": "",
+            "distance": 0.9353,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_miniskirt_003",
+      "type": "text_ko_basic",
+      "input": "미니스커트",
+      "lang": "ko",
+      "scores": {
+        "quality_score": 0.0,
+        "keyword_hit": 0.0,
+        "color_hit": null,
+        "fit_hit": null,
+        "brand_hit": null,
+        "brand_diversity": 4,
+        "distance_p50": 0.9413,
+        "subcat_hit": 0.0,
+        "subcat_hit_tagged": 0.0,
+        "tag_coverage": 0.4,
+        "result_count": 5,
+        "samples": [
+          {
+            "id": 579666,
+            "brand": "S.J",
+            "name": "40 Acres x COINTEL Do The Right Thing Tee - Blue",
+            "subcategory": "t-shirt",
+            "distance": 0.9333,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454478,
+            "brand": "South2 West8",
+            "name": "South2 West8 Crew Neck Tee - Black",
+            "subcategory": "sweater",
+            "distance": 0.9413,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454769,
+            "brand": "Kith",
+            "name": "Kith Ivy for Wilson Logo Wide Headband - White",
+            "subcategory": "",
+            "distance": 0.9413,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 533762,
+            "brand": "Sohc",
+            "name": "Food Vs Life T-Shirt (Grey)",
+            "subcategory": "",
+            "distance": 0.9442,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          },
+          {
+            "id": 454754,
+            "brand": "Kith",
+            "name": "Kith Ivy for Wilson Logo Wide Headband - Black",
+            "subcategory": "",
+            "distance": 0.9446,
+            "sc": false,
+            "kw": false,
+            "co": null,
+            "fi": null
+          }
+        ]
+      }
+    }
+  ]
+}

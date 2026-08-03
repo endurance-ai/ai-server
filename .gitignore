@@ -12,8 +12,8 @@ build/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # IDE
 .vscode/
@@ -29,6 +29,9 @@ Thumbs.db
 qdrant-data/
 certs/
 
+# Redis local dump
+dump.rdb
+
 # Testing
 .coverage
 htmlcov/
@@ -36,3 +39,17 @@ htmlcov/
 
 # uv
 .python-version
+
+# MoAI runtime artifacts (per-developer, not shared)
+.moai/state/
+.moai/logs/
+.moai/reports/
+.moai/learning/
+.moai/evolution/
+.moai/docs/
+HANDOFF.md
+tests/eval/multiturn_*.json
+!tests/eval/multiturn_dataset.json
+
+# Eval run results (generated locally, not shared)
+tests/eval/*_results.json

@@ -1,0 +1,206 @@
+# ==============================================================================
+# kiko-ai-server CI/CD 파이프라인 (DEV)
+# ==============================================================================
+# 트리거:
+#   - dev 브랜치로의 PR 머지 시
+#   - workflow_dispatch (수동 실행)
+#
+# 흐름:
+#   1. ruff + pytest (CI 재검증, fail 시 배포 중단)
+#   2. Docker 이미지 빌드 (ARM64 네이티브 러너)
+#   3. ECR Push (태그: <YYYYMMDDhhmmss>-<short_sha>, latest)
+#   4. SSH로 EC2 접속 → /home/ec2-user/scripts/deploy.ai.sh 실행
+# ==============================================================================
+
+name: 🚀 Deploy to AWS
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - dev
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '배포 환경'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+
+permissions:
+  contents: read
+
+# 같은 ref 의 동시 deploy 직렬화 (취소하지 않음)
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: kikoai-dev/ai
+
+jobs:
+  # ============================================
+  # Job 1: 검증 (ruff + pytest)
+  # ============================================
+  verify:
+    name: 검증 (ruff + pytest)
+    # fork PR 가드: head 가 같은 repo 일 때만 + 머지된 경우 / 수동 실행
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: uv 설치
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.7.x"
+          enable-cache: true
+
+      - name: Python 셋업
+        run: uv python install 3.13
+
+      - name: 의존성 설치
+        run: uv sync --frozen
+
+      - name: ruff 린트 + 포맷 체크
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: pytest
+        run: uv run pytest -q
+
+  # ============================================
+  # Job 2: 빌드 + ECR Push
+  # ============================================
+  build-and-push:
+    name: 빌드 및 ECR Push
+    needs: verify
+    runs-on: ubuntu-24.04-arm
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: AWS 인증
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ECR 로그인
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: 이미지 태그 생성
+        id: meta
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          TIMESTAMP=$(TZ='Asia/Seoul' date +'%Y%m%d%H%M%S')
+          IMAGE_TAG="${TIMESTAMP}-${SHORT_SHA}"
+          echo "tags=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "생성된 태그: ${IMAGE_TAG} (KST)"
+
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+        with:
+          version: latest
+
+      - name: Docker 이미지 빌드 + ECR Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.tags }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          platforms: linux/arm64
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,ignore-error=true
+
+  # ============================================
+  # Job 3: EC2 배포
+  # ============================================
+  deploy:
+    name: EC2 배포
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: SSH 배포
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=========================================="
+            echo "[kiko.ai DEV] AI 배포 시작"
+            echo "=========================================="
+            /home/ec2-user/scripts/deploy.ai.sh ${{ needs.build-and-push.outputs.image_tag }}
+
+  # ============================================
+  # Job 4: DB 함수 적용 (dev-app) — 7/10 사고 재발 방지
+  # ============================================
+  # public.search_products_v6 등 검색 RPC 함수는 alembic(ai.* 스키마) 대상이 아니라
+  # dev-app 의 db 컨테이너에 별도 적용해야 한다. 정본 sql/functions/*.sql 를 dev-app 으로
+  # scp 한 뒤, db 컨테이너에 로컬 exec(무비번 peer/trust)으로 적용. 각 파일은 "모든
+  # 오버로드 DROP 후 재생성"(BEGIN/COMMIT 원자)이라 시그니처가 바뀌어도 옛 오버로드가
+  # 남아 RPC 가 엉뚱하게 resolve 되는 사고를 근본 차단한다. deploy(ai 이미지)와 독립이라
+  # verify 만 needs — 머지 게이트는 verify 의 if 를 통해 상속.
+  apply-db-functions:
+    name: DB 함수 적용 (dev-app)
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: sql/functions 를 dev-app 으로 전송
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST_APP || '15.165.107.28' }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "sql/functions/*.sql"
+          target: "/home/ec2-user/sql/functions"
+          strip_components: 2
+          overwrite: true
+
+      - name: db 컨테이너에 함수 적용 + 검증
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST_APP || '15.165.107.28' }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            n=0
+            for f in "$HOME"/sql/functions/*.sql; do
+              [ -e "$f" ] || continue
+              n=$((n+1))
+              echo ">>> apply $(basename "$f")"
+              sudo docker exec -i db psql -U postgres -d kikoai -v ON_ERROR_STOP=1 < "$f"
+            done
+            [ "$n" -gt 0 ] || { echo "[ERROR] ~/sql/functions/*.sql 없음"; exit 1; }
+            echo "=== 검증: search_products_v6 오버로드 ==="
+            sudo docker exec -i db psql -U postgres -d kikoai -c \
+              "SELECT oid::regprocedure FROM pg_proc WHERE proname='search_products_v6' AND pronamespace='public'::regnamespace;"

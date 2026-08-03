@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>noscroll 벤치마크 — kiko.ai 적용안</title>
+<meta name="color-scheme" content="light">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: light; }
+  html, body { background: #fafaf9; }
+  body {
+    font-family: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif;
+    color: #1c1d20;
+    font-feature-settings: "ss01","ss02","cv01","cv11";
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.65;
+  }
+  .mono { font-family: "JetBrains Mono","SF Mono",Menlo,monospace; letter-spacing: -0.01em; }
+  details > summary { cursor: pointer; list-style: none; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before {
+    content: "▸"; display: inline-block; width: 1em; transition: transform .15s;
+    color: #9ca3af; margin-right: .25rem;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  .pill {
+    display: inline-flex; align-items: center; padding: 2px 9px;
+    border-radius: 999px; font-size: 11px; font-weight: 600;
+  }
+  table { border-collapse: separate; border-spacing: 0; }
+  th, td { vertical-align: top; padding: 10px 12px; }
+  thead th { background: #f4f4f5; font-size: 12px; font-weight: 600; color: #52525b; border-bottom: 1px solid #e4e4e7; }
+  tbody tr { border-bottom: 1px solid #f1f1f3; }
+  .row-keep { background: rgba(209, 250, 229, 0.35); }
+  .row-fix  { background: rgba(254, 243, 199, 0.45); }
+  ::selection { background: rgba(59,130,246,0.22); color:#0f172a; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+  .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 14px; }
+  .step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 999px; background: #18181b;
+    color: #fafaf9; font-size: 11px; font-weight: 600;
+  }
+  .kbd {
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+    padding: 1px 6px; border-radius: 4px; background: #f4f4f5; border: 1px solid #e4e4e7;
+    color: #18181b;
+  }
+  .codeblock {
+    font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+    background: #18181b; color: #e4e4e7; padding: 16px 18px; border-radius: 10px;
+    overflow-x: auto; line-height: 1.55;
+  }
+  .codeblock .c { color: #71717a; }
+  .codeblock .k { color: #f0abfc; }
+  .codeblock .s { color: #86efac; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="sticky top-0 z-20 backdrop-blur-md bg-[#fafaf9]/85 border-b border-zinc-200">
+  <div class="max-w-6xl mx-auto px-8 py-5 flex items-end justify-between gap-6">
+    <div>
+      <div class="flex items-center gap-2 text-[11px] uppercase tracking-widest text-zinc-500 mb-1">
+        <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        Benchmark · v2 · 2026-05-14
+      </div>
+      <h1 class="text-[22px] font-semibold text-zinc-900 leading-tight">noscroll 벤치마크 — kiko.ai 차용 매트릭스</h1>
+      <p class="text-[12px] text-zinc-500 mono mt-1">docs/_tmp/noscroll-benchmark.html · 직접 사용 + Karpathy 검증 반영</p>
+    </div>
+    <div class="flex items-center gap-2 text-[12px]">
+      <a class="px-3 py-1.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50" href="https://noscroll.com/" target="_blank">noscroll.com ↗</a>
+      <a class="px-3 py-1.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50" href="https://x.com/noscroll" target="_blank">@noscroll ↗</a>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-8 py-10 space-y-12">
+
+  <!-- HERO / SUMMARY -->
+  <section class="card p-7">
+    <div class="grid md:grid-cols-3 gap-6">
+      <div class="md:col-span-2">
+        <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Product</div>
+        <h2 class="text-[26px] font-semibold leading-snug">
+          "noscroll monitors the situation — so you don't have to."
+        </h2>
+        <p class="text-zinc-600 mt-3">
+          Nadav Hollander (전 OpenSea CTO) + <span class="mono">@z0age</span>, 2026-04-23 런칭.
+          <strong>SMS / Telegram</strong> 으로 동작하는 개인 AI 뉴스 에이전트.
+          X 계정 임포트로 취향 부트스트랩 → 자연어로 "beat" 설정 → 정기 다이제스트 + breaking 인터럽트.
+        </p>
+      </div>
+      <div class="space-y-2 text-[13px]">
+        <div class="flex justify-between border-b border-zinc-100 pb-2">
+          <span class="text-zinc-500">Transport</span>
+          <span class="mono">SMS · Telegram</span>
+        </div>
+        <div class="flex justify-between border-b border-zinc-100 pb-2">
+          <span class="text-zinc-500">Bot</span>
+          <span class="mono">@no_scroll_bot</span>
+        </div>
+        <div class="flex justify-between border-b border-zinc-100 pb-2">
+          <span class="text-zinc-500">Pricing</span>
+          <span class="mono">$9.99/mo · 7d trial</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-zinc-500">Positioning</span>
+          <span class="mono">"no app, no feed"</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 1. PRODUCT LOOP -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">1. Product Loop</h2>
+      <span class="text-[11px] text-zinc-500 mono">how it works</span>
+    </div>
+
+    <div class="card p-6">
+      <ol class="space-y-4 text-[14px]">
+        <li class="flex gap-3">
+          <span class="step-num">1</span>
+          <div>
+            <strong>Entry</strong> — 사용자가 SMS 또는 Telegram(<span class="mono">@no_scroll_bot</span>)으로 첫 메시지.
+            <div class="text-zinc-500 text-[12.5px] mt-1">전화번호 +1 (415) 305-4858 / +1 (415) 718-4828 모두 동일 백엔드로 라우팅.</div>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="step-num">2</span>
+          <div>
+            <strong>Account link</strong> — 봇이 <span class="mono">noscroll.com/hi/&lt;token&gt;?platform=telegram</span> 링크 발송 → X OAuth 연동
+            <div class="text-zinc-500 text-[12.5px] mt-1">X likes / bookmarks / follows 를 임포트해서 <em>취향 시드</em> 생성 (콜드스타트 X)</div>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="step-num">3</span>
+          <div>
+            <strong>Beat setting</strong> — 자연어로 "내가 뭘 보고 싶은지 / 뭘 빼야 하는지" 설정
+            <div class="text-zinc-500 text-[12.5px] mt-1">예: "crypto regulation news, but skip price-only posts"</div>
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="step-num">4</span>
+          <div>
+            <strong>Sample → Trial → Paid</strong> — 무료 샘플 1회 → 7일 트라이얼 → $9.99/월
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="step-num">5</span>
+          <div>
+            <strong>Delivery</strong> — 사용자 지정 cadence (주 1 ~ 일 N회) + <em>breaking</em> 발생 시 즉시 인터럽트
+          </div>
+        </li>
+        <li class="flex gap-3">
+          <span class="step-num">6</span>
+          <div>
+            <strong>Reply loop</strong> — 모든 알림에 자연어 응답으로 dig-in / 조정 → 취향 강화
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- 2. AGENTIC PATTERNS -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">2. kiko.ai 차용 매트릭스</h2>
+      <span class="text-[11px] text-zinc-500 mono">8 patterns · build status</span>
+    </div>
+
+    <div class="card overflow-hidden">
+      <table class="w-full text-[13.5px]">
+        <thead>
+          <tr>
+            <th class="text-left w-[170px]">패턴</th>
+            <th class="text-left w-[110px]">상태</th>
+            <th class="text-left">noscroll 구현</th>
+            <th class="text-left">kiko 현황 / 액션</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="row-keep">
+            <td><strong>Persona / Voice</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>프롬프트 튜닝 (파인튜닝 X)</td>
+            <td>"kiko" 페르소나 + Puss-in-Boots 톤 (KO/EN sticky). <strong>noscroll엔 없는 강점</strong></td>
+          </tr>
+          <tr class="row-keep">
+            <td><strong>Sticky 다국어</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>한국어 대응 안 됨 (사용자 직접 확인)</td>
+            <td><span class="mono">app/channels/lang.py</span> Hangul detect → 세션 sticky. <strong>noscroll 추월</strong></td>
+          </tr>
+          <tr class="row-keep">
+            <td><strong>Taste over time</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>클릭 · 응답 → 프로파일 강화</td>
+            <td>SPEC-MEMORY-001 (<span class="mono">user_taste_profile</span> Postgres 영속) + SPEC-IMPLICIT-FB-001 (click 신호)</td>
+          </tr>
+          <tr class="row-keep">
+            <td><strong>Reply-to-refine</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>알림에 자연어 응답으로 조정</td>
+            <td>LangGraph <span class="mono">respond</span> + <span class="mono">ask_clarify</span> 카드 폴백 (SPEC-CLARIFY-CARDS-001)</td>
+          </tr>
+          <tr class="row-keep">
+            <td><strong>QR 온보딩</strong></td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅ 완료</span></td>
+            <td>SMS 전화번호 노출</td>
+            <td>웹 랜딩에 <span class="mono">@kiko_fashion_ai_bot</span> QR 모달 (스크린샷 확인). <strong>딥링크 토큰 바인딩 여부는 확인 필요</strong></td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Card 온보딩</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>텍스트 beat setting (SMS 한계)</td>
+            <td><strong>kiko는 Telegram 카드 가능</strong>. 무드(8) → 컬러(6) → 핏(4) 멀티셀렉트 → TasteProfile 시드. 넷플릭스 패턴</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Graph bootstrap</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>X likes/bookmarks/follows 임포트</td>
+            <td>Pinterest 보드 URL → Apify 크롤 → Vision 일괄 분석 → TasteProfile 시드. IG는 비공개 saved 한계로 2순위</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>문장 분할 발화</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>1문장씩 끊어 발송 (대화감 ↑)</td>
+            <td><span class="mono">respond</span> 노드 — LLM 출력을 문장 split + 200ms 딜레이. <span class="mono">sendChatAction("typing")</span> 동반</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>/start 가이드</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>첫 입장 시 소개 + 사용법 안내</td>
+            <td>현재 <span class="mono">/start</span> 핸들러 빈약. 소개 3줄 + 사용법 3줄 + 카드 온보딩 진입</td>
+          </tr>
+          <tr class="row-fix">
+            <td><strong>Brand save + 신상 푸시</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">🟡 후보</span></td>
+            <td>2-tier: 정기 digest + breaking 인터럽트</td>
+            <td><span class="mono">saved_brands</span> 테이블 신설 + 카드에 ❤️ 버튼. <strong>크롤러 자동화 완성 후</strong> 매칭 푸시</td>
+          </tr>
+          <tr>
+            <td><strong>Group chat mode</strong></td>
+            <td><span class="pill bg-blue-200 text-blue-900">🔵 후보 (P3)</span></td>
+            <td>단톡방 봇 추가 → 그룹 큐레이션</td>
+            <td>friends 2~3명 단톡방. multi-chat_id 처리 + per-group TasteProfile 필요. 성장 루프</td>
+          </tr>
+          <tr>
+            <td><strong>Continuous monitoring</strong></td>
+            <td><span class="pill bg-zinc-200 text-zinc-700">⏸ 보류</span></td>
+            <td>24/7 X/Reddit/HN 크롤</td>
+            <td>kiko는 product DB 크롤러가 선결 과제. 자동화 후 phase 2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-[12px] text-zinc-500 mt-2">
+      <span class="pill bg-emerald-200 text-emerald-900 mr-1">✅ 완료</span>
+      <span class="pill bg-amber-200 text-amber-900 mr-1">🟡 차용 후보 (P1~P2)</span>
+      <span class="pill bg-blue-200 text-blue-900 mr-1">🔵 후보 (P3)</span>
+      <span class="pill bg-zinc-200 text-zinc-700">⏸ 의존성 대기</span>
+    </p>
+  </section>
+
+  <!-- 2.5 USER OBSERVATIONS -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">2.5 직접 써본 관찰 (사용자 실험)</h2>
+      <span class="text-[11px] text-zinc-500 mono">5/5 → 5/14, 9 days</span>
+    </div>
+
+    <div class="card overflow-hidden">
+      <table class="w-full text-[13.5px]">
+        <thead>
+          <tr>
+            <th class="text-left">관찰</th>
+            <th class="text-left w-[160px]">평가</th>
+            <th class="text-left w-[260px]">kiko 액션</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>한국어로 해달라고 해도 영어로 답함</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td>kiko sticky 다국어 강점 유지</td>
+          </tr>
+          <tr>
+            <td>페르소나/이모지 거의 없음 (밋밋한 톤)</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td>kiko "kiko" 페르소나 강점 유지</td>
+          </tr>
+          <tr>
+            <td>로딩바/진행 표시 없음 — 그냥 기다림</td>
+            <td><span class="pill bg-red-200 text-red-900">❌ noscroll 약점</span></td>
+            <td><strong>sendChatAction("typing")</strong> 적용. 응답 동안 "타이핑 중..." 노출</td>
+          </tr>
+          <tr class="row-fix">
+            <td>첫 입장 시 소개말 + 사용법 안내</td>
+            <td><span class="pill bg-amber-200 text-amber-900">👍 차용</span></td>
+            <td><span class="mono">/start</span> 핸들러 개선 (SPEC 후보)</td>
+          </tr>
+          <tr class="row-fix">
+            <td>1문장씩 끊어서 답장 — 진짜 대화 같음</td>
+            <td><span class="pill bg-amber-200 text-amber-900">👍 차용</span></td>
+            <td><span class="mono">respond</span> 노드 split + delay (SPEC 후보)</td>
+          </tr>
+          <tr>
+            <td>Karpathy 어록 5개 중 2개 날짜 오류</td>
+            <td><span class="pill bg-blue-200 text-blue-900">📚 교훈</span></td>
+            <td>아래 §4 참조 — 메타데이터 신뢰 원칙</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 3. TELEGRAM QR ONBOARDING -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">3. QR 로 Telegram 다이렉트 등록</h2>
+      <span class="text-[11px] text-zinc-500 mono">deep-link · start_param</span>
+    </div>
+
+    <div class="card p-6 space-y-5">
+      <p class="text-[14px] text-zinc-700">
+        noscroll 이 쓰는 패턴은 Telegram 공식 <strong>start_param 딥링크</strong>.
+        QR 은 그 URL 을 단순히 이미지로 인코딩한 것일 뿐 — 핵심은 <strong>1회용 토큰 ↔ chat_id 바인딩</strong>.
+      </p>
+
+<pre class="codeblock"><span class="c"># 흐름</span>
+<span class="c">[웹]</span>                                <span class="c">[사용자]</span>            <span class="c">[Telegram]</span>
+1. POST /api/telegram/link-token
+   → token = uuid(), TTL 10분
+   → Redis: token → web_user_id
+                                    ─▶ QR 스캔
+                                        <span class="s">https://t.me/kiko_fashion_ai_bot?start=&lt;token&gt;</span>
+2.                                        Telegram 앱 자동 오픈
+3.                                        "Start" 버튼 노출
+4.                                        탭 → 봇이 받는 메시지: <span class="s">"/start &lt;token&gt;"</span>
+5. webhook 수신
+   chat_id ↔ token ↔ web_user_id 바인딩
+   토큰 즉시 폐기
+                                    ◀─ "환영해요! 계정 연결 완료 🐱"</pre>
+
+      <div class="grid md:grid-cols-2 gap-4 pt-2">
+        <div class="border border-zinc-200 rounded-lg p-4">
+          <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">A. 웹 → Telegram</div>
+          <ul class="text-[13px] space-y-1.5 list-disc list-inside text-zinc-700">
+            <li><span class="mono">kikoai/app</span> 에서 토큰 발급 API</li>
+            <li>프론트에서 <span class="mono">qrcode</span> npm 으로 QR 생성</li>
+            <li>이 AI 서버 <span class="mono">app/api/webhooks/telegram.py</span> 에서 <span class="mono">/start &lt;token&gt;</span> 패턴 매칭</li>
+            <li><span class="mono">users.telegram_chat_id</span> 업데이트 → 토큰 폐기</li>
+          </ul>
+        </div>
+        <div class="border border-zinc-200 rounded-lg p-4">
+          <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">B. Telegram → 웹 (반대)</div>
+          <ul class="text-[13px] space-y-1.5 list-disc list-inside text-zinc-700">
+            <li>봇이 <span class="mono">https://kikoai.com/hi/&lt;token&gt;</span> 발송</li>
+            <li>웹에서 토큰 검증 → 세션 생성</li>
+            <li>Telegram-first 회원가입 플로우</li>
+            <li>noscroll 의 <span class="mono">/hi/&lt;token&gt;?platform=telegram</span> 이 정확히 이 패턴</li>
+          </ul>
+        </div>
+      </div>
+
+      <details class="pt-2">
+        <summary class="text-[13px] font-medium text-zinc-700">결제 통합 (추후)</summary>
+        <div class="text-[13px] text-zinc-600 pt-2 pl-5">
+          Telegram Stars / Payments 로 in-chat 구독 가능. noscroll 은 외부 결제 사용.
+          $9.99/월 + 7일 트라이얼 모델은 PMF 검증 후 차용 권장.
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 4. KARPATHY LESSON -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">4. Karpathy 어록 검증 — kiko에 적용할 교훈</h2>
+      <span class="text-[11px] text-zinc-500 mono">5개 중 2개 날짜 오류</span>
+    </div>
+
+    <div class="card overflow-hidden">
+      <table class="w-full text-[13px]">
+        <thead>
+          <tr>
+            <th class="text-left w-[40px]">#</th>
+            <th class="text-left">어록</th>
+            <th class="text-left w-[120px]">noscroll</th>
+            <th class="text-left w-[150px]">실제</th>
+            <th class="text-left w-[80px]">평가</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="row-fix">
+            <td>1</td>
+            <td>"The hottest new programming language is English."</td>
+            <td>2025-06</td>
+            <td><strong>2023-01-24</strong></td>
+            <td><span class="pill bg-red-200 text-red-900">❌ 2.5년 ↓</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>2</td>
+            <td>"claim the leverage from the use of agents..."</td>
+            <td>2026-02</td>
+            <td>2026-02 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+          <tr class="row-fix">
+            <td>3</td>
+            <td>"fully give in to the vibes..." (vibe coding)</td>
+            <td>2025-09</td>
+            <td><strong>2025-02-02</strong></td>
+            <td><span class="pill bg-amber-200 text-amber-900">⚠️ 7개월 ↓</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>4</td>
+            <td>"For now, autocomplete is my sweet spot."</td>
+            <td>2025-10</td>
+            <td>2025-10-17 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+          <tr class="row-keep">
+            <td>5</td>
+            <td>"express my will to my agents for 16 hours a day."</td>
+            <td>2026-03</td>
+            <td>2026-03-20 ✅</td>
+            <td><span class="pill bg-emerald-200 text-emerald-900">✅</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card p-5 mt-4 bg-blue-50 border-blue-200">
+      <div class="text-[11px] uppercase tracking-widest text-blue-700 mb-2">★ Insight</div>
+      <p class="text-[14px] text-blue-950">
+        <strong>noscroll은 출처는 잘 찾지만 timestamp 메타데이터를 LLM에 추론시키는 듯.</strong>
+        팟캐스트(2025-10, 2026-03)처럼 명시적 발행일이 있는 소스는 정확하고,
+        오래된 트윗은 LLM이 "최근에 한 말 같다"로 envelope를 추론하면서 어긋남.
+      </p>
+      <p class="text-[14px] text-blue-950 mt-2">
+        <strong>kiko 적용:</strong> 패션 신상 큐레이션할 때 "FW25 신상" / "5월 입고" 같은 시즌·출시일 메타데이터는
+        <span class="mono">product</span> DB의 신뢰 가능한 컬럼에서만 끌어와야 함. LLM이 이미지·이름 보고 추론하게 두면 같은 함정.
+      </p>
+    </div>
+  </section>
+
+  <!-- 5. PRIORITIZED BACKLOG -->
+  <section>
+    <div class="flex items-end justify-between mb-4">
+      <h2 class="text-[18px] font-semibold">5. 우선순위 백로그</h2>
+      <span class="text-[11px] text-zinc-500 mono">P0 → P3</span>
+    </div>
+
+    <div class="space-y-3">
+
+      <!-- P0 -->
+      <div class="card p-5 border-l-4 border-l-emerald-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-emerald-200 text-emerald-900">P0 · 즉시</span>
+          <span class="text-[11px] text-zinc-500 mono">no SPEC needed · ~1 PR</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">A. 문장 분할 발화 + <span class="mono">sendChatAction</span></h3>
+        <p class="text-[13px] text-zinc-600">
+          <span class="mono">app/graphs/nodes/respond.py</span> 출력을 문장 split (".", "!", "?", "\n\n") + 200ms 딜레이.
+          매 sendMessage 직전 <span class="mono">sendChatAction("typing")</span> 1회. 작은 변경으로 대화 톤이 확 살아남.
+        </p>
+      </div>
+
+      <!-- P1 -->
+      <div class="card p-5 border-l-4 border-l-emerald-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-emerald-200 text-emerald-900">P1 · 다음</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-START-GUIDE-001 (가칭)</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">B. <span class="mono">/start</span> 개선 + 카드 온보딩</h3>
+        <p class="text-[13px] text-zinc-600">
+          (1) 소개 3줄 + 사용법 3줄 →
+          (2) 카드 온보딩 (무드 8 · 컬러 6 · 핏 4 멀티셀렉트, <span class="mono">InlineKeyboardButton</span>) →
+          (3) <span class="mono">user_taste_profile</span> 초기 가중치 시드.
+          기존 SPEC-CLARIFY-CARDS-001 인프라 재활용.
+        </p>
+      </div>
+
+      <!-- P2 -->
+      <div class="card p-5 border-l-4 border-l-amber-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-amber-200 text-amber-900">P2</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-PINTEREST-BOOTSTRAP-001 (가칭)</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">C. Pinterest 보드 부트스트랩</h3>
+        <p class="text-[13px] text-zinc-600">
+          보드 URL 받기 → Apify로 핀 50~100개 크롤 → Vision 일괄 분석 → TasteProfile 강한 시드.
+          카드 온보딩 대안/병행 경로. IG saved는 비공개 한계로 후순위.
+        </p>
+      </div>
+
+      <!-- P3 -->
+      <div class="card p-5 border-l-4 border-l-blue-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-blue-200 text-blue-900">P3</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-SAVED-BRANDS-001 + SPEC-NOTIFY-2TIER-001 (가칭)</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">D. Brand save + 신상 푸시 (2-tier 알림)</h3>
+        <p class="text-[13px] text-zinc-600">
+          <span class="mono">saved_brands</span> 테이블 + 카드에 ❤️ 버튼 + 명시적 저장 액션 (이미 있는 implicit-fb 보강).
+          신상 매칭 푸시는 <strong>product DB 크롤러 자동화 선결</strong> 후 발동.
+        </p>
+      </div>
+
+      <!-- P3+ -->
+      <div class="card p-5 border-l-4 border-l-blue-500">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="pill bg-blue-200 text-blue-900">P3+</span>
+          <span class="text-[11px] text-zinc-500 mono">SPEC-GROUP-CHAT-001 (가칭)</span>
+        </div>
+        <h3 class="text-[15px] font-semibold mb-1">E. Group chat mode</h3>
+        <p class="text-[13px] text-zinc-600">
+          친구 단톡방에 kiko 추가 → 공동 코디 추천. multi-chat_id 라우팅 + per-group TasteProfile.
+          성장 루프지만 PMF 확인 후 진입.
+        </p>
+      </div>
+
+    </div>
+
+    <div class="mt-5 p-4 bg-zinc-50 border border-zinc-200 rounded-lg text-[13px] text-zinc-700">
+      <strong>검증 대기:</strong> QR이 <span class="mono">?start=&lt;token&gt;</span> 딥링크인지 확인 (web↔Telegram 계정 바인딩 필요 시). 현재는 봇 진입은 동작 ✅
+    </div>
+  </section>
+
+  <!-- SOURCES -->
+  <section class="border-t border-zinc-200 pt-6">
+    <h3 class="text-[13px] font-semibold mb-3 text-zinc-700">Sources</h3>
+    <ul class="text-[12.5px] text-zinc-600 space-y-1.5 mono">
+      <li>· <a class="underline hover:text-zinc-900" href="https://techcrunch.com/2026/04/23/meet-noscroll-an-ai-bot-that-does-your-doomscrolling-for-you/" target="_blank">TechCrunch — Meet Noscroll (2026-04-23)</a></li>
+      <li>· <a class="underline hover:text-zinc-900" href="https://www.webpronews.com/noscrolls-ai-agent-ends-doomscrolling-by-text-a-startups-bid-to-reclaim-user-attention/" target="_blank">WebProNews — Noscroll's AI Agent</a></li>
+      <li>· <a class="underline hover:text-zinc-900" href="https://core.telegram.org/api/links" target="_blank">Telegram Deep Links (공식)</a></li>
+      <li>· <a class="underline hover:text-zinc-900" href="https://docs.python-telegram-bot.org/en/v21.7/examples.deeplinking.html" target="_blank">python-telegram-bot deeplinking example</a></li>
+      <li>· <a class="underline hover:text-zinc-900" href="https://noscroll.com/" target="_blank">noscroll.com 랜딩</a> · <a class="underline hover:text-zinc-900" href="https://x.com/noscroll" target="_blank">x.com/noscroll</a></li>
+    </ul>
+  </section>
+
+</main>
+
+</body>
+</html>

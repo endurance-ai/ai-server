@@ -1,4 +1,4 @@
-project_name: "portal-ai-server"
+project_name: "kiko-ai-server"
 
 languages:
   - python
@@ -28,7 +28,7 @@ base_modes:
 default_modes:
 
 initial_prompt: |
-  Portal.ai 패션 추천 AI 서버 (FastAPI). 검색 + 리파인 파이프라인.
+  kiko.ai 패션 추천 AI 서버 (FastAPI). 검색 + 리파인 파이프라인.
   app/ (API + pipeline + scoring + providers + models), scripts/ (배치)
   Tech: Python 3.13, FastAPI, LiteLLM, Qdrant, Pydantic v2, uv
 
