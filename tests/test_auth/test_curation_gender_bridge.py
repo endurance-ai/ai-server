@@ -1,11 +1,15 @@
-"""curation 성별 3단 다리 — VLM → products.gender → 제외.
+"""curation 성별 매칭 — products.gender 단일 출처.
 
-`search_products_v6` 와 같은 계단을 쓰지만 **마지막 칸이 반대다**: 검색은 성별
-정보가 없으면 fail-open(양쪽 노출), 큐레이션은 fail-closed(제외). 이 비대칭이
-의도된 것임을 여기서 고정한다 — 메인 피드에 성별이 어긋난 상품을 띄우느니
-VLM 배치가 돌 때까지 기다린다.
+이력: VLM(product_features) 우선 3단 다리 → 크롤러 정본 우선 → 단일 출처.
+gender 소유권이 크롤러로 돌아왔고 migration 104 가
+`chk_products_gender_required` 를 VALIDATE 해 products.gender 는
+non-NULL · non-empty · canonical 이 보장된다. **VLM 은 더 이상 읽지 않는다.**
 
-products.gender 를 DROP 할 때 2번째 칸과 그 케이스들을 함께 지운다.
+`search_products_v6` 와 술어 모양은 같지만 **unisex 취급이 반대다**: 검색은
+unisex 를 남녀 양쪽에 노출하고, 큐레이션은 제외한다(명시 라벨만 메인 피드에
+올린다). 이 비대칭이 의도된 것임을 여기서 고정한다.
+
+product_features 조인은 남아 있다 — primary_color 와 품질 게이트가 쓴다.
 """
 
 from __future__ import annotations
@@ -25,14 +29,19 @@ _MATCH_SQL = f"""
 """
 
 # (name, VLM gender, products.gender)
+#
+# VLM 값은 이제 **무시된다** — 앞의 두 픽스처가 그걸 고정한다. products.gender 와
+# 어긋나는 VLM 을 심어 두고, 결과가 products.gender 를 따르는지 본다.
 _FIXTURES = [
-    ("vlm-women-overrides-legacy-men", "women", ["men"]),
-    ("vlm-unisex-excluded", "unisex", ["women"]),
-    ("legacy-women", None, ["women"]),
-    ("legacy-women-plus-unisex-excluded", None, ["women", "unisex"]),
-    ("legacy-men", None, ["men"]),
-    ("no-gender-anywhere", None, None),
-    ("legacy-empty-array", None, []),
+    ("vlm-women-ignored-products-men", "women", ["men"]),
+    ("vlm-unisex-ignored-products-women", "unisex", ["women"]),
+    ("women", None, ["women"]),
+    ("women-plus-unisex-excluded", None, ["women", "unisex"]),
+    ("men", None, ["men"]),
+    # 아래 둘은 chk_products_gender_required 때문에 운영에서는 존재할 수 없다.
+    # 술어가 방어적으로 동작하는지만 확인한다.
+    ("no-gender", None, None),
+    ("empty-array", None, []),
 ]
 
 
@@ -64,23 +73,36 @@ async def _matched(pool, gender: str) -> list[str]:
         return [r[0] for r in await cur.fetchall()]
 
 
-async def test_women_matches_vlm_first_then_legacy(pool) -> None:
+async def test_women_reads_products_gender_and_ignores_vlm(pool) -> None:
     await _seed(pool)
+    # vlm-unisex-ignored-products-women: VLM 이 unisex 라도 products.gender 가
+    # ['women'] 이므로 잡힌다. VLM 을 봤다면 unisex 제외 규칙에 걸렸을 것이다.
     assert await _matched(pool, "women") == [
-        "legacy-women",
-        "vlm-women-overrides-legacy-men",
+        "vlm-unisex-ignored-products-women",
+        "women",
     ]
 
 
-async def test_men_falls_back_to_legacy_and_loses_the_vlm_override(pool) -> None:
+async def test_men_reads_products_gender_and_ignores_vlm(pool) -> None:
     await _seed(pool)
-    # legacy 가 ['men'] 이어도 VLM 이 women 이라고 하면 men 에서 빠진다.
-    assert await _matched(pool, "men") == ["legacy-men"]
+    # vlm-women-ignored-products-men: VLM 이 women 이라고 해도 products.gender 가
+    # ['men'] 이므로 men 에 잡힌다. 예전 3단 다리에서는 빠졌던 케이스다.
+    assert await _matched(pool, "men") == [
+        "men",
+        "vlm-women-ignored-products-men",
+    ]
+
+
+async def test_unisex_is_excluded_from_both(pool) -> None:
+    """검색(v6)은 unisex 를 남녀 양쪽에 노출한다 — 큐레이션은 제외한다."""
+    await _seed(pool)
+    for gender in ("women", "men"):
+        assert "women-plus-unisex-excluded" not in await _matched(pool, gender)
 
 
 async def test_missing_gender_is_excluded_from_both(pool) -> None:
-    """fail-closed. 검색(v6)이라면 이 둘은 양쪽에 노출된다 — 큐레이션은 아니다."""
+    """운영에서는 chk_products_gender_required 가 막지만 술어도 방어한다."""
     await _seed(pool)
-    excluded = {"no-gender-anywhere", "legacy-empty-array"}
+    excluded = {"no-gender", "empty-array"}
     assert excluded.isdisjoint(await _matched(pool, "women"))
     assert excluded.isdisjoint(await _matched(pool, "men"))

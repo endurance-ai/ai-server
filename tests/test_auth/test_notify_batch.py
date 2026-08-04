@@ -145,16 +145,24 @@ async def test_brand_new_products_notify_once_and_respect_gender(client: AsyncCl
 
 
 @pytest.mark.asyncio
-async def test_gender_filled_in_later_is_still_caught(client: AsyncClient, pool):
-    """VLM 이 나중에 성별을 채워도 잡혀야 한다 — 워터마크였다면 영구 유실될 케이스."""
+async def test_user_gender_filled_in_later_is_still_caught(client: AsyncClient, pool):
+    """유저 성별이 나중에 채워져도 잡혀야 한다 — 워터마크였다면 영구 유실될 케이스.
+
+    원래 이 테스트는 **상품** 성별이 나중에 채워지는 경우(VLM 단일 출처 시절)를
+    고정했다. gender 소유권이 크롤러로 돌아오고 `chk_products_gender_required` 가
+    VALIDATE 되면서 products.gender 는 NULL 일 수 없어졌고, 그 시나리오는 도달
+    불가능해졌다. 보존창이 막아주는 "나중에 해결" 케이스는 이제 유저 쪽이다 —
+    user_profiles.gender 가 비어 있으면 picks CTE 에서 빠진다.
+    """
     _auth, user_id = await _login(client)
+
+    # 유저 성별 미설정 — picks 의 `up.gender IN ('female','male')` 에서 탈락한다.
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await cur.execute("UPDATE ai.user_profiles SET gender = NULL WHERE user_id = %s", (user_id,))
         await conn.commit()
 
-    # 크롤러는 gender 를 쓰지 않는다 (VLM 단일 출처) — 갓 들어온 신상의 실제 모습.
-    product_id = await _insert_product(pool, brand="Picked")
-    await _set_product(pool, product_id, gender=None)
+    # 상품은 처음부터 성별을 갖고 들어온다 (크롤러 계약).
+    product_id = await _insert_product(pool, brand="Picked", gender=["women"])
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (product_id,))
         brand_node_id = (await cur.fetchone())[0]
@@ -165,19 +173,14 @@ async def test_gender_filled_in_later_is_still_caught(client: AsyncClient, pool)
         await conn.commit()
 
     report = await run_notify_batch(pool, only_user=UUID(user_id))
-    assert report.detected[KIND_BRAND_NEW] == 0  # 아직 성별 미해결
+    assert report.detected[KIND_BRAND_NEW] == 0  # 유저 성별 미해결
 
-    # VLM 배치가 뒤늦게 성별을 채운다.
+    # 유저가 뒤늦게 성별을 설정한다.
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO public.product_features (product_id, feature_metadata)
-            VALUES (%s, '{"gender": "women"}'::jsonb)
-            """,
-            (product_id,),
-        )
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
 
+    # 보존창이 살아 있으므로 다시 후보가 된다.
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_BRAND_NEW] == 1
 
