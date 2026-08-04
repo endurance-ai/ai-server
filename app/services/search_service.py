@@ -84,11 +84,10 @@ def _resolve_gender(req: Any) -> str | None:
     값은 None(필터 off). unisex 상품은 어느 성별 요청에도 항상 포함된다.
     시맨틱 제약이므로 완화 재시도에서 제거하지 않는다.
 
-    2026-07-29 / 2026-08-03 — 이 함수는 두 번 다 그대로다. 바뀐 건 RPC 쪽
-    매칭 소스 순위로, 현재는 `products.gender` → `product_features.
-    feature_metadata->>'gender'` → fail-open 3단 다리다. VLM 우선이었다가
-    성능 미달로 크롤러 정본 우선으로 되돌렸다 (search_products_v6.sql 헤더).
-    호출부 계약('men'|'women'|None)은 세 시점 모두 동일하다."""
+    2026-07-29 / 2026-08-03 — 이 함수는 그동안 한 번도 바뀌지 않았다. 바뀐 건
+    RPC 쪽 매칭 소스뿐이다: VLM 우선 3단 다리 → 크롤러 정본 우선 → migration 104
+    VALIDATE 이후 `p.gender && ARRAY[p_gender,'unisex']` 단일 출처로 축약.
+    호출부 계약('men'|'women'|None)은 전 구간 동일하다."""
     if not settings.SEARCH_GENDER_FILTER_ENABLED:
         return None
     g = str(getattr(req, "gender", None) or "").strip().lower()
