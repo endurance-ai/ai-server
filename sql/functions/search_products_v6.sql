@@ -42,26 +42,26 @@
 --   인덱스: idx_pf_primary_color (migration 095). 기존 jsonb_path_ops GIN 은
 --   `->>` 등치 비교를 타지 못하므로 표현식 btree 가 따로 필요하다.
 --
--- ── 성별 필터 (`p_gender`, 2026-07-16 도입 / 2026-07-29 3단 다리로 교체) ──
+-- ── 성별 필터 (`p_gender`) ──────────────────────────────────────────────
+-- 이력: 2026-07-16 도입 / 2026-07-29 VLM 우선 3단 다리 / **2026-08-04 단일 출처**
+--
 -- 호출자(AI 서버)는 men/women 만 보낸다: unisex 요청/미확인은 NULL(필터 off).
 -- 골든셋 2차 실측 문제(남성 쿼리에 여성 상품 누수) 해소용 상품 레벨 하드 필터.
 -- 시맨틱 제약이므로 어느 rung 에서도 완화하지 않는다 (in_stock 과 동급).
 --
--- 매칭 우선순위 (CASE 3단):
---   1) pf.feature_metadata->>'gender' 가 있으면 그것만 본다   ← 최종 상태
---   2) 없으면 products.gender (text[]) 로 폴백                 ← 기존 154k 행
---   3) 둘 다 비었으면 통과 (fail-open)                          ← 신규 gender-less 행
+--   AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
 --
--- 왜 3단인가: 크롤러가 gender 생성을 멈추는(products.gender 를 NULL 로 두는)
---   시점과 VLM 이 feature_metadata.gender 를 채우는 시점이 어긋난다. 2단
---   COALESCE(..., 'unisex') 로 가면 features 가 비어있는 지금 **전 상품이 unisex 로
---   접혀 성별 필터가 통째로 무력화**된다 (도입 이유였던 여성/남성 누수가 부활).
---   반대로 fail-open 없이 strict 로 두면 신규 상품이 어떤 성별 검색에도 안 걸리고
---   조용히 사라진다. 3단이 그 사이를 메운다.
+-- 다단 CASE 와 fail-open 을 걷어냈다. gender 출처를 VLM(product_features) 으로
+-- 이관했다가 성능 미달로 크롤러에 회귀시켰고, migration 104 가
+-- `chk_products_gender_required` 를 VALIDATE 해 **p.gender 의 non-NULL ·
+-- non-empty · canonical(men/women/unisex) 이 DB 차원에서 보장**된다.
+-- 따라서 `&&` 가 NULL 을 낼 수 없고 폴백이 방어할 대상도 없다.
 --
--- 🧹 VLM gender 커버리지가 충분해지면 1)만 남기고 2)/3) 을 삭제할 것.
---   그때 products.gender 컬럼과 idx_products_gender 도 함께 DROP (migration 예정).
---   `chk_products_gender_required` 는 migration 096 에서 이미 해제됐다.
+-- ⚠️ `LEFT JOIN product_features pf` 는 **그대로 둔다** — p_color_family 필터가
+--    `pf.feature_metadata->>'primary_color'` 를 쓴다. color 는 계속 VLM 소관이다.
+--
+-- 되돌려야 한다면: 104 를 DROP 하고 p.gender 에 NULL 이 다시 생길 수 있는
+--    상태로 가는 경우에만 3단 다리가 필요해진다.
 
 BEGIN;
 
@@ -135,13 +135,7 @@ BEGIN
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (
         p_gender IS NULL
-        OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-             WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-               THEN p.gender && ARRAY[p_gender, 'unisex']
-             ELSE true
-           END
+        OR p.gender && ARRAY[p_gender, 'unisex']
       );
   END IF;
 
@@ -173,13 +167,7 @@ BEGIN
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
           p_gender IS NULL
-          OR CASE
-               WHEN pf.feature_metadata->>'gender' IS NOT NULL
-                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-               WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-                 THEN p.gender && ARRAY[p_gender, 'unisex']
-               ELSE true
-             END
+          OR p.gender && ARRAY[p_gender, 'unisex']
         )
       ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
       LIMIT p_limit;
@@ -208,13 +196,7 @@ BEGIN
          OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
     AND (
       p_gender IS NULL
-      OR CASE
-           WHEN pf.feature_metadata->>'gender' IS NOT NULL
-             THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-           WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-             THEN p.gender && ARRAY[p_gender, 'unisex']
-           ELSE true
-         END
+      OR p.gender && ARRAY[p_gender, 'unisex']
     );
 
   IF v_node_count > 0 THEN
@@ -243,13 +225,7 @@ BEGIN
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
           p_gender IS NULL
-          OR CASE
-               WHEN pf.feature_metadata->>'gender' IS NOT NULL
-                 THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-               WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-                 THEN p.gender && ARRAY[p_gender, 'unisex']
-               ELSE true
-             END
+          OR p.gender && ARRAY[p_gender, 'unisex']
         )
       ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
       LIMIT p_limit;
@@ -274,13 +250,7 @@ BEGIN
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (
         p_gender IS NULL
-        OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-             WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-               THEN p.gender && ARRAY[p_gender, 'unisex']
-             ELSE true
-           END
+        OR p.gender && ARRAY[p_gender, 'unisex']
       )
     ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
     LIMIT p_limit;
