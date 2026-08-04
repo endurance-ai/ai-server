@@ -94,12 +94,7 @@ BEGIN
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
-      AND (p_gender IS NULL OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-             WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-               THEN p.gender && ARRAY[p_gender, 'unisex']
-             ELSE true END)
+      AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
     ORDER BY pe.embedding::halfvec <=> query_embedding
     LIMIT p_pool
   ),
@@ -117,12 +112,7 @@ BEGIN
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
-      AND (p_gender IS NULL OR CASE
-             WHEN pf.feature_metadata->>'gender' IS NOT NULL
-               THEN pf.feature_metadata->>'gender' IN (p_gender, 'unisex')
-             WHEN p.gender IS NOT NULL AND cardinality(p.gender) > 0
-               THEN p.gender && ARRAY[p_gender, 'unisex']
-             ELSE true END)
+      AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
     ORDER BY pf.text_embedding <=> query_embedding
     LIMIT p_pool
   ),
