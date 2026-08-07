@@ -67,6 +67,9 @@ class NotificationCategories(BaseModel):
     restock: bool | None = None
     price_drop: bool | None = None
     brand_new_product: bool | None = None
+    # 알림 2차 — 일일 브리핑 토글. PATCH 가 jsonb `||` 병합이라 키 추가는 기존 키에
+    # 영향 없다.
+    daily_briefing: bool | None = None
 
 
 class UpdateNotificationsRequest(BaseModel):
@@ -86,6 +89,7 @@ _DEFAULT_NOTIFICATION_SETTINGS = {
     "restock": True,
     "price_drop": True,
     "brand_new_product": True,
+    "daily_briefing": True,
 }
 
 
