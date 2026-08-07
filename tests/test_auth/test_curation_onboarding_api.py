@@ -113,6 +113,15 @@ async def _insert_auto_sections(pool, gender: str = "women") -> None:
         )
 
 
+async def _insert_view(pool, user_id: str, product_id: int, viewed_at) -> None:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO ai.product_views (user_id, product_id, session_id, viewed_at) VALUES (%s, %s, %s, %s)",
+            (user_id, product_id, uuid4(), viewed_at),
+        )
+        await conn.commit()
+
+
 # ── GET /v1/brands/search ─────────────────────────────────────────────────────
 
 
@@ -237,6 +246,39 @@ async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient
     assert [s["id"] for s in sections] == ["popular"]  # inactive/타 gender 제외
     ids = [p["product_id"] for p in sections[0]["products"]]
     assert ids == [p2, p1]  # product_ids 순서 보존, 품절 제외
+
+
+@pytest.mark.asyncio
+async def test_curation_recent_views_injected_at_top_in_recency_order(client: AsyncClient, pool):
+    """최근 본 상품 — 로그인 유저 열람 로그를 최상단에 최신순 주입, 다른 구좌와 dedup."""
+    from datetime import UTC, datetime, timedelta
+
+    auth, user_id = await _login(client)
+    p_old = await _insert_product(pool, brand="RV-A", name="Old")
+    p_new = await _insert_product(pool, brand="RV-B", name="New")
+    now = datetime.now(UTC)
+    await _insert_view(pool, user_id, p_old, now - timedelta(hours=2))
+    await _insert_view(pool, user_id, p_new, now - timedelta(minutes=5))
+    # 같은 상품이 popular 에도 있어도 최근 본 상품이 선점(dedup) → popular 에선 제외.
+    await _insert_section(pool, section_id="popular", gender="women", product_ids=[p_new], sort_order=1)
+
+    resp = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
+    assert resp.status_code == 200
+    sections = resp.json()["sections"]
+    assert sections[0]["id"] == "recent-views"
+    assert sections[0]["slot_type"] == "auto"
+    assert sections[0]["title"] == "최근 본 상품"
+    assert [p["product_id"] for p in sections[0]["products"]] == [p_new, p_old]  # 최신순
+    popular = next(s for s in sections if s["id"] == "popular")
+    assert [p["product_id"] for p in popular["products"]] == []  # recent-views 가 선점
+
+
+@pytest.mark.asyncio
+async def test_curation_recent_views_absent_for_guest(client: AsyncClient):
+    """비로그인은 열람 로그가 없어 최근 본 상품 구좌가 안 뜬다."""
+    resp = await client.get("/v1/curation", params={"gender": "women"})
+    assert resp.status_code == 200
+    assert all(s["id"] != "recent-views" for s in resp.json()["sections"])
 
 
 @pytest.mark.asyncio

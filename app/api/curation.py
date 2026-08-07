@@ -26,6 +26,8 @@ from app.services.curation_chips import Chip, chips_for
 from app.services.curation_refresh import (
     GENDER_MATCH_SQL,
     PRODUCT_FEATURES_JOIN,
+    query_params,
+    recent_views_ids_sql,
     select_candidate_ids,
 )
 from app.services.curation_taste import record_impressions
@@ -126,8 +128,24 @@ async def _load_sections(
             )
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
+        # 최근 본 상품 — 개인 행동 구좌(진입 시점 실시간). 크론/Notion 이 아니라
+        # 여기서 유저 열람 로그(ai.product_views)로 채운다. 응답 slot_type 은
+        # 'auto'(앱은 제네릭 렌더). 최상단에 주입해 dedup 우선권을 줘 다른 구좌와
+        # 겹치지 않게 한다. 로그인 + 하한선 통과 상품이 있을 때만(빈 구좌는 숨김).
+        if user_id is not None:
+            await cur.execute(
+                recent_views_ids_sql(),
+                {**query_params(gender), "user_id": user_id, "limit": _PRODUCTS_PER_SECTION * 2},
+            )
+            recent_ids = [int(r[0]) for r in await cur.fetchall()]
+            if recent_ids:
+                section_rows = [("recent-views", "auto", "최근 본 상품", None, recent_ids), *section_rows]
+
         for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
-            if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
+            if section_id == "recent-views":
+                # 이미 하한선·성별 통과·최신순. taste 재랭킹 없이 시간순 유지.
+                selected = [pid for pid in (product_ids or []) if pid not in excluded_ids][:_PRODUCTS_PER_SECTION]
+            elif slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
                 selected = [
                     int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
                 ]

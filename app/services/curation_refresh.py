@@ -189,7 +189,7 @@ def _candidate_sql(section_id: str) -> str:
     """  # noqa: S608 -- all interpolation is module-owned SQL
 
 
-def _query_params(gender: str) -> dict[str, Any]:
+def query_params(gender: str) -> dict[str, Any]:
     categories = list(_BASE_EXCLUDED_CATEGORIES)
     subcategories: list[str] = []
     if settings.CURATION_SEASON.lower() == "summer":
@@ -203,6 +203,25 @@ def _query_params(gender: str) -> dict[str, Any]:
         "excluded_categories": categories,
         "excluded_subcategories": subcategories,
     }
+
+
+def recent_views_ids_sql() -> str:
+    """최근 본 상품(개인 행동 구좌) 후보 SQL — 유저별 열람 로그(ai.product_views)를
+    품질 하한선·성별 게이트 통과분만 상품 단위 최신순으로 뽑는다. 크론 풀이 아니라
+    curation.py 가 요청 시점에 실행(진입 시점 실시간). 파라미터: user_id, limit +
+    query_params(gender). 같은 상품을 여러 번 봐도 상품 단위로 한 번(최신 열람 기준)."""
+    return f"""
+        SELECT p.id
+        FROM ai.product_views pv
+        JOIN public.products p ON p.id = pv.product_id
+        LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+        {PRODUCT_FEATURES_JOIN}
+        WHERE pv.user_id = %(user_id)s
+          AND {_quality_sql()}
+        GROUP BY p.id
+        ORDER BY max(pv.viewed_at) DESC
+        LIMIT %(limit)s
+    """  # noqa: S608 -- 보간되는 값은 모두 모듈 소유 상수
 
 
 def _stable_tie(seed: str, product_id: int) -> int:
@@ -471,7 +490,7 @@ async def refresh_auto_sections(
         for section_id in section_ids:
             try:
                 async with pool.connection() as conn, conn.cursor() as cur:
-                    await cur.execute(_candidate_sql(section_id), _query_params(gender))
+                    await cur.execute(_candidate_sql(section_id), query_params(gender))
                     raw = await cur.fetchall()
                     rows = [
                         {
