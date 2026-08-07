@@ -13,6 +13,7 @@ from app.api.history import router as history_router
 from app.api.iap import router as iap_router
 from app.api.legal import router as legal_router
 from app.api.me import router as me_router
+from app.api.notifications import router as notifications_router
 from app.api.onboarding import router as onboarding_router
 from app.api.products import router as products_router
 from app.api.recommend import router as recommend_router
@@ -41,6 +42,7 @@ router.include_router(results_router)
 router.include_router(history_router)
 router.include_router(feedback_router)
 router.include_router(devices_router)
+router.include_router(notifications_router)
 router.include_router(legal_router)
 router.include_router(iap_router)
 router.include_router(subscription_router)
