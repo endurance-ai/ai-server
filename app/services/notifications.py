@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 KIND_RESTOCK = "restock"
 KIND_PRICE_DROP = "price_drop"
 KIND_BRAND_NEW = "brand_new_product"
-KINDS: tuple[str, ...] = (KIND_RESTOCK, KIND_PRICE_DROP, KIND_BRAND_NEW)
+KIND_BRAND_SALE = "brand_sale"
+KINDS: tuple[str, ...] = (KIND_RESTOCK, KIND_PRICE_DROP, KIND_BRAND_NEW, KIND_BRAND_SALE)
 
 # 마지막 실행 시각을 남기는 ai.notification_job_state 행 키 (관측용 — 감지는 이 값을
 # 읽지 않는다. 이유는 _NEW_PRODUCT_SQL 주석 참조).
@@ -52,6 +53,9 @@ SAVED_JOB = "notify_saved_detect"
 BRAND_JOB = "notify_brand_detect"
 SAVED_CATEGORY = "saved_product_digest"
 BRAND_CATEGORY = "brand_new_digest"
+# brand_sale 전용 다이제스트 카테고리 — brand_new(BRAND_CATEGORY)와 분리한다.
+# 공유하면 fetch_brand_new_days_last_week 의 주간 캡 카운트에 세일 발송이 섞인다.
+BRAND_SALE_CATEGORY = "brand_sale_digest"
 
 # 알림 종류는 기본 opt-in. 유저가 끄면 notification_settings 에 false 가 들어온다.
 DEFAULT_KIND_CONSENT = True
@@ -86,12 +90,40 @@ class NewProductRow:
 
 
 @dataclass(frozen=True, slots=True)
+class BrandSaleRow:
+    """브랜드별 세일 비율 집계 + 직전 세일 상태 + notify_enabled 팔로워 한 행.
+
+    detect_save_events 의 SavedRow 처럼 판정에 필요한 값을 이미 조인해 담는다.
+    followers 는 이 브랜드를 notify_enabled 로 팔로우한 유저들 — false→true 전환 시
+    각 팔로워마다 이벤트를 만든다.
+    """
+
+    brand_node_id: int
+    brand: str | None
+    sale_count: int
+    total_count: int
+    prev_on_sale: bool
+    followers: tuple[UUID, ...]
+    # 이 브랜드 현재 세일 중 가장 깊은 개별 상품 할인율 (0~1). 발동 임계값은
+    # sale_count/total_count 비율이지만, 문구의 "최대 N% 싸요" 는 이 값(=가장 큰
+    # 단일 상품 할인)을 쓴다 — 카탈로그 커버리지 비율이 아니라 실제 최대 할인폭.
+    max_discount_pct: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Event:
     user_id: UUID
     kind: str
-    product_id: int
+    product_id: int | None
     brand_node_id: int | None = None
     payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BrandSaleStateWrite:
+    brand_node_id: int
+    on_sale: bool
+    ratio: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,14 +263,62 @@ def new_product_events(rows: list[NewProductRow]) -> list[Event]:
     ]
 
 
+def detect_brand_sale_events(
+    rows: list[BrandSaleRow],
+    *,
+    threshold: float = 0.30,
+) -> tuple[list[Event], list[BrandSaleStateWrite]]:
+    """브랜드별 세일 비율이 임계값을 **처음 넘는 순간에만** 팔로워에게 알린다.
+
+    재입고 판정(baseline_in_stock false→true, detect_save_events)과 같은 전환 패턴이다.
+    비율이 임계값 이상이면 on_sale=true 를 항상 기록해 두고, 직전 상태가 false 였을
+    때만 이벤트를 만든다 — 연속 세일 기간 내내 매 배치 재발송하지 않는다.
+
+    state 는 이벤트 발생 여부와 무관하게 항상 현재 비율/상태로 갱신한다. 그래야
+    다음 배치가 정확한 직전 상태를 보고 false→true 전환을 판정할 수 있다.
+    """
+    events: list[Event] = []
+    states: list[BrandSaleStateWrite] = []
+
+    for row in rows:
+        ratio = row.sale_count / row.total_count if row.total_count > 0 else 0.0
+        now_on_sale = ratio >= threshold
+        states.append(BrandSaleStateWrite(row.brand_node_id, now_on_sale, ratio))
+
+        if now_on_sale and not row.prev_on_sale:
+            # ratio/sale_pct 는 발동 신호(카탈로그 세일 커버리지)라 관측/디버깅용으로
+            # 남긴다. 문구가 실제로 쓰는 값은 max_discount_pct(가장 깊은 단일 할인)다.
+            payload = {
+                "brand": row.brand,
+                "ratio": round(ratio, 3),
+                "sale_pct": round(ratio * 100),
+                "max_discount_pct": round(row.max_discount_pct * 100) if row.max_discount_pct else None,
+            }
+            for user_id in row.followers:
+                events.append(
+                    Event(
+                        user_id=user_id,
+                        kind=KIND_BRAND_SALE,
+                        product_id=None,  # 브랜드 단위 알림 — 특정 상품에 매이지 않는다.
+                        brand_node_id=row.brand_node_id,
+                        payload=payload,
+                    )
+                )
+
+    return events, states
+
+
 def kind_allowed(prefs: dict[str, Any] | None, kind: str) -> bool:
     """Apply the existing mobile master/marketing controls plus kind opt-out."""
     values = prefs or {}
     if not bool(values.get("system", True)):
         return False
-    if kind == KIND_BRAND_NEW and not bool(values.get("release_alerts", True)):
+    # brand_sale 은 전용 동의 키가 설정 스키마에 없어 브랜드 소식(brand_new_product)
+    # 동의를 공유한다 — 프론트가 두 종류를 한 "브랜드 알림" 토글로 묶는다.
+    consent_kind = KIND_BRAND_NEW if kind == KIND_BRAND_SALE else kind
+    if consent_kind == KIND_BRAND_NEW and not bool(values.get("release_alerts", True)):
         return False
-    return bool(values.get(kind, DEFAULT_KIND_CONSENT))
+    return bool(values.get(consent_kind, DEFAULT_KIND_CONSENT))
 
 
 def select_for_delivery(
@@ -265,6 +345,9 @@ def select_for_delivery(
     ordered: dict[UUID, list[Event]] = {}
     for user_id, user_events in per_user.items():
         brand_new = [e for e in user_events if e.kind == KIND_BRAND_NEW][:max_brand_items]
+        # brand_sale 은 이 경로를 타지 않는다 — 인박스 무조건 적재 + 푸시 게이트가
+        # 서로 달라 _persist_brand_sale 이 전담한다(인박스는 동의/캡과 무관하게 항상,
+        # 푸시만 kind_allowed + 주간 캡으로 게이트).
         selected = [
             *[e for e in user_events if e.kind == KIND_RESTOCK],
             *[e for e in user_events if e.kind == KIND_PRICE_DROP],
@@ -285,6 +368,13 @@ def build_digest(events: list[Event], *, notification_ids: list[int] | None = No
         brands = {e.payload.get("brand") for e in events if e.payload.get("brand")}
         brand_label = next(iter(brands)) if len(brands) == 1 else "관심 브랜드"
         title, body = f"{brand_label}에 신상 {len(events)}개가 들어왔어요", ""
+    elif kinds == {KIND_BRAND_SALE}:
+        # 한 브랜드면 브랜드명으로, 여러 브랜드가 동시에 전환됐으면 곳 수로 묶는다.
+        # (이 분기가 len==1 폴백보다 먼저 걸려 brand_sale 은 _single_copy 를 타지 않는다.)
+        if len(events) == 1:
+            title, body = _single_copy(events[0])
+        else:
+            title, body = f"팔로우한 브랜드 {len(events)}곳이 세일 중이에요", ""
     elif len(events) == 1:
         title, body = _single_copy(events[0])
     else:
@@ -302,7 +392,15 @@ def build_digest(events: list[Event], *, notification_ids: list[int] | None = No
 
 
 def _single_copy(event: Event) -> tuple[str, str]:
-    """찜 알림(가격 하락 · 재입고) 한 건짜리 문구. PRD 알림 문안 표 참조."""
+    """찜 알림(가격 하락 · 재입고) + 브랜드 세일 한 건짜리 문구. PRD 알림 문안 표 참조."""
+    if event.kind == KIND_BRAND_SALE:
+        brand = event.payload.get("brand")
+        # PRD 문안: 제목 "팔로우한 {브랜드명} 세일 시작했어요" / 본문 "최대 N% 싸요".
+        # N 은 카탈로그 커버리지 비율이 아니라 가장 깊은 개별 상품 할인율이다.
+        title = f"팔로우한 {brand} 세일 시작했어요" if brand else "팔로우한 브랜드 세일 시작했어요"
+        max_discount_pct = event.payload.get("max_discount_pct")
+        body = f"최대 {max_discount_pct}% 싸요" if max_discount_pct else ""
+        return title, body
     if event.kind == KIND_PRICE_DROP:
         brand = event.payload.get("brand")
         title = f"찜하신 {brand} 상품이 할인되었어요" if brand else "찜한 상품이 할인되었어요"
@@ -324,6 +422,11 @@ def _headline(event: Event) -> str:
         return f"{label} 다시 입고됐어요"
     if event.kind == KIND_PRICE_DROP:
         return f"{label} 가격이 {event.payload.get('drop_pct', 0)}% 내려갔어요"
+    # 방어용 — brand_sale 은 전용 카테고리라 이 혼합-종류 폴백 경로에 도달하지 않는다
+    # (_persist_outbox 가 category 별로 다이제스트를 나눠 brand_sale 이 단독으로 묶인다).
+    if event.kind == KIND_BRAND_SALE:
+        brand = event.payload.get("brand") or "팔로우한 브랜드"
+        return f"{brand} 세일 중이에요"
     return f"{label} 새로 들어왔어요"
 
 
@@ -435,6 +538,62 @@ async def fetch_new_product_rows(
     ]
 
 
+# 브랜드별 세일 비율 = (sale_price < original_price 인 상품 수) / (전체 상품 수).
+# in_stock 필터 없음 (전체 카탈로그 기준 — 사용자 확정). notify_enabled 팔로워가
+# 하나라도 있는 브랜드만 집계한다. 성별 매칭은 없다 — 브랜드 단위 세일 소식은
+# 상품 추천이 아니라 브랜드 헤즈업이라 신상(brand_new)의 성별 게이트가 필요 없다.
+# only_user 는 팬아웃 대상만 좁힌다 — 비율/직전상태는 브랜드 전역이라 카나리
+# 실행이 다른 팔로워의 전환 상태를 앞당겨 소비할 수 있다(운영에선 풀배치가 정답).
+_BRAND_SALE_SQL = """
+    WITH followers AS (
+        SELECT ubp.brand_id, array_agg(ubp.user_id) AS user_ids
+        FROM ai.user_brand_picks ubp
+        WHERE ubp.notify_enabled
+          AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
+        GROUP BY ubp.brand_id
+    )
+    SELECT p.brand_node_id,
+           max(p.brand) AS brand,
+           count(*) FILTER (
+               WHERE p.sale_price IS NOT NULL
+                 AND p.original_price IS NOT NULL
+                 AND p.sale_price < p.original_price
+           ) AS sale_count,
+           count(*) AS total_count,
+           coalesce(bss.on_sale, false) AS prev_on_sale,
+           f.user_ids,
+           -- 문구용: 이 브랜드 현재 세일 중 가장 깊은 개별 상품 할인율(0~1).
+           -- FILTER 가 sale_price < original_price 를 보장하므로 분모는 항상 양수다.
+           max((p.original_price - p.sale_price)::numeric / NULLIF(p.original_price, 0)) FILTER (
+               WHERE p.sale_price IS NOT NULL
+                 AND p.original_price IS NOT NULL
+                 AND p.sale_price < p.original_price
+           ) AS max_discount
+    FROM followers f
+    JOIN public.products p ON p.brand_node_id = f.brand_id
+    LEFT JOIN ai.brand_sale_state bss ON bss.brand_node_id = f.brand_id
+    GROUP BY p.brand_node_id, f.user_ids, bss.on_sale
+"""
+
+
+async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, only_user: UUID | None = None) -> list[BrandSaleRow]:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(_BRAND_SALE_SQL, {"only_user": only_user})
+        rows = await cur.fetchall()
+    return [
+        BrandSaleRow(
+            brand_node_id=int(r[0]),
+            brand=r[1],
+            sale_count=int(r[2]),
+            total_count=int(r[3]),
+            prev_on_sale=bool(r[4]),
+            followers=tuple(r[5]),
+            max_discount_pct=float(r[6]) if r[6] is not None else None,
+        )
+        for r in rows
+    ]
+
+
 async def record_run(pool: AsyncConnectionPool, job: str, ran_at: datetime) -> None:
     """마지막 실행 시각 기록. 감지에는 쓰지 않는다 (보존창 + 안티조인이 대신한다).
 
@@ -487,6 +646,32 @@ async def fetch_brand_new_days_last_week(pool: AsyncConnectionPool, user_ids: li
             GROUP BY user_id
             """,
             (BRAND_CATEGORY, user_ids, settings.NOTIFY_TIMEZONE),
+        )
+        rows = await cur.fetchall()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+async def fetch_brand_sale_days_last_week(pool: AsyncConnectionPool, user_ids: list[UUID]) -> dict[UUID, int]:
+    """최근 7일 중 brand_sale 푸시가 실제로 나간 **날짜 수**를 유저별로 센다.
+
+    fetch_brand_new_days_last_week 와 같은 집계이되 카테고리만 BRAND_SALE_CATEGORY 로
+    바꾼다 — brand_new 캡과 독립적으로 세기 위해 전용 카테고리로 분리돼 있다. 이
+    카운트는 Phase B 푸시 게이트에만 쓰인다(인박스 적재는 이 캡과 무관하게 항상 함).
+    """
+    if not user_ids:
+        return {}
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT user_id, count(DISTINCT scheduled_on)
+            FROM ai.notification_messages
+            WHERE category = %s
+              AND user_id = ANY(%s)
+              AND scheduled_on >= (now() AT TIME ZONE %s)::date - 6
+              AND status IN ('accepted', 'partial')
+            GROUP BY user_id
+            """,
+            (BRAND_SALE_CATEGORY, user_ids, settings.NOTIFY_TIMEZONE),
         )
         rows = await cur.fetchall()
     return {r[0]: int(r[1]) for r in rows}
@@ -570,8 +755,12 @@ def delivery_window(category: str, now: datetime) -> tuple[date, datetime, datet
 
 def _message_payload(message_id: UUID, category: str, events: list[Event]) -> dict[str, Any]:
     primary = events[0]
-    if len(events) == 1:
+    if len(events) == 1 and primary.product_id is not None:
         route = f"/product/{primary.product_id}"
+    elif len(events) == 1 and primary.brand_node_id is not None:
+        # brand_sale 은 상품이 아니라 브랜드 단위 이벤트라 product_id 가 없다 —
+        # 브랜드 페이지로 딥링크한다 ("/product/None" 방지).
+        route = f"/brand/{primary.brand_node_id}"
     elif category == SAVED_CATEGORY:
         route = "/wishlist"
     else:
@@ -580,14 +769,18 @@ def _message_payload(message_id: UUID, category: str, events: list[Event]) -> di
         "schema_version": 1,
         "message_id": str(message_id),
         "kind": category,
-        "primary_product_id": str(primary.product_id),
+        "primary_product_id": str(primary.product_id) if primary.product_id is not None else None,
         "item_count": len(events),
         "route": route,
     }
 
 
 def _category_for(event: Event) -> str:
-    return BRAND_CATEGORY if event.kind == KIND_BRAND_NEW else SAVED_CATEGORY
+    if event.kind == KIND_BRAND_SALE:
+        return BRAND_SALE_CATEGORY
+    if event.kind == KIND_BRAND_NEW:
+        return BRAND_CATEGORY
+    return SAVED_CATEGORY
 
 
 async def _persist_outbox(
@@ -787,6 +980,245 @@ async def _persist_outbox(
                 deliveries += len(delivery_rows)
 
     return len(baselines), recorded, messages, deliveries
+
+
+async def _persist_brand_sale(
+    pool: AsyncConnectionPool,
+    *,
+    events: list[Event],
+    states: list[BrandSaleStateWrite],
+    prefs: dict[UUID, dict[str, Any] | None],
+    brand_sale_days_last_week: dict[UUID, int],
+    weekly_cap: int,
+    now: datetime,
+) -> tuple[int, int, int, int]:
+    """brand_sale 전용 적재 — 인박스는 무조건, 푸시만 동의·주간 캡으로 게이트.
+
+    brand_sale 은 restock/price_drop/brand_new 와 인박스 정책이 다르다. 감지된
+    이벤트(=세일 임계값을 방금 넘은 브랜드의 팔로워)는 동의/캡과 무관하게 전부
+    ai.notifications 에 적재해 알림함(GET /v1/notifications)에 노출한다. APNs 푸시
+    (메시지+딜리버리)만 kind_allowed 동의 + 주간 캡으로 게이트한다.
+
+    brand_sale 에만 이렇게 국한할 수 있는 이유: brand_sale 의 중복 방지는
+    ai.brand_sale_state 의 false→true 전환 게이트라 ai.notifications 행 존재에
+    의존하지 않는다. brand_new 처럼 ai.notifications 안티조인(_NEW_PRODUCT_SQL)을
+    쓰지 않으므로, 캡/동의로 막힌 이벤트를 인박스에 남겨도 다음 감지를 오염시키지
+    않는다. 상태 upsert·인박스 insert·푸시 적재는 한 트랜잭션으로 원자화한다.
+
+    반환: (recorded, messages, deliveries, pushed).
+      recorded   — Phase A 에서 실제 insert 된 알림 행 수
+      messages   — Phase B 에서 만든 메시지 수
+      deliveries — Phase B 에서 만든 딜리버리 수
+      pushed     — 푸시 게이트를 통과한(=selected) 이벤트 수 (리포트용)
+    """
+    recorded = 0
+    messages = 0
+    deliveries = 0
+    pushed = 0
+    if not states and not events:
+        return recorded, messages, deliveries, pushed
+
+    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        # Phase A ── 상태 전환(on_sale/ratio) upsert. 이벤트 발생 여부와 무관하게
+        # 항상 기록해야 다음 배치가 정확한 직전 상태로 false→true 를 판정한다.
+        for state in states:
+            await cur.execute(
+                """
+                INSERT INTO ai.brand_sale_state (brand_node_id, on_sale, ratio, updated_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (brand_node_id) DO UPDATE SET
+                    on_sale = EXCLUDED.on_sale,
+                    ratio = EXCLUDED.ratio,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (state.brand_node_id, state.on_sale, state.ratio, now),
+            )
+
+        # Phase A ── 감지된 세일 이벤트를 동의/캡과 무관하게 모두 인박스에 적재한다.
+        inserted_by_user: dict[UUID, list[RecordedEvent]] = {}
+        for event in events:
+            await cur.execute(
+                """
+                INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload)
+                VALUES (%s, %s, %s, %s, %s::jsonb)
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """,
+                (
+                    event.user_id,
+                    event.kind,
+                    event.product_id,
+                    event.brand_node_id,
+                    json.dumps(event.payload, ensure_ascii=False, default=str),
+                ),
+            )
+            row = await cur.fetchone()
+            if row:
+                inserted_by_user.setdefault(event.user_id, []).append(RecordedEvent(int(row[0]), event))
+                recorded += 1
+
+        # Phase B ── 인박스에 남은 이벤트 중 푸시 대상(동의 + 주간 캡)만 유저별
+        # 다이제스트 메시지로 만든다. 나머지는 인박스에 그대로 두고 처리 표시만 남긴다.
+        for user_id, user_inserted in inserted_by_user.items():
+            consent_ok = kind_allowed(prefs.get(user_id), KIND_BRAND_SALE)
+            cap_ok = brand_sale_days_last_week.get(user_id, 0) < weekly_cap
+            if not (consent_ok and cap_ok):
+                # 인박스 행은 이미 남았다 — 푸시만 억제. 관측용 사유를 남긴다.
+                reason = "consent_off" if not consent_ok else "weekly_cap"
+                await cur.execute(
+                    "UPDATE ai.notifications SET processed_at = now(), suppressed_reason = %s WHERE id = ANY(%s)",
+                    (reason, [item.notification_id for item in user_inserted]),
+                )
+                continue
+
+            pushed += len(user_inserted)
+            created_messages, created_deliveries = await _attach_brand_sale_message(cur, user_id, user_inserted, now)
+            messages += created_messages
+            deliveries += created_deliveries
+
+    return recorded, messages, deliveries, pushed
+
+
+async def _attach_brand_sale_message(
+    cur: Any,
+    user_id: UUID,
+    inserted: list[RecordedEvent],
+    now: datetime,
+) -> tuple[int, int]:
+    """푸시 대상 brand_sale 이벤트를 유저의 당일 다이제스트 메시지에 붙인다.
+
+    _persist_outbox 의 per-category create-or-merge 를 brand_sale 전용으로 옮긴 것이다.
+    당일 같은 유저 메시지가 pending 이면 SAVED_CATEGORY 처럼 그냥 병합한다 — brand_new 의
+    "overflow 는 이벤트 로그 밖에 둔다"(BRAND_CATEGORY continue) 분기는 안티조인 재시도
+    전용이라 brand_sale 엔 없다. 반환: (messages_created, deliveries_created).
+    """
+    category = BRAND_SALE_CATEGORY
+    scheduled_on, scheduled_at, expires_at = delivery_window(category, now)
+    # 같은 유저·카테고리·발송일만 직렬화한다 (수동 카나리가 스케줄 배치와 안전하게 경쟁).
+    await cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"notify:{user_id}:{category}:{scheduled_on.isoformat()}",),
+    )
+    await cur.execute(
+        """
+        SELECT message_id, status, scheduled_at
+        FROM ai.notification_messages
+        WHERE user_id = %s AND category = %s AND scheduled_on = %s
+        """,
+        (user_id, category, scheduled_on),
+    )
+    existing_message = await cur.fetchone()
+
+    if existing_message:
+        existing_id, existing_status, existing_scheduled_at = existing_message
+        if existing_status == "pending" and existing_scheduled_at > now:
+            for item in inserted:
+                await cur.execute(
+                    """
+                    INSERT INTO ai.notification_message_events (message_id, notification_id)
+                    VALUES (%s, %s)
+                    """,
+                    (existing_id, item.notification_id),
+                )
+            await cur.execute(
+                """
+                SELECT n.user_id, n.kind, n.product_id, n.brand_node_id, n.payload
+                FROM ai.notification_message_events me
+                JOIN ai.notifications n ON n.id = me.notification_id
+                WHERE me.message_id = %s
+                ORDER BY n.id
+                """,
+                (existing_id,),
+            )
+            # brand_sale 은 product_id 가 None 이라 int() 캐스팅을 하지 않는다.
+            merged_events = [
+                Event(user_id=row[0], kind=row[1], product_id=row[2], brand_node_id=row[3], payload=row[4])
+                for row in await cur.fetchall()
+            ]
+            digest = build_digest(merged_events)
+            payload = _message_payload(existing_id, category, merged_events)
+            await cur.execute(
+                """
+                UPDATE ai.notification_messages
+                SET title = %s, body = %s, payload = %s::jsonb
+                WHERE message_id = %s
+                """,
+                (digest.title, digest.body, json.dumps(payload, ensure_ascii=False), existing_id),
+            )
+            await cur.execute(
+                "UPDATE ai.notifications SET processed_at = now() WHERE id = ANY(%s)",
+                ([item.notification_id for item in inserted],),
+            )
+        else:
+            await cur.execute(
+                """
+                UPDATE ai.notifications
+                SET processed_at = now(), suppressed_reason = 'daily_cap'
+                WHERE id = ANY(%s)
+                """,
+                ([item.notification_id for item in inserted],),
+            )
+        return 0, 0
+
+    message_id = uuid4()
+    digest = build_digest([item.event for item in inserted])
+    payload = _message_payload(message_id, category, [item.event for item in inserted])
+    await cur.execute(
+        """
+        INSERT INTO ai.notification_messages
+            (message_id, user_id, category, scheduled_on, scheduled_at,
+             expires_at, title, body, payload)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        """,
+        (
+            message_id,
+            user_id,
+            category,
+            scheduled_on,
+            scheduled_at,
+            expires_at,
+            digest.title,
+            digest.body,
+            json.dumps(payload, ensure_ascii=False),
+        ),
+    )
+    for item in inserted:
+        await cur.execute(
+            """
+            INSERT INTO ai.notification_message_events (message_id, notification_id)
+            VALUES (%s, %s)
+            """,
+            (message_id, item.notification_id),
+        )
+    await cur.execute(
+        "UPDATE ai.notifications SET processed_at = now() WHERE id = ANY(%s)",
+        ([item.notification_id for item in inserted],),
+    )
+    await cur.execute(
+        """
+        INSERT INTO ai.notification_deliveries (message_id, device_id, next_attempt_at)
+        SELECT %s, d.device_id, %s
+        FROM ai.devices d
+        WHERE d.user_id = %s
+          AND d.provider = 'apns'
+          AND d.platform = 'ios'
+          AND d.status = 'active'
+        ON CONFLICT DO NOTHING
+        RETURNING delivery_id
+        """,
+        (message_id, scheduled_at, user_id),
+    )
+    delivery_rows = await cur.fetchall()
+    if not delivery_rows:
+        await cur.execute(
+            """
+            UPDATE ai.notification_messages
+            SET status = 'no_recipient', completed_at = now()
+            WHERE message_id = %s
+            """,
+            (message_id,),
+        )
+    return 1, len(delivery_rows)
 
 
 async def claim_due_deliveries(
@@ -1085,6 +1517,7 @@ async def run_notify_batch(
     limit: int | None = None,
     include_saved: bool = True,
     include_brand: bool = True,
+    include_brand_sale: bool = True,
     now: datetime | None = None,
 ) -> BatchReport:
     """Detect events and atomically enqueue durable per-device deliveries."""
@@ -1103,13 +1536,30 @@ async def run_notify_batch(
         new_rows = await fetch_new_product_rows(pool, since=since, cutoff=cutoff, only_user=only_user)
         brand_events = new_product_events(new_rows)
 
+    # 브랜드 세일 감지 — 상품이 아니라 브랜드 단위 이벤트다. restock/price_drop/brand_new
+    # 과 달리 인박스 적재와 푸시 게이트가 분리돼(인박스는 무조건, 푸시만 동의+주간 캡)
+    # 공유 select_for_delivery/_persist_outbox 경로를 타지 않고 _persist_brand_sale 이
+    # 전담한다. 상태(ai.brand_sale_state) 갱신도 그 함수가 같은 트랜잭션에서 처리한다.
+    sale_events: list[Event] = []
+    sale_states: list[BrandSaleStateWrite] = []
+    if include_brand_sale:
+        sale_rows = await fetch_brand_sale_rows(pool, only_user=only_user)
+        sale_events, sale_states = detect_brand_sale_events(sale_rows, threshold=settings.NOTIFY_BRAND_SALE_THRESHOLD)
+
     events = [*save_events, *brand_events]
     for event in events:
         report.detected[event.kind] += 1
+    for event in sale_events:
+        report.detected[event.kind] += 1
 
-    user_ids = sorted({event.user_id for event in events}, key=str)
+    # prefs·캡 조회 대상엔 sale_events 유저까지 포함한다 — brand_sale Phase B 푸시
+    # 게이트가 동의(prefs)와 전용 주간 캡을 참조한다.
+    user_ids = sorted({e.user_id for e in (*events, *sale_events)}, key=str)
     prefs = await fetch_preferences(pool, user_ids)
     brand_days = await fetch_brand_new_days_last_week(pool, user_ids)
+    brand_sale_days = await fetch_brand_sale_days_last_week(pool, user_ids)
+    # select_for_delivery 는 restock/price_drop/brand_new 만 다룬다 — brand_sale 은
+    # 인박스 무조건 적재 + 푸시 게이트가 달라 _persist_brand_sale 이 따로 처리한다.
     selected = select_for_delivery(
         events,
         prefs=prefs,
@@ -1135,6 +1585,23 @@ async def run_notify_batch(
         report.messages_queued,
         report.deliveries_queued,
     ) = await _persist_outbox(pool, selected=selected, baselines=baselines, now=cutoff)
+
+    # brand_sale 은 별도 경로 — Phase A 무조건 인박스 적재 + 상태 전환 upsert,
+    # Phase B 동의·전용 주간 캡 통과분만 APNs 푸시. 카운트를 아웃박스와 합산한다.
+    sale_recorded, sale_messages, sale_deliveries, sale_pushed = await _persist_brand_sale(
+        pool,
+        events=sale_events,
+        states=sale_states,
+        prefs=prefs,
+        brand_sale_days_last_week=brand_sale_days,
+        weekly_cap=settings.NOTIFY_BRAND_SALE_WEEKLY_CAP,
+        now=cutoff,
+    )
+    report.recorded += sale_recorded
+    report.messages_queued += sale_messages
+    report.deliveries_queued += sale_deliveries
+    report.selected[KIND_BRAND_SALE] += sale_pushed
+
     if include_saved and not include_brand:
         job_name = SAVED_JOB
     elif include_brand and not include_saved:

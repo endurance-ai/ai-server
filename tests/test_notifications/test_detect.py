@@ -5,13 +5,17 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.services.notifications import (
+    KIND_BRAND_SALE,
     KIND_PRICE_DROP,
     KIND_RESTOCK,
+    BrandSaleRow,
     SavedRow,
+    detect_brand_sale_events,
     detect_save_events,
 )
 
 USER = UUID("11111111-1111-1111-1111-111111111111")
+OTHER = UUID("22222222-2222-2222-2222-222222222222")
 
 
 def _row(**kw) -> SavedRow:
@@ -105,3 +109,81 @@ def test_restock_and_price_drop_can_fire_together():
 def test_zero_or_missing_prices_are_ignored():
     events, _ = detect_save_events([_row(price=None), _row(baseline_price=0.0, price=1.0)], threshold=0.15)
     assert events == []
+
+
+# ── 브랜드 세일 감지 (순수 판정) ──────────────────────────────────────────────
+
+
+def _sale_row(**kw) -> BrandSaleRow:
+    base = {
+        "brand_node_id": 100,
+        "brand": "MAISON",
+        "sale_count": 4,
+        "total_count": 10,
+        "prev_on_sale": False,
+        "followers": (USER,),
+        "max_discount_pct": 0.45,  # 가장 깊은 개별 상품 할인 45% — 문구용
+    }
+    base.update(kw)
+    return BrandSaleRow(**base)
+
+
+def test_brand_sale_fires_on_false_to_true_transition_per_follower():
+    events, states = detect_brand_sale_events([_sale_row(followers=(USER, OTHER))], threshold=0.30)
+
+    assert {e.user_id for e in events} == {USER, OTHER}
+    assert all(e.kind == KIND_BRAND_SALE for e in events)
+    assert all(e.product_id is None for e in events)
+    assert all(e.brand_node_id == 100 for e in events)
+    assert events[0].payload["sale_pct"] == 40
+    # 문구가 실제로 쓰는 값 — 카탈로그 커버리지(sale_pct)가 아니라 최대 개별 할인율.
+    assert events[0].payload["max_discount_pct"] == 45
+    # 상태는 항상 현재 비율/온세일로 기록된다.
+    assert len(states) == 1
+    assert states[0].on_sale is True
+    assert states[0].ratio == 0.4
+
+
+def test_brand_already_on_sale_does_not_refire():
+    events, states = detect_brand_sale_events([_sale_row(prev_on_sale=True)], threshold=0.30)
+
+    assert events == []
+    # 연속 세일 기간에도 상태는 갱신해 둔다 (다음 배치의 전환 판정 기준).
+    assert states[0].on_sale is True
+
+
+def test_brand_below_threshold_does_not_fire_and_marks_not_on_sale():
+    events, states = detect_brand_sale_events([_sale_row(sale_count=2, total_count=10)], threshold=0.30)
+
+    assert events == []
+    assert states[0].on_sale is False
+    assert states[0].ratio == 0.2
+
+
+def test_brand_at_exact_threshold_fires():
+    events, _ = detect_brand_sale_events([_sale_row(sale_count=3, total_count=10)], threshold=0.30)
+    assert [e.kind for e in events] == [KIND_BRAND_SALE]
+
+
+def test_brand_dropping_back_below_threshold_clears_state_so_it_can_fire_again():
+    # on_sale 이었다가 비율이 떨어지면 상태가 false 로 내려가고,
+    off, states = detect_brand_sale_events([_sale_row(prev_on_sale=True, sale_count=1, total_count=10)], threshold=0.30)
+    assert off == []
+    assert states[0].on_sale is False
+
+    # 다음 세일에서 다시 발동한다 (false→true).
+    again, _ = detect_brand_sale_events([_sale_row(prev_on_sale=False)], threshold=0.30)
+    assert [e.kind for e in again] == [KIND_BRAND_SALE]
+
+
+def test_brand_with_no_products_is_safe():
+    events, states = detect_brand_sale_events([_sale_row(sale_count=0, total_count=0)], threshold=0.30)
+    assert events == []
+    assert states[0].on_sale is False
+    assert states[0].ratio == 0.0
+
+
+def test_brand_with_no_followers_still_writes_state_without_events():
+    events, states = detect_brand_sale_events([_sale_row(followers=())], threshold=0.30)
+    assert events == []
+    assert states[0].on_sale is True

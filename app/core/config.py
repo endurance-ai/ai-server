@@ -145,6 +145,15 @@ class Settings(BaseSettings):
     # 성별 미해결 상태를 거친다. 창은 VLM 주기보다 넉넉히 길어야 그 사이에 놓치지
     # 않는다 (VLM 일배치 기준 14일이면 한참 여유).
     NOTIFY_NEW_PRODUCT_WINDOW_D: int = 14
+    # 브랜드 세일 알림 임계값. sale_price < original_price 인 상품 비율이 이 값을
+    # 처음 넘는 순간에만 팔로워에게 알린다. sale_price 는 할인 시에만 채워지므로
+    # (실측 커버리지 ≈5%) 30% 는 "브랜드 전면 세일" 수준의 강한 신호를 요구한다.
+    NOTIFY_BRAND_SALE_THRESHOLD: float = 0.30
+    # 브랜드 세일 푸시는 주 N일까지만. brand_new 캡(NOTIFY_BRAND_NEW_WEEKLY_CAP)과
+    # 독립적으로 센다 — 전용 카테고리(brand_sale_digest)로 집계하므로 두 종류의
+    # 발송이 서로의 주간 캡을 잠식하지 않는다. 인박스 적재는 이 캡과 무관하게 항상
+    # 이뤄지고, 캡은 APNs 푸시 발송에만 적용된다.
+    NOTIFY_BRAND_SALE_WEEKLY_CAP: int = 3
 
     # Standalone worker. The process exits without doing work unless enabled.
     NOTIFICATION_WORKER_ENABLED: bool = False
