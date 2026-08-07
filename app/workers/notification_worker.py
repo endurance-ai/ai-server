@@ -95,7 +95,14 @@ async def _run_cycle(pool: AsyncConnectionPool, *, force: bool, dry_run: bool) -
         await _with_job_lock(
             pool,
             SAVED_JOB,
-            lambda: run_notify_batch(pool, include_saved=True, include_brand=False, dry_run=dry_run, now=now),
+            lambda: run_notify_batch(
+                pool,
+                include_saved=True,
+                include_brand=False,
+                include_brand_sale=False,  # brand_sale 는 브랜드 스캔 사이클에서 하루 1회만.
+                dry_run=dry_run,
+                now=now,
+            ),
         )
     if brand_due:
         await _with_job_lock(
