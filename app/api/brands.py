@@ -100,6 +100,10 @@ class BrandHome(BaseModel):
     product_count: int
     following: bool
     notify_enabled: bool
+    store_url: str | None
+    """공식 스토어 방문 링크. brand_nodes.wiki->>'homepage_url' 소스."""
+    news: str | None
+    """최근 소식. brand_nodes.wiki->>'news' — 수집 파이프라인 없음, admin이 수동 관리."""
 
 
 class BrandProduct(BaseModel):
@@ -227,7 +231,7 @@ async def brand_home(
     """브랜드 홈. 비로그인도 조회 가능 (로그인 시 following/notify_enabled 채움)."""
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "SELECT id, brand_name, wiki FROM public.brand_nodes WHERE id = %s",
+            "SELECT id, brand_name, description, wiki FROM public.brand_nodes WHERE id = %s",
             (brand_id,),
         )
         row = await cur.fetchone()
@@ -249,18 +253,24 @@ async def brand_home(
                 following = True
                 notify_enabled = follow_row[0]
 
-    # brand_nodes 에 전용 description/logo 컬럼이 없다 — wiki JSONB 에 있으면 꺼내고,
-    # 없으면 null 을 돌려준다 (없는 컬럼을 지어내지 않는다).
-    wiki = row[2] or {}
-    description = wiki.get("description") if isinstance(wiki, dict) else None
+    # description 은 brand_nodes.description 전용 컬럼이 단일 출처다 (kiko.ai-app
+    # migration 105 — wiki.description_ko/description_original 은 이 컬럼으로
+    # 백필된 뒤 wiki 에서 삭제됐다. 예전에 여기서 읽던 wiki.get("description")는
+    # 애초에 존재한 적 없는 키라 항상 null 을 반환하고 있었다.
+    # logo_url 은 brand_nodes 에 전용 컬럼이 없다 — 없는 컬럼을 지어내지 않는다.
+    wiki = row[3] or {}
+    store_url = wiki.get("homepage_url") if isinstance(wiki, dict) else None
+    news = wiki.get("news") if isinstance(wiki, dict) else None
     return BrandHome(
         id=row[0],
         name=row[1],
-        description=description,
+        description=row[2],
         logo_url=None,
         product_count=product_count,
         following=following,
         notify_enabled=notify_enabled,
+        store_url=store_url,
+        news=news,
     )
 
 
