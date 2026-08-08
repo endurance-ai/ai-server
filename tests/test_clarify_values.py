@@ -33,6 +33,10 @@ class TestEnumCompleteness:
             opts = AXIS_OPTIONS.get(axis.value)
             assert opts is not None, f"axis={axis.value} 매핑 표 누락"
             assert len(opts) >= 3, f"axis={axis.value} 옵션이 3개 미만 (REQ-CLARIFY-CARD-001)"
+            if axis is ClarifyAxis.COLOR:
+                # color 는 개인화 풀 — 전체 어휘는 버튼 한계를 넘을 수 있고, 실제
+                # 노출은 personalized_color_options(k=6)가 캡한다 (TestColorPersonalization).
+                continue
             assert len(opts) <= 5, f"axis={axis.value} 옵션이 5개 초과 (skip 포함 시 6 → 한계 위반)"
 
     def test_all_axes_have_prompt(self):
@@ -120,3 +124,50 @@ class TestGetOption:
         for axis_val, opts in AXIS_OPTIONS.items():
             values = [o.value for o in opts]
             assert len(values) == len(set(values)), f"axis={axis_val} 중복 value 감지: {values}"
+
+
+class TestColorPersonalization:
+    """color 축 — user_feature_scores 로 버튼 순서 개인화 + 표시 캡."""
+
+    def test_color_values_map_to_feature_enum(self):
+        # value 를 대문자화하면 product_features primary_color / v6 color_family enum 이어야
+        # user_feature_scores 조회 키가 정확히 맞는다.
+        from app.channels.clarify_values import COLOR_OPTIONS
+
+        enum16 = {
+            "BLACK", "WHITE", "GREY", "NAVY", "BLUE", "BEIGE", "BROWN",
+            "GREEN", "RED", "PINK", "PURPLE", "ORANGE", "YELLOW", "CREAM", "KHAKI", "MULTI",
+        }  # fmt: skip
+        for opt in COLOR_OPTIONS:
+            assert opt.value.upper() in enum16, opt.value
+
+    def test_cold_user_keeps_static_order_and_caps_at_k(self):
+        from app.channels.clarify_values import COLOR_OPTIONS, personalized_color_options
+
+        out = personalized_color_options(None, k=6)
+        assert len(out) == 6
+        assert [o.value for o in out] == [o.value for o in COLOR_OPTIONS[:6]]
+
+    def test_loved_colors_float_to_top(self):
+        from app.channels.clarify_values import personalized_color_options
+
+        # navy/khaki 를 아껴온 유저 → 두 색이 앞으로. (feature_scores 키는 UPPER enum)
+        scores = {("color", "NAVY"): 15.0, ("color", "KHAKI"): 8.0}
+        out = [o.value for o in personalized_color_options(scores, k=6)]
+        assert out[0] == "navy"
+        assert out[1] == "khaki"
+        assert "black" in out  # 나머지는 기본 순서로 뒤따름
+
+    def test_color_card_is_server_authoritative_and_personalized(self):
+        # ask_user_clarification 의 color 분기: LLM options 무시, 서버가 취향 버튼 + 건너뛰기.
+        from app.agents.tools.ask_user_clarification import _color_card
+        from app.scoring import feature_scores_cache
+
+        feature_scores_cache.clear()
+        feature_scores_cache.put("c:42", {("color", "RED"): 20.0})
+        prompt, buttons = _color_card({"user_key": "c:42"}, "")
+        feature_scores_cache.clear()
+
+        assert prompt  # 서버 기본 프롬프트 채워짐
+        assert buttons[0][0]["callback_data"] == "clarify:color:red"  # 취향 1위가 맨 앞
+        assert buttons[-1][0]["callback_data"] == "clarify:color:skip"  # 마지막은 건너뛰기

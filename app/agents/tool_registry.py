@@ -128,7 +128,9 @@ class UpdateTasteArgs(TypedDict, total=False):
 
 
 class AskUserClarificationArgs(TypedDict, total=False):
-    axis: Literal["category_pick", "formality", "fit", "occasion", "subcategory_disambiguation", "generic_fallback"]
+    axis: Literal[
+        "category_pick", "formality", "fit", "occasion", "color", "subcategory_disambiguation", "generic_fallback"
+    ]
     options: list[str]
     prompt: str
 
@@ -386,11 +388,13 @@ REGISTRY: dict[str, ToolMetadata] = {
         "name": "ask_user_clarification",
         "description": (
             "Send the user an inline-keyboard card asking to clarify intent on one axis. "
-            "`axis` MUST be EXACTLY one of these 6 strings (case-sensitive, no variants):\n"
+            "`axis` MUST be EXACTLY one of these 7 strings (case-sensitive, no variants):\n"
             "  - 'category_pick'              — when user didn't say what garment (top/bottom/outer/dress/shoes/bag)\n"
             "  - 'formality'                  — casual vs business vs formal\n"
             "  - 'fit'                        — slim/regular/oversized/etc\n"
             "  - 'occasion'                   — daily/date/work/party/wedding/etc\n"
+            "  - 'color'                      — when you'd ask 'what color?'. NEVER ask color in free text; "
+            "use this axis and OMIT `options` — the server fills personalized color buttons from the user's taste\n"
             "  - 'subcategory_disambiguation' — narrowing within a category (e.g. shirt: oxford vs linen vs flannel)\n"
             "  - 'generic_fallback'           — when none of the above fit (last resort)\n"
             "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected."
@@ -572,7 +576,15 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
     # on the very next iter. Scoped to `ask_user_clarification` until other
     # tools demand the same.
     if tool_name == "ask_user_clarification" and "axis" in args:
-        valid_axes = ("category_pick", "formality", "fit", "occasion", "subcategory_disambiguation", "generic_fallback")
+        valid_axes = (
+            "category_pick",
+            "formality",
+            "fit",
+            "occasion",
+            "color",
+            "subcategory_disambiguation",
+            "generic_fallback",
+        )
         axis = args["axis"]
         if not isinstance(axis, str) or axis not in valid_axes:
             return False, f"bad_axis: {axis!r} not in {list(valid_axes)}"

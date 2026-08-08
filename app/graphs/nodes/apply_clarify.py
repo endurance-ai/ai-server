@@ -42,6 +42,7 @@ _TOAST_TEMPLATES_KO: dict[str, str] = {
     "category_pick": "{label} 위주로 찾아볼게",
     "subcategory_disambiguation": "{label} 위주로 찾아볼게",
     "generic_fallback": "{label} 위주로 찾아볼게",
+    "color": "{label}로 찾아볼게",
 }
 _TOAST_SKIP_KO = "그대로 검색해볼게"
 
