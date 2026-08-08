@@ -144,6 +144,27 @@ async def test_brand_home_anonymous(client: AsyncClient, pool):
     assert data["product_count"] == 2
     assert data["following"] is False
     assert data["notify_enabled"] is False
+    assert data["description"] is None
+    assert data["store_url"] is None
+    assert data["news"] is None
+
+
+@pytest.mark.asyncio
+async def test_brand_home_returns_description_store_url_and_news(client: AsyncClient, pool):
+    brand_id = await _insert_brand(
+        pool,
+        "Acme",
+        description="A test brand.",
+        homepage_url="https://acme.example",
+        news="26SS 컬렉션 8/20 발매",
+    )
+
+    resp = await client.get(f"/v1/brands/{brand_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["description"] == "A test brand."
+    assert data["store_url"] == "https://acme.example"
+    assert data["news"] == "26SS 컬렉션 8/20 발매"
 
 
 @pytest.mark.asyncio
