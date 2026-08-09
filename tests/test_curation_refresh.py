@@ -99,16 +99,15 @@ def test_chips_contract():
     assert chips_for("men") == []  # men 골든셋 등록 전까지 빈 배열 (스펙 v1.1)
 
 
-def test_candidate_selection_enforces_hot_overall_brand_and_cross_section_quotas():
+def test_candidate_selection_enforces_brand_cap_and_cross_section_exclusion():
     rows = []
-    for pid in range(1, 21):
+    for pid in range(1, 31):
         rows.append(
             {
                 "product_id": pid,
-                "is_hot": pid <= 10,
                 "base_score": float(100 - pid),
-                "base_rank": pid if pid <= 10 else pid - 10,
-                "brand_key": f"brand-{(pid - 1) // 2}",
+                "base_rank": pid,
+                "brand_key": f"brand-{(pid - 1) // 3}",
                 "style_node_id": pid,
             }
         )
@@ -119,18 +118,17 @@ def test_candidate_selection_enforces_hot_overall_brand_and_cross_section_quotas
         seed="test",
     )
     assert len(selected) == 12
-    assert len([pid for pid in selected if pid <= 10]) == 8
-    assert len([pid for pid in selected if pid > 10]) == 4
     assert 1 not in selected
+    selected_brands = [f"brand-{(pid - 1) // 3}" for pid in selected]
+    assert all(selected_brands.count(brand) <= 2 for brand in set(selected_brands))
 
 
-def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
+def test_candidate_selection_uses_taste_scores_without_weakening_brand_cap():
     rows = [
         {
             "product_id": pid,
-            "is_hot": pid <= 10,
             "base_score": float(100 - pid),
-            "base_rank": pid if pid <= 10 else pid - 10,
+            "base_rank": pid,
             "brand_key": f"brand-{pid}",
             "style_node_id": pid,
         }
@@ -155,18 +153,15 @@ def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
     assert baseline[0] == 1
     assert personalized[0] == 8
     assert len(personalized) == 12
-    assert len([pid for pid in personalized if pid <= 10]) == 8
-    assert len([pid for pid in personalized if pid > 10]) == 4
 
 
 def _feature_rows() -> list[dict]:
-    # Product 8 is black; everything else beige. All hot, unique brands.
+    # Product 8 is black; everything else beige. All products have unique brands.
     return [
         {
             "product_id": pid,
-            "is_hot": pid <= 10,
             "base_score": float(100 - pid),
-            "base_rank": pid if pid <= 10 else pid - 10,
+            "base_rank": pid,
             "brand_key": f"brand-{pid}",
             "style_node_id": pid,
             "feature_metadata": {"primary_color": "black" if pid == 8 else "beige"},
@@ -175,7 +170,7 @@ def _feature_rows() -> list[dict]:
     ]
 
 
-def test_candidate_selection_uses_feature_scores_without_weakening_quotas():
+def test_candidate_selection_uses_feature_scores_without_weakening_brand_cap():
     rows = _feature_rows()
     baseline = select_candidate_ids(rows, section_id="under-100", excluded_ids=set(), seed="feat")
     # Loves black, dislikes beige — the lone black product should surface to #1.
@@ -190,8 +185,6 @@ def test_candidate_selection_uses_feature_scores_without_weakening_quotas():
     assert baseline[0] == 1
     assert personalized[0] == 8
     assert len(personalized) == 12
-    assert len([pid for pid in personalized if pid <= 10]) == 8
-    assert len([pid for pid in personalized if pid > 10]) == 4
 
 
 def test_candidate_selection_missing_feature_metadata_is_neutral():
@@ -200,9 +193,8 @@ def test_candidate_selection_missing_feature_metadata_is_neutral():
     rows = [
         {
             "product_id": pid,
-            "is_hot": pid <= 10,
             "base_score": float(100 - pid),
-            "base_rank": pid if pid <= 10 else pid - 10,
+            "base_rank": pid,
             "brand_key": f"brand-{pid}",
             "style_node_id": pid,
         }
