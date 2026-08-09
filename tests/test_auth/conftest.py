@@ -144,6 +144,7 @@ async def _truncate(pool) -> AsyncGenerator[None]:
                 ai.notification_message_events,
                 ai.notification_messages,
                 ai.notifications,
+                ai.brand_news,
                 ai.brand_sale_state,
                 ai.notification_job_state,
                 ai.saved_product_baseline,

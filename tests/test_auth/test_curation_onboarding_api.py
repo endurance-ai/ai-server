@@ -29,7 +29,6 @@ async def _insert_brand(
     *,
     description: str | None = None,
     homepage_url: str | None = None,
-    news: str | None = None,
 ) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -37,11 +36,11 @@ async def _insert_brand(
             INSERT INTO public.brand_nodes (brand_name, brand_name_normalized, primary_style_node_id, description, wiki)
             VALUES (
                 %s, %s, %s, %s,
-                jsonb_strip_nulls(jsonb_build_object('homepage_url', %s::text, 'news', %s::text))
+                jsonb_strip_nulls(jsonb_build_object('homepage_url', %s::text))
             )
             RETURNING id
             """,
-            (name, normalized, node_id, description, homepage_url, news),
+            (name, normalized, node_id, description, homepage_url),
         )
         row = await cur.fetchone()
         await conn.commit()

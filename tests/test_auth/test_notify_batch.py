@@ -25,6 +25,19 @@ from app.services.push.apns import ApnsResult
 from tests.test_auth.test_curation_onboarding_api import _insert_brand, _insert_product, _login
 
 
+@pytest.fixture(autouse=True)
+def _allow_small_catalogs(monkeypatch):
+    """이 파일의 픽스처 브랜드는 상품 몇 개짜리다.
+
+    운영 기본값(NOTIFY_BRAND_SALE_MIN_PRODUCTS=10)은 전체 브랜드 스캔에서 잡음을
+    거르는 하한이라, 그대로 두면 세일 비율 판정 자체를 검증할 수 없다. 하한 게이트
+    동작은 test_brand_sale_ignores_tiny_catalogs 가 실제 기본값으로 따로 본다.
+    """
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "NOTIFY_BRAND_SALE_MIN_PRODUCTS", 1)
+
+
 async def _follow(pool, user_id: str, brand_id: int, *, notify: bool = True) -> None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -366,14 +379,110 @@ async def test_brand_sale_skips_notify_disabled_follower(client: AsyncClient, po
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id, notify=False)
 
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_BRAND_SALE] == 0
+    # 팬아웃만 막힌다 — 소식 정본은 그대로 남아 브랜드 홈에 노출된다.
+    assert report.brand_news_written == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE ended_at IS NULL") == 1
+
+
+async def _put_brand_on_sale(pool, brand_id: int, *, brand: str = "SaleBrand") -> None:
+    """5개 중 2개 세일 → 40% ≥ 30% 임계값."""
+    on_sale = [await _insert_product(pool, brand=brand, brand_node_id=brand_id) for _ in range(2)]
+    for _ in range(3):
+        await _insert_product(pool, brand=brand, brand_node_id=brand_id)
+    for pid in on_sale:
+        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+
+
+@pytest.mark.asyncio
+async def test_brand_news_is_written_for_brands_nobody_follows(client: AsyncClient, pool):
+    """0027 의 핵심 — 팔로워가 0명인 브랜드도 소식 정본을 남긴다.
+
+    이전 구조에선 _BRAND_SALE_SQL 이 followers CTE 로 JOIN 해서 팔로워 없는 브랜드는
+    집계 대상에서 통째로 빠졌고, 그 결과 브랜드 홈이 영영 비어 있었다.
+    """
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _put_brand_on_sale(pool, brand_id)
+
+    report = await run_notify_batch(pool)
+
+    assert report.brand_news_written == 1
+    assert report.detected[KIND_BRAND_SALE] == 0  # 팬아웃 대상 없음
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT brand_node_id, kind, payload, ended_at FROM ai.brand_news")
+        row = await cur.fetchone()
+    assert row[0] == brand_id
+    assert row[1] == "brand_sale"
+    assert row[2]["max_discount_pct"] == 30
+    assert row[3] is None  # 진행 중
+
+
+@pytest.mark.asyncio
+async def test_brand_news_opens_once_and_closes_when_sale_ends(client: AsyncClient, pool):
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _put_brand_on_sale(pool, brand_id)
+
+    await run_notify_batch(pool)
+    # 연속 세일 기간엔 소식을 다시 열지 않는다 (uq_brand_news_open + 전환 게이트).
+    second = await run_notify_batch(pool)
+    assert second.brand_news_written == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news") == 1
+
+    # 세일이 끝나면 진행 중이던 소식이 닫힌다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE public.products SET sale_price = NULL WHERE brand_node_id = %s", (brand_id,))
+        await conn.commit()
+
+    third = await run_notify_batch(pool)
+    assert third.brand_news_written == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE ended_at IS NOT NULL") == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news") == 1
+
+
+@pytest.mark.asyncio
+async def test_inbox_row_points_at_the_canonical_brand_news(client: AsyncClient, pool):
+    _auth, user_id = await _login(client)
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _follow(pool, user_id, brand_id)
+    await _put_brand_on_sale(pool, brand_id)
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT n.brand_news_id, bn.id
+            FROM ai.notifications n
+            JOIN ai.brand_news bn ON bn.id = n.brand_news_id
+            WHERE n.kind = 'brand_sale'
+            """
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == row[1]
+
+
+@pytest.mark.asyncio
+async def test_brand_sale_ignores_tiny_catalogs(client: AsyncClient, pool, monkeypatch):
+    """전체 브랜드 스캔의 잡음 하한 — 상품 2개 중 1개 할인은 비율 50% 지만 소식이 아니다."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "NOTIFY_BRAND_SALE_MIN_PRODUCTS", 10)
+
+    brand_id = await _insert_brand(pool, "TinyBrand")
+    one = await _insert_product(pool, brand="TinyBrand", brand_node_id=brand_id)
+    await _insert_product(pool, brand="TinyBrand", brand_node_id=brand_id)
+    await _set_product(pool, one, original_price=100000, sale_price=50000)
+
+    report = await run_notify_batch(pool)
+
+    assert report.brand_news_written == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news") == 0
+    # 상태도 쓰지 않는다 — 집계에서 아예 빠지므로 전환 판정 대상이 아니다.
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_sale_state") == 0
 
 
 @pytest.mark.asyncio

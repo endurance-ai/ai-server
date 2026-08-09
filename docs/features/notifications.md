@@ -10,6 +10,7 @@ of this release.
 | --- | --- | --- | --- | --- |
 | Saved-product digest | Restock and price drop for saved products | 09:00 KST | 09:30 KST | One digest per user/day |
 | Followed-brand digest | Recent products from selected brands | 10:30 KST | 11:00 KST | Up to 5 items; max 3 accepted days in a rolling 7-day window |
+| Brand-sale digest | A brand's discounted-catalog ratio crosses 30% | 10:30 KST | 11:00 KST | Max 3 accepted days in a rolling 7-day window |
 
 Quiet hours are 22:00–08:00 KST. A detector delayed into the active window
 catches up immediately; work found during quiet hours is moved to the next
@@ -19,7 +20,31 @@ category delivery time. Undelivered brand overflow remains eligible during the
 Consent is evaluated server-side. `system=false` disables every notification;
 brand-new notifications additionally require `release_alerts=true`. The hidden
 `restock`, `price_drop`, and `brand_new_product` keys are supported for a future
-mobile UI and default to true.
+mobile UI and default to true. `brand_sale` has no dedicated consent key — it
+shares `brand_new_product` because the mobile UI groups both under one "brand
+notifications" toggle.
+
+## Brand news is canonical, not fanned out
+
+`brand_sale` is the one category whose content is a **brand-level fact**, so it
+is stored once in `ai.brand_news` (migration `0027`) and only then fanned out to
+followers. Two consequences that the other categories do not share:
+
+- Detection scans **every** brand, not just followed ones. A brand nobody follows
+  still gets its news row, because the brand home page (`GET /v1/brands/{id}`) is
+  public and reads `ai.brand_news` directly. Scanning all brands makes catalog
+  size a noise source, so `NOTIFY_BRAND_SALE_MIN_PRODUCTS` (default 10) excludes
+  brands too small for a ratio to mean anything.
+- The inbox row is written **regardless of consent or weekly cap**; only the APNs
+  push is gated. `suppressed_reason` records which gate stopped the push. This is
+  safe here because deduplication comes from the `ai.brand_sale_state`
+  false→true transition plus the `uq_brand_news_open` partial unique index, not
+  from an anti-join against `ai.notifications`.
+
+`ai.brand_sale_state` holds the current answer to "is this brand on sale"
+(upserted, no history). `ai.brand_news` holds the history via
+`started_at`/`ended_at`. A sale ending closes the open row rather than deleting
+it.
 
 ## Architecture and invariants
 
@@ -27,6 +52,10 @@ mobile UI and default to true.
 products/saves/brand picks
         │ detect (separate worker; advisory lock)
         ▼
+ai.brand_news ─────┐  brand-level canonical news (brand_sale only)
+ brand home reads  │  O(brands × events) — independent of user count
+   this directly   │
+                   ▼ fan out to notify_enabled followers
 ai.notifications ── ai.notification_messages ── ai.notification_deliveries
  domain event             user digest                  device attempt
                                                         │
@@ -54,7 +83,8 @@ ai.notifications ── ai.notification_messages ── ai.notification_deliveri
   Device tokens are fingerprinted in logs, never logged directly.
 
 Schema ownership is split deliberately: Alembic `0023`/`0024` owns `ai.*` outbox
-tables, while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
+tables, `0025`–`0027` add the inbox feed, brand follow, and brand-news canon,
+while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
 owns the public product candidate index.
 
 ## Apple Developer setup
@@ -151,7 +181,16 @@ FROM ai.notification_deliveries d
 JOIN ai.notification_messages m USING (message_id)
 WHERE d.status IN ('pending', 'retry', 'processing')
   AND d.next_attempt_at <= now() AND m.expires_at > now();
+
+-- Brand news currently shown on brand home pages.
+SELECT count(*) FILTER (WHERE ended_at IS NULL) AS open,
+       count(*)                                 AS total
+FROM ai.brand_news;
 ```
+
+An open brand-news row that never closes means the brand has stayed above the
+sale threshold, which is legitimate for a long promotion but worth checking
+against `ai.brand_sale_state.updated_at` if it persists for weeks.
 
 Alert when a detector has no successful run for 26 hours, `last_error` is set,
 overdue deliveries grow for two poll intervals, or APNs configuration failures

@@ -91,11 +91,12 @@ class NewProductRow:
 
 @dataclass(frozen=True, slots=True)
 class BrandSaleRow:
-    """브랜드별 세일 비율 집계 + 직전 세일 상태 + notify_enabled 팔로워 한 행.
+    """브랜드별 세일 비율 집계 + 직전 세일 상태 한 행.
 
     detect_save_events 의 SavedRow 처럼 판정에 필요한 값을 이미 조인해 담는다.
-    followers 는 이 브랜드를 notify_enabled 로 팔로우한 유저들 — false→true 전환 시
-    각 팔로워마다 이벤트를 만든다.
+    팔로워는 여기 없다 — 소식은 브랜드 단위 사실이고 팬아웃은 그 다음 단계다.
+    (0027 이전엔 followers 가 이 행에 붙어 있었고, 그래서 팔로워 0명 브랜드는
+    감지 자체가 되지 않았다. fetch_brand_followers 로 분리했다.)
     """
 
     brand_node_id: int
@@ -103,7 +104,6 @@ class BrandSaleRow:
     sale_count: int
     total_count: int
     prev_on_sale: bool
-    followers: tuple[UUID, ...]
     # 이 브랜드 현재 세일 중 가장 깊은 개별 상품 할인율 (0~1). 발동 임계값은
     # sale_count/total_count 비율이지만, 문구의 "최대 N% 싸요" 는 이 값(=가장 큰
     # 단일 상품 할인)을 쓴다 — 카탈로그 커버리지 비율이 아니라 실제 최대 할인폭.
@@ -127,6 +127,23 @@ class BrandSaleStateWrite:
 
 
 @dataclass(frozen=True, slots=True)
+class BrandNewsWrite:
+    """ai.brand_news 정본 행의 열기/닫기 지시 (migration 0027).
+
+    opened=True  → 세일 시작. 새 소식 행을 연다 (started_at=now, ended_at=NULL).
+    opened=False → 세일 종료. 진행 중이던 행을 닫는다 (ended_at=now).
+
+    상태(ai.brand_sale_state)가 "지금 세일 중인가" 라는 현재값이라면 이쪽은 이력이다.
+    둘 다 같은 전환에서 파생되지만 상태는 덮어쓰고 소식은 쌓인다.
+    """
+
+    brand_node_id: int
+    kind: str
+    payload: dict[str, Any]
+    opened: bool
+
+
+@dataclass(frozen=True, slots=True)
 class BaselineWrite:
     user_id: UUID
     product_id: int
@@ -146,6 +163,7 @@ class BatchReport:
     detected: dict[str, int] = field(default_factory=lambda: dict.fromkeys(KINDS, 0))
     selected: dict[str, int] = field(default_factory=lambda: dict.fromkeys(KINDS, 0))
     baselines_written: int = 0
+    brand_news_written: int = 0
     recorded: int = 0
     messages_queued: int = 0
     deliveries_queued: int = 0
@@ -165,7 +183,8 @@ class BatchReport:
         return (
             f"🔔 [notify] {prefix}"
             f"detected({detected}) selected({selected}) "
-            f"baselines={self.baselines_written} recorded={self.recorded} "
+            f"baselines={self.baselines_written} brand_news={self.brand_news_written} "
+            f"recorded={self.recorded} "
             f"messages={self.messages_queued} deliveries={self.deliveries_queued} "
             f"users_pushed={self.users_pushed} ok={self.pushes_ok} failed={self.pushes_failed} "
             f"dead_tokens={self.dead_tokens_dropped}"
@@ -266,46 +285,62 @@ def new_product_events(rows: list[NewProductRow]) -> list[Event]:
 def detect_brand_sale_events(
     rows: list[BrandSaleRow],
     *,
+    followers: dict[int, tuple[UUID, ...]],
     threshold: float = 0.30,
-) -> tuple[list[Event], list[BrandSaleStateWrite]]:
-    """브랜드별 세일 비율이 임계값을 **처음 넘는 순간에만** 팔로워에게 알린다.
+) -> tuple[list[Event], list[BrandSaleStateWrite], list[BrandNewsWrite]]:
+    """브랜드별 세일 비율이 임계값을 **처음 넘는 순간에만** 소식을 만든다.
 
     재입고 판정(baseline_in_stock false→true, detect_save_events)과 같은 전환 패턴이다.
     비율이 임계값 이상이면 on_sale=true 를 항상 기록해 두고, 직전 상태가 false 였을
-    때만 이벤트를 만든다 — 연속 세일 기간 내내 매 배치 재발송하지 않는다.
+    때만 소식을 연다 — 연속 세일 기간 내내 매 배치 재발송하지 않는다.
+
+    **소식(BrandNewsWrite)이 먼저이고 유저 이벤트는 그 팬아웃이다.** 팔로워가 하나도
+    없어도 소식은 만들어진다 — 브랜드 홈은 비로그인도 보는 페이지라 노출할 컨텐츠가
+    팔로우 여부에 종속되면 안 된다. followers 에 없는 브랜드는 events 만 비고
+    news/state 는 그대로 나간다.
 
     state 는 이벤트 발생 여부와 무관하게 항상 현재 비율/상태로 갱신한다. 그래야
     다음 배치가 정확한 직전 상태를 보고 false→true 전환을 판정할 수 있다.
     """
     events: list[Event] = []
     states: list[BrandSaleStateWrite] = []
+    news: list[BrandNewsWrite] = []
 
     for row in rows:
         ratio = row.sale_count / row.total_count if row.total_count > 0 else 0.0
         now_on_sale = ratio >= threshold
         states.append(BrandSaleStateWrite(row.brand_node_id, now_on_sale, ratio))
 
-        if now_on_sale and not row.prev_on_sale:
-            # ratio/sale_pct 는 발동 신호(카탈로그 세일 커버리지)라 관측/디버깅용으로
-            # 남긴다. 문구가 실제로 쓰는 값은 max_discount_pct(가장 깊은 단일 할인)다.
-            payload = {
-                "brand": row.brand,
-                "ratio": round(ratio, 3),
-                "sale_pct": round(ratio * 100),
-                "max_discount_pct": round(row.max_discount_pct * 100) if row.max_discount_pct else None,
-            }
-            for user_id in row.followers:
-                events.append(
-                    Event(
-                        user_id=user_id,
-                        kind=KIND_BRAND_SALE,
-                        product_id=None,  # 브랜드 단위 알림 — 특정 상품에 매이지 않는다.
-                        brand_node_id=row.brand_node_id,
-                        payload=payload,
-                    )
-                )
+        if row.prev_on_sale and not now_on_sale:
+            # 세일 종료 — 진행 중이던 소식을 닫는다. payload 는 닫기에 쓰이지 않는다.
+            news.append(BrandNewsWrite(row.brand_node_id, KIND_BRAND_SALE, {}, opened=False))
+            continue
 
-    return events, states
+        if not (now_on_sale and not row.prev_on_sale):
+            continue
+
+        # ratio/sale_pct 는 발동 신호(카탈로그 세일 커버리지)라 관측/디버깅용으로
+        # 남긴다. 문구가 실제로 쓰는 값은 max_discount_pct(가장 깊은 단일 할인)다.
+        payload = {
+            "brand": row.brand,
+            "ratio": round(ratio, 3),
+            "sale_pct": round(ratio * 100),
+            "max_discount_pct": round(row.max_discount_pct * 100) if row.max_discount_pct else None,
+        }
+        news.append(BrandNewsWrite(row.brand_node_id, KIND_BRAND_SALE, payload, opened=True))
+
+        for user_id in followers.get(row.brand_node_id, ()):
+            events.append(
+                Event(
+                    user_id=user_id,
+                    kind=KIND_BRAND_SALE,
+                    product_id=None,  # 브랜드 단위 알림 — 특정 상품에 매이지 않는다.
+                    brand_node_id=row.brand_node_id,
+                    payload=payload,
+                )
+            )
+
+    return events, states, news
 
 
 def kind_allowed(prefs: dict[str, Any] | None, kind: str) -> bool:
@@ -408,6 +443,21 @@ def _single_copy(event: Event) -> tuple[str, str]:
         return title, body
     name = event.payload.get("name") or "상품"
     return f"찜한 {name}이 재입고되었어요", ""
+
+
+def brand_news_copy(kind: str, payload: dict[str, Any]) -> tuple[str, str]:
+    """브랜드 홈 소식 카드 문구 (text, sub). ai.brand_news.payload 만 보고 만든다.
+
+    인박스(_single_copy / api.notifications._copy)와 문안이 다른 이유: 그쪽은 피드에서
+    맥락 없이 읽히므로 "팔로우한 {브랜드}" 로 대상을 밝혀야 하지만, 브랜드 홈은 이미
+    그 브랜드 페이지 안이라 브랜드명 반복이 군더더기다. 팔로우하지 않은 유저·비로그인도
+    보는 화면이라 "팔로우한" 이라는 전제 자체가 틀리기도 한다.
+    """
+    if kind == KIND_BRAND_SALE:
+        max_discount_pct = payload.get("max_discount_pct")
+        sub = f"최대 {max_discount_pct}% 싸요" if max_discount_pct else ""
+        return "세일 시작했어요", sub
+    return "새 소식이 있어요", ""
 
 
 def _price_range(baseline: float | None, price: float | None) -> str:
@@ -539,19 +589,16 @@ async def fetch_new_product_rows(
 
 
 # 브랜드별 세일 비율 = (sale_price < original_price 인 상품 수) / (전체 상품 수).
-# in_stock 필터 없음 (전체 카탈로그 기준 — 사용자 확정). notify_enabled 팔로워가
-# 하나라도 있는 브랜드만 집계한다. 성별 매칭은 없다 — 브랜드 단위 세일 소식은
-# 상품 추천이 아니라 브랜드 헤즈업이라 신상(brand_new)의 성별 게이트가 필요 없다.
-# only_user 는 팬아웃 대상만 좁힌다 — 비율/직전상태는 브랜드 전역이라 카나리
-# 실행이 다른 팔로워의 전환 상태를 앞당겨 소비할 수 있다(운영에선 풀배치가 정답).
+# in_stock 필터 없음 (전체 카탈로그 기준 — 사용자 확정). 성별 매칭도 없다 — 브랜드
+# 단위 세일 소식은 상품 추천이 아니라 브랜드 헤즈업이라 신상(brand_new)의 성별 게이트가
+# 필요 없다.
+#
+# **팔로워 조인이 없다** (0027). 소식은 브랜드 단위 사실이므로 팔로워가 없는 브랜드도
+# 집계해 ai.brand_news 에 남겨야 브랜드 홈이 채워진다. 팬아웃 대상은
+# fetch_brand_followers 가 따로 가져와 detect_brand_sale_events 에서 합친다.
+# 그 대신 전체 브랜드를 훑게 되므로 HAVING 으로 카탈로그가 너무 작은 브랜드를 뺀다
+# (상품 2개 중 1개 할인 = 비율 50% 짜리 가짜 전면세일 방지).
 _BRAND_SALE_SQL = """
-    WITH followers AS (
-        SELECT ubp.brand_id, array_agg(ubp.user_id) AS user_ids
-        FROM ai.user_brand_picks ubp
-        WHERE ubp.notify_enabled
-          AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
-        GROUP BY ubp.brand_id
-    )
     SELECT p.brand_node_id,
            max(p.brand) AS brand,
            count(*) FILTER (
@@ -561,7 +608,6 @@ _BRAND_SALE_SQL = """
            ) AS sale_count,
            count(*) AS total_count,
            coalesce(bss.on_sale, false) AS prev_on_sale,
-           f.user_ids,
            -- 문구용: 이 브랜드 현재 세일 중 가장 깊은 개별 상품 할인율(0~1).
            -- FILTER 가 sale_price < original_price 를 보장하므로 분모는 항상 양수다.
            max((p.original_price - p.sale_price)::numeric / NULLIF(p.original_price, 0)) FILTER (
@@ -569,16 +615,28 @@ _BRAND_SALE_SQL = """
                  AND p.original_price IS NOT NULL
                  AND p.sale_price < p.original_price
            ) AS max_discount
-    FROM followers f
-    JOIN public.products p ON p.brand_node_id = f.brand_id
-    LEFT JOIN ai.brand_sale_state bss ON bss.brand_node_id = f.brand_id
-    GROUP BY p.brand_node_id, f.user_ids, bss.on_sale
+    FROM public.products p
+    LEFT JOIN ai.brand_sale_state bss ON bss.brand_node_id = p.brand_node_id
+    WHERE p.brand_node_id IS NOT NULL
+    GROUP BY p.brand_node_id, bss.on_sale
+    HAVING count(*) >= %(min_products)s
+"""
+
+# notify_enabled 팔로워 팬아웃 대상. only_user 는 여기만 좁힌다 — 비율/전환 판정은
+# 브랜드 전역이라 카나리 실행이 다른 팔로워의 전환을 앞당겨 소비할 수 있다
+# (0027 이후로는 소식 자체가 brand_news 에 남으므로 유실이 아니라 푸시 누락에 그친다).
+_BRAND_FOLLOWERS_SQL = """
+    SELECT ubp.brand_id, array_agg(ubp.user_id) AS user_ids
+    FROM ai.user_brand_picks ubp
+    WHERE ubp.notify_enabled
+      AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
+    GROUP BY ubp.brand_id
 """
 
 
-async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, only_user: UUID | None = None) -> list[BrandSaleRow]:
+async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, min_products: int = 1) -> list[BrandSaleRow]:
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(_BRAND_SALE_SQL, {"only_user": only_user})
+        await cur.execute(_BRAND_SALE_SQL, {"min_products": min_products})
         rows = await cur.fetchall()
     return [
         BrandSaleRow(
@@ -587,11 +645,20 @@ async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, only_user: UUID | 
             sale_count=int(r[2]),
             total_count=int(r[3]),
             prev_on_sale=bool(r[4]),
-            followers=tuple(r[5]),
-            max_discount_pct=float(r[6]) if r[6] is not None else None,
+            max_discount_pct=float(r[5]) if r[5] is not None else None,
         )
         for r in rows
     ]
+
+
+async def fetch_brand_followers(
+    pool: AsyncConnectionPool, *, only_user: UUID | None = None
+) -> dict[int, tuple[UUID, ...]]:
+    """brand_node_id → notify_enabled 팔로워. 소식 감지와 분리된 팬아웃 대상 조회."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(_BRAND_FOLLOWERS_SQL, {"only_user": only_user})
+        rows = await cur.fetchall()
+    return {int(r[0]): tuple(r[1]) for r in rows}
 
 
 async def record_run(pool: AsyncConnectionPool, job: str, ran_at: datetime) -> None:
@@ -987,12 +1054,13 @@ async def _persist_brand_sale(
     *,
     events: list[Event],
     states: list[BrandSaleStateWrite],
+    news: list[BrandNewsWrite],
     prefs: dict[UUID, dict[str, Any] | None],
     brand_sale_days_last_week: dict[UUID, int],
     weekly_cap: int,
     now: datetime,
-) -> tuple[int, int, int, int]:
-    """brand_sale 전용 적재 — 인박스는 무조건, 푸시만 동의·주간 캡으로 게이트.
+) -> tuple[int, int, int, int, int]:
+    """brand_sale 전용 적재 — 소식 정본이 먼저, 인박스는 무조건, 푸시만 게이트.
 
     brand_sale 은 restock/price_drop/brand_new 와 인박스 정책이 다르다. 감지된
     이벤트(=세일 임계값을 방금 넘은 브랜드의 팔로워)는 동의/캡과 무관하게 전부
@@ -1003,22 +1071,72 @@ async def _persist_brand_sale(
     ai.brand_sale_state 의 false→true 전환 게이트라 ai.notifications 행 존재에
     의존하지 않는다. brand_new 처럼 ai.notifications 안티조인(_NEW_PRODUCT_SQL)을
     쓰지 않으므로, 캡/동의로 막힌 이벤트를 인박스에 남겨도 다음 감지를 오염시키지
-    않는다. 상태 upsert·인박스 insert·푸시 적재는 한 트랜잭션으로 원자화한다.
+    않는다. 소식 upsert·상태 upsert·인박스 insert·푸시 적재는 한 트랜잭션으로 원자화한다.
 
-    반환: (recorded, messages, deliveries, pushed).
-      recorded   — Phase A 에서 실제 insert 된 알림 행 수
-      messages   — Phase B 에서 만든 메시지 수
-      deliveries — Phase B 에서 만든 딜리버리 수
-      pushed     — 푸시 게이트를 통과한(=selected) 이벤트 수 (리포트용)
+    반환: (news_written, recorded, messages, deliveries, pushed).
+      news_written — Phase 0 에서 열거나 닫은 ai.brand_news 행 수
+      recorded     — Phase A 에서 실제 insert 된 알림 행 수
+      messages     — Phase B 에서 만든 메시지 수
+      deliveries   — Phase B 에서 만든 딜리버리 수
+      pushed       — 푸시 게이트를 통과한(=selected) 이벤트 수 (리포트용)
     """
+    news_written = 0
     recorded = 0
     messages = 0
     deliveries = 0
     pushed = 0
-    if not states and not events:
-        return recorded, messages, deliveries, pushed
+    if not states and not events and not news:
+        return news_written, recorded, messages, deliveries, pushed
 
     async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        # Phase 0 ── 브랜드 소식 정본. 유저 팬아웃보다 **먼저** 쓴다. 팔로워가 0명인
+        # 브랜드도 여기까지는 반드시 도달해야 브랜드 홈이 채워진다.
+        news_ids: dict[int, int] = {}
+        for item in news:
+            if item.opened:
+                # uq_brand_news_open (brand_node_id, kind) WHERE ended_at IS NULL 이
+                # 진행 중 소식을 브랜드·종류당 1건으로 강제한다. 같은 배치를 두 번
+                # 돌려도 DO NOTHING 으로 흘러 소식이 늘지 않는다.
+                await cur.execute(
+                    """
+                    INSERT INTO ai.brand_news (brand_node_id, kind, payload, started_at)
+                    VALUES (%s, %s, %s::jsonb, %s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        item.brand_node_id,
+                        item.kind,
+                        json.dumps(item.payload, ensure_ascii=False, default=str),
+                        now,
+                    ),
+                )
+                row = await cur.fetchone()
+                if row:
+                    news_ids[item.brand_node_id] = int(row[0])
+                    news_written += 1
+                else:
+                    # 이미 열린 소식이 있다 — 인박스 행이 그 정본을 가리키게 재조회한다.
+                    await cur.execute(
+                        """
+                        SELECT id FROM ai.brand_news
+                        WHERE brand_node_id = %s AND kind = %s AND ended_at IS NULL
+                        """,
+                        (item.brand_node_id, item.kind),
+                    )
+                    existing = await cur.fetchone()
+                    if existing:
+                        news_ids[item.brand_node_id] = int(existing[0])
+            else:
+                await cur.execute(
+                    """
+                    UPDATE ai.brand_news SET ended_at = %s
+                    WHERE brand_node_id = %s AND kind = %s AND ended_at IS NULL
+                    """,
+                    (now, item.brand_node_id, item.kind),
+                )
+                news_written += cur.rowcount if cur.rowcount > 0 else 0
+
         # Phase A ── 상태 전환(on_sale/ratio) upsert. 이벤트 발생 여부와 무관하게
         # 항상 기록해야 다음 배치가 정확한 직전 상태로 false→true 를 판정한다.
         for state in states:
@@ -1039,8 +1157,8 @@ async def _persist_brand_sale(
         for event in events:
             await cur.execute(
                 """
-                INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload)
-                VALUES (%s, %s, %s, %s, %s::jsonb)
+                INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload, brand_news_id)
+                VALUES (%s, %s, %s, %s, %s::jsonb, %s)
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
@@ -1050,6 +1168,7 @@ async def _persist_brand_sale(
                     event.product_id,
                     event.brand_node_id,
                     json.dumps(event.payload, ensure_ascii=False, default=str),
+                    news_ids.get(event.brand_node_id) if event.brand_node_id is not None else None,
                 ),
             )
             row = await cur.fetchone()
@@ -1076,7 +1195,7 @@ async def _persist_brand_sale(
             messages += created_messages
             deliveries += created_deliveries
 
-    return recorded, messages, deliveries, pushed
+    return news_written, recorded, messages, deliveries, pushed
 
 
 async def _attach_brand_sale_message(
@@ -1542,9 +1661,16 @@ async def run_notify_batch(
     # 전담한다. 상태(ai.brand_sale_state) 갱신도 그 함수가 같은 트랜잭션에서 처리한다.
     sale_events: list[Event] = []
     sale_states: list[BrandSaleStateWrite] = []
+    sale_news: list[BrandNewsWrite] = []
     if include_brand_sale:
-        sale_rows = await fetch_brand_sale_rows(pool, only_user=only_user)
-        sale_events, sale_states = detect_brand_sale_events(sale_rows, threshold=settings.NOTIFY_BRAND_SALE_THRESHOLD)
+        # 감지는 전체 브랜드(팔로워 무관), 팬아웃 대상만 only_user 로 좁힌다.
+        sale_rows = await fetch_brand_sale_rows(pool, min_products=settings.NOTIFY_BRAND_SALE_MIN_PRODUCTS)
+        sale_followers = await fetch_brand_followers(pool, only_user=only_user)
+        sale_events, sale_states, sale_news = detect_brand_sale_events(
+            sale_rows,
+            followers=sale_followers,
+            threshold=settings.NOTIFY_BRAND_SALE_THRESHOLD,
+        )
 
     events = [*save_events, *brand_events]
     for event in events:
@@ -1586,12 +1712,20 @@ async def run_notify_batch(
         report.deliveries_queued,
     ) = await _persist_outbox(pool, selected=selected, baselines=baselines, now=cutoff)
 
-    # brand_sale 은 별도 경로 — Phase A 무조건 인박스 적재 + 상태 전환 upsert,
-    # Phase B 동의·전용 주간 캡 통과분만 APNs 푸시. 카운트를 아웃박스와 합산한다.
-    sale_recorded, sale_messages, sale_deliveries, sale_pushed = await _persist_brand_sale(
+    # brand_sale 은 별도 경로 — Phase 0 브랜드 소식 정본, Phase A 무조건 인박스 적재 +
+    # 상태 전환 upsert, Phase B 동의·전용 주간 캡 통과분만 APNs 푸시.
+    # 카운트를 아웃박스와 합산한다.
+    (
+        report.brand_news_written,
+        sale_recorded,
+        sale_messages,
+        sale_deliveries,
+        sale_pushed,
+    ) = await _persist_brand_sale(
         pool,
         events=sale_events,
         states=sale_states,
+        news=sale_news,
         prefs=prefs,
         brand_sale_days_last_week=brand_sale_days,
         weekly_cap=settings.NOTIFY_BRAND_SALE_WEEKLY_CAP,

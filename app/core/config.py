@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     # 발송이 서로의 주간 캡을 잠식하지 않는다. 인박스 적재는 이 캡과 무관하게 항상
     # 이뤄지고, 캡은 APNs 푸시 발송에만 적용된다.
     NOTIFY_BRAND_SALE_WEEKLY_CAP: int = 3
+    # 세일 비율 집계에서 제외할 최소 카탈로그 크기. 감지가 팔로워 있는 브랜드만
+    # 훑던 시절엔 필요 없었지만(팔로우된 브랜드는 실카탈로그가 있다), 브랜드 소식을
+    # 정본으로 남기려고 전체 브랜드를 스캔하면서 필요해졌다 — 상품 2개 중 1개가
+    # 할인이면 비율 50% 로 임계값을 넘어 브랜드 홈에 가짜 "전면 세일" 이 걸린다.
+    NOTIFY_BRAND_SALE_MIN_PRODUCTS: int = 10
 
     # Standalone worker. The process exits without doing work unless enabled.
     NOTIFICATION_WORKER_ENABLED: bool = False

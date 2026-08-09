@@ -6,6 +6,8 @@ GET /v1/brands/{id} · GET /v1/brands/{id}/products
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from httpx import AsyncClient
 
@@ -146,17 +148,16 @@ async def test_brand_home_anonymous(client: AsyncClient, pool):
     assert data["notify_enabled"] is False
     assert data["description"] is None
     assert data["store_url"] is None
-    assert data["news"] is None
+    assert data["news"] == []
 
 
 @pytest.mark.asyncio
-async def test_brand_home_returns_description_store_url_and_news(client: AsyncClient, pool):
+async def test_brand_home_returns_description_and_store_url(client: AsyncClient, pool):
     brand_id = await _insert_brand(
         pool,
         "Acme",
         description="A test brand.",
         homepage_url="https://acme.example",
-        news="26SS 컬렉션 8/20 발매",
     )
 
     resp = await client.get(f"/v1/brands/{brand_id}")
@@ -164,7 +165,51 @@ async def test_brand_home_returns_description_store_url_and_news(client: AsyncCl
     data = resp.json()
     assert data["description"] == "A test brand."
     assert data["store_url"] == "https://acme.example"
-    assert data["news"] == "26SS 컬렉션 8/20 발매"
+
+
+async def _insert_brand_news(pool, brand_id: int, *, payload: dict, ended: bool = False) -> int:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.brand_news (brand_node_id, kind, payload, ended_at)
+            VALUES (%s, 'brand_sale', %s::jsonb, CASE WHEN %s THEN now() ELSE NULL END)
+            RETURNING id
+            """,
+            (brand_id, json.dumps(payload), ended),
+        )
+        row = await cur.fetchone()
+        await conn.commit()
+    return row[0]
+
+
+@pytest.mark.asyncio
+async def test_brand_home_returns_brand_news_newest_first(client: AsyncClient, pool):
+    brand_id = await _insert_brand(pool, "Acme")
+    await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 30}, ended=True)
+    await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 45})
+
+    resp = await client.get(f"/v1/brands/{brand_id}")
+    assert resp.status_code == 200
+    news = resp.json()["news"]
+
+    assert len(news) == 2
+    # 진행 중인 최신 소식이 먼저. 문구는 브랜드 홈 맥락이라 "팔로우한" 이 없다.
+    assert news[0]["text"] == "세일 시작했어요"
+    assert news[0]["sub"] == "최대 45% 싸요"
+    assert news[0]["ended_at"] is None
+    assert news[1]["sub"] == "최대 30% 싸요"
+    assert news[1]["ended_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_brand_home_news_visible_without_any_follower(client: AsyncClient, pool):
+    """0027 회귀 가드 — 팔로워 0명 + 비로그인이어도 소식이 보여야 한다."""
+    brand_id = await _insert_brand(pool, "Acme")
+    await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 50})
+
+    resp = await client.get(f"/v1/brands/{brand_id}")
+    assert resp.status_code == 200
+    assert [n["sub"] for n in resp.json()["news"]] == ["최대 50% 싸요"]
 
 
 @pytest.mark.asyncio
