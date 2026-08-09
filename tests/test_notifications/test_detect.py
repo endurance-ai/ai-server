@@ -5,13 +5,16 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.services.notifications import (
+    KIND_BRAND_NEW,
     KIND_BRAND_SALE,
     KIND_PRICE_DROP,
     KIND_RESTOCK,
     BrandSaleRow,
+    Event,
     SavedRow,
     detect_brand_sale_events,
     detect_save_events,
+    pick_brand_new,
 )
 
 USER = UUID("11111111-1111-1111-1111-111111111111")
@@ -109,6 +112,50 @@ def test_restock_and_price_drop_can_fire_together():
 def test_zero_or_missing_prices_are_ignored():
     events, _ = detect_save_events([_row(price=None), _row(baseline_price=0.0, price=1.0)], threshold=0.15)
     assert events == []
+
+
+# ── 신상 하루치 선별 (순수 판정) ─────────────────────────────────────────────
+
+
+def _new(product_id: int, brand_node_id: int) -> Event:
+    return Event(user_id=USER, kind=KIND_BRAND_NEW, product_id=product_id, brand_node_id=brand_node_id)
+
+
+def test_one_brand_cannot_take_the_whole_day():
+    """products.created_at 은 적재 시각이라, 그대로 자르면 마지막에 크롤된 브랜드가 독식한다."""
+    # 최신순 입력: 브랜드 10 이 앞을 다 차지한 상태 (통짜 적재된 브랜드).
+    events = [_new(i, 10) for i in range(1, 6)] + [_new(6, 20), _new(7, 30)]
+
+    picked = pick_brand_new(events, max_items=5, max_per_brand=2)
+
+    # 자르기만 했다면 전부 브랜드 10 이었다. 상한이 다른 두 브랜드에 자리를 만든다.
+    assert [e.brand_node_id for e in picked] == [10, 10, 10, 20, 30]
+    # 최신순(입력 순서)이 유지된다 — build_digest 가 events[0] 로 대표를 고른다.
+    assert [e.product_id for e in picked] == [1, 2, 3, 6, 7]
+
+
+def test_single_brand_follower_still_gets_a_full_day():
+    """다양성 장치가 물량 축소로 변질되면 안 된다 — 슬롯이 남으면 상한 초과분으로 채운다."""
+    events = [_new(i, 10) for i in range(1, 9)]
+
+    picked = pick_brand_new(events, max_items=5, max_per_brand=2)
+
+    assert len(picked) == 5
+    assert [e.product_id for e in picked] == [1, 2, 3, 4, 5]
+
+
+def test_backfill_keeps_newest_first_order():
+    events = [_new(1, 10), _new(2, 10), _new(3, 10), _new(4, 20)]
+
+    picked = pick_brand_new(events, max_items=4, max_per_brand=2)
+
+    # 브랜드 20 을 먼저 확보한 뒤 남은 슬롯을 브랜드 10 초과분으로 채우되, 순서는 원복한다.
+    assert [e.product_id for e in picked] == [1, 2, 3, 4]
+
+
+def test_fewer_candidates_than_the_cap_is_returned_whole():
+    events = [_new(1, 10), _new(2, 20)]
+    assert pick_brand_new(events, max_items=5, max_per_brand=2) == events
 
 
 # ── 브랜드 세일 감지 (순수 판정) ──────────────────────────────────────────────

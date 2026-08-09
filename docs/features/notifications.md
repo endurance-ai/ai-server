@@ -68,6 +68,28 @@ Deduplication comes from the `ai.brand_sale_state` false→true transition plus 
 `started_at`/`ended_at`. A sale ending closes the open row rather than deleting
 it.
 
+### `products.created_at` is an ingest time, not a release date
+
+Both new-arrival paths have to work around this. Crawls run per brand and bulk
+insert, so `created_at` records when a row first landed in our database — one
+measured brand wrote 775 rows inside two seconds. Two consequences, each with its
+own guard:
+
+- **A brand's first crawl is not a wave of new arrivals.** Onboarding a brand
+  imports its whole back catalogue at once; 13% of a measured 14-day candidate
+  set was exactly this. Rows within `NOTIFY_BRAND_ONBOARDING_GRACE_H` (24h) of a
+  brand's earliest product are excluded from both `_NEW_PRODUCT_SQL` and
+  `_BRAND_NEW_SUMMARY_SQL`.
+- **"Newest first" really means "crawled last".** Taking the top
+  `NOTIFY_BRAND_NEW_MAX_ITEMS` would hand the whole day to whichever brand the
+  crawler visited most recently, burying every other followed brand.
+  `pick_brand_new` caps each brand at `NOTIFY_BRAND_NEW_MAX_PER_BRAND` (2) first,
+  then backfills any unused slots from the overflow so that a user following a
+  single brand still receives a full day.
+
+Both guards apply to the push path and the consent-suppressed inbox path
+identically — otherwise the inbox would reproduce the skew the push path avoids.
+
 ### Two news kinds, two audiences
 
 `ai.brand_news.kind` (migration `0029`):

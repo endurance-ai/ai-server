@@ -397,6 +397,7 @@ def select_for_delivery(
     brand_new_days_last_week: dict[UUID, int],
     weekly_cap: int,
     max_brand_items: int,
+    max_per_brand: int,
 ) -> dict[UUID, list[Event]]:
     """동의 · 주간 캡 · 다이제스트 크기를 적용해 유저별 발송 목록을 만든다.
 
@@ -413,7 +414,11 @@ def select_for_delivery(
 
     ordered: dict[UUID, list[Event]] = {}
     for user_id, user_events in per_user.items():
-        brand_new = [e for e in user_events if e.kind == KIND_BRAND_NEW][:max_brand_items]
+        brand_new = pick_brand_new(
+            [e for e in user_events if e.kind == KIND_BRAND_NEW],
+            max_items=max_brand_items,
+            max_per_brand=max_per_brand,
+        )
         # brand_sale 은 이 경로를 타지 않는다 — 인박스 무조건 적재 + 푸시 게이트가
         # 서로 달라 _persist_brand_sale 이 전담한다(인박스는 동의/캡과 무관하게 항상,
         # 푸시만 kind_allowed + 주간 캡으로 게이트).
@@ -427,11 +432,48 @@ def select_for_delivery(
     return ordered
 
 
+def pick_brand_new(events: list[Event], *, max_items: int, max_per_brand: int) -> list[Event]:
+    """유저 한 명분 brand_new 후보에서 하루치를 고른다. 입력은 최신순 전제.
+
+    단순히 앞에서 max_items 개를 자르면 **한 브랜드가 하루 몫을 독식**한다.
+    products.created_at 은 출시일이 아니라 우리 DB 적재 시각이고, 크롤은 브랜드 단위로
+    통째 돌아서 한 브랜드의 수백 건이 같은 초에 들어온다(실측: 한 브랜드 775건이 2초).
+    그래서 "가장 새로운 5개" 가 사실상 "마지막에 크롤된 브랜드 5개" 가 되고, 나머지
+    팔로우 브랜드는 영영 묻힌다.
+
+    브랜드당 상한을 먼저 적용해 고르게 뽑고, 슬롯이 남으면 상한 초과분으로 채운다.
+    채우기 단계가 없으면 브랜드를 하나만 팔로우한 유저는 하루 max_per_brand 개로
+    줄어든다 — 다양성 장치가 물량 축소로 변질되면 안 된다.
+
+    출력은 다시 입력 순서(최신순)로 맞춘다. build_digest 가 events[0] 로 대표 상품을
+    고르므로 두 단계로 뽑았다는 사실이 문구에 새어나가면 안 된다.
+    """
+    picked: list[tuple[int, Event]] = []
+    overflow: list[tuple[int, Event]] = []
+    per_brand: dict[int | None, int] = {}
+
+    for index, event in enumerate(events):
+        if per_brand.get(event.brand_node_id, 0) < max_per_brand:
+            per_brand[event.brand_node_id] = per_brand.get(event.brand_node_id, 0) + 1
+            picked.append((index, event))
+        else:
+            overflow.append((index, event))
+
+    picked = picked[:max_items]
+    for item in overflow:
+        if len(picked) >= max_items:
+            break
+        picked.append(item)
+
+    return [event for _, event in sorted(picked, key=lambda pair: pair[0])]
+
+
 def consent_suppressed_events(
     events: list[Event],
     *,
     prefs: dict[UUID, dict[str, Any] | None],
     max_brand_items: int,
+    max_per_brand: int,
 ) -> list[Event]:
     """동의 게이트에 막혔지만 인박스에는 남길 이벤트. 인박스 적재만, 푸시는 없다.
 
@@ -453,23 +495,26 @@ def consent_suppressed_events(
     기록해버리면 다음 날 다시 후보가 되는 재시도가 깨진다. 동의 off 는 영구 억제라
     재시도할 게 없어서 기록해도 안전하다.
 
-    brand_new 는 인박스 적재도 하루 max_brand_items 개로 자른다. 안 그러면 동의를 꺼둔
-    유저에게 14일 보존창의 후보 수백 건이 한 배치에 쏟아진다. 잘린 몫은 기록되지 않아
-    다음 날 다시 후보가 되므로, 푸시 경로와 같은 속도로 흘러든다.
+    brand_new 는 인박스 적재도 푸시 경로와 **같은 선별**(pick_brand_new)을 거친다.
+    안 그러면 동의를 꺼둔 유저에게 14일 보존창의 후보 수백 건이 한 배치에 쏟아지고,
+    브랜드 쏠림도 그대로 인박스에 재현된다. 잘린 몫은 기록되지 않아 다음 날 다시
+    후보가 되므로 푸시 경로와 같은 속도로 흘러든다.
     """
-    per_user_brand_new: dict[UUID, int] = {}
     suppressed: list[Event] = []
+    brand_new_by_user: dict[UUID, list[Event]] = {}
+
     for event in events:
         if event.kind not in (KIND_RESTOCK, KIND_PRICE_DROP, KIND_BRAND_NEW):
             continue
         if kind_allowed(prefs.get(event.user_id), event.kind):
             continue
         if event.kind == KIND_BRAND_NEW:
-            taken = per_user_brand_new.get(event.user_id, 0)
-            if taken >= max_brand_items:
-                continue
-            per_user_brand_new[event.user_id] = taken + 1
-        suppressed.append(event)
+            brand_new_by_user.setdefault(event.user_id, []).append(event)
+        else:
+            suppressed.append(event)
+
+    for user_events in brand_new_by_user.values():
+        suppressed.extend(pick_brand_new(user_events, max_items=max_brand_items, max_per_brand=max_per_brand))
     return suppressed
 
 
@@ -598,6 +643,21 @@ _GENDER_MATCH_PER_USER = GENDER_MATCH_SQL.replace("%(gender)s", "k.gender_app")
 #   ② 캡/상한에 걸려 못 나간 상품도 다음 회차에 다시 후보가 된다.
 # 워터마크였다면 둘 다 영구 유실이다.
 # 안티조인은 날짜와 무관하다 — brand_new_product 는 (user, product) 당 평생 1회다.
+# 온보딩 적재분 제외 (실측 근거는 _BRAND_FIRST_SEEN_CTE 주석 참조). 브랜드를 처음
+# 수집하면 카탈로그 전체가 같은 배치로 들어와 전부 "신상" 으로 잡히므로, 브랜드 최초
+# 적재 후 유예시간 안에 들어온 행은 후보에서 뺀다.
+_BRAND_FIRST_SEEN_CTE = """
+    brand_first_seen AS (
+        SELECT brand_node_id, min(created_at) AS first_seen_at
+        FROM public.products
+        WHERE brand_node_id IS NOT NULL
+        GROUP BY brand_node_id
+    )
+"""
+_NOT_ONBOARDING_IMPORT = """
+    p.created_at > f.first_seen_at + make_interval(hours => %(onboarding_grace_h)s)
+"""
+
 _NEW_PRODUCT_SQL = f"""
     WITH picks AS (
         SELECT ubp.user_id,
@@ -607,13 +667,16 @@ _NEW_PRODUCT_SQL = f"""
         JOIN ai.user_profiles up ON up.user_id = ubp.user_id
         WHERE up.gender IN ('female', 'male')
           AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
-    )
+    ),
+    {_BRAND_FIRST_SEEN_CTE}
     SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price
     FROM public.products p
     JOIN picks k ON k.brand_id = p.brand_node_id
+    JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
     {PRODUCT_FEATURES_JOIN}
     WHERE p.created_at > %(since)s
       AND p.created_at <= %(cutoff)s
+      AND {_NOT_ONBOARDING_IMPORT}
       AND p.in_stock
       AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
       AND {_GENDER_MATCH_PER_USER}
@@ -652,12 +715,18 @@ async def fetch_new_product_rows(
     *,
     since: datetime,
     cutoff: datetime,
+    onboarding_grace_h: int,
     only_user: UUID | None = None,
 ) -> list[NewProductRow]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             _NEW_PRODUCT_SQL,
-            {"since": since, "cutoff": cutoff, "only_user": only_user},
+            {
+                "since": since,
+                "cutoff": cutoff,
+                "only_user": only_user,
+                "onboarding_grace_h": onboarding_grace_h,
+            },
         )
         rows = await cur.fetchall()
     return [
@@ -740,12 +809,14 @@ async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, min_products: int 
 # 보지 않는다 — 브랜드 홈은 비로그인도 보는 화면이라 개인화할 대상이 없다.
 # in_stock + 이미지 조건은 알림 쪽과 맞춘다 (품절이나 이미지 없는 상품을 "신상 입고" 로
 # 세면 눌렀을 때 보여줄 게 없다).
-_BRAND_NEW_SUMMARY_SQL = """
+_BRAND_NEW_SUMMARY_SQL = f"""
+    WITH {_BRAND_FIRST_SEEN_CTE}
     SELECT p.brand_node_id, max(p.brand) AS brand, count(*) AS new_count
     FROM public.products p
-    WHERE p.brand_node_id IS NOT NULL
-      AND p.created_at > %(since)s
+    JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
+    WHERE p.created_at > %(since)s
       AND p.created_at <= %(cutoff)s
+      AND {_NOT_ONBOARDING_IMPORT}
       AND p.in_stock
       AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
     GROUP BY p.brand_node_id
@@ -753,11 +824,14 @@ _BRAND_NEW_SUMMARY_SQL = """
 
 
 async def fetch_brand_new_counts(
-    pool: AsyncConnectionPool, *, since: datetime, cutoff: datetime
+    pool: AsyncConnectionPool, *, since: datetime, cutoff: datetime, onboarding_grace_h: int
 ) -> dict[int, tuple[str | None, int]]:
     """brand_node_id → (브랜드명, 최근 신상 수). 브랜드 홈 요약 소식의 입력."""
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(_BRAND_NEW_SUMMARY_SQL, {"since": since, "cutoff": cutoff})
+        await cur.execute(
+            _BRAND_NEW_SUMMARY_SQL,
+            {"since": since, "cutoff": cutoff, "onboarding_grace_h": onboarding_grace_h},
+        )
         return {int(r[0]): (r[1], int(r[2])) for r in await cur.fetchall()}
 
 
@@ -1862,13 +1936,21 @@ async def run_notify_batch(
     brand_new_counts: dict[int, tuple[str | None, int]] = {}
     if include_brand:
         since = cutoff - timedelta(days=settings.NOTIFY_NEW_PRODUCT_WINDOW_D)
-        new_rows = await fetch_new_product_rows(pool, since=since, cutoff=cutoff, only_user=only_user)
+        new_rows = await fetch_new_product_rows(
+            pool,
+            since=since,
+            cutoff=cutoff,
+            onboarding_grace_h=settings.NOTIFY_BRAND_ONBOARDING_GRACE_H,
+            only_user=only_user,
+        )
         brand_events = new_product_events(new_rows)
         # 브랜드 홈 요약은 알림과 별개 축이다 — 팔로우도 성별도 보지 않고, 창도 짧다.
+        # 온보딩 적재분 제외만 공유한다 (양쪽 다 "신상" 을 주장하는 화면이라).
         brand_new_counts = await fetch_brand_new_counts(
             pool,
             since=cutoff - timedelta(days=settings.NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D),
             cutoff=cutoff,
+            onboarding_grace_h=settings.NOTIFY_BRAND_ONBOARDING_GRACE_H,
         )
 
     # 브랜드 세일 감지 — 상품이 아니라 브랜드 단위 이벤트다. restock/price_drop/brand_new
@@ -1908,10 +1990,16 @@ async def run_notify_batch(
         brand_new_days_last_week=brand_days,
         weekly_cap=settings.NOTIFY_BRAND_NEW_WEEKLY_CAP,
         max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS,
+        max_per_brand=settings.NOTIFY_BRAND_NEW_MAX_PER_BRAND,
     )
     # 동의에 막힌 이벤트는 푸시만 건너뛰고 인박스에는 남긴다. 캡·상한에 막힌 몫은
     # 여기 없다 — 재시도 대상이라 기록하면 안 된다 (consent_suppressed_events 참조).
-    inbox_only = consent_suppressed_events(events, prefs=prefs, max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS)
+    inbox_only = consent_suppressed_events(
+        events,
+        prefs=prefs,
+        max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS,
+        max_per_brand=settings.NOTIFY_BRAND_NEW_MAX_PER_BRAND,
+    )
     if limit is not None:
         allowed_users = set(list(selected)[: max(0, limit)])
         selected = {user_id: value for user_id, value in selected.items() if user_id in allowed_users}

@@ -47,6 +47,23 @@ async def _follow(pool, user_id: str, brand_id: int, *, notify: bool = True) -> 
         await conn.commit()
 
 
+async def _aged_brand(pool, name: str, *, anchor_gender: list[str] | None = None) -> int:
+    """이미 예전부터 수집돼 있던 브랜드를 만든다.
+
+    신상 감지는 브랜드 최초 적재 +NOTIFY_BRAND_ONBOARDING_GRACE_H 이내 상품을 제외한다
+    (브랜드를 처음 크롤하면 카탈로그 전체가 같은 배치로 들어와 전부 "신상" 이 되므로).
+    테스트는 브랜드를 방금 만들기 때문에, 앵커 상품 1건을 60일 전으로 backdate 해
+    "온보딩은 옛날에 끝난 브랜드" 상태로 만든다. 앵커는 14일 후보창 밖이라 신상으로도
+    잡히지 않고, 세일 비율에는 영향을 주므로 세일 테스트에서는 쓰지 않는다.
+    """
+    brand_id = await _insert_brand(pool, name)
+    anchor = await _insert_product(pool, brand=name, brand_node_id=brand_id, gender=anchor_gender or ["women"])
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE public.products SET created_at = now() - interval '60 days' WHERE id = %s", (anchor,))
+        await conn.commit()
+    return brand_id
+
+
 async def _count(pool, sql: str, params: tuple = ()) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(sql, params)
@@ -144,10 +161,9 @@ async def test_brand_new_products_notify_once_and_respect_gender(client: AsyncCl
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
 
-    women_product = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
+    await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (women_product,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
@@ -187,10 +203,9 @@ async def test_user_gender_filled_in_later_is_still_caught(client: AsyncClient, 
         await conn.commit()
 
     # 상품은 처음부터 성별을 갖고 들어온다 (크롤러 계약).
-    product_id = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
+    await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (product_id,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
@@ -222,16 +237,14 @@ async def test_capped_overflow_carries_over_to_the_next_run(client: AsyncClient,
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
 
-    first = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (first,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
         )
         await conn.commit()
-    for _ in range(4):
+    for _ in range(5):
         await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
 
     first_run = datetime.now(tz=UTC)
@@ -470,7 +483,7 @@ async def test_inbox_row_points_at_the_canonical_brand_news(client: AsyncClient,
 @pytest.mark.asyncio
 async def test_brand_new_summary_fills_the_brand_home(client: AsyncClient, pool):
     """브랜드 홈 '신상 N개' 요약 — 팔로우도 성별도 보지 않는 브랜드 단위 집계."""
-    brand_id = await _insert_brand(pool, "Acme")
+    brand_id = await _aged_brand(pool, "Acme")
     for _ in range(3):
         await _insert_product(pool, brand="Acme", brand_node_id=brand_id)
 
@@ -485,7 +498,7 @@ async def test_brand_new_summary_fills_the_brand_home(client: AsyncClient, pool)
 
 @pytest.mark.asyncio
 async def test_brand_new_summary_refreshes_count_then_closes(client: AsyncClient, pool):
-    brand_id = await _insert_brand(pool, "Acme")
+    brand_id = await _aged_brand(pool, "Acme")
     await _insert_product(pool, brand="Acme", brand_node_id=brand_id)
     await run_notify_batch(pool)
 
@@ -516,7 +529,7 @@ async def test_brand_new_summary_stays_out_of_the_inbox(client: AsyncClient, poo
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
-    brand_id = await _insert_brand(pool, "Acme")
+    brand_id = await _aged_brand(pool, "Acme")
     await _follow(pool, user_id, brand_id)
     await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
 
@@ -535,7 +548,7 @@ async def test_brand_new_consent_off_keeps_the_inbox_row_but_not_the_retry_pool(
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
-    brand_id = await _insert_brand(pool, "Acme")
+    brand_id = await _aged_brand(pool, "Acme")
     await _follow(pool, user_id, brand_id)
     await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
     await client.patch(
@@ -561,7 +574,7 @@ async def test_brand_new_inbox_backlog_is_capped_per_run(client: AsyncClient, po
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
-    brand_id = await _insert_brand(pool, "Acme")
+    brand_id = await _aged_brand(pool, "Acme")
     await _follow(pool, user_id, brand_id)
     for _ in range(app_settings.NOTIFY_BRAND_NEW_MAX_ITEMS + 4):
         await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
@@ -574,6 +587,74 @@ async def test_brand_new_inbox_backlog_is_capped_per_run(client: AsyncClient, po
     # 잘린 몫은 기록되지 않아 다음 배치에서 다시 후보가 된다.
     second = await run_notify_batch(pool, only_user=UUID(user_id))
     assert second.recorded == 4
+
+
+@pytest.mark.asyncio
+async def test_onboarding_import_is_not_treated_as_new_arrivals(client: AsyncClient, pool):
+    """브랜드를 처음 수집하면 카탈로그 전체가 같은 배치로 들어온다 — 신상이 아니다.
+
+    실측: 한 브랜드 775건이 2초 안에 적재됐고, 최근 14일 신상 후보의 13% 가 이런
+    온보딩 통짜 적재분이었다. 걸러내지 않으면 팔로워는 구형 카탈로그를 "신상" 으로 받는다.
+    """
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+
+    # 방금 온보딩된 브랜드 — 카탈로그 전체가 지금 적재된다.
+    brand_id = await _insert_brand(pool, "JustOnboarded")
+    await _follow(pool, user_id, brand_id)
+    for _ in range(6):
+        await _insert_product(pool, brand="JustOnboarded", brand_node_id=brand_id, gender=["women"])
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 0
+    assert report.brand_new_news == 0  # 브랜드 홈 요약도 뜨지 않는다
+
+    # 유예시간이 지난 뒤 들어온 상품부터는 진짜 신상이다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE public.products SET created_at = now() - interval '3 days' WHERE brand_node_id = %s",
+            (brand_id,),
+        )
+        await conn.commit()
+    await _insert_product(pool, brand="JustOnboarded", brand_node_id=brand_id, gender=["women"])
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 1
+    assert report.brand_new_news == 1
+
+
+@pytest.mark.asyncio
+async def test_one_brand_does_not_take_the_whole_day_of_new_arrivals(client: AsyncClient, pool):
+    """통짜 적재된 브랜드가 하루 몫을 독식하지 않는다 — 팔로우한 다른 브랜드도 나온다."""
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+
+    loud = await _aged_brand(pool, "Loud")
+    quiet = await _aged_brand(pool, "Quiet")
+    await _follow(pool, user_id, loud)
+    await _follow(pool, user_id, quiet)
+
+    # Quiet 을 먼저 적재하고 Loud 를 나중에 — 최신순으로는 Loud 가 앞을 다 차지한다.
+    await _insert_product(pool, brand="Quiet", brand_node_id=quiet, gender=["women"])
+    for _ in range(8):
+        await _insert_product(pool, brand="Loud", brand_node_id=loud, gender=["women"])
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT brand_node_id, count(*) FROM ai.notifications WHERE kind = %s GROUP BY 1",
+            (KIND_BRAND_NEW,),
+        )
+        by_brand = dict(await cur.fetchall())
+    # 나중에 적재된 Loud 가 5칸을 독식하지 않고 Quiet 도 자리를 얻는다.
+    assert by_brand.get(quiet) == 1
+    assert by_brand.get(loud) == 4  # 브랜드당 2개 + 남은 슬롯 backfill
+    assert sum(by_brand.values()) == 5
 
 
 @pytest.mark.asyncio
