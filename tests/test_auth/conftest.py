@@ -53,6 +53,7 @@ def _bootstrap(dsn: str) -> None:
                 primary_style_node_id BIGINT,
                 secondary_style_node_id BIGINT,
                 gender_scope TEXT[],
+                description TEXT,
                 wiki JSONB NOT NULL DEFAULT '{}'::jsonb
             )
         """)

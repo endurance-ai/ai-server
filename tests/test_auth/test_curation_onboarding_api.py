@@ -21,14 +21,27 @@ async def _login(client: AsyncClient) -> tuple[str, str]:
     return f"Bearer {data['access_token']}", data["user_id"]
 
 
-async def _insert_brand(pool, name: str, node_id: int | None = None, normalized: str | None = None) -> int:
+async def _insert_brand(
+    pool,
+    name: str,
+    node_id: int | None = None,
+    normalized: str | None = None,
+    *,
+    description: str | None = None,
+    homepage_url: str | None = None,
+    news: str | None = None,
+) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            INSERT INTO public.brand_nodes (brand_name, brand_name_normalized, primary_style_node_id)
-            VALUES (%s, %s, %s) RETURNING id
+            INSERT INTO public.brand_nodes (brand_name, brand_name_normalized, primary_style_node_id, description, wiki)
+            VALUES (
+                %s, %s, %s, %s,
+                jsonb_strip_nulls(jsonb_build_object('homepage_url', %s::text, 'news', %s::text))
+            )
+            RETURNING id
             """,
-            (name, normalized, node_id),
+            (name, normalized, node_id, description, homepage_url, news),
         )
         row = await cur.fetchone()
         await conn.commit()
