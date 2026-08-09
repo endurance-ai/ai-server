@@ -138,23 +138,27 @@ def test_feed_brand_cap_limits_one_brand_across_the_whole_feed():
     def pool() -> list[dict]:
         rows: list[dict] = []
         for pid in range(1, 41):  # hot 후보 40개
-            rows.append({
-                "product_id": pid,
-                "is_hot": True,
-                "base_score": float(1000 - pid),
-                "base_rank": pid,
-                "brand_key": "dom" if pid <= 2 else f"hot-{pid}",
-                "style_node_id": pid,
-            })
+            rows.append(
+                {
+                    "product_id": pid,
+                    "is_hot": True,
+                    "base_score": float(1000 - pid),
+                    "base_rank": pid,
+                    "brand_key": "dom" if pid <= 2 else f"hot-{pid}",
+                    "style_node_id": pid,
+                }
+            )
         for pid in range(41, 81):  # overall 후보 40개
-            rows.append({
-                "product_id": pid,
-                "is_hot": False,
-                "base_score": float(1000 - pid),
-                "base_rank": pid - 40,
-                "brand_key": f"over-{pid}",
-                "style_node_id": pid,
-            })
+            rows.append(
+                {
+                    "product_id": pid,
+                    "is_hot": False,
+                    "base_score": float(1000 - pid),
+                    "base_rank": pid - 40,
+                    "brand_key": f"over-{pid}",
+                    "style_node_id": pid,
+                }
+            )
         return rows
 
     feed_brands: Counter[str] = Counter()

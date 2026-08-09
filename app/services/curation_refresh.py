@@ -305,11 +305,7 @@ def select_candidate_ids(
                 continue
             # 교차 섹션 캡 — 이 구좌 몫(brands[brand])을 더한 피드 누적이 상한에
             # 닿으면 건너뛴다. feed_brands 는 성공 반환 시에만 반영(아래 commit).
-            if (
-                feed_cap is not None
-                and feed_brands is not None
-                and feed_brands[brand] + brands[brand] >= feed_cap
-            ):
+            if feed_cap is not None and feed_brands is not None and feed_brands[brand] + brands[brand] >= feed_cap:
                 continue
             selected.append(pid)
             brands[brand] += 1
