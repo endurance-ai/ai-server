@@ -32,9 +32,13 @@ products: `detect_save_events` advances the baseline the moment it fires, so an
 event dropped at this point is gone for good — re-enabling consent later cannot
 recover it.
 
-`brand_new_product` is the one exception: `_NEW_PRODUCT_SQL` picks candidates by
-anti-joining `ai.notifications`, so recording a suppressed event would remove it
-from the retry pool and break capped-overflow carry-over.
+Only **consent** failures are recorded this way. Weekly-cap and daily-overflow
+misses stay unrecorded on purpose: `_NEW_PRODUCT_SQL` picks candidates by
+anti-joining `ai.notifications`, so recording them would drop them from the retry
+pool. Consent-off is a permanent suppression, so there is no retry to preserve.
+Suppressed `brand_new_product` rows are still capped at
+`NOTIFY_BRAND_NEW_MAX_ITEMS` per run, or a user with the category off would get
+the whole 14-day candidate window dumped into their inbox at once.
 
 ## Brand news is canonical, not fanned out
 
@@ -63,6 +67,27 @@ Deduplication comes from the `ai.brand_sale_state` false→true transition plus 
 (upserted, no history). `ai.brand_news` holds the history via
 `started_at`/`ended_at`. A sale ending closes the open row rather than deleting
 it.
+
+### Two news kinds, two audiences
+
+`ai.brand_news.kind` (migration `0029`):
+
+| kind | Trigger | Brand home | Inbox |
+| --- | --- | --- | --- |
+| `brand_sale` | discounted-catalog ratio crosses the threshold (state transition) | yes | yes |
+| `brand_new` | rolling count of arrivals in `NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D` days | yes | **no** |
+
+`brand_new` exists because sales are rare, so a brand home that only surfaces
+sales looks empty most of the time. It stays out of the inbox because the inbox
+already receives per-product `brand_new_product` rows matched to the user's
+gender — a brand-level summary on top would say the same thing twice. The brand
+home has no user to personalise for (it is public), so there the summary is the
+only sensible form. `app/api/notifications.py` `_INBOX_NEWS_KINDS` enforces this.
+
+Unlike a sale, the summary is not an on/off transition but a rolling aggregate:
+one open row per brand whose `payload.new_count` is refreshed each run, closed
+when the window empties. A refresh is not "news", so it neither reopens the row
+nor moves `started_at`.
 
 ## Inbox feed: two sources, two read models
 

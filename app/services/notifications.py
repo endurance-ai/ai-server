@@ -46,6 +46,13 @@ KIND_BRAND_NEW = "brand_new_product"
 KIND_BRAND_SALE = "brand_sale"
 KINDS: tuple[str, ...] = (KIND_RESTOCK, KIND_PRICE_DROP, KIND_BRAND_NEW, KIND_BRAND_SALE)
 
+# ai.brand_news.kind 값. 알림 kind 와 이름이 겹치지만 다른 축이다 — 이쪽은 "브랜드
+# 단위 소식의 종류" 고, KIND_* 는 "유저에게 가는 알림의 종류" 다. NEWS_BRAND_SALE 만
+# 알림함과 브랜드 홈이 공유하고, NEWS_BRAND_NEW 는 브랜드 홈 전용이다 (알림함은
+# 상품별 brand_new_product 행을 따로 갖고 있어 끼워 넣으면 중복이다).
+NEWS_BRAND_SALE = "brand_sale"
+NEWS_BRAND_NEW = "brand_new"
+
 # 마지막 실행 시각을 남기는 ai.notification_job_state 행 키 (관측용 — 감지는 이 값을
 # 읽지 않는다. 이유는 _NEW_PRODUCT_SQL 주석 참조).
 NOTIFY_JOB = "notify_batch"
@@ -181,7 +188,10 @@ class BatchReport:
     detected: dict[str, int] = field(default_factory=lambda: dict.fromkeys(KINDS, 0))
     selected: dict[str, int] = field(default_factory=lambda: dict.fromkeys(KINDS, 0))
     baselines_written: int = 0
-    brand_news_written: int = 0
+    # ai.brand_news 에 열거나 닫은 행 수. 두 종류는 트리거도 소비자도 달라 따로 센다
+    # (세일=전환 감지·알림함+브랜드홈 / 신상=롤링 집계·브랜드홈 전용).
+    brand_sale_news: int = 0
+    brand_new_news: int = 0
     recorded: int = 0
     messages_queued: int = 0
     deliveries_queued: int = 0
@@ -205,7 +215,8 @@ class BatchReport:
         return (
             f"🔔 [notify] {prefix}"
             f"detected({detected}) selected({selected}) "
-            f"baselines={self.baselines_written} brand_news={self.brand_news_written} "
+            f"baselines={self.baselines_written} "
+            f"brand_news(sale={self.brand_sale_news} new={self.brand_new_news}) "
             f"recorded={self.recorded} "
             f"messages={self.messages_queued} deliveries={self.deliveries_queued} "
             f"users_pushed={self.users_pushed} ok={self.pushes_ok} failed={self.pushes_failed} "
@@ -336,7 +347,7 @@ def detect_brand_sale_events(
 
         if row.prev_on_sale and not now_on_sale:
             # 세일 종료 — 진행 중이던 소식을 닫는다. payload 는 닫기에 쓰이지 않는다.
-            news.append(BrandNewsWrite(row.brand_node_id, KIND_BRAND_SALE, {}, opened=False))
+            news.append(BrandNewsWrite(row.brand_node_id, NEWS_BRAND_SALE, {}, opened=False))
             continue
 
         if not (now_on_sale and not row.prev_on_sale):
@@ -350,7 +361,7 @@ def detect_brand_sale_events(
             "sale_pct": round(ratio * 100),
             "max_discount_pct": round(row.max_discount_pct * 100) if row.max_discount_pct else None,
         }
-        news.append(BrandNewsWrite(row.brand_node_id, KIND_BRAND_SALE, payload, opened=True))
+        news.append(BrandNewsWrite(row.brand_node_id, NEWS_BRAND_SALE, payload, opened=True))
 
         for user_id in followers.get(row.brand_node_id, ()):
             events.append(
@@ -416,8 +427,13 @@ def select_for_delivery(
     return ordered
 
 
-def suppressed_saved_events(events: list[Event], *, prefs: dict[UUID, dict[str, Any] | None]) -> list[Event]:
-    """동의 게이트에 막힌 **찜 알림**(재입고/가격 하락). 인박스에는 그대로 적재한다.
+def consent_suppressed_events(
+    events: list[Event],
+    *,
+    prefs: dict[UUID, dict[str, Any] | None],
+    max_brand_items: int,
+) -> list[Event]:
+    """동의 게이트에 막혔지만 인박스에는 남길 이벤트. 인박스 적재만, 푸시는 없다.
 
     푸시를 끈 것과 소식을 못 보는 것은 다른 일이다. 그런데 찜 알림은 그 둘이 묶여
     있어서, 동의가 꺼져 있으면 select_for_delivery 에서 탈락하고 _persist_outbox 가
@@ -430,17 +446,31 @@ def suppressed_saved_events(events: list[Event], *, prefs: dict[UUID, dict[str, 
 
     brand_sale 처럼 정본을 조회하는 방식(read fan-out)으로는 풀 수 없다. "네가 찜한
     셔츠가 재입고됐다" 는 유저마다 다른 사실이라 접을 정본이 없다. 그래서 대신
-    **인박스 행은 무조건 남기고 푸시만 게이트하는** 방식을 쓴다.
+    **인박스 행은 남기고 푸시만 게이트하는** 방식을 쓴다.
 
-    brand_new 는 여기 포함하지 않는다 — _NEW_PRODUCT_SQL 이 ai.notifications 를
-    안티조인해 후보를 고르므로, 억제된 이벤트를 기록하면 캡에 걸린 신상이 다음 날
-    다시 후보가 되는 재시도 동작이 깨진다.
+    **동의 실패만 여기 들어온다.** 주간 캡·하루 상한(overflow)에 막힌 brand_new 는
+    제외한다 — _NEW_PRODUCT_SQL 이 ai.notifications 안티조인으로 후보를 고르므로,
+    기록해버리면 다음 날 다시 후보가 되는 재시도가 깨진다. 동의 off 는 영구 억제라
+    재시도할 게 없어서 기록해도 안전하다.
+
+    brand_new 는 인박스 적재도 하루 max_brand_items 개로 자른다. 안 그러면 동의를 꺼둔
+    유저에게 14일 보존창의 후보 수백 건이 한 배치에 쏟아진다. 잘린 몫은 기록되지 않아
+    다음 날 다시 후보가 되므로, 푸시 경로와 같은 속도로 흘러든다.
     """
-    return [
-        event
-        for event in events
-        if event.kind in (KIND_RESTOCK, KIND_PRICE_DROP) and not kind_allowed(prefs.get(event.user_id), event.kind)
-    ]
+    per_user_brand_new: dict[UUID, int] = {}
+    suppressed: list[Event] = []
+    for event in events:
+        if event.kind not in (KIND_RESTOCK, KIND_PRICE_DROP, KIND_BRAND_NEW):
+            continue
+        if kind_allowed(prefs.get(event.user_id), event.kind):
+            continue
+        if event.kind == KIND_BRAND_NEW:
+            taken = per_user_brand_new.get(event.user_id, 0)
+            if taken >= max_brand_items:
+                continue
+            per_user_brand_new[event.user_id] = taken + 1
+        suppressed.append(event)
+    return suppressed
 
 
 def build_digest(events: list[Event], *, notification_ids: list[int] | None = None) -> Digest:
@@ -503,10 +533,15 @@ def brand_news_copy(kind: str, payload: dict[str, Any]) -> tuple[str, str]:
     그 브랜드 페이지 안이라 브랜드명 반복이 군더더기다. 팔로우하지 않은 유저·비로그인도
     보는 화면이라 "팔로우한" 이라는 전제 자체가 틀리기도 한다.
     """
-    if kind == KIND_BRAND_SALE:
+    if kind == NEWS_BRAND_SALE:
         max_discount_pct = payload.get("max_discount_pct")
         sub = f"최대 {max_discount_pct}% 싸요" if max_discount_pct else ""
         return "세일 시작했어요", sub
+    if kind == NEWS_BRAND_NEW:
+        # 기간을 문구에 박지 않는다 — 집계 창이 설정값
+        # (NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D)이라 "이번 주" 가 거짓말이 될 수 있다.
+        new_count = payload.get("new_count")
+        return (f"신상 {new_count}개가 새로 들어왔어요", "") if new_count else ("새 상품이 들어왔어요", "")
     return "새 소식이 있어요", ""
 
 
@@ -699,6 +734,31 @@ async def fetch_brand_sale_rows(pool: AsyncConnectionPool, *, min_products: int 
         )
         for r in rows
     ]
+
+
+# 브랜드 홈 "신상 N개" 요약용 집계. 알림용 _NEW_PRODUCT_SQL 과 달리 팔로우도 성별도
+# 보지 않는다 — 브랜드 홈은 비로그인도 보는 화면이라 개인화할 대상이 없다.
+# in_stock + 이미지 조건은 알림 쪽과 맞춘다 (품절이나 이미지 없는 상품을 "신상 입고" 로
+# 세면 눌렀을 때 보여줄 게 없다).
+_BRAND_NEW_SUMMARY_SQL = """
+    SELECT p.brand_node_id, max(p.brand) AS brand, count(*) AS new_count
+    FROM public.products p
+    WHERE p.brand_node_id IS NOT NULL
+      AND p.created_at > %(since)s
+      AND p.created_at <= %(cutoff)s
+      AND p.in_stock
+      AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
+    GROUP BY p.brand_node_id
+"""
+
+
+async def fetch_brand_new_counts(
+    pool: AsyncConnectionPool, *, since: datetime, cutoff: datetime
+) -> dict[int, tuple[str | None, int]]:
+    """brand_node_id → (브랜드명, 최근 신상 수). 브랜드 홈 요약 소식의 입력."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(_BRAND_NEW_SUMMARY_SQL, {"since": since, "cutoff": cutoff})
+        return {int(r[0]): (r[1], int(r[2])) for r in await cur.fetchall()}
 
 
 async def fetch_brand_followers(
@@ -1296,6 +1356,57 @@ async def _persist_brand_sale(
     )
 
 
+async def _persist_brand_new_news(
+    pool: AsyncConnectionPool,
+    *,
+    counts: dict[int, tuple[str | None, int]],
+    now: datetime,
+) -> int:
+    """브랜드 홈 "신상 N개" 요약 소식을 갱신한다. 반환: 열거나 닫은 행 수.
+
+    세일과 달리 on/off 전환이 아니라 롤링 윈도우 집계다. 열린 소식 1건을 유지하며
+    개수만 갱신하고, 윈도우가 비면 닫는다. uq_brand_news_open 이 브랜드·종류당 열린
+    소식을 1건으로 강제하므로 열기/갱신이 upsert 한 방으로 끝난다.
+
+    개수만 바뀐 갱신은 "새 소식" 이 아니므로 세지 않는다 — started_at 도 유지해
+    브랜드 홈이 "언제부터 신상이 들어오기 시작했는지" 를 잃지 않는다.
+    """
+    written = 0
+    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        for brand_node_id, (brand, new_count) in counts.items():
+            await cur.execute(
+                """
+                INSERT INTO ai.brand_news (brand_node_id, kind, payload, started_at)
+                VALUES (%s, %s, %s::jsonb, %s)
+                ON CONFLICT (brand_node_id, kind) WHERE ended_at IS NULL
+                DO UPDATE SET payload = EXCLUDED.payload
+                RETURNING (xmax = 0) AS opened
+                """,
+                (
+                    brand_node_id,
+                    NEWS_BRAND_NEW,
+                    json.dumps({"brand": brand, "new_count": new_count}, ensure_ascii=False),
+                    now,
+                ),
+            )
+            row = await cur.fetchone()
+            if row and row[0]:
+                written += 1
+
+        # 윈도우가 비어버린 브랜드는 소식을 닫는다 — 브랜드 홈이 3주 전 신상을 계속
+        # "최근 소식" 으로 걸어두지 않게.
+        await cur.execute(
+            """
+            UPDATE ai.brand_news SET ended_at = %s
+            WHERE kind = %s AND ended_at IS NULL AND NOT (brand_node_id = ANY(%s))
+            """,
+            (now, NEWS_BRAND_NEW, list(counts)),
+        )
+        written += max(cur.rowcount, 0)
+
+    return written
+
+
 async def _attach_brand_sale_message(
     cur: Any,
     user_id: UUID,
@@ -1748,10 +1859,17 @@ async def run_notify_batch(
         save_events, baselines = detect_save_events(saved_rows, threshold=settings.NOTIFY_PRICE_DROP_THRESHOLD)
 
     brand_events: list[Event] = []
+    brand_new_counts: dict[int, tuple[str | None, int]] = {}
     if include_brand:
         since = cutoff - timedelta(days=settings.NOTIFY_NEW_PRODUCT_WINDOW_D)
         new_rows = await fetch_new_product_rows(pool, since=since, cutoff=cutoff, only_user=only_user)
         brand_events = new_product_events(new_rows)
+        # 브랜드 홈 요약은 알림과 별개 축이다 — 팔로우도 성별도 보지 않고, 창도 짧다.
+        brand_new_counts = await fetch_brand_new_counts(
+            pool,
+            since=cutoff - timedelta(days=settings.NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D),
+            cutoff=cutoff,
+        )
 
     # 브랜드 세일 감지 — 상품이 아니라 브랜드 단위 이벤트다. restock/price_drop/brand_new
     # 과 달리 인박스 적재와 푸시 게이트가 분리돼(인박스는 무조건, 푸시만 동의+주간 캡)
@@ -1791,9 +1909,9 @@ async def run_notify_batch(
         weekly_cap=settings.NOTIFY_BRAND_NEW_WEEKLY_CAP,
         max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS,
     )
-    # 동의에 막힌 찜 알림은 푸시만 건너뛰고 인박스에는 남긴다. brand_new 는 제외 —
-    # 안티조인 재시도 로직이 깨진다 (suppressed_saved_events docstring 참조).
-    inbox_only = suppressed_saved_events(events, prefs=prefs)
+    # 동의에 막힌 이벤트는 푸시만 건너뛰고 인박스에는 남긴다. 캡·상한에 막힌 몫은
+    # 여기 없다 — 재시도 대상이라 기록하면 안 된다 (consent_suppressed_events 참조).
+    inbox_only = consent_suppressed_events(events, prefs=prefs, max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS)
     if limit is not None:
         allowed_users = set(list(selected)[: max(0, limit)])
         selected = {user_id: value for user_id, value in selected.items() if user_id in allowed_users}
@@ -1828,7 +1946,10 @@ async def run_notify_batch(
         weekly_cap=settings.NOTIFY_BRAND_SALE_WEEKLY_CAP,
         now=cutoff,
     )
-    report.brand_news_written = sale.news_written
+    report.brand_sale_news = sale.news_written
+    # 브랜드 홈 "신상 N개" 요약. 알림 경로와 독립이라 팬아웃/푸시가 붙지 않는다.
+    if include_brand:
+        report.brand_new_news = await _persist_brand_new_news(pool, counts=brand_new_counts, now=cutoff)
     report.recorded += sale.recorded
     report.messages_queued += sale.messages
     report.deliveries_queued += sale.deliveries

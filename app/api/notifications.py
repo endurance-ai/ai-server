@@ -45,6 +45,12 @@ _FEED_READ_SOURCE = "brand_news"
 # 아웃박스 앵커 전용이라 피드에서 제외하는 kind. 같은 소식을 source `b` 가 이미 낸다.
 _PUSH_LEDGER_KIND = "brand_sale"
 
+# ai.brand_news 중 알림함에 노출하는 종류. 'brand_new'(브랜드 홈 "신상 N개" 요약)는
+# 뺀다 — 알림함에는 이미 상품별 brand_new_product 행이 성별까지 맞춰 들어오므로,
+# 브랜드 단위 요약까지 끼면 같은 사실이 두 번 보인다. 브랜드 홈은 개인화할 대상이
+# 없어서 요약이 유일한 표현이지만, 알림함은 사정이 다르다.
+_INBOX_NEWS_KINDS = ("brand_sale",)
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -197,7 +203,8 @@ _FEED_SQL = f"""
             LEFT JOIN ai.user_feed_state ufs ON ufs.user_id = %(uid)s
             LEFT JOIN ai.feed_reads fr
               ON fr.user_id = %(uid)s AND fr.source = '{_FEED_READ_SOURCE}' AND fr.ref_id = bn.id
-            WHERE bn.started_at >= ubp.created_at
+            WHERE bn.kind = ANY(%(news_kinds)s)
+              AND bn.started_at >= ubp.created_at
               AND (
                   %(cur_at)s::timestamptz IS NULL
                   OR (bn.started_at, '{SOURCE_BRAND_NEWS}', bn.id)
@@ -227,7 +234,8 @@ _UNREAD_SQL = f"""
           ON ubp.brand_id = bn.brand_node_id AND ubp.user_id = %(uid)s AND ubp.notify_enabled
         LEFT JOIN ai.feed_reads fr
           ON fr.user_id = %(uid)s AND fr.source = '{_FEED_READ_SOURCE}' AND fr.ref_id = bn.id
-        WHERE bn.started_at >= ubp.created_at
+        WHERE bn.kind = ANY(%(news_kinds)s)
+          AND bn.started_at >= ubp.created_at
           AND bn.started_at > coalesce(
               (SELECT last_read_at FROM ai.user_feed_state WHERE user_id = %(uid)s),
               '-infinity'::timestamptz
@@ -238,7 +246,7 @@ _UNREAD_SQL = f"""
 
 
 async def _unread_count(cur: Any, user_id: UUID) -> int:
-    await cur.execute(_UNREAD_SQL, {"uid": user_id})
+    await cur.execute(_UNREAD_SQL, {"uid": user_id, "news_kinds": list(_INBOX_NEWS_KINDS)})
     return (await cur.fetchone())[0]
 
 
@@ -263,6 +271,7 @@ async def list_notifications(
                 "cur_at": cursor_at,
                 "cur_source": cursor_source,
                 "cur_id": cursor_id,
+                "news_kinds": list(_INBOX_NEWS_KINDS),
                 "lim": limit + 1,
             },
         )

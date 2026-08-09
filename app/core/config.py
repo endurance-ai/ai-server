@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     # 정본으로 남기려고 전체 브랜드를 스캔하면서 필요해졌다 — 상품 2개 중 1개가
     # 할인이면 비율 50% 로 임계값을 넘어 브랜드 홈에 가짜 "전면 세일" 이 걸린다.
     NOTIFY_BRAND_SALE_MIN_PRODUCTS: int = 10
+    # 브랜드 홈 "신상 N개" 요약이 세는 기간. 알림용 보존창
+    # (NOTIFY_NEW_PRODUCT_WINDOW_D=14)과 별개다 — 그쪽은 "캡에 걸려 아직 못 보낸 걸
+    # 다시 후보로 올리는" 재시도 창이고, 이건 화면에 보여줄 "최근" 의 길이다.
+    NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D: int = 7
 
     # Standalone worker. The process exits without doing work unless enabled.
     NOTIFICATION_WORKER_ENABLED: bool = False
