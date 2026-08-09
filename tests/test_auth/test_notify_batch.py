@@ -487,16 +487,16 @@ async def test_brand_sale_ignores_tiny_catalogs(client: AsyncClient, pool, monke
 
 @pytest.mark.asyncio
 async def test_brand_sale_respects_brand_consent(client: AsyncClient, pool):
-    """동의가 꺼져도 인박스엔 남는다 — 억제되는 건 푸시뿐이다 (brand_sale 전용 정책)."""
+    """동의를 꺼도 소식 정본은 남는다 — 억제되는 건 푸시뿐이다.
+
+    0028 이후 인박스는 ai.brand_news 를 조회하므로, 게이트에 막힌 유저의
+    ai.notifications 행은 아예 만들지 않는다(아웃박스 앵커가 필요 없으니까).
+    유저가 소식을 못 보는 게 아니라 푸시를 안 받는 것이다.
+    """
     auth, user_id = await _login(client)
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id)
-
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     # brand_sale 은 brand_new_product 동의를 공유한다 — 이를 끄면 푸시만 억제된다.
     await client.patch(
@@ -508,31 +508,28 @@ async def test_brand_sale_respects_brand_consent(client: AsyncClient, pool):
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_BRAND_SALE] == 1
     assert report.selected[KIND_BRAND_SALE] == 0  # 푸시 게이트 통과분은 0
-    # 인박스는 동의와 무관하게 항상 적재된다 (GET /v1/notifications 노출).
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 1
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT processed_at, suppressed_reason FROM ai.notifications WHERE kind = 'brand_sale'")
-        processed_at, suppressed_reason = await cur.fetchone()
-    assert processed_at is not None
-    assert suppressed_reason == "consent_off"
+    assert report.push_suppressed_consent == 1
+    # 소식 정본은 남는다 — 인박스와 브랜드 홈이 이걸 읽는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news") == 1
+    # 아웃박스 앵커 행은 만들지 않는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 0
     # 푸시 경로(메시지/딜리버리)는 만들어지지 않는다.
     assert await _count(pool, "SELECT count(*) FROM ai.notification_messages WHERE category = 'brand_sale_digest'") == 0
+
+    # 그래도 알림함에는 보인다 — read fan-out 의 핵심.
+    feed = await client.get("/v1/notifications", headers={"Authorization": auth})
+    assert [i["type"] for i in feed.json()["items"]] == ["brand_sale"]
 
 
 @pytest.mark.asyncio
 async def test_brand_sale_respects_weekly_cap(client: AsyncClient, pool):
-    """주간 캡에 걸려도 인박스엔 남는다 — 억제되는 건 푸시뿐이다."""
+    """주간 캡에 걸려도 소식 정본은 남는다 — 억제되는 건 푸시뿐이다."""
     from app.services.notifications import BRAND_SALE_CATEGORY
 
     auth, user_id = await _login(client)
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id)
-
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     # 캡(주 3회)을 이미 채운 것처럼 최근 7일 내 accepted 메시지 3건을 직접 심는다.
     now = datetime.now(tz=UTC)
@@ -557,13 +554,15 @@ async def test_brand_sale_respects_weekly_cap(client: AsyncClient, pool):
     report = await run_notify_batch(pool, only_user=UUID(user_id), now=now)
     assert report.detected[KIND_BRAND_SALE] == 1
     assert report.selected[KIND_BRAND_SALE] == 0  # 캡에 걸려 푸시 게이트 통과분은 0
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 1
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT suppressed_reason FROM ai.notifications WHERE kind = 'brand_sale'")
-        (suppressed_reason,) = await cur.fetchone()
-    assert suppressed_reason == "weekly_cap"
+    assert report.push_suppressed_cap == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news") == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 0
     # 캡 이전에 심어둔 3건 외에 새 메시지가 추가되지 않는다.
     assert await _count(pool, "SELECT count(*) FROM ai.notification_messages WHERE category = 'brand_sale_digest'") == 3
+
+    # 캡은 푸시만 막는다 — 알림함에는 그대로 보인다.
+    feed = await client.get("/v1/notifications", headers={"Authorization": auth})
+    assert [i["type"] for i in feed.json()["items"]] == ["brand_sale"]
 
 
 @pytest.mark.asyncio

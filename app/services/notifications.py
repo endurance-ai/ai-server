@@ -144,6 +144,24 @@ class BrandNewsWrite:
 
 
 @dataclass(frozen=True, slots=True)
+class BrandSalePersistResult:
+    """_persist_brand_sale 결과. 위치 인자 5개 튜플이 한계에 다다라 이름을 붙였다.
+
+    suppressed_* 는 0028 이전에 ai.notifications.suppressed_reason 컬럼으로 남기던
+    관측값이다. 이제 막힌 유저는 행 자체를 만들지 않으므로(인박스는 정본이 담당)
+    리포트 카운터로만 센다.
+    """
+
+    news_written: int = 0
+    recorded: int = 0
+    messages: int = 0
+    deliveries: int = 0
+    pushed: int = 0
+    suppressed_consent: int = 0
+    suppressed_cap: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class BaselineWrite:
     user_id: UUID
     product_id: int
@@ -168,6 +186,10 @@ class BatchReport:
     messages_queued: int = 0
     deliveries_queued: int = 0
     users_pushed: int = 0
+    # brand_sale 푸시가 게이트에 막힌 이벤트 수. 인박스 노출은 정본(ai.brand_news)이
+    # 담당하므로 이건 "유저가 못 본 소식" 이 아니라 "푸시를 안 보낸 건수" 다.
+    push_suppressed_consent: int = 0
+    push_suppressed_cap: int = 0
     pushes_ok: int = 0
     pushes_failed: int = 0
     dead_tokens_dropped: int = 0
@@ -187,6 +209,7 @@ class BatchReport:
             f"recorded={self.recorded} "
             f"messages={self.messages_queued} deliveries={self.deliveries_queued} "
             f"users_pushed={self.users_pushed} ok={self.pushes_ok} failed={self.pushes_failed} "
+            f"suppressed(consent={self.push_suppressed_consent} cap={self.push_suppressed_cap}) "
             f"dead_tokens={self.dead_tokens_dropped}"
         )
 
@@ -1059,34 +1082,34 @@ async def _persist_brand_sale(
     brand_sale_days_last_week: dict[UUID, int],
     weekly_cap: int,
     now: datetime,
-) -> tuple[int, int, int, int, int]:
-    """brand_sale 전용 적재 — 소식 정본이 먼저, 인박스는 무조건, 푸시만 게이트.
+) -> BrandSalePersistResult:
+    """brand_sale 전용 적재 — 소식 정본이 먼저, 유저 행은 푸시 대상만.
 
-    brand_sale 은 restock/price_drop/brand_new 와 인박스 정책이 다르다. 감지된
-    이벤트(=세일 임계값을 방금 넘은 브랜드의 팔로워)는 동의/캡과 무관하게 전부
-    ai.notifications 에 적재해 알림함(GET /v1/notifications)에 노출한다. APNs 푸시
-    (메시지+딜리버리)만 kind_allowed 동의 + 주간 캡으로 게이트한다.
+    Phase 0 은 ai.brand_news 정본을 열고 닫는다. 팔로워가 0명이어도 여기까지는
+    반드시 도달한다 — 브랜드 홈이 이 테이블을 직접 읽기 때문이다.
 
-    brand_sale 에만 이렇게 국한할 수 있는 이유: brand_sale 의 중복 방지는
-    ai.brand_sale_state 의 false→true 전환 게이트라 ai.notifications 행 존재에
-    의존하지 않는다. brand_new 처럼 ai.notifications 안티조인(_NEW_PRODUCT_SQL)을
-    쓰지 않으므로, 캡/동의로 막힌 이벤트를 인박스에 남겨도 다음 감지를 오염시키지
-    않는다. 소식 upsert·상태 upsert·인박스 insert·푸시 적재는 한 트랜잭션으로 원자화한다.
+    Phase A 는 ai.brand_sale_state 전환 상태를 갱신한다. 이벤트 발생 여부와 무관하다.
 
-    반환: (news_written, recorded, messages, deliveries, pushed).
-      news_written — Phase 0 에서 열거나 닫은 ai.brand_news 행 수
-      recorded     — Phase A 에서 실제 insert 된 알림 행 수
-      messages     — Phase B 에서 만든 메시지 수
-      deliveries   — Phase B 에서 만든 딜리버리 수
-      pushed       — 푸시 게이트를 통과한(=selected) 이벤트 수 (리포트용)
+    Phase B 는 **푸시 대상만** ai.notifications 에 적재한다. 인박스 노출은 정본이
+    담당하므로(0028 read fan-out) 유저별 복제가 필요 없고, 남은 행은 아웃박스 앵커
+    (notification_message_events FK) 역할만 한다.
+
+    중복 방지가 ai.notifications 행 존재에 의존하지 않아 가능한 구조다 — brand_sale 은
+    ai.brand_sale_state 의 false→true 전환 + uq_brand_news_open 이 막는다. brand_new
+    처럼 ai.notifications 안티조인(_NEW_PRODUCT_SQL)을 쓰지 않으므로, 게이트에 막힌
+    유저의 행을 안 남겨도 다음 감지가 오염되지 않는다.
+
+    전 단계를 한 트랜잭션으로 원자화한다.
     """
     news_written = 0
     recorded = 0
     messages = 0
     deliveries = 0
     pushed = 0
+    suppressed_consent = 0
+    suppressed_cap = 0
     if not states and not events and not news:
-        return news_written, recorded, messages, deliveries, pushed
+        return BrandSalePersistResult()
 
     async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
         # Phase 0 ── 브랜드 소식 정본. 유저 팬아웃보다 **먼저** 쓴다. 팔로워가 0명인
@@ -1152,42 +1175,55 @@ async def _persist_brand_sale(
                 (state.brand_node_id, state.on_sale, state.ratio, now),
             )
 
-        # Phase A ── 감지된 세일 이벤트를 동의/캡과 무관하게 모두 인박스에 적재한다.
-        inserted_by_user: dict[UUID, list[RecordedEvent]] = {}
+        # Phase B ── 푸시 대상(동의 + 주간 캡)만 ai.notifications 에 적재한다.
+        #
+        # 0028 이전엔 여기서 팔로워 전원의 행을 만들고 인박스가 그걸 읽었다. 이제
+        # 인박스는 ai.brand_news 정본을 조회하므로(app/api/notifications.py source `b`)
+        # 유저별 복제가 필요 없다. 남은 행의 유일한 역할은 아웃박스 앵커다 —
+        # ai.notification_message_events.notification_id 가 이 테이블을 FK 로 건다.
+        #
+        # 그래서 게이트를 **적재 전에** 본다. 막힌 유저는 행 자체를 만들지 않는다.
+        # 인박스 노출은 정본이 담당하므로 유실이 아니다 — 푸시만 건너뛴다.
+        # (억제 사유는 행 대신 리포트 카운터로 관측한다.)
+        events_by_user: dict[UUID, list[Event]] = {}
         for event in events:
-            await cur.execute(
-                """
-                INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload, brand_news_id)
-                VALUES (%s, %s, %s, %s, %s::jsonb, %s)
-                ON CONFLICT DO NOTHING
-                RETURNING id
-                """,
-                (
-                    event.user_id,
-                    event.kind,
-                    event.product_id,
-                    event.brand_node_id,
-                    json.dumps(event.payload, ensure_ascii=False, default=str),
-                    news_ids.get(event.brand_node_id) if event.brand_node_id is not None else None,
-                ),
-            )
-            row = await cur.fetchone()
-            if row:
-                inserted_by_user.setdefault(event.user_id, []).append(RecordedEvent(int(row[0]), event))
-                recorded += 1
+            events_by_user.setdefault(event.user_id, []).append(event)
 
-        # Phase B ── 인박스에 남은 이벤트 중 푸시 대상(동의 + 주간 캡)만 유저별
-        # 다이제스트 메시지로 만든다. 나머지는 인박스에 그대로 두고 처리 표시만 남긴다.
-        for user_id, user_inserted in inserted_by_user.items():
+        for user_id, user_events in events_by_user.items():
             consent_ok = kind_allowed(prefs.get(user_id), KIND_BRAND_SALE)
             cap_ok = brand_sale_days_last_week.get(user_id, 0) < weekly_cap
-            if not (consent_ok and cap_ok):
-                # 인박스 행은 이미 남았다 — 푸시만 억제. 관측용 사유를 남긴다.
-                reason = "consent_off" if not consent_ok else "weekly_cap"
+            if not consent_ok:
+                suppressed_consent += len(user_events)
+                continue
+            if not cap_ok:
+                suppressed_cap += len(user_events)
+                continue
+
+            user_inserted: list[RecordedEvent] = []
+            for event in user_events:
                 await cur.execute(
-                    "UPDATE ai.notifications SET processed_at = now(), suppressed_reason = %s WHERE id = ANY(%s)",
-                    (reason, [item.notification_id for item in user_inserted]),
+                    """
+                    INSERT INTO ai.notifications
+                        (user_id, kind, product_id, brand_node_id, payload, brand_news_id)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        event.user_id,
+                        event.kind,
+                        event.product_id,
+                        event.brand_node_id,
+                        json.dumps(event.payload, ensure_ascii=False, default=str),
+                        news_ids.get(event.brand_node_id) if event.brand_node_id is not None else None,
+                    ),
                 )
+                row = await cur.fetchone()
+                if row:
+                    user_inserted.append(RecordedEvent(int(row[0]), event))
+                    recorded += 1
+
+            if not user_inserted:
                 continue
 
             pushed += len(user_inserted)
@@ -1195,7 +1231,15 @@ async def _persist_brand_sale(
             messages += created_messages
             deliveries += created_deliveries
 
-    return news_written, recorded, messages, deliveries, pushed
+    return BrandSalePersistResult(
+        news_written=news_written,
+        recorded=recorded,
+        messages=messages,
+        deliveries=deliveries,
+        pushed=pushed,
+        suppressed_consent=suppressed_consent,
+        suppressed_cap=suppressed_cap,
+    )
 
 
 async def _attach_brand_sale_message(
@@ -1712,16 +1756,10 @@ async def run_notify_batch(
         report.deliveries_queued,
     ) = await _persist_outbox(pool, selected=selected, baselines=baselines, now=cutoff)
 
-    # brand_sale 은 별도 경로 — Phase 0 브랜드 소식 정본, Phase A 무조건 인박스 적재 +
-    # 상태 전환 upsert, Phase B 동의·전용 주간 캡 통과분만 APNs 푸시.
+    # brand_sale 은 별도 경로 — Phase 0 브랜드 소식 정본, Phase A 상태 전환 upsert,
+    # Phase B 동의·전용 주간 캡 통과분만 유저 행 + APNs 푸시.
     # 카운트를 아웃박스와 합산한다.
-    (
-        report.brand_news_written,
-        sale_recorded,
-        sale_messages,
-        sale_deliveries,
-        sale_pushed,
-    ) = await _persist_brand_sale(
+    sale = await _persist_brand_sale(
         pool,
         events=sale_events,
         states=sale_states,
@@ -1731,10 +1769,13 @@ async def run_notify_batch(
         weekly_cap=settings.NOTIFY_BRAND_SALE_WEEKLY_CAP,
         now=cutoff,
     )
-    report.recorded += sale_recorded
-    report.messages_queued += sale_messages
-    report.deliveries_queued += sale_deliveries
-    report.selected[KIND_BRAND_SALE] += sale_pushed
+    report.brand_news_written = sale.news_written
+    report.recorded += sale.recorded
+    report.messages_queued += sale.messages
+    report.deliveries_queued += sale.deliveries
+    report.selected[KIND_BRAND_SALE] += sale.pushed
+    report.push_suppressed_consent += sale.suppressed_consent
+    report.push_suppressed_cap += sale.suppressed_cap
 
     if include_saved and not include_brand:
         job_name = SAVED_JOB

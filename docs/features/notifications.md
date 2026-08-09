@@ -27,24 +27,53 @@ notifications" toggle.
 ## Brand news is canonical, not fanned out
 
 `brand_sale` is the one category whose content is a **brand-level fact**, so it
-is stored once in `ai.brand_news` (migration `0027`) and only then fanned out to
-followers. Two consequences that the other categories do not share:
+is stored once in `ai.brand_news` (migration `0027`) and read by followers rather
+than copied to them. Consequences the other categories do not share:
 
 - Detection scans **every** brand, not just followed ones. A brand nobody follows
   still gets its news row, because the brand home page (`GET /v1/brands/{id}`) is
   public and reads `ai.brand_news` directly. Scanning all brands makes catalog
   size a noise source, so `NOTIFY_BRAND_SALE_MIN_PRODUCTS` (default 10) excludes
   brands too small for a ratio to mean anything.
-- The inbox row is written **regardless of consent or weekly cap**; only the APNs
-  push is gated. `suppressed_reason` records which gate stopped the push. This is
-  safe here because deduplication comes from the `ai.brand_sale_state`
-  false→true transition plus the `uq_brand_news_open` partial unique index, not
-  from an anti-join against `ai.notifications`.
+- The inbox reads the canon, so consent and the weekly cap gate **only the APNs
+  push**. A user who turned push off still sees the news in their inbox.
+- `ai.notifications` rows for `brand_sale` are written only for users who pass
+  the push gate. Their sole job is anchoring the outbox
+  (`notification_message_events.notification_id` is a foreign key), so the feed
+  excludes `kind = 'brand_sale'` to avoid showing the same news twice.
+  Suppressed pushes are counted in the batch report, not stored as rows.
+
+Deduplication comes from the `ai.brand_sale_state` false→true transition plus the
+`uq_brand_news_open` partial unique index, not from an anti-join against
+`ai.notifications` — which is what makes the above safe.
 
 `ai.brand_sale_state` holds the current answer to "is this brand on sale"
 (upserted, no history). `ai.brand_news` holds the history via
 `started_at`/`ended_at`. A sale ending closes the open row rather than deleting
 it.
+
+## Inbox feed: two sources, two read models
+
+`GET /v1/notifications` merges two sources (migration `0028`):
+
+| Source | Table | Fan-out | Read state |
+| --- | --- | --- | --- |
+| `n` | `ai.notifications` (restock, price_drop, brand_new_product) | write — rows already differ per user | `read_at` on the row |
+| `b` | `ai.brand_news` joined to `ai.user_brand_picks` | read — one shared row per brand | `ai.user_feed_state` watermark + `ai.feed_reads` exceptions |
+
+Item ids are `<source>:<row id>` (`"n:123"`, `"b:45"`) because the two id spaces
+overlap; `PATCH /v1/notifications/read` takes the same strings back. The cursor is
+an opaque base64 token over `(created_at, source, id)`, all three descending —
+mixing sort directions would break the row-wise comparison that drives keyset
+pagination.
+
+Read state is deliberately **not** unified. Per-user rows can carry a per-row
+`read_at`; a shared row cannot, so it needs the watermark. Marking everything read
+becomes a single-row update on `ai.user_feed_state` and prunes `ai.feed_reads`,
+since the watermark then covers every exception.
+
+Brand news is scoped to `started_at >= user_brand_picks.created_at`, so following
+a brand does not retroactively fill the inbox with its past sales.
 
 ## Architecture and invariants
 
@@ -83,8 +112,8 @@ ai.notifications ── ai.notification_messages ── ai.notification_deliveri
   Device tokens are fingerprinted in logs, never logged directly.
 
 Schema ownership is split deliberately: Alembic `0023`/`0024` owns `ai.*` outbox
-tables, `0025`–`0027` add the inbox feed, brand follow, and brand-news canon,
-while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
+tables, `0025`–`0028` add the inbox feed, brand follow, brand-news canon, and feed
+read state, while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
 owns the public product candidate index.
 
 ## Apple Developer setup
@@ -186,6 +215,10 @@ WHERE d.status IN ('pending', 'retry', 'processing')
 SELECT count(*) FILTER (WHERE ended_at IS NULL) AS open,
        count(*)                                 AS total
 FROM ai.brand_news;
+
+-- Feed read-state size. feed_reads should stay small: "mark all read" prunes it.
+SELECT (SELECT count(*) FROM ai.user_feed_state) AS watermarks,
+       (SELECT count(*) FROM ai.feed_reads)      AS exceptions;
 ```
 
 An open brand-news row that never closes means the brand has stayed above the
