@@ -24,6 +24,18 @@ mobile UI and default to true. `brand_sale` has no dedicated consent key — it
 shares `brand_new_product` because the mobile UI groups both under one "brand
 notifications" toggle.
 
+**Consent gates the push, not the inbox.** Turning a category off must not erase
+the news itself. `restock` and `price_drop` are still recorded in
+`ai.notifications` (marked `suppressed_reason = 'consent_off'`, no message or
+delivery), and `brand_sale` is served from the canon. This matters most for saved
+products: `detect_save_events` advances the baseline the moment it fires, so an
+event dropped at this point is gone for good — re-enabling consent later cannot
+recover it.
+
+`brand_new_product` is the one exception: `_NEW_PRODUCT_SQL` picks candidates by
+anti-joining `ai.notifications`, so recording a suppressed event would remove it
+from the retry pool and break capped-overflow carry-over.
+
 ## Brand news is canonical, not fanned out
 
 `brand_sale` is the one category whose content is a **brand-level fact**, so it

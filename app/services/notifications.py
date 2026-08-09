@@ -186,8 +186,8 @@ class BatchReport:
     messages_queued: int = 0
     deliveries_queued: int = 0
     users_pushed: int = 0
-    # brand_sale 푸시가 게이트에 막힌 이벤트 수. 인박스 노출은 정본(ai.brand_news)이
-    # 담당하므로 이건 "유저가 못 본 소식" 이 아니라 "푸시를 안 보낸 건수" 다.
+    # 푸시가 게이트에 막힌 이벤트 수. 어느 쪽도 "유저가 못 본 소식" 이 아니다 —
+    # brand_sale 은 정본(ai.brand_news)이, 찜 알림은 인박스 전용 행이 노출을 담당한다.
     push_suppressed_consent: int = 0
     push_suppressed_cap: int = 0
     pushes_ok: int = 0
@@ -414,6 +414,33 @@ def select_for_delivery(
         if selected:
             ordered[user_id] = selected
     return ordered
+
+
+def suppressed_saved_events(events: list[Event], *, prefs: dict[UUID, dict[str, Any] | None]) -> list[Event]:
+    """동의 게이트에 막힌 **찜 알림**(재입고/가격 하락). 인박스에는 그대로 적재한다.
+
+    푸시를 끈 것과 소식을 못 보는 것은 다른 일이다. 그런데 찜 알림은 그 둘이 묶여
+    있어서, 동의가 꺼져 있으면 select_for_delivery 에서 탈락하고 _persist_outbox 가
+    행을 만들지 않아 **알림함에서도** 사라졌다.
+
+    찜 알림은 이 손실이 되돌릴 수 없다는 점에서 더 나빴다. detect_save_events 가
+    발동과 함께 기준가/기준재고를 전진시키고, run_notify_batch 는 그 기준값을 선별
+    여부와 무관하게 저장한다. 즉 이벤트는 이미 소비돼 다시는 감지되지 않는다 —
+    나중에 동의를 켜도 그 하락은 영영 볼 수 없다.
+
+    brand_sale 처럼 정본을 조회하는 방식(read fan-out)으로는 풀 수 없다. "네가 찜한
+    셔츠가 재입고됐다" 는 유저마다 다른 사실이라 접을 정본이 없다. 그래서 대신
+    **인박스 행은 무조건 남기고 푸시만 게이트하는** 방식을 쓴다.
+
+    brand_new 는 여기 포함하지 않는다 — _NEW_PRODUCT_SQL 이 ai.notifications 를
+    안티조인해 후보를 고르므로, 억제된 이벤트를 기록하면 캡에 걸린 신상이 다음 날
+    다시 후보가 되는 재시도 동작이 깨진다.
+    """
+    return [
+        event
+        for event in events
+        if event.kind in (KIND_RESTOCK, KIND_PRICE_DROP) and not kind_allowed(prefs.get(event.user_id), event.kind)
+    ]
 
 
 def build_digest(events: list[Event], *, notification_ids: list[int] | None = None) -> Digest:
@@ -877,10 +904,15 @@ async def _persist_outbox(
     pool: AsyncConnectionPool,
     *,
     selected: dict[UUID, list[Event]],
+    inbox_only: list[Event],
     baselines: list[BaselineWrite],
     now: datetime,
 ) -> tuple[int, int, int, int]:
-    """Atomically advance baselines and create events, messages, deliveries."""
+    """Atomically advance baselines and create events, messages, deliveries.
+
+    `inbox_only` 는 푸시 동의에 막힌 찜 알림이다 — 행은 남기되 메시지/딜리버리는
+    만들지 않는다 (suppressed_saved_events docstring 참조).
+    """
     recorded = 0
     messages = 0
     deliveries = 0
@@ -898,6 +930,28 @@ async def _persist_outbox(
                 """,
                 (baseline.user_id, baseline.product_id, baseline.price, baseline.in_stock),
             )
+
+        # 푸시는 막혔지만 알림함에는 남는 이벤트. 처리 완료로 표시해 두어 아웃박스가
+        # 나중에 집어가지 않게 한다.
+        for event in inbox_only:
+            await cur.execute(
+                """
+                INSERT INTO ai.notifications
+                    (user_id, kind, product_id, brand_node_id, payload, processed_at, suppressed_reason)
+                VALUES (%s, %s, %s, %s, %s::jsonb, now(), 'consent_off')
+                ON CONFLICT DO NOTHING
+                RETURNING id
+                """,
+                (
+                    event.user_id,
+                    event.kind,
+                    event.product_id,
+                    event.brand_node_id,
+                    json.dumps(event.payload, ensure_ascii=False, default=str),
+                ),
+            )
+            if await cur.fetchone():
+                recorded += 1
 
         for user_id, user_events in selected.items():
             by_category: dict[str, list[Event]] = {}
@@ -1737,10 +1791,14 @@ async def run_notify_batch(
         weekly_cap=settings.NOTIFY_BRAND_NEW_WEEKLY_CAP,
         max_brand_items=settings.NOTIFY_BRAND_NEW_MAX_ITEMS,
     )
+    # 동의에 막힌 찜 알림은 푸시만 건너뛰고 인박스에는 남긴다. brand_new 는 제외 —
+    # 안티조인 재시도 로직이 깨진다 (suppressed_saved_events docstring 참조).
+    inbox_only = suppressed_saved_events(events, prefs=prefs)
     if limit is not None:
         allowed_users = set(list(selected)[: max(0, limit)])
         selected = {user_id: value for user_id, value in selected.items() if user_id in allowed_users}
         baselines = [baseline for baseline in baselines if baseline.user_id in allowed_users]
+        inbox_only = [event for event in inbox_only if event.user_id in allowed_users]
     for user_events in selected.values():
         for event in user_events:
             report.selected[event.kind] += 1
@@ -1754,7 +1812,8 @@ async def run_notify_batch(
         report.recorded,
         report.messages_queued,
         report.deliveries_queued,
-    ) = await _persist_outbox(pool, selected=selected, baselines=baselines, now=cutoff)
+    ) = await _persist_outbox(pool, selected=selected, inbox_only=inbox_only, baselines=baselines, now=cutoff)
+    report.push_suppressed_consent += len(inbox_only)
 
     # brand_sale 은 별도 경로 — Phase 0 브랜드 소식 정본, Phase A 상태 전환 upsert,
     # Phase B 동의·전용 주간 캡 통과분만 유저 행 + APNs 푸시.

@@ -586,5 +586,47 @@ async def test_opt_out_suppresses_only_that_kind(client: AsyncClient, pool):
 
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_PRICE_DROP] == 1
-    assert report.selected[KIND_PRICE_DROP] == 0
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 0
+    assert report.selected[KIND_PRICE_DROP] == 0  # 푸시 게이트 통과분 없음
+    assert report.push_suppressed_consent == 1
+    # 인박스 행은 남는다 — 동의를 끈 건 푸시지 소식이 아니다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 1
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT suppressed_reason FROM ai.notifications")
+        assert (await cur.fetchone())[0] == "consent_off"
+    # 푸시 경로는 만들어지지 않는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_deliveries") == 0
+
+    # 알림함에서 실제로 보인다.
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    assert [i["type"] for i in feed["items"]] == ["price_drop"]
+    assert feed["unread_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_consent_off_saved_alert_is_not_lost_when_the_baseline_advances(client: AsyncClient, pool):
+    """동의 off 로 놓친 하락이 되돌릴 수 없던 문제의 회귀 가드.
+
+    detect_save_events 는 발동과 동시에 기준가를 내리므로, 그때 인박스 행을 안 남기면
+    같은 하락은 다시는 감지되지 않는다 — 나중에 동의를 켜도 영영 못 본다.
+    """
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"price_drop": False}}, headers={"Authorization": auth}
+    )
+    await _set_product(pool, product_id, price=50000)
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    # 기준가는 전진했다 — 재감지는 기대할 수 없다.
+    assert await _count(pool, "SELECT count(*) FROM ai.saved_product_baseline WHERE baseline_price = 50000") == 1
+    # 그래서 그 순간 남긴 인박스 행이 유일한 기록이고, 동의를 다시 켜도 그대로 있다.
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"price_drop": True}}, headers={"Authorization": auth}
+    )
+    second = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert second.detected[KIND_PRICE_DROP] == 0  # 기준가 전진으로 재감지 안 됨
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    assert [(i["type"], i["old_price"], i["new_price"]) for i in feed["items"]] == [("price_drop", 100000, 50000)]
