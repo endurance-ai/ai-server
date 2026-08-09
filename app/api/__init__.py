@@ -23,6 +23,7 @@ from app.api.saves import router as saves_router
 from app.api.style_nodes import router as style_nodes_router
 from app.api.subscription import router as subscription_router
 from app.api.uploads import router as uploads_router
+from app.api.visual_search import router as visual_search_router
 from app.api.webhooks.apple_notifications import router as apple_webhook_router
 from app.api.webhooks.telegram import router as telegram_webhook_router
 
@@ -47,6 +48,7 @@ router.include_router(legal_router)
 router.include_router(iap_router)
 router.include_router(subscription_router)
 router.include_router(uploads_router)
+router.include_router(visual_search_router)
 router.include_router(recommend_router, tags=["recommend"])
 router.include_router(telegram_webhook_router)
 router.include_router(apple_webhook_router)
