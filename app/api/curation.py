@@ -12,6 +12,7 @@ gender 해석: 로그인 + 프로필 gender 확정이면 프로필 우선, 아�
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Literal
 from uuid import UUID
 
@@ -24,6 +25,7 @@ from app.core.di import provide_db_pool
 from app.core.gender import db_to_app
 from app.services.curation_chips import Chip, chips_for
 from app.services.curation_refresh import (
+    _FEED_BRAND_CAP,
     GENDER_MATCH_SQL,
     PRODUCT_FEATURES_JOIN,
     select_candidate_ids,
@@ -126,6 +128,9 @@ async def _load_sections(
             )
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
+        # 개인화 재랭킹 시 한 성별 피드의 auto 구좌들이 공유하는 브랜드 카운터 —
+        # 교차 섹션 브랜드 캡(같은 브랜드가 세 구좌를 도배하는 편향 억제).
+        feed_brands: Counter[str] = Counter()
         for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
                 selected = [
@@ -163,6 +168,8 @@ async def _load_sections(
                     taste_scores=taste_scores,
                     feature_scores=feature_scores,
                     seed=f"{user_id}:{gender}:{section_id}",
+                    feed_brands=feed_brands,
+                    feed_cap=_FEED_BRAND_CAP,
                 )
                 if not selected:
                     selected = [

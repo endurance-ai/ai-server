@@ -28,6 +28,12 @@ _GENDERS = ("women", "men")
 _AUTO_IDS = ("popular", "trending-search", "under-100")
 _SECTION_SIZE = 12
 _CANDIDATES_PER_POOL = 60
+# 브랜드 노출 상한. 섹션 캡(한 구좌당 브랜드 2개)만으로는 popular·trending·
+# under-100 세 구좌를 같은 상위 브랜드가 각각 2슬롯씩 도배 → 남성 피드 상위 5개
+# 브랜드가 52.8% 점유(2026-08 진단). 피드 전역 캡으로 한 브랜드의 총 등장을
+# 제한하면 상위5 점유 27.8%·고유 브랜드 18→23 로 개선(언더필 0, 시뮬 검증).
+_PER_SECTION_BRAND_CAP = 2
+_FEED_BRAND_CAP = 2
 _NOTION_API = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
 
@@ -239,6 +245,8 @@ def select_candidate_ids(
     feature_scores: dict[tuple[str, str], float] | None = None,
     seed: str,
     require_full: bool = True,
+    feed_brands: Counter[str] | None = None,
+    feed_cap: int | None = None,
 ) -> list[int]:
     """Select hot 8 + overall 4 with per-section brand cap and stable ties.
 
@@ -249,6 +257,12 @@ def select_candidate_ids(
     under-100); style-only users keep the original style weight (0.3 / 0.7) so
     the shipped behavior does not regress. With neither axis, ordering falls back
     to base rank.
+
+    `feed_brands` (optional) is a caller-owned counter shared across the sections
+    of one gender's feed; when paired with `feed_cap` it enforces a *cross-section*
+    brand cap so a single brand cannot dominate every 구좌. It is mutated only when
+    this call returns a non-empty selection — a section discarded by `require_full`
+    leaves the shared counter untouched so it never over-counts a dropped 구좌.
     """
     usable = [r for r in rows if int(r["product_id"]) not in excluded_ids]
     if not usable:
@@ -277,6 +291,7 @@ def select_candidate_ids(
         return combined, -_stable_tie(seed, int(row["product_id"]))
 
     ranked = sorted(usable, key=rank_value, reverse=True)
+    brand_of = {int(r["product_id"]): str(r["brand_key"]) for r in usable}
     selected: list[int] = []
     brands: Counter[str] = Counter()
 
@@ -286,18 +301,31 @@ def select_candidate_ids(
                 return
             pid = int(row["product_id"])
             brand = str(row["brand_key"])
-            if pid in selected or brands[brand] >= 2:
+            if pid in selected or brands[brand] >= _PER_SECTION_BRAND_CAP:
+                continue
+            # 교차 섹션 캡 — 이 구좌 몫(brands[brand])을 더한 피드 누적이 상한에
+            # 닿으면 건너뛴다. feed_brands 는 성공 반환 시에만 반영(아래 commit).
+            if feed_cap is not None and feed_brands is not None and feed_brands[brand] + brands[brand] >= feed_cap:
                 continue
             selected.append(pid)
             brands[brand] += 1
 
+    def commit() -> None:
+        if feed_brands is not None:
+            for pid in selected:
+                feed_brands[brand_of[pid]] += 1
+
     take([r for r in ranked if r["is_hot"]], 8)
     # Do not weaken the quota when hot inventory is short.
     if len(selected) < 8:
-        return [] if require_full else selected
+        if require_full:
+            return []
+        commit()
+        return selected
     take([r for r in ranked if not r["is_hot"]], _SECTION_SIZE)
     if require_full and len(selected) != _SECTION_SIZE:
         return []
+    commit()
     return selected
 
 
@@ -470,6 +498,8 @@ async def refresh_auto_sections(
     written = 0
     for gender in _GENDERS:
         excluded_ids: set[int] = set()
+        # 한 성별 피드의 모든 구좌가 공유 — 브랜드 교차 섹션 캡용.
+        feed_brands: Counter[str] = Counter()
         for section_id in section_ids:
             try:
                 async with pool.connection() as conn, conn.cursor() as cur:
@@ -493,6 +523,8 @@ async def refresh_auto_sections(
                         excluded_ids=excluded_ids,
                         seed=f"guest:{gender}:{section_id}:{generated_for}",
                         require_full=strict_quota,
+                        feed_brands=feed_brands,
+                        feed_cap=_FEED_BRAND_CAP,
                     )
                     if not selected:
                         logger.warning("🗂 [curation] no valid candidates %s/%s", section_id, gender)

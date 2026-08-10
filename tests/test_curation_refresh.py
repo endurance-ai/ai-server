@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 from app.services.curation_chips import chips_for
 from app.services.curation_refresh import (
     _parse_notion_page,
@@ -122,6 +124,88 @@ def test_candidate_selection_enforces_hot_overall_brand_and_cross_section_quotas
     assert len([pid for pid in selected if pid <= 10]) == 8
     assert len([pid for pid in selected if pid > 10]) == 4
     assert 1 not in selected
+
+
+def test_feed_brand_cap_limits_one_brand_across_the_whole_feed():
+    """교차 섹션 캡: 한 브랜드가 세 구좌를 도배하지 못하도록 피드 전역 제한.
+
+    상위 hot 2개가 같은 브랜드('dom'). 나머지 재고는 브랜드가 전부 달라 구좌를
+    채우기 충분하다. 캡이 없으면 'dom'은 구좌마다 섹션 캡(2)까지 잡혀 총 6회
+    등장하지만, feed_cap=2 면 첫 구좌에서만 2회 잡히고 이후 구좌에선 배제된다.
+    """
+
+    # 실데이터처럼 브랜드가 넉넉한 풀(섹션당 hot~50종). 상위 hot 2개만 'dom'.
+    def pool() -> list[dict]:
+        rows: list[dict] = []
+        for pid in range(1, 41):  # hot 후보 40개
+            rows.append(
+                {
+                    "product_id": pid,
+                    "is_hot": True,
+                    "base_score": float(1000 - pid),
+                    "base_rank": pid,
+                    "brand_key": "dom" if pid <= 2 else f"hot-{pid}",
+                    "style_node_id": pid,
+                }
+            )
+        for pid in range(41, 81):  # overall 후보 40개
+            rows.append(
+                {
+                    "product_id": pid,
+                    "is_hot": False,
+                    "base_score": float(1000 - pid),
+                    "base_rank": pid - 40,
+                    "brand_key": f"over-{pid}",
+                    "style_node_id": pid,
+                }
+            )
+        return rows
+
+    feed_brands: Counter[str] = Counter()
+    picks = []
+    for section_id in ("popular", "trending-search", "under-100"):
+        selected = select_candidate_ids(
+            pool(),
+            section_id=section_id,
+            excluded_ids=set(),
+            seed=section_id,
+            feed_brands=feed_brands,
+            feed_cap=2,
+        )
+        assert len(selected) == 12  # 캡이 걸려도 구좌는 여전히 꽉 찬다(언더필 없음)
+        picks.append(selected)
+
+    dom_total = sum(1 for sel in picks for pid in sel if pid in (1, 2))
+    assert dom_total == 2  # 피드 전체에서 최대 2회
+    assert feed_brands["dom"] == 2
+
+
+def test_feed_brand_cap_counter_untouched_when_section_discarded():
+    """require_full 로 폐기된 구좌는 공유 카운터를 오염시키지 않는다."""
+    # hot 재고가 8 미만 → require_full=True 는 [] 를 돌려주고, 그 사이 잠깐
+    # 담겼던 브랜드가 feed_brands 에 새어 들어가면 안 된다.
+    rows = [
+        {
+            "product_id": pid,
+            "is_hot": True,
+            "base_score": float(100 - pid),
+            "base_rank": pid,
+            "brand_key": "dom",
+            "style_node_id": pid,
+        }
+        for pid in range(1, 4)  # hot 3개뿐(브랜드도 하나) → 8 채우기 불가
+    ]
+    feed_brands: Counter[str] = Counter()
+    selected = select_candidate_ids(
+        rows,
+        section_id="popular",
+        excluded_ids=set(),
+        seed="discard",
+        feed_brands=feed_brands,
+        feed_cap=2,
+    )
+    assert selected == []
+    assert feed_brands == Counter()  # 폐기된 구좌는 카운터 미반영
 
 
 def test_candidate_selection_uses_taste_scores_without_weakening_quotas():
