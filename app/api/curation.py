@@ -134,25 +134,24 @@ async def _load_sections(
             else:
                 await cur.execute(
                     """
-                    SELECT c.product_id, c.is_hot, c.base_score, c.base_rank, c.brand_key,
+                    SELECT c.product_id, c.base_score, c.base_rank, c.brand_key,
                            c.brand_node_id, c.style_node_id, pf.feature_metadata
                     FROM ai.curation_candidates c
                     LEFT JOIN public.product_features pf ON pf.product_id = c.product_id
                     WHERE c.section_id = %s AND c.gender = %s
-                    ORDER BY c.is_hot DESC, c.base_rank
+                    ORDER BY c.base_rank
                     """,
                     (section_id, gender),
                 )
                 candidate_rows = [
                     {
                         "product_id": int(r[0]),
-                        "is_hot": bool(r[1]),
-                        "base_score": float(r[2]),
-                        "base_rank": int(r[3]),
-                        "brand_key": r[4],
-                        "brand_node_id": r[5],
-                        "style_node_id": int(r[6]) if r[6] is not None else None,
-                        "feature_metadata": r[7],
+                        "base_score": float(r[1]),
+                        "base_rank": int(r[2]),
+                        "brand_key": r[3],
+                        "brand_node_id": r[4],
+                        "style_node_id": int(r[5]) if r[5] is not None else None,
+                        "feature_metadata": r[6],
                     }
                     for r in await cur.fetchall()
                 ]

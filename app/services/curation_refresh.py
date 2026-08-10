@@ -27,7 +27,7 @@ _KST = ZoneInfo("Asia/Seoul")
 _GENDERS = ("women", "men")
 _AUTO_IDS = ("popular", "trending-search", "under-100")
 _SECTION_SIZE = 12
-_CANDIDATES_PER_POOL = 60
+_CANDIDATES_PER_SECTION = 60
 _NOTION_API = "https://api.notion.com/v1"
 _NOTION_VERSION = "2022-06-28"
 
@@ -73,7 +73,6 @@ def _quality_sql() -> str:
         AND length(btrim(p.brand)) BETWEEN 1 AND 40
         AND p.brand NOT ILIKE '%%상품명%%'
         AND p.brand <> p.name
-        AND COALESCE(bn.wiki->>'status', '') NOT IN ('제외', 'excluded', 'discontinued')
         AND NOT (COALESCE(p.category, '') = ANY(%(excluded_categories)s))
         AND NOT (COALESCE(p.subcategory, '') = ANY(%(excluded_subcategories)s))
         {winter_name_gate}
@@ -84,20 +83,21 @@ def _candidate_sql(section_id: str) -> str:
     if section_id == "popular":
         signal_ctes = """
             views AS (
-                SELECT product_id, count(*)::float AS n
+                SELECT product_id, count(DISTINCT user_id)::float AS n
                 FROM ai.product_views
                 WHERE viewed_at > now() - interval '7 days'
                 GROUP BY product_id
             ),
             saves AS (
-                SELECT product_id::bigint AS product_id, count(*)::float AS n
+                SELECT product_id::bigint AS product_id, count(DISTINCT user_id)::float AS n
                 FROM ai.saves
                 WHERE product_id ~ '^[0-9]+$'
                   AND created_at > now() - interval '7 days'
                 GROUP BY product_id::bigint
             ),
             outbound AS (
-                SELECT (metadata->>'product_id')::bigint AS product_id, count(*)::float AS n
+                SELECT (metadata->>'product_id')::bigint AS product_id,
+                       count(DISTINCT user_id)::float AS n
                 FROM ai.taste_signal_events
                 WHERE signal_type = 'outbound'
                   AND occurred_at > now() - interval '7 days'
@@ -105,7 +105,7 @@ def _candidate_sql(section_id: str) -> str:
                 GROUP BY (metadata->>'product_id')::bigint
             )
         """
-        score = """
+        product_score = """
             COALESCE(v.n, 0) + 3 * COALESCE(sv.n, 0) + 4 * COALESCE(o.n, 0)
                 + ln(1 + COALESCE(p.review_count, 0))
         """
@@ -114,7 +114,54 @@ def _candidate_sql(section_id: str) -> str:
             LEFT JOIN saves sv ON sv.product_id = p.id
             LEFT JOIN outbound o ON o.product_id = p.id
         """
-        extra = ""
+        signal_prefix = f"{signal_ctes},"
+        return f"""
+            WITH
+            {signal_prefix}
+            eligible AS (
+                SELECT
+                    p.id AS product_id,
+                    COALESCE(NULLIF(lower(btrim(p.brand)), ''), p.id::text) AS brand_key,
+                    p.brand_node_id,
+                    bn.primary_style_node_id AS style_node_id,
+                    {product_score} AS product_score
+                FROM public.products p
+                LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+                {PRODUCT_FEATURES_JOIN}
+                {joins}
+                WHERE {_quality_sql()}
+            ),
+            brand_products AS (
+                SELECT *,
+                    row_number() OVER (
+                        PARTITION BY brand_key
+                        ORDER BY product_score DESC,
+                                 md5(product_id::text || current_date::text)
+                    ) AS product_rank
+                FROM eligible
+            ),
+            brand_scores AS (
+                SELECT brand_key, sum(product_score) AS brand_score
+                FROM brand_products
+                WHERE product_rank <= 3
+                GROUP BY brand_key
+            ),
+            ranked AS (
+                SELECT bp.*, bs.brand_score,
+                    row_number() OVER (
+                        ORDER BY bs.brand_score DESC, bp.product_score DESC,
+                                 md5(bp.product_id::text || current_date::text)
+                    ) AS base_rank
+                FROM brand_products bp
+                JOIN brand_scores bs USING (brand_key)
+                WHERE bp.product_rank <= 6
+            )
+            SELECT product_id, false AS is_hot, brand_score AS base_score, base_rank,
+                   brand_key, brand_node_id, style_node_id
+            FROM ranked
+            WHERE base_rank <= {_CANDIDATES_PER_SECTION}
+            ORDER BY base_rank
+        """  # noqa: S608 -- all interpolation is module-owned SQL
     elif section_id == "trending-search":
         signal_ctes = """
             recent_search AS (
@@ -155,7 +202,6 @@ def _candidate_sql(section_id: str) -> str:
                 COALESCE(NULLIF(lower(btrim(p.brand)), ''), p.id::text) AS brand_key,
                 p.brand_node_id,
                 bn.primary_style_node_id AS style_node_id,
-                COALESCE(bn.wiki->>'status', '') IN ('완료', '진행중') AS is_hot,
                 {score} AS base_score
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
@@ -167,27 +213,26 @@ def _candidate_sql(section_id: str) -> str:
         brand_limited AS (
             SELECT *,
                 row_number() OVER (
-                    PARTITION BY is_hot, brand_key
+                    PARTITION BY brand_key
                     ORDER BY base_score DESC,
                              md5(product_id::text || current_date::text)
                 ) AS brand_rank
             FROM eligible
         ),
-        pool_ranked AS (
+        ranked AS (
             SELECT *,
                 row_number() OVER (
-                    PARTITION BY is_hot
                     ORDER BY base_score DESC,
                              md5(product_id::text || current_date::text)
-                ) AS pool_rank
+                ) AS base_rank
             FROM brand_limited
             WHERE brand_rank <= 6
         )
-        SELECT product_id, is_hot, base_score, pool_rank, brand_key,
+        SELECT product_id, false AS is_hot, base_score, base_rank, brand_key,
                brand_node_id, style_node_id
-        FROM pool_ranked
-        WHERE pool_rank <= {_CANDIDATES_PER_POOL}
-        ORDER BY is_hot DESC, pool_rank
+        FROM ranked
+        WHERE base_rank <= {_CANDIDATES_PER_SECTION}
+        ORDER BY base_rank
     """  # noqa: S608 -- all interpolation is module-owned SQL
 
 
@@ -240,7 +285,7 @@ def select_candidate_ids(
     seed: str,
     require_full: bool = True,
 ) -> list[int]:
-    """Select hot 8 + overall 4 with per-section brand cap and stable ties.
+    """Select 12 products with a per-section brand cap and stable ties.
 
     Personalization blends taste onto the base rank. The style-node axis
     (`taste_scores`) is joined by the visual-feature axes (`feature_scores`,
@@ -280,22 +325,16 @@ def select_candidate_ids(
     selected: list[int] = []
     brands: Counter[str] = Counter()
 
-    def take(source: list[dict[str, Any]], target: int) -> None:
-        for row in source:
-            if len(selected) >= target:
-                return
-            pid = int(row["product_id"])
-            brand = str(row["brand_key"])
-            if pid in selected or brands[brand] >= 2:
-                continue
-            selected.append(pid)
-            brands[brand] += 1
+    for row in ranked:
+        if len(selected) >= _SECTION_SIZE:
+            break
+        pid = int(row["product_id"])
+        brand = str(row["brand_key"])
+        if pid in selected or brands[brand] >= 2:
+            continue
+        selected.append(pid)
+        brands[brand] += 1
 
-    take([r for r in ranked if r["is_hot"]], 8)
-    # Do not weaken the quota when hot inventory is short.
-    if len(selected) < 8:
-        return [] if require_full else selected
-    take([r for r in ranked if not r["is_hot"]], _SECTION_SIZE)
     if require_full and len(selected) != _SECTION_SIZE:
         return []
     return selected
@@ -468,9 +507,28 @@ async def refresh_auto_sections(
 ) -> int:
     generated_for = datetime.now(tz=_KST).date()
     written = 0
+    requested = set(section_ids)
+    ordered_section_ids = tuple(section_id for section_id in _AUTO_IDS if section_id in requested)
     for gender in _GENDERS:
         excluded_ids: set[int] = set()
-        for section_id in section_ids:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT section_id, product_ids
+                FROM ai.curation_sections
+                WHERE gender = %s AND slot_type = 'auto' AND is_active
+                  AND section_id = ANY(%s)
+                """,
+                (gender, list(_AUTO_IDS)),
+            )
+            cached_ids = {str(row[0]): {int(pid) for pid in (row[1] or [])} for row in await cur.fetchall()}
+
+        processed: set[str] = set()
+        for section_id in ordered_section_ids:
+            section_index = _AUTO_IDS.index(section_id)
+            for prior_section_id in _AUTO_IDS[:section_index]:
+                if prior_section_id not in processed:
+                    excluded_ids.update(cached_ids.get(prior_section_id, set()))
             try:
                 async with pool.connection() as conn, conn.cursor() as cur:
                     await cur.execute(_candidate_sql(section_id), _query_params(gender))
@@ -496,6 +554,8 @@ async def refresh_auto_sections(
                     )
                     if not selected:
                         logger.warning("🗂 [curation] no valid candidates %s/%s", section_id, gender)
+                        excluded_ids.update(cached_ids.get(section_id, set()))
+                        processed.add(section_id)
                         continue
                     await cur.execute(
                         "DELETE FROM ai.curation_candidates WHERE section_id = %s AND gender = %s",
@@ -532,8 +592,12 @@ async def refresh_auto_sections(
                     )
                     await conn.commit()
                 excluded_ids.update(selected)
+                cached_ids[section_id] = set(selected)
+                processed.add(section_id)
                 written += 1
             except Exception as exc:  # noqa: BLE001
+                excluded_ids.update(cached_ids.get(section_id, set()))
+                processed.add(section_id)
                 logger.warning("🗂 [curation] auto %s/%s failed: %r", section_id, gender, exc)
     return written
 
