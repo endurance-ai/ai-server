@@ -36,6 +36,9 @@ def _select(events, **kw):
         "brand_new_days_last_week": {},
         "weekly_cap": 3,
         "max_brand_items": 5,
+        # 이 파일의 이벤트는 brand_node_id 가 없어(None) 한 브랜드로 묶인다. 브랜드
+        # 다양성은 pick_brand_new 단위 테스트가 보므로 여기선 상한을 열어 둔다.
+        "max_per_brand": 5,
     }
     params.update(kw)
     return select_for_delivery(events, **params)

@@ -15,10 +15,13 @@ from pydantic import BaseModel
 from app.api.deps import get_current_user_id, get_optional_user_id
 from app.core.di import provide_db_pool
 from app.infrastructure.repositories.brand_node_cache import normalize_brand
+from app.services.notifications import brand_news_copy
 
 router = APIRouter(prefix="/v1", tags=["brands"])
 
 _SEARCH_LIMIT = 8
+# 브랜드 홈 "최근 소식" 노출 건수. 타임라인이 아니라 헤즈업이라 짧게 자른다.
+_NEWS_LIMIT = 5
 
 
 class BrandSearchItem(BaseModel):
@@ -92,6 +95,18 @@ class FollowListResponse(BaseModel):
     next_cursor: str | None
 
 
+class BrandNewsItem(BaseModel):
+    """브랜드 소식 한 건. ai.brand_news 정본 1행 = 이 카드 1개 (migration 0027)."""
+
+    id: int
+    kind: str
+    text: str
+    sub: str
+    started_at: str
+    ended_at: str | None
+    """세일 종료 시각. null 이면 진행 중 — 프론트가 '진행 중' 배지를 붙일 근거."""
+
+
 class BrandHome(BaseModel):
     id: int
     name: str
@@ -102,8 +117,12 @@ class BrandHome(BaseModel):
     notify_enabled: bool
     store_url: str | None
     """공식 스토어 방문 링크. brand_nodes.wiki->>'homepage_url' 소스."""
-    news: str | None
-    """최근 소식. brand_nodes.wiki->>'news' — 수집 파이프라인 없음, admin이 수동 관리."""
+    news: list[BrandNewsItem]
+    """최근 소식 (최신순). 알림 배치가 ai.brand_news 에 남긴 정본을 그대로 읽는다.
+
+    0027 이전엔 brand_nodes.wiki->>'news' 단문을 읽었는데, 그 키를 쓰는 writer 가
+    코드베이스에 없어 항상 null 이었다 (수동 관리 전제였으나 관리 주체 부재).
+    """
 
 
 class BrandProduct(BaseModel):
@@ -253,6 +272,21 @@ async def brand_home(
                 following = True
                 notify_enabled = follow_row[0]
 
+        # 소식은 팔로우 여부·로그인 여부와 무관하게 브랜드 단위로 읽는다 — 정본이
+        # ai.brand_news 에 있어서 가능하다. 유저별 팬아웃 행을 뒤질 때는 팔로워가
+        # 없는 브랜드의 홈이 영영 비어 있었다 (migration 0027 docstring 참조).
+        await cur.execute(
+            """
+            SELECT id, kind, payload, started_at, ended_at
+            FROM ai.brand_news
+            WHERE brand_node_id = %s
+            ORDER BY started_at DESC, id DESC
+            LIMIT %s
+            """,
+            (brand_id, _NEWS_LIMIT),
+        )
+        news_rows = await cur.fetchall()
+
     # description 은 brand_nodes.description 전용 컬럼이 단일 출처다 (kiko.ai-app
     # migration 105 — wiki.description_ko/description_original 은 이 컬럼으로
     # 백필된 뒤 wiki 에서 삭제됐다. 예전에 여기서 읽던 wiki.get("description")는
@@ -260,7 +294,21 @@ async def brand_home(
     # logo_url 은 brand_nodes 에 전용 컬럼이 없다 — 없는 컬럼을 지어내지 않는다.
     wiki = row[3] or {}
     store_url = wiki.get("homepage_url") if isinstance(wiki, dict) else None
-    news = wiki.get("news") if isinstance(wiki, dict) else None
+
+    news: list[BrandNewsItem] = []
+    for news_row in news_rows:
+        text, sub = brand_news_copy(news_row[1], news_row[2] or {})
+        news.append(
+            BrandNewsItem(
+                id=news_row[0],
+                kind=news_row[1],
+                text=text,
+                sub=sub,
+                started_at=news_row[3].isoformat(),
+                ended_at=news_row[4].isoformat() if news_row[4] else None,
+            )
+        )
+
     return BrandHome(
         id=row[0],
         name=row[1],

@@ -154,6 +154,25 @@ class Settings(BaseSettings):
     # 발송이 서로의 주간 캡을 잠식하지 않는다. 인박스 적재는 이 캡과 무관하게 항상
     # 이뤄지고, 캡은 APNs 푸시 발송에만 적용된다.
     NOTIFY_BRAND_SALE_WEEKLY_CAP: int = 3
+    # 세일 비율 집계에서 제외할 최소 카탈로그 크기. 감지가 팔로워 있는 브랜드만
+    # 훑던 시절엔 필요 없었지만(팔로우된 브랜드는 실카탈로그가 있다), 브랜드 소식을
+    # 정본으로 남기려고 전체 브랜드를 스캔하면서 필요해졌다 — 상품 2개 중 1개가
+    # 할인이면 비율 50% 로 임계값을 넘어 브랜드 홈에 가짜 "전면 세일" 이 걸린다.
+    NOTIFY_BRAND_SALE_MIN_PRODUCTS: int = 10
+    # 브랜드 홈 "신상 N개" 요약이 세는 기간. 알림용 보존창
+    # (NOTIFY_NEW_PRODUCT_WINDOW_D=14)과 별개다 — 그쪽은 "캡에 걸려 아직 못 보낸 걸
+    # 다시 후보로 올리는" 재시도 창이고, 이건 화면에 보여줄 "최근" 의 길이다.
+    NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D: int = 7
+    # 하루 몫(NOTIFY_BRAND_NEW_MAX_ITEMS) 안에서 한 브랜드가 가져갈 수 있는 최대치.
+    # products.created_at 은 출시일이 아니라 적재 시각이고 크롤은 브랜드 단위로 통째
+    # 도는데(실측: 한 브랜드 775건이 2초 안에 적재), 그대로 최신순 5개를 뽑으면
+    # "마지막에 크롤된 브랜드" 가 하루를 독식한다. 슬롯이 남으면 초과분으로 채우므로
+    # 브랜드를 하나만 팔로우한 유저의 물량은 줄지 않는다.
+    NOTIFY_BRAND_NEW_MAX_PER_BRAND: int = 2
+    # 브랜드를 처음 수집하면 카탈로그 전체가 같은 배치로 들어와 전부 "신상" 이 된다
+    # (실측: 최근 14일 후보 15,438건 중 1,992건 = 13%). 브랜드 최초 적재 후 이 시간
+    # 안에 들어온 행은 신상으로 치지 않는다.
+    NOTIFY_BRAND_ONBOARDING_GRACE_H: int = 24
 
     # Standalone worker. The process exits without doing work unless enabled.
     NOTIFICATION_WORKER_ENABLED: bool = False

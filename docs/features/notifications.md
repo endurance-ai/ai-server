@@ -10,6 +10,7 @@ of this release.
 | --- | --- | --- | --- | --- |
 | Saved-product digest | Restock and price drop for saved products | 09:00 KST | 09:30 KST | One digest per user/day |
 | Followed-brand digest | Recent products from selected brands | 10:30 KST | 11:00 KST | Up to 5 items; max 3 accepted days in a rolling 7-day window |
+| Brand-sale digest | A brand's discounted-catalog ratio crosses 30% | 10:30 KST | 11:00 KST | Max 3 accepted days in a rolling 7-day window |
 
 Quiet hours are 22:00–08:00 KST. A detector delayed into the active window
 catches up immediately; work found during quiet hours is moved to the next
@@ -19,7 +20,119 @@ category delivery time. Undelivered brand overflow remains eligible during the
 Consent is evaluated server-side. `system=false` disables every notification;
 brand-new notifications additionally require `release_alerts=true`. The hidden
 `restock`, `price_drop`, and `brand_new_product` keys are supported for a future
-mobile UI and default to true.
+mobile UI and default to true. `brand_sale` has no dedicated consent key — it
+shares `brand_new_product` because the mobile UI groups both under one "brand
+notifications" toggle.
+
+**Consent gates the push, not the inbox.** Turning a category off must not erase
+the news itself. `restock` and `price_drop` are still recorded in
+`ai.notifications` (marked `suppressed_reason = 'consent_off'`, no message or
+delivery), and `brand_sale` is served from the canon. This matters most for saved
+products: `detect_save_events` advances the baseline the moment it fires, so an
+event dropped at this point is gone for good — re-enabling consent later cannot
+recover it.
+
+Only **consent** failures are recorded this way. Weekly-cap and daily-overflow
+misses stay unrecorded on purpose: `_NEW_PRODUCT_SQL` picks candidates by
+anti-joining `ai.notifications`, so recording them would drop them from the retry
+pool. Consent-off is a permanent suppression, so there is no retry to preserve.
+Suppressed `brand_new_product` rows are still capped at
+`NOTIFY_BRAND_NEW_MAX_ITEMS` per run, or a user with the category off would get
+the whole 14-day candidate window dumped into their inbox at once.
+
+## Brand news is canonical, not fanned out
+
+`brand_sale` is the one category whose content is a **brand-level fact**, so it
+is stored once in `ai.brand_news` (migration `0027`) and read by followers rather
+than copied to them. Consequences the other categories do not share:
+
+- Detection scans **every** brand, not just followed ones. A brand nobody follows
+  still gets its news row, because the brand home page (`GET /v1/brands/{id}`) is
+  public and reads `ai.brand_news` directly. Scanning all brands makes catalog
+  size a noise source, so `NOTIFY_BRAND_SALE_MIN_PRODUCTS` (default 10) excludes
+  brands too small for a ratio to mean anything.
+- The inbox reads the canon, so consent and the weekly cap gate **only the APNs
+  push**. A user who turned push off still sees the news in their inbox.
+- `ai.notifications` rows for `brand_sale` are written only for users who pass
+  the push gate. Their sole job is anchoring the outbox
+  (`notification_message_events.notification_id` is a foreign key), so the feed
+  excludes `kind = 'brand_sale'` to avoid showing the same news twice.
+  Suppressed pushes are counted in the batch report, not stored as rows.
+
+Deduplication comes from the `ai.brand_sale_state` false→true transition plus the
+`uq_brand_news_open` partial unique index, not from an anti-join against
+`ai.notifications` — which is what makes the above safe.
+
+`ai.brand_sale_state` holds the current answer to "is this brand on sale"
+(upserted, no history). `ai.brand_news` holds the history via
+`started_at`/`ended_at`. A sale ending closes the open row rather than deleting
+it.
+
+### `products.created_at` is an ingest time, not a release date
+
+Both new-arrival paths have to work around this. Crawls run per brand and bulk
+insert, so `created_at` records when a row first landed in our database — one
+measured brand wrote 775 rows inside two seconds. Two consequences, each with its
+own guard:
+
+- **A brand's first crawl is not a wave of new arrivals.** Onboarding a brand
+  imports its whole back catalogue at once; 13% of a measured 14-day candidate
+  set was exactly this. Rows within `NOTIFY_BRAND_ONBOARDING_GRACE_H` (24h) of a
+  brand's earliest product are excluded from both `_NEW_PRODUCT_SQL` and
+  `_BRAND_NEW_SUMMARY_SQL`.
+- **"Newest first" really means "crawled last".** Taking the top
+  `NOTIFY_BRAND_NEW_MAX_ITEMS` would hand the whole day to whichever brand the
+  crawler visited most recently, burying every other followed brand.
+  `pick_brand_new` caps each brand at `NOTIFY_BRAND_NEW_MAX_PER_BRAND` (2) first,
+  then backfills any unused slots from the overflow so that a user following a
+  single brand still receives a full day.
+
+Both guards apply to the push path and the consent-suppressed inbox path
+identically — otherwise the inbox would reproduce the skew the push path avoids.
+
+### Two news kinds, two audiences
+
+`ai.brand_news.kind` (migration `0029`):
+
+| kind | Trigger | Brand home | Inbox |
+| --- | --- | --- | --- |
+| `brand_sale` | discounted-catalog ratio crosses the threshold (state transition) | yes | yes |
+| `brand_new` | rolling count of arrivals in `NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D` days | yes | **no** |
+
+`brand_new` exists because sales are rare, so a brand home that only surfaces
+sales looks empty most of the time. It stays out of the inbox because the inbox
+already receives per-product `brand_new_product` rows matched to the user's
+gender — a brand-level summary on top would say the same thing twice. The brand
+home has no user to personalise for (it is public), so there the summary is the
+only sensible form. `app/api/notifications.py` `_INBOX_NEWS_KINDS` enforces this.
+
+Unlike a sale, the summary is not an on/off transition but a rolling aggregate:
+one open row per brand whose `payload.new_count` is refreshed each run, closed
+when the window empties. A refresh is not "news", so it neither reopens the row
+nor moves `started_at`.
+
+## Inbox feed: two sources, two read models
+
+`GET /v1/notifications` merges two sources (migration `0028`):
+
+| Source | Table | Fan-out | Read state |
+| --- | --- | --- | --- |
+| `n` | `ai.notifications` (restock, price_drop, brand_new_product) | write — rows already differ per user | `read_at` on the row |
+| `b` | `ai.brand_news` joined to `ai.user_brand_picks` | read — one shared row per brand | `ai.user_feed_state` watermark + `ai.feed_reads` exceptions |
+
+Item ids are `<source>:<row id>` (`"n:123"`, `"b:45"`) because the two id spaces
+overlap; `PATCH /v1/notifications/read` takes the same strings back. The cursor is
+an opaque base64 token over `(created_at, source, id)`, all three descending —
+mixing sort directions would break the row-wise comparison that drives keyset
+pagination.
+
+Read state is deliberately **not** unified. Per-user rows can carry a per-row
+`read_at`; a shared row cannot, so it needs the watermark. Marking everything read
+becomes a single-row update on `ai.user_feed_state` and prunes `ai.feed_reads`,
+since the watermark then covers every exception.
+
+Brand news is scoped to `started_at >= user_brand_picks.created_at`, so following
+a brand does not retroactively fill the inbox with its past sales.
 
 ## Architecture and invariants
 
@@ -27,6 +140,10 @@ mobile UI and default to true.
 products/saves/brand picks
         │ detect (separate worker; advisory lock)
         ▼
+ai.brand_news ─────┐  brand-level canonical news (brand_sale only)
+ brand home reads  │  O(brands × events) — independent of user count
+   this directly   │
+                   ▼ fan out to notify_enabled followers
 ai.notifications ── ai.notification_messages ── ai.notification_deliveries
  domain event             user digest                  device attempt
                                                         │
@@ -54,7 +171,8 @@ ai.notifications ── ai.notification_messages ── ai.notification_deliveri
   Device tokens are fingerprinted in logs, never logged directly.
 
 Schema ownership is split deliberately: Alembic `0023`/`0024` owns `ai.*` outbox
-tables, while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
+tables, `0025`–`0028` add the inbox feed, brand follow, brand-news canon, and feed
+read state, while `kiko.ai-app/database/migrations/101_notification_candidate_indexes.sql`
 owns the public product candidate index.
 
 ## Apple Developer setup
@@ -151,7 +269,20 @@ FROM ai.notification_deliveries d
 JOIN ai.notification_messages m USING (message_id)
 WHERE d.status IN ('pending', 'retry', 'processing')
   AND d.next_attempt_at <= now() AND m.expires_at > now();
+
+-- Brand news currently shown on brand home pages.
+SELECT count(*) FILTER (WHERE ended_at IS NULL) AS open,
+       count(*)                                 AS total
+FROM ai.brand_news;
+
+-- Feed read-state size. feed_reads should stay small: "mark all read" prunes it.
+SELECT (SELECT count(*) FROM ai.user_feed_state) AS watermarks,
+       (SELECT count(*) FROM ai.feed_reads)      AS exceptions;
 ```
+
+An open brand-news row that never closes means the brand has stayed above the
+sale threshold, which is legitimate for a long promotion but worth checking
+against `ai.brand_sale_state.updated_at` if it persists for weeks.
 
 Alert when a detector has no successful run for 26 hours, `last_error` is set,
 overdue deliveries grow for two poll intervals, or APNs configuration failures

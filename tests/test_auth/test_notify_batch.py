@@ -25,6 +25,19 @@ from app.services.push.apns import ApnsResult
 from tests.test_auth.test_curation_onboarding_api import _insert_brand, _insert_product, _login
 
 
+@pytest.fixture(autouse=True)
+def _allow_small_catalogs(monkeypatch):
+    """이 파일의 픽스처 브랜드는 상품 몇 개짜리다.
+
+    운영 기본값(NOTIFY_BRAND_SALE_MIN_PRODUCTS=10)은 전체 브랜드 스캔에서 잡음을
+    거르는 하한이라, 그대로 두면 세일 비율 판정 자체를 검증할 수 없다. 하한 게이트
+    동작은 test_brand_sale_ignores_tiny_catalogs 가 실제 기본값으로 따로 본다.
+    """
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "NOTIFY_BRAND_SALE_MIN_PRODUCTS", 1)
+
+
 async def _follow(pool, user_id: str, brand_id: int, *, notify: bool = True) -> None:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -32,6 +45,23 @@ async def _follow(pool, user_id: str, brand_id: int, *, notify: bool = True) -> 
             (user_id, brand_id, notify),
         )
         await conn.commit()
+
+
+async def _aged_brand(pool, name: str, *, anchor_gender: list[str] | None = None) -> int:
+    """이미 예전부터 수집돼 있던 브랜드를 만든다.
+
+    신상 감지는 브랜드 최초 적재 +NOTIFY_BRAND_ONBOARDING_GRACE_H 이내 상품을 제외한다
+    (브랜드를 처음 크롤하면 카탈로그 전체가 같은 배치로 들어와 전부 "신상" 이 되므로).
+    테스트는 브랜드를 방금 만들기 때문에, 앵커 상품 1건을 60일 전으로 backdate 해
+    "온보딩은 옛날에 끝난 브랜드" 상태로 만든다. 앵커는 14일 후보창 밖이라 신상으로도
+    잡히지 않고, 세일 비율에는 영향을 주므로 세일 테스트에서는 쓰지 않는다.
+    """
+    brand_id = await _insert_brand(pool, name)
+    anchor = await _insert_product(pool, brand=name, brand_node_id=brand_id, gender=anchor_gender or ["women"])
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE public.products SET created_at = now() - interval '60 days' WHERE id = %s", (anchor,))
+        await conn.commit()
+    return brand_id
 
 
 async def _count(pool, sql: str, params: tuple = ()) -> int:
@@ -131,10 +161,9 @@ async def test_brand_new_products_notify_once_and_respect_gender(client: AsyncCl
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
 
-    women_product = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
+    await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (women_product,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
@@ -174,10 +203,9 @@ async def test_user_gender_filled_in_later_is_still_caught(client: AsyncClient, 
         await conn.commit()
 
     # 상품은 처음부터 성별을 갖고 들어온다 (크롤러 계약).
-    product_id = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
+    await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (product_id,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
@@ -209,16 +237,14 @@ async def test_capped_overflow_carries_over_to_the_next_run(client: AsyncClient,
         await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
         await conn.commit()
 
-    first = await _insert_product(pool, brand="Picked", gender=["women"])
+    brand_node_id = await _aged_brand(pool, "Picked")
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT brand_node_id FROM public.products WHERE id = %s", (first,))
-        brand_node_id = (await cur.fetchone())[0]
         await cur.execute(
             "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
             (user_id, brand_node_id),
         )
         await conn.commit()
-    for _ in range(4):
+    for _ in range(5):
         await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
 
     first_run = datetime.now(tz=UTC)
@@ -366,28 +392,303 @@ async def test_brand_sale_skips_notify_disabled_follower(client: AsyncClient, po
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id, notify=False)
 
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_BRAND_SALE] == 0
+    # 팬아웃만 막힌다 — 소식 정본은 그대로 남아 브랜드 홈에 노출된다.
+    assert report.brand_sale_news == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale' AND ended_at IS NULL") == 1
+
+
+async def _put_brand_on_sale(pool, brand_id: int, *, brand: str = "SaleBrand") -> None:
+    """5개 중 2개 세일 → 40% ≥ 30% 임계값."""
+    on_sale = [await _insert_product(pool, brand=brand, brand_node_id=brand_id) for _ in range(2)]
+    for _ in range(3):
+        await _insert_product(pool, brand=brand, brand_node_id=brand_id)
+    for pid in on_sale:
+        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+
+
+@pytest.mark.asyncio
+async def test_brand_news_is_written_for_brands_nobody_follows(client: AsyncClient, pool):
+    """0027 의 핵심 — 팔로워가 0명인 브랜드도 소식 정본을 남긴다.
+
+    이전 구조에선 _BRAND_SALE_SQL 이 followers CTE 로 JOIN 해서 팔로워 없는 브랜드는
+    집계 대상에서 통째로 빠졌고, 그 결과 브랜드 홈이 영영 비어 있었다.
+    """
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _put_brand_on_sale(pool, brand_id)
+
+    report = await run_notify_batch(pool)
+
+    assert report.brand_sale_news == 1
+    assert report.detected[KIND_BRAND_SALE] == 0  # 팬아웃 대상 없음
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT brand_node_id, kind, payload, ended_at FROM ai.brand_news WHERE kind = 'brand_sale'")
+        row = await cur.fetchone()
+    assert row[0] == brand_id
+    assert row[1] == "brand_sale"
+    assert row[2]["max_discount_pct"] == 30
+    assert row[3] is None  # 진행 중
+
+
+@pytest.mark.asyncio
+async def test_brand_news_opens_once_and_closes_when_sale_ends(client: AsyncClient, pool):
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _put_brand_on_sale(pool, brand_id)
+
+    await run_notify_batch(pool)
+    # 연속 세일 기간엔 소식을 다시 열지 않는다 (uq_brand_news_open + 전환 게이트).
+    second = await run_notify_batch(pool)
+    assert second.brand_sale_news == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale'") == 1
+
+    # 세일이 끝나면 진행 중이던 소식이 닫힌다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE public.products SET sale_price = NULL WHERE brand_node_id = %s", (brand_id,))
+        await conn.commit()
+
+    third = await run_notify_batch(pool)
+    assert third.brand_sale_news == 1
+    assert (
+        await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale' AND ended_at IS NOT NULL") == 1
+    )
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale'") == 1
+
+
+@pytest.mark.asyncio
+async def test_inbox_row_points_at_the_canonical_brand_news(client: AsyncClient, pool):
+    _auth, user_id = await _login(client)
+    brand_id = await _insert_brand(pool, "SaleBrand")
+    await _follow(pool, user_id, brand_id)
+    await _put_brand_on_sale(pool, brand_id)
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT n.brand_news_id, bn.id
+            FROM ai.notifications n
+            JOIN ai.brand_news bn ON bn.id = n.brand_news_id
+            WHERE n.kind = 'brand_sale'
+            """
+        )
+        row = await cur.fetchone()
+    assert row is not None
+    assert row[0] == row[1]
+
+
+@pytest.mark.asyncio
+async def test_brand_new_summary_fills_the_brand_home(client: AsyncClient, pool):
+    """브랜드 홈 '신상 N개' 요약 — 팔로우도 성별도 보지 않는 브랜드 단위 집계."""
+    brand_id = await _aged_brand(pool, "Acme")
+    for _ in range(3):
+        await _insert_product(pool, brand="Acme", brand_node_id=brand_id)
+
+    report = await run_notify_batch(pool)
+    assert report.brand_new_news == 1
+
+    resp = await client.get(f"/v1/brands/{brand_id}")
+    news = resp.json()["news"]
+    assert [(n["kind"], n["text"]) for n in news] == [("brand_new", "신상 3개가 새로 들어왔어요")]
+    assert news[0]["ended_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_brand_new_summary_refreshes_count_then_closes(client: AsyncClient, pool):
+    brand_id = await _aged_brand(pool, "Acme")
+    await _insert_product(pool, brand="Acme", brand_node_id=brand_id)
+    await run_notify_batch(pool)
+
+    # 개수만 바뀐 갱신은 새 소식이 아니다 — 행도 늘지 않고 카운터도 안 오른다.
+    await _insert_product(pool, brand="Acme", brand_node_id=brand_id)
+    second = await run_notify_batch(pool)
+    assert second.brand_new_news == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_new'") == 1
+    news = (await client.get(f"/v1/brands/{brand_id}")).json()["news"]
+    assert news[0]["text"] == "신상 2개가 새로 들어왔어요"
+
+    # 윈도우 밖으로 밀려나면 닫힌다 — 3주 전 신상을 계속 걸어두지 않는다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE public.products SET created_at = now() - interval '30 days' WHERE brand_node_id = %s",
+            (brand_id,),
+        )
+        await conn.commit()
+    third = await run_notify_batch(pool)
+    assert third.brand_new_news == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind='brand_new' AND ended_at IS NOT NULL") == 1
+
+
+@pytest.mark.asyncio
+async def test_brand_new_summary_stays_out_of_the_inbox(client: AsyncClient, pool):
+    """알림함엔 상품별 brand_new_product 행이 따로 들어온다 — 요약까지 끼면 중복이다."""
+    auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+    brand_id = await _aged_brand(pool, "Acme")
+    await _follow(pool, user_id, brand_id)
+    await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_new'") == 1
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    # 상품별 알림 1건만. 브랜드 단위 요약은 브랜드 홈 전용이다.
+    assert [i["type"] for i in feed["items"]] == ["brand_new_product"]
+
+
+@pytest.mark.asyncio
+async def test_brand_new_consent_off_keeps_the_inbox_row_but_not_the_retry_pool(client: AsyncClient, pool):
+    """동의 off 는 영구 억제라 기록해도 안전하다 — 캡/초과분과 구분되는 지점."""
+    auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+    brand_id = await _aged_brand(pool, "Acme")
+    await _follow(pool, user_id, brand_id)
+    await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"release_alerts": False}}, headers={"Authorization": auth}
+    )
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.selected[KIND_BRAND_NEW] == 0
+    assert report.push_suppressed_consent == 1
+    # 알림함엔 남는다.
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    assert [i["type"] for i in feed["items"]] == ["brand_new_product"]
+    # 푸시 경로는 없다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 0
+
+
+@pytest.mark.asyncio
+async def test_brand_new_inbox_backlog_is_capped_per_run(client: AsyncClient, pool):
+    """동의 off 라도 14일 창의 후보 전체를 한 배치에 쏟지 않는다."""
+    from app.core.config import settings as app_settings
+
+    auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+    brand_id = await _aged_brand(pool, "Acme")
+    await _follow(pool, user_id, brand_id)
+    for _ in range(app_settings.NOTIFY_BRAND_NEW_MAX_ITEMS + 4):
+        await _insert_product(pool, brand="Acme", brand_node_id=brand_id, gender=["women"])
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"release_alerts": False}}, headers={"Authorization": auth}
+    )
+
+    first = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert first.recorded == app_settings.NOTIFY_BRAND_NEW_MAX_ITEMS
+    # 잘린 몫은 기록되지 않아 다음 배치에서 다시 후보가 된다.
+    second = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert second.recorded == 4
+
+
+@pytest.mark.asyncio
+async def test_onboarding_import_is_not_treated_as_new_arrivals(client: AsyncClient, pool):
+    """브랜드를 처음 수집하면 카탈로그 전체가 같은 배치로 들어온다 — 신상이 아니다.
+
+    실측: 한 브랜드 775건이 2초 안에 적재됐고, 최근 14일 신상 후보의 13% 가 이런
+    온보딩 통짜 적재분이었다. 걸러내지 않으면 팔로워는 구형 카탈로그를 "신상" 으로 받는다.
+    """
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+
+    # 방금 온보딩된 브랜드 — 카탈로그 전체가 지금 적재된다.
+    brand_id = await _insert_brand(pool, "JustOnboarded")
+    await _follow(pool, user_id, brand_id)
+    for _ in range(6):
+        await _insert_product(pool, brand="JustOnboarded", brand_node_id=brand_id, gender=["women"])
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 0
+    assert report.brand_new_news == 0  # 브랜드 홈 요약도 뜨지 않는다
+
+    # 유예시간이 지난 뒤 들어온 상품부터는 진짜 신상이다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "UPDATE public.products SET created_at = now() - interval '3 days' WHERE brand_node_id = %s",
+            (brand_id,),
+        )
+        await conn.commit()
+    await _insert_product(pool, brand="JustOnboarded", brand_node_id=brand_id, gender=["women"])
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 1
+    assert report.brand_new_news == 1
+
+
+@pytest.mark.asyncio
+async def test_one_brand_does_not_take_the_whole_day_of_new_arrivals(client: AsyncClient, pool):
+    """통짜 적재된 브랜드가 하루 몫을 독식하지 않는다 — 팔로우한 다른 브랜드도 나온다."""
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+
+    loud = await _aged_brand(pool, "Loud")
+    quiet = await _aged_brand(pool, "Quiet")
+    await _follow(pool, user_id, loud)
+    await _follow(pool, user_id, quiet)
+
+    # Quiet 을 먼저 적재하고 Loud 를 나중에 — 최신순으로는 Loud 가 앞을 다 차지한다.
+    await _insert_product(pool, brand="Quiet", brand_node_id=quiet, gender=["women"])
+    for _ in range(8):
+        await _insert_product(pool, brand="Loud", brand_node_id=loud, gender=["women"])
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT brand_node_id, count(*) FROM ai.notifications WHERE kind = %s GROUP BY 1",
+            (KIND_BRAND_NEW,),
+        )
+        by_brand = dict(await cur.fetchall())
+    # 나중에 적재된 Loud 가 5칸을 독식하지 않고 Quiet 도 자리를 얻는다.
+    assert by_brand.get(quiet) == 1
+    assert by_brand.get(loud) == 4  # 브랜드당 2개 + 남은 슬롯 backfill
+    assert sum(by_brand.values()) == 5
+
+
+@pytest.mark.asyncio
+async def test_brand_sale_ignores_tiny_catalogs(client: AsyncClient, pool, monkeypatch):
+    """전체 브랜드 스캔의 잡음 하한 — 상품 2개 중 1개 할인은 비율 50% 지만 소식이 아니다."""
+    from app.core.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "NOTIFY_BRAND_SALE_MIN_PRODUCTS", 10)
+
+    brand_id = await _insert_brand(pool, "TinyBrand")
+    one = await _insert_product(pool, brand="TinyBrand", brand_node_id=brand_id)
+    await _insert_product(pool, brand="TinyBrand", brand_node_id=brand_id)
+    await _set_product(pool, one, original_price=100000, sale_price=50000)
+
+    report = await run_notify_batch(pool)
+
+    assert report.brand_sale_news == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale'") == 0
+    # 상태도 쓰지 않는다 — 집계에서 아예 빠지므로 전환 판정 대상이 아니다.
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_sale_state") == 0
 
 
 @pytest.mark.asyncio
 async def test_brand_sale_respects_brand_consent(client: AsyncClient, pool):
-    """동의가 꺼져도 인박스엔 남는다 — 억제되는 건 푸시뿐이다 (brand_sale 전용 정책)."""
+    """동의를 꺼도 소식 정본은 남는다 — 억제되는 건 푸시뿐이다.
+
+    0028 이후 인박스는 ai.brand_news 를 조회하므로, 게이트에 막힌 유저의
+    ai.notifications 행은 아예 만들지 않는다(아웃박스 앵커가 필요 없으니까).
+    유저가 소식을 못 보는 게 아니라 푸시를 안 받는 것이다.
+    """
     auth, user_id = await _login(client)
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id)
-
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     # brand_sale 은 brand_new_product 동의를 공유한다 — 이를 끄면 푸시만 억제된다.
     await client.patch(
@@ -399,31 +700,28 @@ async def test_brand_sale_respects_brand_consent(client: AsyncClient, pool):
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_BRAND_SALE] == 1
     assert report.selected[KIND_BRAND_SALE] == 0  # 푸시 게이트 통과분은 0
-    # 인박스는 동의와 무관하게 항상 적재된다 (GET /v1/notifications 노출).
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 1
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT processed_at, suppressed_reason FROM ai.notifications WHERE kind = 'brand_sale'")
-        processed_at, suppressed_reason = await cur.fetchone()
-    assert processed_at is not None
-    assert suppressed_reason == "consent_off"
+    assert report.push_suppressed_consent == 1
+    # 소식 정본은 남는다 — 인박스와 브랜드 홈이 이걸 읽는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale'") == 1
+    # 아웃박스 앵커 행은 만들지 않는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 0
     # 푸시 경로(메시지/딜리버리)는 만들어지지 않는다.
     assert await _count(pool, "SELECT count(*) FROM ai.notification_messages WHERE category = 'brand_sale_digest'") == 0
+
+    # 그래도 알림함에는 보인다 — read fan-out 의 핵심.
+    feed = await client.get("/v1/notifications", headers={"Authorization": auth})
+    assert [i["type"] for i in feed.json()["items"]] == ["brand_sale"]
 
 
 @pytest.mark.asyncio
 async def test_brand_sale_respects_weekly_cap(client: AsyncClient, pool):
-    """주간 캡에 걸려도 인박스엔 남는다 — 억제되는 건 푸시뿐이다."""
+    """주간 캡에 걸려도 소식 정본은 남는다 — 억제되는 건 푸시뿐이다."""
     from app.services.notifications import BRAND_SALE_CATEGORY
 
     auth, user_id = await _login(client)
     brand_id = await _insert_brand(pool, "SaleBrand")
     await _follow(pool, user_id, brand_id)
-
-    on_sale = [await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id) for _ in range(2)]
-    for _ in range(3):
-        await _insert_product(pool, brand="SaleBrand", brand_node_id=brand_id)
-    for pid in on_sale:
-        await _set_product(pool, pid, original_price=100000, sale_price=70000)
+    await _put_brand_on_sale(pool, brand_id)
 
     # 캡(주 3회)을 이미 채운 것처럼 최근 7일 내 accepted 메시지 3건을 직접 심는다.
     now = datetime.now(tz=UTC)
@@ -448,13 +746,15 @@ async def test_brand_sale_respects_weekly_cap(client: AsyncClient, pool):
     report = await run_notify_batch(pool, only_user=UUID(user_id), now=now)
     assert report.detected[KIND_BRAND_SALE] == 1
     assert report.selected[KIND_BRAND_SALE] == 0  # 캡에 걸려 푸시 게이트 통과분은 0
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 1
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("SELECT suppressed_reason FROM ai.notifications WHERE kind = 'brand_sale'")
-        (suppressed_reason,) = await cur.fetchone()
-    assert suppressed_reason == "weekly_cap"
+    assert report.push_suppressed_cap == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.brand_news WHERE kind = 'brand_sale'") == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'brand_sale'") == 0
     # 캡 이전에 심어둔 3건 외에 새 메시지가 추가되지 않는다.
     assert await _count(pool, "SELECT count(*) FROM ai.notification_messages WHERE category = 'brand_sale_digest'") == 3
+
+    # 캡은 푸시만 막는다 — 알림함에는 그대로 보인다.
+    feed = await client.get("/v1/notifications", headers={"Authorization": auth})
+    assert [i["type"] for i in feed.json()["items"]] == ["brand_sale"]
 
 
 @pytest.mark.asyncio
@@ -478,5 +778,47 @@ async def test_opt_out_suppresses_only_that_kind(client: AsyncClient, pool):
 
     report = await run_notify_batch(pool, only_user=UUID(user_id))
     assert report.detected[KIND_PRICE_DROP] == 1
-    assert report.selected[KIND_PRICE_DROP] == 0
-    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 0
+    assert report.selected[KIND_PRICE_DROP] == 0  # 푸시 게이트 통과분 없음
+    assert report.push_suppressed_consent == 1
+    # 인박스 행은 남는다 — 동의를 끈 건 푸시지 소식이 아니다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 1
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT suppressed_reason FROM ai.notifications")
+        assert (await cur.fetchone())[0] == "consent_off"
+    # 푸시 경로는 만들어지지 않는다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_deliveries") == 0
+
+    # 알림함에서 실제로 보인다.
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    assert [i["type"] for i in feed["items"]] == ["price_drop"]
+    assert feed["unread_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_consent_off_saved_alert_is_not_lost_when_the_baseline_advances(client: AsyncClient, pool):
+    """동의 off 로 놓친 하락이 되돌릴 수 없던 문제의 회귀 가드.
+
+    detect_save_events 는 발동과 동시에 기준가를 내리므로, 그때 인박스 행을 안 남기면
+    같은 하락은 다시는 감지되지 않는다 — 나중에 동의를 켜도 영영 못 본다.
+    """
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"price_drop": False}}, headers={"Authorization": auth}
+    )
+    await _set_product(pool, product_id, price=50000)
+
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    # 기준가는 전진했다 — 재감지는 기대할 수 없다.
+    assert await _count(pool, "SELECT count(*) FROM ai.saved_product_baseline WHERE baseline_price = 50000") == 1
+    # 그래서 그 순간 남긴 인박스 행이 유일한 기록이고, 동의를 다시 켜도 그대로 있다.
+    await client.patch(
+        "/v1/me/notifications", json={"categories": {"price_drop": True}}, headers={"Authorization": auth}
+    )
+    second = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert second.detected[KIND_PRICE_DROP] == 0  # 기준가 전진으로 재감지 안 됨
+    feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
+    assert [(i["type"], i["old_price"], i["new_price"]) for i in feed["items"]] == [("price_drop", 100000, 50000)]
