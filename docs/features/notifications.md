@@ -99,6 +99,11 @@ identically — otherwise the inbox would reproduce the skew the push path avoid
 | `brand_sale` | discounted-catalog ratio crosses the threshold (state transition) | yes | yes |
 | `brand_new` | rolling count of arrivals in `NOTIFY_BRAND_NEW_SUMMARY_WINDOW_D` days | yes | **no** |
 
+Brand home serves the newest `_NEWS_LIMIT` (5) inline on
+`GET /v1/brands/{id}`; `GET /v1/brands/{id}/news` pages past that preview with the
+same ordering and copy. Both are public — news is a brand-level fact, independent
+of who is looking.
+
 `brand_new` exists because sales are rare, so a brand home that only surfaces
 sales looks empty most of the time. It stays out of the inbox because the inbox
 already receives per-product `brand_new_product` rows matched to the user's
