@@ -45,6 +45,8 @@ class CurationProduct(BaseModel):
     brand: str
     name: str
     price: float | None
+    original_price: float | None
+    sale_price: float | None
     image_url: str
     product_url: str
 
@@ -180,7 +182,9 @@ async def _load_sections(
             # 뽑을 때와 하이드레이션할 때의 기준이 갈리면 구좌가 조용히 빈다.
             await cur.execute(
                 f"""
-                SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url
+                SELECT p.id, p.brand, p.name, p.price,
+                       p.original_price, p.sale_price,
+                       p.image_url, p.product_url
                 FROM public.products p
                 {PRODUCT_FEATURES_JOIN}
                 WHERE p.id = ANY(%(ids)s)
@@ -191,12 +195,14 @@ async def _load_sections(
                 """,  # noqa: S608 -- 보간되는 값은 모두 모듈 소유 상수
                 {"ids": list(dict.fromkeys(all_ids)), "gender": gender},
             )
-            for pid, brand, name, price, image_url, product_url in await cur.fetchall():
+            for pid, brand, name, price, original_price, sale_price, image_url, product_url in await cur.fetchall():
                 products[int(pid)] = CurationProduct(
                     product_id=int(pid),
                     brand=brand,
                     name=name,
                     price=float(price) if price is not None else None,
+                    original_price=float(original_price) if original_price is not None else None,
+                    sale_price=float(sale_price) if sale_price is not None else None,
                     image_url=image_url,
                     product_url=product_url,
                 )
