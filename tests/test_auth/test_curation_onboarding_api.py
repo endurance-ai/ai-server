@@ -52,6 +52,8 @@ async def _insert_product(
     *,
     brand: str = "TestBrand",
     price: float | None = 50000.0,
+    original_price: float | None = None,
+    sale_price: float | None = None,
     gender: list[str] | None = None,
     brand_node_id: int | None = None,
     in_stock: bool = True,
@@ -72,13 +74,16 @@ async def _insert_product(
         await cur.execute(
             """
             INSERT INTO public.products
-                (brand, name, price, gender, image_url, product_url, brand_node_id, in_stock, category)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                (brand, name, price, original_price, sale_price, gender,
+                 image_url, product_url, brand_node_id, in_stock, category)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 brand,
                 name,
                 price,
+                original_price,
+                sale_price,
                 gender or ["women"],
                 "https://img.test/i.jpg",
                 f"https://shop.test/{uuid4()}",
@@ -238,7 +243,7 @@ async def test_curation_men_chips_empty_until_goldenset(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient, pool):
     p1 = await _insert_product(pool, brand="A")
-    p2 = await _insert_product(pool, brand="B")
+    p2 = await _insert_product(pool, brand="B", original_price=70000, sale_price=45000)
     p_out = await _insert_product(pool, brand="C", in_stock=False)
     await _insert_section(pool, section_id="popular", gender="women", product_ids=[p2, p_out, p1], sort_order=1)
     await _insert_section(pool, section_id="hidden", gender="women", product_ids=[p1], is_active=False)
@@ -247,8 +252,13 @@ async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = resp.json()["sections"]
     assert [s["id"] for s in sections] == ["popular"]  # inactive/타 gender 제외
-    ids = [p["product_id"] for p in sections[0]["products"]]
+    products = sections[0]["products"]
+    ids = [p["product_id"] for p in products]
     assert ids == [p2, p1]  # product_ids 순서 보존, 품절 제외
+    assert products[0]["original_price"] == 70000.0
+    assert products[0]["sale_price"] == 45000.0
+    assert products[1]["original_price"] is None
+    assert products[1]["sale_price"] is None
 
 
 @pytest.mark.asyncio

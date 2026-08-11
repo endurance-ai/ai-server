@@ -63,6 +63,8 @@ class ProductRef(BaseModel):
     brand: str
     name: str
     price: float | None
+    original_price: float | None
+    sale_price: float | None
     image_url: str
     product_url: str
 
@@ -202,7 +204,9 @@ async def _get_similar(pool: AsyncConnectionPool, product_id: int, limit: int = 
                 WITH anchor AS (
                     SELECT embedding FROM public.product_embeddings WHERE product_id = %s
                 )
-                SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url
+                SELECT p.id, p.brand, p.name, p.price,
+                       p.original_price, p.sale_price,
+                       p.image_url, p.product_url
                 FROM public.product_embeddings e
                 JOIN public.products p ON p.id = e.product_id
                 WHERE e.product_id <> %s
@@ -224,8 +228,10 @@ async def _get_similar(pool: AsyncConnectionPool, product_id: int, limit: int = 
             brand=r[1],
             name=r[2],
             price=float(r[3]) if r[3] is not None else None,
-            image_url=r[4],
-            product_url=r[5],
+            original_price=float(r[4]) if r[4] is not None else None,
+            sale_price=float(r[5]) if r[5] is not None else None,
+            image_url=r[6],
+            product_url=r[7],
         )
         for r in rows
     ]
