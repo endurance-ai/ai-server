@@ -202,6 +202,61 @@ async def test_brand_home_returns_brand_news_newest_first(client: AsyncClient, p
 
 
 @pytest.mark.asyncio
+async def test_brand_news_more_paginates_past_the_home_preview(client: AsyncClient, pool):
+    """홈은 프리뷰 5건만 — 더보기가 그 뒤를 이어 받는다."""
+    brand_id = await _insert_brand(pool, "Acme")
+    for i in range(7):
+        await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 10 + i}, ended=True)
+
+    home = (await client.get(f"/v1/brands/{brand_id}")).json()["news"]
+    assert len(home) == 5  # _NEWS_LIMIT
+
+    seen: list[int] = []
+    cursor = None
+    for _ in range(5):
+        url = f"/v1/brands/{brand_id}/news?limit=3" + (f"&cursor={cursor}" if cursor else "")
+        data = (await client.get(url)).json()
+        seen.extend(i["id"] for i in data["items"])
+        cursor = data["next_cursor"]
+        if cursor is None:
+            break
+
+    assert cursor is None
+    assert len(seen) == 7
+    assert len(set(seen)) == 7  # 페이지 경계에서 중복/유실 없음
+    assert seen == sorted(seen, reverse=True)  # 최신순 유지
+    # 홈 프리뷰는 더보기 첫 페이지와 같은 정렬을 쓴다.
+    assert [n["id"] for n in home] == seen[:5]
+
+
+@pytest.mark.asyncio
+async def test_brand_news_more_is_public_and_404s_on_unknown_brand(client: AsyncClient, pool):
+    brand_id = await _insert_brand(pool, "Acme")
+    await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 40})
+
+    resp = await client.get(f"/v1/brands/{brand_id}/news")  # 비로그인
+    assert resp.status_code == 200
+    assert [n["sub"] for n in resp.json()["items"]] == ["최대 40% 싸요"]
+    assert resp.json()["next_cursor"] is None
+
+    # 소식이 없는 것과 브랜드가 없는 것은 다른 의미다.
+    empty = await client.get(f"/v1/brands/{await _insert_brand(pool, 'Quiet')}/news")
+    assert empty.status_code == 200
+    assert empty.json() == {"items": [], "next_cursor": None}
+    assert (await client.get("/v1/brands/99999999/news")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_brand_news_more_ignores_a_malformed_cursor(client: AsyncClient, pool):
+    brand_id = await _insert_brand(pool, "Acme")
+    await _insert_brand_news(pool, brand_id, payload={"max_discount_pct": 40})
+
+    resp = await client.get(f"/v1/brands/{brand_id}/news?cursor=not-a-real-cursor")
+    assert resp.status_code == 200
+    assert len(resp.json()["items"]) == 1  # 커서 없음으로 폴백
+
+
+@pytest.mark.asyncio
 async def test_brand_home_news_visible_without_any_follower(client: AsyncClient, pool):
     """0027 회귀 가드 — 팔로워 0명 + 비로그인이어도 소식이 보여야 한다."""
     brand_id = await _insert_brand(pool, "Acme")

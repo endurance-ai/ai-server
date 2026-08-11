@@ -125,6 +125,11 @@ class BrandHome(BaseModel):
     """
 
 
+class BrandNewsResponse(BaseModel):
+    items: list[BrandNewsItem]
+    next_cursor: str | None
+
+
 class BrandProduct(BaseModel):
     id: int
     brand: str
@@ -183,6 +188,50 @@ async def unfollow_brand(
         )
         await conn.commit()
     return UnfollowResponse(following=False)
+
+
+def _news_item(row: tuple) -> BrandNewsItem:
+    """(id, kind, payload, started_at, ended_at) → 카드. 브랜드 홈과 더보기가 공유한다."""
+    text, sub = brand_news_copy(row[1], row[2] or {})
+    return BrandNewsItem(
+        id=row[0],
+        kind=row[1],
+        text=text,
+        sub=sub,
+        started_at=row[3].isoformat(),
+        ended_at=row[4].isoformat() if row[4] else None,
+    )
+
+
+# 브랜드 홈 프리뷰와 더보기가 같은 정렬을 써야 페이지 경계에서 항목이 새거나 겹치지
+# 않는다. started_at 만으로는 부족하다 — 같은 배치가 여러 브랜드 소식을 같은 시각으로
+# 남기므로 id 를 tie-breaker 로 둔다.
+_BRAND_NEWS_SELECT = """
+    SELECT id, kind, payload, started_at, ended_at
+    FROM ai.brand_news
+    WHERE brand_node_id = %(brand_id)s
+      AND (
+          %(cur_at)s::timestamptz IS NULL
+          OR (started_at, id) < (%(cur_at)s::timestamptz, %(cur_id)s::bigint)
+      )
+    ORDER BY started_at DESC, id DESC
+    LIMIT %(lim)s
+"""
+
+
+def _decode_news_cursor(cursor: str | None) -> tuple[str | None, int | None]:
+    if not cursor:
+        return None, None
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        ts_part, id_part = raw.rsplit("|", 1)
+        return ts_part, int(id_part)
+    except (ValueError, UnicodeDecodeError):
+        return None, None
+
+
+def _encode_news_cursor(started_at_iso: str, news_id: int) -> str:
+    return base64.urlsafe_b64encode(f"{started_at_iso}|{news_id}".encode()).decode("ascii")
 
 
 def _decode_follows_cursor(cursor: str | None) -> tuple[str | None, int | None]:
@@ -276,14 +325,8 @@ async def brand_home(
         # ai.brand_news 에 있어서 가능하다. 유저별 팬아웃 행을 뒤질 때는 팔로워가
         # 없는 브랜드의 홈이 영영 비어 있었다 (migration 0027 docstring 참조).
         await cur.execute(
-            """
-            SELECT id, kind, payload, started_at, ended_at
-            FROM ai.brand_news
-            WHERE brand_node_id = %s
-            ORDER BY started_at DESC, id DESC
-            LIMIT %s
-            """,
-            (brand_id, _NEWS_LIMIT),
+            _BRAND_NEWS_SELECT,
+            {"brand_id": brand_id, "cur_at": None, "cur_id": None, "lim": _NEWS_LIMIT},
         )
         news_rows = await cur.fetchall()
 
@@ -295,20 +338,6 @@ async def brand_home(
     wiki = row[3] or {}
     store_url = wiki.get("homepage_url") if isinstance(wiki, dict) else None
 
-    news: list[BrandNewsItem] = []
-    for news_row in news_rows:
-        text, sub = brand_news_copy(news_row[1], news_row[2] or {})
-        news.append(
-            BrandNewsItem(
-                id=news_row[0],
-                kind=news_row[1],
-                text=text,
-                sub=sub,
-                started_at=news_row[3].isoformat(),
-                ended_at=news_row[4].isoformat() if news_row[4] else None,
-            )
-        )
-
     return BrandHome(
         id=row[0],
         name=row[1],
@@ -318,8 +347,43 @@ async def brand_home(
         following=following,
         notify_enabled=notify_enabled,
         store_url=store_url,
-        news=news,
+        news=[_news_item(r) for r in news_rows],
     )
+
+
+@router.get("/brands/{brand_id}/news", response_model=BrandNewsResponse, status_code=status.HTTP_200_OK)
+async def brand_news(
+    brand_id: int,
+    cursor: str | None = Query(default=None, description="Pagination cursor (opaque token)"),
+    limit: int = Query(default=20, ge=1, le=100),
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> BrandNewsResponse:
+    """브랜드 소식 전체 목록 (최신순) — 브랜드 홈 '더보기'.
+
+    홈은 프리뷰 _NEWS_LIMIT 건만 보여주므로 그 뒤를 이어 받는 경로가 필요하다.
+    브랜드 홈과 같은 정렬·같은 문구 변환을 쓴다 (_BRAND_NEWS_SELECT / _news_item).
+
+    브랜드 홈과 마찬가지로 인증이 필요 없다 — 소식은 팔로우·로그인과 무관한 브랜드
+    단위 사실이다. 존재하지 않는 브랜드는 404 로 구분해 준다: 소식이 없는 것과
+    브랜드가 없는 것은 클라이언트에 다른 의미다.
+    """
+    cursor_at, cursor_id = _decode_news_cursor(cursor)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT 1 FROM public.brand_nodes WHERE id = %s", (brand_id,))
+        if not await cur.fetchone():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+
+        await cur.execute(
+            _BRAND_NEWS_SELECT,
+            {"brand_id": brand_id, "cur_at": cursor_at, "cur_id": cursor_id, "lim": limit + 1},
+        )
+        rows = await cur.fetchall()
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = _encode_news_cursor(page[-1][3].isoformat(), page[-1][0]) if has_more and page else None
+    return BrandNewsResponse(items=[_news_item(r) for r in page], next_cursor=next_cursor)
 
 
 @router.get("/brands/{brand_id}/products", response_model=BrandProductsResponse, status_code=status.HTTP_200_OK)
