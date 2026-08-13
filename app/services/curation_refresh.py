@@ -53,13 +53,18 @@ _MEN_ONLY_EXCLUDED_SUBCATEGORIES = (
 # `chk_products_gender_required` 를 VALIDATE 했으므로 p.gender 는
 # non-NULL · non-empty · canonical 이 보장된다 — 폴백이 방어할 대상이 없다.
 #
-# unisex 는 제외한다 — 메인 피드에는 명시 라벨만 올린다(기존 동작 보존).
-# 검색(search_products_v6)은 unisex 를 포함하지만 큐레이션은 fail-closed 다.
+# unisex 는 포함한다 — 검색(search_products_v6.sql:138 `p.gender &&
+# ARRAY[p_gender, 'unisex']`)과 같은 술어다. 이전에는 큐레이션만 unisex 를
+# 잘라내는 비대칭이었는데, 카탈로그 상당수가 unisex 라벨이라 브랜드 구좌가
+# 통째로 비었다(예: 999HUMANITY 727개 전량, NWT 48개 전량, Scuffers 1221개 중 974개).
+# 이제 성별 정의는 검색·큐레이션 한 곳뿐이다.
+#
+# 빈 배열과 NULL 은 `&&` 가 각각 false / NULL 이라 그대로 걸러진다.
 # PRODUCT_FEATURES_JOIN 은 유지한다: primary_color 와 품질 게이트가 쓴다.
 PRODUCT_FEATURES_JOIN = "LEFT JOIN public.product_features pf ON pf.product_id = p.id"
 
 GENDER_MATCH_SQL = """
-        %(gender)s = ANY(p.gender) AND NOT ('unisex' = ANY(p.gender))
+        p.gender && ARRAY[%(gender)s, 'unisex']::text[]
 """
 
 

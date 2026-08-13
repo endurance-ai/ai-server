@@ -414,8 +414,10 @@ async def test_refresh_under100_filters_bad_data(client: AsyncClient, pool):
     under = [p["product_id"] for p in sections["under-100"]["products"]]
 
     assert ok in under
-    for excluded in (unconverted_fx, mixed_gender, unisex):
-        assert excluded not in under
+    assert unconverted_fx not in under  # 가격 하한(5000원) 가드
+    # unisex 는 검색(v6)과 같이 남녀 양쪽에 노출된다 — GENDER_MATCH_SQL 참조.
+    for included in (mixed_gender, unisex):
+        assert included in under
     assert len([pid for pid in dupes if pid in under]) == 2  # 브랜드당 2개 캡
 
 

@@ -209,22 +209,59 @@ GENDERS = ("women", "men")
 
 
 async def _resolve_brand_names(cur: Any, names: list[str]) -> tuple[list[int], list[str]]:
-    """이름만 적힌 브랜드를 brand_nodes.id 로 해석. (찾은 id, 못 찾은 이름)."""
+    """이름만 적힌 브랜드를 brand_nodes.id 로 해석. (찾은 id, 못 찾은 이름).
+
+    저장된 `brand_name_normalized` 는 신뢰할 수 없다 — 실측상 'Scuffers' 가
+    'scuffersher', 'Anytime loreak' 이 공백을 남긴 'anytime loreak',
+    'müdule' 이 움라우트를 남긴 'müdule' 로 들어가 있다. 그래서 `brand_name`
+    을 조회 시점에 입력과 같은 규칙으로 정규화해 맞추고, 저장 컬럼은 보조
+    조건으로만 둔다.
+    """
     if not names:
         return [], []
     await cur.execute(
         """
-        SELECT DISTINCT ON (n.raw) n.raw, bn.id
-        FROM unnest(%s::text[]) AS n(raw)
+        WITH input AS (
+            SELECT raw, regexp_replace(lower(raw), '[^a-z0-9]+', '', 'g') AS norm
+            FROM unnest(%s::text[]) AS n(raw)
+        )
+        SELECT DISTINCT ON (i.raw) i.raw, bn.id
+        FROM input i
         JOIN public.brand_nodes bn
-          ON bn.brand_name_normalized = regexp_replace(lower(n.raw), '[^a-z0-9]+', '', 'g')
-        ORDER BY n.raw, length(bn.brand_name) ASC, bn.id ASC
+          ON regexp_replace(lower(bn.brand_name), '[^a-z0-9]+', '', 'g') = i.norm
+          OR bn.brand_name_normalized = i.norm
+        ORDER BY i.raw, length(bn.brand_name) ASC, bn.id ASC
         """,
         (names,),
     )
     found = {str(r[0]): int(r[1]) for r in await cur.fetchall()}
     missing = [n for n in names if n not in found]
     return list(found.values()), missing
+
+
+async def _brand_breakdown(cur: Any, brand_ids: list[int], gender: str) -> list[tuple[int, str, int]]:
+    """브랜드별로 품질 게이트를 통과하는 상품 수. 얇은 브랜드를 눈으로 잡으려는 것."""
+    if not brand_ids:
+        return []
+    await cur.execute(
+        f"""
+        WITH eligible AS (
+            SELECT p.brand_node_id AS bid, count(*) AS n
+            FROM public.products p
+            {PRODUCT_FEATURES_JOIN}
+            WHERE p.brand_node_id = ANY(%(brand_ids)s)
+              AND {_quality_sql()}
+            GROUP BY p.brand_node_id
+        )
+        SELECT bn.id, bn.brand_name, COALESCE(e.n, 0)
+        FROM public.brand_nodes bn
+        LEFT JOIN eligible e ON e.bid = bn.id
+        WHERE bn.id = ANY(%(brand_ids)s)
+        ORDER BY COALESCE(e.n, 0) ASC, bn.brand_name ASC
+        """,  # noqa: S608 -- 보간되는 값은 모두 모듈 소유 상수
+        {**_query_params(gender), "brand_ids": brand_ids},
+    )
+    return [(int(r[0]), str(r[1]), int(r[2])) for r in await cur.fetchall()]
 
 
 async def _expand_brands(cur: Any, brand_ids: list[int], gender: str) -> list[int]:
@@ -386,6 +423,9 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
                 print(f"  ⚠ {spec['section_id']}/{gender}: 브랜드 미매칭 {missing}")
             brand_ids = list(dict.fromkeys([*brands["ids"], *resolved]))
             product_ids = await _expand_brands(cur, brand_ids, gender)
+            empty = [f"{name}({bid})" for bid, name, n in await _brand_breakdown(cur, brand_ids, gender) if n == 0]
+            if empty:
+                print(f"  ⚠ {spec['section_id']}/{gender}: 해당 성별 상품 0 개인 브랜드 {empty}")
             if not product_ids:
                 print(f"  ⚠ {spec['section_id']}/{gender}: 전개된 상품 0 개 — 비활성으로 넣는다")
             rows.append(
@@ -405,9 +445,18 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
 
 
 async def _report(cur: Any, rows: list[dict[str, Any]]) -> None:
+    # auto 구좌는 upsert 가 기존 product_ids 를 보존하므로(_UPSERT 의 CASE),
+    # 계획상의 빈 배열이 아니라 DB 현재값을 보여줘야 오해가 없다.
+    await cur.execute(
+        "SELECT section_id, gender, product_ids FROM ai.curation_sections WHERE slot_type = 'auto'",
+    )
+    current_auto = {(str(r[0]), str(r[1])): [int(p) for p in (r[2] or [])] for r in await cur.fetchall()}
+
     print(f"\n{'section_id':<30} {'gender':<6} {'type':<9} {'ord':>3} {'act':<4} {'ids':>4} {'표시가능':>6}")
     print("-" * 76)
     for row in sorted(rows, key=lambda r: (r["sort_order"], r["section_id"], r["gender"])):
+        if row["slot_type"] == "auto":
+            row = {**row, "product_ids": current_auto.get((row["section_id"], row["gender"]), [])}
         live = await _hydratable_count(cur, row["product_ids"], row["gender"])
         flag = "on" if row["is_active"] else "off"
         warn = "  ← 12개 미만" if row["is_active"] and row["slot_type"] == "editorial" and live < 12 else ""
