@@ -45,6 +45,10 @@ from app.services.curation_refresh import (  # noqa: E402
 _PER_BRAND = 2
 _BRAND_SECTION_POOL = 24
 
+# app/api/curation.py `_PRODUCTS_PER_SECTION` 과 같은 값. 그 모듈을 import 하면
+# langfuse 쪽 pydantic v1 shim 이 딸려 와 stderr 를 더럽혀서 값만 복제한다.
+_PRODUCTS_PER_SECTION = 20
+
 
 # ── 노션 원본 (구좌명 / 성별 / slot_type / 상품 / 활성) ───────────────────────
 #
@@ -264,12 +268,17 @@ async def _brand_breakdown(cur: Any, brand_ids: list[int], gender: str) -> list[
     return [(int(r[0]), str(r[1]), int(r[2])) for r in await cur.fetchall()]
 
 
-async def _expand_brands(cur: Any, brand_ids: list[int], gender: str) -> list[int]:
+async def _expand_brands(cur: Any, brand_ids: list[int], gender: str, excluded: set[int]) -> list[int]:
     """브랜드별 인기 상위 상품을 라운드로빈으로 섞어 상품 ID 풀을 만든다.
 
     인기 점수는 `popular` auto 구좌와 같은 신호·가중치를 쓴다 (조회 + 3×저장
     + 4×아웃바운드 + ln(1+리뷰), curation_refresh.py:99). 인기 정의가 구좌마다
     갈리지 않게 하려는 것이다.
+
+    `excluded` 는 앞 구좌가 이미 차지한 상품이다. API 가 sort_order 순으로
+    `excluded_ids` 를 누적해 뒤 구좌에서 중복을 빼기 때문에(curation.py:173),
+    여기서 미리 피하지 않으면 인기 브랜드일수록 `popular` 와 겹쳐 구좌가 반토막
+    난다 — 실측상 브랜드 픽(남) 8개 중 4개가 popular 에 먹혔다.
 
     품질 게이트도 auto 구좌와 같은 `_quality_sql()` 을 쓴다 — 여기서 통과한
     상품만 하이드레이션(app/api/curation.py:183)도 통과한다.
@@ -317,6 +326,7 @@ async def _expand_brands(cur: Any, brand_ids: list[int], gender: str) -> list[in
             LEFT JOIN saves sv ON sv.product_id = p.id
             LEFT JOIN outbound o ON o.product_id = p.id
             WHERE p.brand_node_id = ANY(%(brand_ids)s)
+              AND NOT (p.id = ANY(%(excluded)s))
               AND {_quality_sql()}
         )
         SELECT product_id
@@ -328,6 +338,7 @@ async def _expand_brands(cur: Any, brand_ids: list[int], gender: str) -> list[in
         {
             **_query_params(gender),
             "brand_ids": brand_ids,
+            "excluded": list(excluded),
             "per_brand": _PER_BRAND,
             "pool": _BRAND_SECTION_POOL,
         },
@@ -383,8 +394,23 @@ _UPSERT = """
 
 
 async def _build_rows(cur: Any) -> list[dict[str, Any]]:
-    """DB 조회(브랜드 전개)까지 끝낸 최종 행 목록."""
+    """DB 조회(브랜드 전개)까지 끝낸 최종 행 목록.
+
+    sort_order 순으로 훑으면서 앞 구좌가 차지한 상품을 `claimed` 에 모으고,
+    브랜드 구좌는 그걸 피해서 전개한다 — API 의 `excluded_ids` 누적과 같은
+    순서다(curation.py:173).
+    """
     rows: list[dict[str, Any]] = []
+    claimed: dict[str, set[int]] = {gender: set() for gender in GENDERS}
+
+    # auto 구좌의 상품은 리프레셔 소유다. upsert 가 보존하므로 DB 현재값을
+    # 그대로 claimed 에 반영한다 — 이게 브랜드 구좌를 가장 많이 먹는 쪽이다.
+    await cur.execute(
+        "SELECT gender, product_ids FROM ai.curation_sections WHERE slot_type = 'auto' AND is_active",
+    )
+    for gender, product_ids in await cur.fetchall():
+        if str(gender) in claimed:
+            claimed[str(gender)].update(int(p) for p in (product_ids or []))
 
     for spec in AUTO_SECTIONS:
         for gender in GENDERS:
@@ -403,6 +429,9 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
 
     for spec in EDITORIAL_SECTIONS:
         for gender, product_ids in spec["products"].items():
+            deduped = list(dict.fromkeys(product_ids))
+            if spec["is_active"]:
+                claimed[gender].update(deduped[:_PRODUCTS_PER_SECTION])
             rows.append(
                 {
                     "section_id": spec["section_id"],
@@ -410,7 +439,7 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
                     "slot_type": "editorial",
                     "title": spec["title"],
                     "subtitle": spec["subtitle"],
-                    "product_ids": list(dict.fromkeys(product_ids)),
+                    "product_ids": deduped,
                     "sort_order": spec["sort_order"],
                     "is_active": spec["is_active"],
                 }
@@ -422,7 +451,8 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
             if missing:
                 print(f"  ⚠ {spec['section_id']}/{gender}: 브랜드 미매칭 {missing}")
             brand_ids = list(dict.fromkeys([*brands["ids"], *resolved]))
-            product_ids = await _expand_brands(cur, brand_ids, gender)
+            product_ids = await _expand_brands(cur, brand_ids, gender, claimed[gender])
+            claimed[gender].update(product_ids)
             empty = [f"{name}({bid})" for bid, name, n in await _brand_breakdown(cur, brand_ids, gender) if n == 0]
             if empty:
                 print(f"  ⚠ {spec['section_id']}/{gender}: 해당 성별 상품 0 개인 브랜드 {empty}")
