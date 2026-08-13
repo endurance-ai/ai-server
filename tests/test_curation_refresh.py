@@ -1,92 +1,9 @@
-"""curation_refresh 순수 파서 단위 테스트 (DB/네트워크 없음) + chips 상수 검증."""
+"""curation_refresh 후보 선택 단위 테스트 (DB/네트워크 없음) + chips 상수 검증."""
 
 from __future__ import annotations
 
 from app.services.curation_chips import chips_for
-from app.services.curation_refresh import (
-    _parse_notion_page,
-    _parse_product_ids,
-    select_candidate_ids,
-)
-
-
-def _page(props: dict) -> dict:
-    return {"id": "abcd1234-5678-90ab-cdef-1234567890ab", "properties": props}
-
-
-def _title(text: str) -> dict:
-    return {"title": [{"plain_text": text}]}
-
-
-def _rich(text: str) -> dict:
-    return {"rich_text": [{"plain_text": text}]}
-
-
-def test_parse_product_ids_tolerates_separators():
-    assert _parse_product_ids("123, 456 789;1011") == [123, 456, 789, 1011]
-    assert _parse_product_ids("") == []
-
-
-def test_parse_notion_page_full():
-    parsed = _parse_notion_page(
-        _page(
-            {
-                "구좌명": _title("지금 뜨는 베트남 핫걸 ST"),
-                "구좌 ID": _rich("editorial-vietnam-hotgirl"),
-                "slot_type": {"select": {"name": "editorial"}},
-                "서브타이틀": _rich("사이공 트렌드세터의 여름 무드"),
-                "상품": _rich("11, 22, 33"),
-                "순서": {"number": 4},
-                "활성": {"checkbox": True},
-                "gender_scope": {"multi_select": [{"name": "women"}]},
-            }
-        )
-    )
-    assert parsed is not None
-    assert parsed["section_id"] == "editorial-vietnam-hotgirl"
-    assert parsed["title"] == "지금 뜨는 베트남 핫걸 ST"
-    assert parsed["subtitle"] == "사이공 트렌드세터의 여름 무드"
-    assert parsed["product_ids"] == [11, 22, 33]
-    assert parsed["sort_order"] == 4
-    assert parsed["is_active"] is True
-    assert parsed["genders"] == ["women"]
-
-
-def test_parse_notion_page_defaults_and_missing_title():
-    parsed = _parse_notion_page(
-        _page(
-            {
-                "구좌명": _title("지금 인기 브랜드"),
-                "구좌 ID": _rich("popular"),
-                "slot_type": {"select": {"name": "auto"}},
-                "gender_scope": {"multi_select": [{"name": "women"}, {"name": "men"}]},
-                "활성": {"checkbox": False},
-            }
-        )
-    )
-    assert parsed is not None
-    assert parsed["genders"] == ["women", "men"]
-    assert parsed["sort_order"] == 100
-    assert parsed["is_active"] is False
-    assert parsed["product_ids"] == []
-    # Required operating fields are fail-closed.
-    assert _parse_notion_page(_page({"서브타이틀": _rich("x")})) is None
-    assert _parse_notion_page(_page({"구좌명": _title("missing id")})) is None
-
-
-def test_parse_legacy_auto_without_gender_scope_as_both_genders():
-    parsed = _parse_notion_page(
-        _page(
-            {
-                "구좌명": _title("Under $100"),
-                "구좌 ID": _rich("under-100"),
-                "slot_type": {"select": {"name": "auto"}},
-                "활성": {"checkbox": True},
-            }
-        )
-    )
-    assert parsed is not None
-    assert parsed["genders"] == ["women", "men"]
+from app.services.curation_refresh import select_candidate_ids
 
 
 def test_chips_contract():

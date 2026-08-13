@@ -54,6 +54,10 @@ class CurationProduct(BaseModel):
 class CurationSection(BaseModel):
     id: str
     slot_type: Literal["auto", "editorial"]
+    # slot_type 은 데이터 출처(auto=리프레셔 계산 / editorial=사람이 고른 목록),
+    # display_type 은 앱 렌더러 선택. 트렌딩 구좌가 전부 editorial 이라 두 축을
+    # 분리해야 구분이 된다 (migration 0030).
+    display_type: Literal["default", "trending"] = "default"
     title: str
     subtitle: str | None
     products: list[CurationProduct]
@@ -97,7 +101,7 @@ async def _load_sections(
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT section_id, slot_type, title, subtitle, product_ids
+            SELECT section_id, slot_type, title, subtitle, product_ids, display_type
             FROM ai.curation_sections
             WHERE gender = %s AND is_active
             ORDER BY sort_order ASC, section_id ASC
@@ -128,7 +132,7 @@ async def _load_sections(
             )
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
-        for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
+        for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
                 selected = [
                     int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
@@ -208,11 +212,18 @@ async def _load_sections(
                 )
 
     sections: list[CurationSection] = []
-    for section_id, slot_type, title, subtitle, product_ids in section_rows:
+    for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
         selected = selected_by_section.get(section_id, (product_ids or [])[:_PRODUCTS_PER_SECTION])
         hydrated = [products[pid] for pid in selected if pid in products]
         sections.append(
-            CurationSection(id=section_id, slot_type=slot_type, title=title, subtitle=subtitle, products=hydrated)
+            CurationSection(
+                id=section_id,
+                slot_type=slot_type,
+                display_type=display_type,
+                title=title,
+                subtitle=subtitle,
+                products=hydrated,
+            )
         )
     return sections
 

@@ -163,7 +163,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.modal_keep_warm_task = None
         logging.getLogger(__name__).info("🔥 [modal.keepwarm] disabled (MODAL_KEEP_WARM_ENABLED=false)")
 
-    # 메인 큐레이션 auto 구좌 계산 + 노션 editorial 동기화 백그라운드 루프.
+    # 메인 큐레이션 auto 구좌 계산 백그라운드 루프 (구좌 메타데이터는 어드민 소유).
     # fail-open — 실패해도 ai.curation_sections 기존 행이 그대로 서빙된다.
     if settings.CURATION_REFRESH_ENABLED:
         from app.services.curation_refresh import curation_refresh_loop

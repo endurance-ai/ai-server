@@ -124,13 +124,11 @@ class Settings(BaseSettings):
     MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
     SESSION_CLEANUP_INTERVAL_S: int = 300
 
-    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
-    # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
+    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher.
+    # 구좌 메타데이터와 editorial 상품 목록은 어드민 페이지가 소유한다.
     CURATION_REFRESH_ENABLED: bool = True
     CURATION_REFRESH_INTERVAL_S: int = 900
     CURATION_SEASON: Literal["summer", "winter"] = "summer"
-    NOTION_TOKEN: str = ""
-    NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
     # 알림 1차 — 재입고 / 가격 하락 / 관심 브랜드 신규 상품 (scripts/notify_batch.py)
     # 가격 하락 임계치. 찜한 시점(또는 마지막 알림 시점) 기준가 대비 비율.

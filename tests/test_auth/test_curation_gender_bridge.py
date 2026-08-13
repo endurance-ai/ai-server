@@ -5,9 +5,9 @@ gender 소유권이 크롤러로 돌아왔고 migration 104 가
 `chk_products_gender_required` 를 VALIDATE 해 products.gender 는
 non-NULL · non-empty · canonical 이 보장된다. **VLM 은 더 이상 읽지 않는다.**
 
-`search_products_v6` 와 술어 모양은 같지만 **unisex 취급이 반대다**: 검색은
-unisex 를 남녀 양쪽에 노출하고, 큐레이션은 제외한다(명시 라벨만 메인 피드에
-올린다). 이 비대칭이 의도된 것임을 여기서 고정한다.
+`search_products_v6` 와 **술어가 같다** — unisex 는 남녀 양쪽에 노출된다.
+예전엔 큐레이션만 unisex 를 잘라내는 비대칭이었는데, 카탈로그 상당수가
+unisex 라벨이라 브랜드 구좌가 통째로 비어 대칭으로 되돌렸다.
 
 product_features 조인은 남아 있다 — primary_color 와 품질 게이트가 쓴다.
 """
@@ -36,7 +36,7 @@ _FIXTURES = [
     ("vlm-women-ignored-products-men", "women", ["men"]),
     ("vlm-unisex-ignored-products-women", "unisex", ["women"]),
     ("women", None, ["women"]),
-    ("women-plus-unisex-excluded", None, ["women", "unisex"]),
+    ("women-plus-unisex", None, ["women", "unisex"]),
     ("men", None, ["men"]),
     # 아래 둘은 chk_products_gender_required 때문에 운영에서는 존재할 수 없다.
     # 술어가 방어적으로 동작하는지만 확인한다.
@@ -76,10 +76,11 @@ async def _matched(pool, gender: str) -> list[str]:
 async def test_women_reads_products_gender_and_ignores_vlm(pool) -> None:
     await _seed(pool)
     # vlm-unisex-ignored-products-women: VLM 이 unisex 라도 products.gender 가
-    # ['women'] 이므로 잡힌다. VLM 을 봤다면 unisex 제외 규칙에 걸렸을 것이다.
+    # ['women'] 이므로 잡힌다 — 술어는 products.gender 만 본다.
     assert await _matched(pool, "women") == [
         "vlm-unisex-ignored-products-women",
         "women",
+        "women-plus-unisex",
     ]
 
 
@@ -90,14 +91,15 @@ async def test_men_reads_products_gender_and_ignores_vlm(pool) -> None:
     assert await _matched(pool, "men") == [
         "men",
         "vlm-women-ignored-products-men",
+        "women-plus-unisex",
     ]
 
 
-async def test_unisex_is_excluded_from_both(pool) -> None:
-    """검색(v6)은 unisex 를 남녀 양쪽에 노출한다 — 큐레이션은 제외한다."""
+async def test_unisex_is_included_in_both(pool) -> None:
+    """검색(v6)과 동일 — unisex 라벨은 남녀 양쪽 피드에 노출된다."""
     await _seed(pool)
     for gender in ("women", "men"):
-        assert "women-plus-unisex-excluded" not in await _matched(pool, gender)
+        assert "women-plus-unisex" in await _matched(pool, gender)
 
 
 async def test_missing_gender_is_excluded_from_both(pool) -> None:
