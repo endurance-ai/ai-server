@@ -12,17 +12,18 @@
 그래서 auto 구좌의 product_ids 는 여기서 편집할 수 없다. 리프레셔가 KST 하루
 한 번 덮어쓰므로 편집해도 사라진다 — 필드 자체를 막아 혼란을 없앤다.
 
+UI 는 kiko.ai-app 어드민(`/admin/curation`)이 소유한다 — 이 모듈은 데이터와
+검증 로직만 제공한다. `/debug/*` 를 쓰는 검색 디버거와 같은 구조다.
+
 Auth: 표준 `verify_internal_token`. dev(INTERNAL_API_TOKEN 미설정)에선 통과.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
@@ -33,13 +34,6 @@ from app.services.curation_refresh import GENDER_MATCH_SQL, PRODUCT_FEATURES_JOI
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/curation", tags=["admin"], dependencies=[Depends(verify_internal_token)])
-
-# 페이지 자체는 데이터가 없는 껍데기라 토큰 없이 연다 — 브라우저 문서 요청에는
-# 커스텀 헤더를 실을 수 없기 때문이다. 토큰은 페이지 안에서 입력받아
-# sessionStorage 에 두고, 데이터가 오가는 위 라우터 호출에만 헤더로 붙는다.
-page_router = APIRouter(prefix="/admin", tags=["admin"])
-
-_PAGE_PATH = Path(__file__).parent / "static" / "curation_admin.html"
 
 # 리프레셔가 소유하는 구좌 — product_ids 편집 금지 (curation_refresh._AUTO_IDS).
 _AUTO_SECTION_IDS = ("popular", "trending-search", "under-100")
@@ -345,13 +339,4 @@ async def lookup_products(
     return ProductLookupResponse(
         products=[by_id[pid] for pid in parsed if pid in by_id],
         missing=[pid for pid in parsed if pid not in by_id],
-    )
-
-
-@page_router.get("/curation", response_class=HTMLResponse, include_in_schema=False)
-async def curation_admin_page() -> HTMLResponse:
-    """어드민 UI. 정적 셸이며 모든 데이터는 토큰이 필요한 위 엔드포인트에서 가져온다."""
-    return HTMLResponse(
-        _PAGE_PATH.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
     )
