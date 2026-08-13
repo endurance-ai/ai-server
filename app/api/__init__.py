@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-from app.api.admin_curation import page_router as admin_curation_page_router
 from app.api.admin_curation import router as admin_curation_router
 from app.api.app_config import router as app_config_router
 from app.api.auth import router as auth_router
@@ -33,7 +32,6 @@ router = APIRouter()
 router.include_router(health_router, tags=["system"])
 router.include_router(app_config_router)
 router.include_router(admin_curation_router)
-router.include_router(admin_curation_page_router)
 router.include_router(auth_router)
 router.include_router(chat_router)
 router.include_router(me_router)

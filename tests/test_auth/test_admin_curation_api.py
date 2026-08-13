@@ -138,12 +138,3 @@ async def test_delete_removes_row(client: AsyncClient, pool):
     assert "editorial-doomed" not in {s["section_id"] for s in listing["sections"]}
     # 없는 행 삭제는 조용히 false.
     assert (await client.delete("/admin/curation/sections/editorial-doomed/women")).json()["deleted"] is False
-
-
-async def test_admin_page_is_served_without_token(client: AsyncClient):
-    """페이지는 데이터 없는 껍데기 — 브라우저가 커스텀 헤더를 못 실어서 열어 둔다."""
-    resp = await client.get("/admin/curation")
-    assert resp.status_code == 200
-    assert "text/html" in resp.headers["content-type"]
-    assert resp.headers["x-robots-tag"] == "noindex, nofollow"
-    assert "X-Internal-Token" in resp.text
