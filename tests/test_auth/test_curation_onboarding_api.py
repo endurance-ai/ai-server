@@ -102,13 +102,15 @@ async def _insert_section(pool, *, section_id: str, gender: str, product_ids: li
         await cur.execute(
             """
             INSERT INTO ai.curation_sections
-                (section_id, gender, slot_type, title, subtitle, product_ids, sort_order, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (section_id, gender, slot_type, display_type, title, subtitle,
+                 product_ids, sort_order, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 section_id,
                 gender,
                 kw.get("slot_type", "auto"),
+                kw.get("display_type", "default"),
                 kw.get("title", "섹션"),
                 kw.get("subtitle"),
                 product_ids,
@@ -444,3 +446,37 @@ async def test_refresh_auto_sections_never_repeats_products_across_slots(client:
     assert product_sets[0].isdisjoint(product_sets[1])
     assert product_sets[0].isdisjoint(product_sets[2])
     assert product_sets[1].isdisjoint(product_sets[2])
+
+
+@pytest.mark.asyncio
+async def test_curation_exposes_display_type_for_renderer_split(client: AsyncClient, pool):
+    """앱이 트렌딩 구좌를 전용 디자인으로 그린다 — slot_type 과 별개 축 (migration 0030).
+
+    트렌딩 구좌도 slot_type 은 editorial 이라, 이 필드가 없으면 렌더러를 나눌 수 없다.
+    """
+    product_id = await _insert_product(pool, brand="B", price=42000)
+    await _insert_section(
+        pool,
+        section_id="editorial-summer-vacation",
+        gender="women",
+        product_ids=[product_id],
+        slot_type="editorial",
+        display_type="trending",
+        sort_order=10,
+    )
+    await _insert_section(
+        pool,
+        section_id="editorial-brand-picks",
+        gender="women",
+        product_ids=[product_id],
+        slot_type="editorial",
+        sort_order=20,
+    )
+
+    resp = await client.get("/v1/curation", params={"gender": "women"})
+    assert resp.status_code == 200
+    sections = {s["id"]: s for s in resp.json()["sections"]}
+    assert sections["editorial-summer-vacation"]["display_type"] == "trending"
+    # 값을 주지 않은 구좌는 기존 그리드 그대로 — 컬럼 추가가 기존 구좌를 바꾸지 않는다.
+    assert sections["editorial-brand-picks"]["display_type"] == "default"
+    assert sections["editorial-summer-vacation"]["slot_type"] == "editorial"

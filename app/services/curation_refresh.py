@@ -1,7 +1,12 @@
-"""Notion-backed curation metadata sync and daily auto-candidate refresh.
+"""auto 구좌 일일 후보 계산.
 
-The app never reads Notion. This service copies the operating database into
-Supabase/Postgres, then refreshes auto products once per KST day.
+구좌 메타데이터(존재·제목·순서·활성·display_type과 editorial 상품 목록)는
+어드민 페이지가 소유한다. 이 모듈은 auto 구좌(popular / trending-search /
+under-100)의 product_ids 를 KST 하루 한 번 다시 계산해 UPDATE 할 뿐,
+ai.curation_sections 에 행을 만들거나 지우지 않는다.
+
+이력: 2026-08 이전에는 노션 "큐레이션 구좌 (어드민)" DB 를 폴링해 구좌
+메타데이터를 동기화했다. 어드민 페이지로 이관하면서 그 경로는 제거했다.
 """
 
 from __future__ import annotations
@@ -9,13 +14,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import re
 from collections import Counter
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
@@ -28,8 +31,6 @@ _GENDERS = ("women", "men")
 _AUTO_IDS = ("popular", "trending-search", "under-100")
 _SECTION_SIZE = 12
 _CANDIDATES_PER_SECTION = 60
-_NOTION_API = "https://api.notion.com/v1"
-_NOTION_VERSION = "2022-06-28"
 
 _WINTER_NAME_RE = "패딩|기모|플리스|무스탕|puffer|fleece"
 _BASE_EXCLUDED_CATEGORIES = ("other",)
@@ -345,162 +346,6 @@ def select_candidate_ids(
     return selected
 
 
-# ── Notion operating database ────────────────────────────────────────────────
-
-
-def _notion_plain_text(prop: dict[str, Any] | None) -> str:
-    if not prop:
-        return ""
-    fragments = prop.get("title") or prop.get("rich_text") or []
-    return "".join(f.get("plain_text", "") for f in fragments).strip()
-
-
-def _parse_product_ids(raw: str) -> list[int]:
-    return list(dict.fromkeys(int(tok) for tok in re.findall(r"\d+", raw)))[:_SECTION_SIZE]
-
-
-def _parse_notion_page(page: dict[str, Any]) -> dict[str, Any] | None:
-    props = page.get("properties", {})
-
-    def get(name: str) -> dict[str, Any]:
-        return props.get(name) or {}
-
-    title = _notion_plain_text(get("구좌명"))
-    section_id = _notion_plain_text(get("구좌 ID")).strip().lower()
-    slot_type = ((get("slot_type").get("select") or {}).get("name") or "").strip().lower()
-    if not title or slot_type not in ("auto", "editorial"):
-        return None
-    if slot_type == "auto" and section_id not in _AUTO_IDS:
-        return None
-    if slot_type == "editorial" and not re.fullmatch(r"editorial-[a-z0-9]+(?:-[a-z0-9]+)*", section_id):
-        return None
-
-    gender_options = get("gender_scope").get("multi_select") or []
-    genders = [str(o.get("name", "")).lower() for o in gender_options]
-    genders = [g for g in _GENDERS if g in genders]
-    # The connected operating DB is a legacy Notion database whose schema API
-    # cannot add columns. Its three fixed auto rows are intentionally shared by
-    # both genders; keep those rows syncable until gender_scope is added in UI.
-    if not genders and slot_type == "auto":
-        genders = list(_GENDERS)
-    if not genders:
-        return None
-
-    return {
-        "source_page_id": page["id"],
-        "section_id": section_id,
-        "slot_type": slot_type,
-        "title": title,
-        "subtitle": _notion_plain_text(get("서브타이틀")) or None,
-        "sort_order": int(get("순서").get("number") or 100),
-        "is_active": bool(get("활성").get("checkbox", False)),
-        "product_ids": _parse_product_ids(_notion_plain_text(get("상품"))),
-        "genders": genders,
-    }
-
-
-def _validate_snapshot(sections: list[dict[str, Any]]) -> None:
-    ids = [s["section_id"] for s in sections]
-    if len(ids) != len(set(ids)):
-        raise ValueError("duplicate curation section id")
-    for gender in _GENDERS:
-        active = [s for s in sections if s["is_active"] and gender in s["genders"]]
-        if not 3 <= len(active) <= 6:
-            raise ValueError(f"{gender}: active sections must be 3..6")
-        ordered = sorted(active, key=lambda s: (s["sort_order"], s["section_id"]))
-        seen_editorial = False
-        for section in ordered:
-            seen_editorial = seen_editorial or section["slot_type"] == "editorial"
-            if seen_editorial and section["slot_type"] == "auto":
-                raise ValueError(f"{gender}: auto section after editorial")
-            if section["slot_type"] == "editorial" and len(section["product_ids"]) != _SECTION_SIZE:
-                raise ValueError(f"{section['section_id']}: active editorial requires 12 unique products")
-
-
-async def _fetch_notion_pages() -> list[dict[str, Any]]:
-    pages: list[dict[str, Any]] = []
-    cursor: str | None = None
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        while True:
-            body: dict[str, Any] = {"page_size": 50}
-            if cursor:
-                body["start_cursor"] = cursor
-            response = await client.post(
-                f"{_NOTION_API}/databases/{settings.NOTION_CURATION_DB_ID}/query",
-                headers={
-                    "Authorization": f"Bearer {settings.NOTION_TOKEN}",
-                    "Notion-Version": _NOTION_VERSION,
-                },
-                json=body,
-            )
-            response.raise_for_status()
-            data = response.json()
-            pages.extend(data.get("results", []))
-            if not data.get("has_more"):
-                return pages
-            cursor = data.get("next_cursor")
-
-
-async def sync_notion_sections(pool: AsyncConnectionPool) -> int:
-    if not (settings.NOTION_TOKEN and settings.NOTION_CURATION_DB_ID):
-        return 0
-    parsed = [s for page in await _fetch_notion_pages() if (s := _parse_notion_page(page)) is not None]
-    _validate_snapshot(parsed)
-    seen: list[str] = []
-    written = 0
-    async with pool.connection() as conn, conn.cursor() as cur:
-        for section in parsed:
-            for gender in section["genders"]:
-                seen.append(f"{section['section_id']}:{gender}")
-                product_ids = section["product_ids"] if section["slot_type"] == "editorial" else []
-                await cur.execute(
-                    """
-                    INSERT INTO ai.curation_sections
-                        (section_id, gender, slot_type, title, subtitle, product_ids,
-                         sort_order, is_active, source_page_id, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
-                    ON CONFLICT (section_id, gender) DO UPDATE SET
-                        slot_type = EXCLUDED.slot_type,
-                        title = EXCLUDED.title,
-                        subtitle = EXCLUDED.subtitle,
-                        product_ids = CASE
-                            WHEN EXCLUDED.slot_type = 'editorial' THEN EXCLUDED.product_ids
-                            ELSE ai.curation_sections.product_ids
-                        END,
-                        sort_order = EXCLUDED.sort_order,
-                        is_active = EXCLUDED.is_active,
-                        source_page_id = EXCLUDED.source_page_id,
-                        updated_at = now()
-                    """,
-                    (
-                        section["section_id"],
-                        gender,
-                        section["slot_type"],
-                        section["title"],
-                        section["subtitle"],
-                        product_ids,
-                        section["sort_order"],
-                        section["is_active"],
-                        section["source_page_id"],
-                    ),
-                )
-                written += 1
-        await cur.execute(
-            """
-            UPDATE ai.curation_sections
-            SET is_active = false, updated_at = now()
-            WHERE NOT ((section_id || ':' || gender) = ANY(%s)) AND is_active
-            """,
-            (seen or [""],),
-        )
-        await conn.commit()
-    return written
-
-
-# Backward-compatible name used by existing tests/callers.
-sync_editorial_sections = sync_notion_sections
-
-
 # ── Daily auto candidates ────────────────────────────────────────────────────
 
 
@@ -633,11 +478,12 @@ async def _auto_refresh_due(pool: AsyncConnectionPool) -> bool:
 
 
 async def refresh_once(pool: AsyncConnectionPool) -> None:
-    notion_n = 0
-    try:
-        notion_n = await sync_notion_sections(pool)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("🗂 [curation] notion snapshot rejected: %r", exc)
+    """auto 구좌 재계산 + 부정 시그널 귀속. 구좌 메타데이터는 손대지 않는다.
+
+    구좌의 존재·제목·순서·활성 여부와 editorial 상품 목록은 어드민이 소유한다
+    (이전에는 노션 동기화가 소유했다). 이 루프는 auto 구좌의 product_ids 만
+    UPDATE 한다 — 행을 만들지도 지우지도 않는다.
+    """
     auto_n = await refresh_auto_sections(pool) if await _auto_refresh_due(pool) else 0
     negative_n = 0
     try:
@@ -646,17 +492,12 @@ async def refresh_once(pool: AsyncConnectionPool) -> None:
         negative_n = await attribute_negative_impressions(pool)
     except Exception as exc:  # noqa: BLE001
         logger.warning("🗂 [curation] negative attribution failed: %r", exc)
-    logger.info(
-        "🗂 [curation] refresh done · notion=%d auto=%d negative=%d",
-        notion_n,
-        auto_n,
-        negative_n,
-    )
+    logger.info("🗂 [curation] refresh done · auto=%d negative=%d", auto_n, negative_n)
 
 
 async def curation_refresh_loop() -> None:
     interval = max(900, settings.CURATION_REFRESH_INTERVAL_S)
-    logger.info("🗂 [curation] sync loop started · notion interval=%ds", interval)
+    logger.info("🗂 [curation] refresh loop started · interval=%ds", interval)
     while True:
         try:
             from app.providers import db_pool

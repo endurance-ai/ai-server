@@ -1,9 +1,11 @@
-"""큐레이션 구좌 하드코딩 시드 — 노션 동기화 없이 ai.curation_sections 직접 적재.
+"""큐레이션 구좌 시드 — ai.curation_sections 직접 적재.
 
-노션 "큐레이션 구좌 (어드민)" DB 를 코드로 옮겨 적은 것이다. `NOTION_TOKEN` /
-`NOTION_CURATION_DB_ID` 가 비어 있으면 `sync_notion_sections` 가 즉시 0 을
-리턴하므로(curation_refresh.py:440) 여기서 넣은 행은 tombstone 스윕에
-덮이지 않는다. 노션 동기화를 켜는 순간 이 시드는 노션 스냅샷에 밀린다.
+어드민 페이지가 나오기 전까지 구좌 메타데이터의 소스다. 어드민이 생기면 이
+스크립트는 초기 데이터 부트스트랩 용도로만 남는다.
+
+`curation_refresh_loop` 는 auto 구좌(popular / trending-search / under-100)의
+product_ids 만 UPDATE 하고 행을 만들거나 지우지 않으므로, 여기서 넣은 구좌
+메타데이터는 리프레셔에 덮이지 않는다.
 
 사용:
     # 실제 DB 쓰기 없이 무엇이 들어갈지와 살아남는 상품 수만 확인
@@ -13,11 +15,10 @@
     uv run python scripts/seed_curation_sections.py
 
 멱등: 전 구좌 upsert. 이 파일이 소유하지 않은 활성 구좌는 건드리지 않는다
-(노션 sync 와 달리 tombstone 스윕 없음 — 끄고 싶은 구좌는 --deactivate-unlisted).
+(끄고 싶으면 --deactivate-unlisted).
 
-auto 구좌(popular / trending-search / under-100)는 상품 없이 껍데기만 넣는다.
-`refresh_auto_sections` 가 UPDATE 만 하고 INSERT 는 하지 않으므로
-(curation_refresh.py:585) 행이 먼저 존재해야 리프레셔가 상품을 채운다.
+auto 구좌는 상품 없이 껍데기만 넣는다. `refresh_auto_sections` 가 UPDATE 만
+하고 INSERT 는 하지 않으므로 행이 먼저 존재해야 리프레셔가 상품을 채운다.
 """
 
 from __future__ import annotations
@@ -50,13 +51,12 @@ _BRAND_SECTION_POOL = 24
 _PRODUCTS_PER_SECTION = 20
 
 
-# ── 노션 원본 (구좌명 / 성별 / slot_type / 상품 / 활성) ───────────────────────
+# ── 구좌 정의 ─────────────────────────────────────────────────────────────────
 #
-# 구좌 ID 는 노션에 공란이라 여기서 부여했다. editorial 은 노션 파서의
-# `editorial-[a-z0-9]+(-[a-z0-9]+)*` 정규식(curation_refresh.py:370)에 맞춰
-# 지어서, 나중에 노션 동기화를 켤 때 그대로 옮겨 적을 수 있게 했다.
+# section_id 는 `editorial-<슬러그>` 규칙을 따른다 — 어드민 페이지도 같은 규칙을
+# 쓰면 자동/수기 구좌를 id 만 보고 구분할 수 있다.
 #
-# 아래 ID 목록은 노션 셀에서 옮겨 온 것이라 원본 대조가 쉽도록 10개씩 묶어 둔다.
+# 아래 ID 목록은 운영자가 고른 원본이라 대조가 쉽도록 10개씩 묶어 둔다.
 # fmt: off
 
 _SUMMER_VACATION_WOMEN = [
@@ -79,7 +79,7 @@ _SUMMER_VACATION_MEN = [
     607470, 445571, 436918,
 ]
 
-# 노션에는 "공용" 한 행. ai.curation_sections.gender CHECK 는 women/men 만
+# 원본은 "공용" 한 벌. ai.curation_sections.gender CHECK 는 women/men 만
 # 받으므로 같은 목록으로 두 행을 만든다. 하이드레이션이 성별로 한 번 더
 # 거르므로(GENDER_MATCH_SQL) 각 행에 실제로 뜨는 상품은 서로 다르다.
 _BERMUDA = [
@@ -103,7 +103,7 @@ _SWIMWEAR_MEN = [
 
 
 # auto 구좌 — 상품은 refresh_auto_sections 가 채운다. 껍데기만 선점한다.
-# 노션에 popular 행이 없었는데 _AUTO_IDS 는 3개를 기대하므로 여기서 채운다.
+# _AUTO_IDS 3개가 모두 있어야 리프레셔가 전부 채운다.
 AUTO_SECTIONS: list[dict[str, Any]] = [
     {
         "section_id": "popular",
@@ -133,6 +133,7 @@ AUTO_SECTIONS: list[dict[str, Any]] = [
 EDITORIAL_SECTIONS: list[dict[str, Any]] = [
     {
         "section_id": "editorial-summer-vacation",
+        "display_type": "trending",
         "title": "시원한 여름 휴가 피스",
         "subtitle": None,
         "sort_order": 10,
@@ -141,6 +142,7 @@ EDITORIAL_SECTIONS: list[dict[str, Any]] = [
     },
     {
         "section_id": "editorial-bermuda-pants",
+        "display_type": "trending",
         "title": "버뮤다 팬츠 셀렉션",
         "subtitle": None,
         "sort_order": 11,
@@ -149,6 +151,7 @@ EDITORIAL_SECTIONS: list[dict[str, Any]] = [
     },
     {
         "section_id": "editorial-swimwear",
+        "display_type": "trending",
         "title": "스윔웨어 모아보기",
         "subtitle": None,
         "sort_order": 12,
@@ -160,15 +163,15 @@ EDITORIAL_SECTIONS: list[dict[str, Any]] = [
         "title": "지금 뜨는 베트남 핫걸 ST",
         "subtitle": "사이공 트렌드세터의 여름 무드",
         "sort_order": 14,
-        "is_active": False,  # 노션 활성 No — 상품 미입력
+        "is_active": False,  # 상품 미입력 — 확정되면 켠다
         "products": {"women": []},
     },
 ]
 
 
-# 브랜드 구좌 — 노션 "브랜드" 필드. brand_nodes.id 를 시드 시점에 상품으로 전개한다.
-# ID 없이 이름만 적힌 항목은 brand_name_normalized 로 매칭을 시도하고,
-# 실패하면 해당 브랜드만 빠진다 (구좌 자체는 남는다).
+# 브랜드 구좌 — brand_nodes.id 를 시드 시점에 상품으로 전개한다.
+# ID 없이 이름만 적힌 항목은 이름으로 매칭을 시도하고, 실패하면 해당 브랜드만
+# 빠진다 (구좌 자체는 남는다).
 BRAND_SECTIONS: list[dict[str, Any]] = [
     {
         "section_id": "editorial-brand-picks",
@@ -375,12 +378,13 @@ async def _hydratable_count(cur: Any, product_ids: list[int], gender: str) -> in
 
 _UPSERT = """
     INSERT INTO ai.curation_sections
-        (section_id, gender, slot_type, title, subtitle, product_ids,
+        (section_id, gender, slot_type, display_type, title, subtitle, product_ids,
          sort_order, is_active, updated_at)
-    VALUES (%(section_id)s, %(gender)s, %(slot_type)s, %(title)s, %(subtitle)s,
+    VALUES (%(section_id)s, %(gender)s, %(slot_type)s, %(display_type)s, %(title)s, %(subtitle)s,
             %(product_ids)s, %(sort_order)s, %(is_active)s, now())
     ON CONFLICT (section_id, gender) DO UPDATE SET
         slot_type = EXCLUDED.slot_type,
+        display_type = EXCLUDED.display_type,
         title = EXCLUDED.title,
         subtitle = EXCLUDED.subtitle,
         product_ids = CASE
@@ -419,6 +423,7 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
                     "section_id": spec["section_id"],
                     "gender": gender,
                     "slot_type": "auto",
+                    "display_type": "default",
                     "title": spec["title"],
                     "subtitle": spec["subtitle"],
                     "product_ids": [],
@@ -437,6 +442,7 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
                     "section_id": spec["section_id"],
                     "gender": gender,
                     "slot_type": "editorial",
+                    "display_type": spec.get("display_type", "default"),
                     "title": spec["title"],
                     "subtitle": spec["subtitle"],
                     "product_ids": deduped,
@@ -463,6 +469,7 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
                     "section_id": spec["section_id"],
                     "gender": gender,
                     "slot_type": "editorial",
+                    "display_type": spec.get("display_type", "default"),
                     "title": spec["title"],
                     "subtitle": spec["subtitle"],
                     "product_ids": product_ids,
@@ -539,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--deactivate-unlisted",
         action="store_true",
-        help="이 파일에 없는 활성 구좌를 is_active=false 로 내림 (노션 tombstone 스윕과 같은 동작)",
+        help="이 파일에 없는 활성 구좌를 is_active=false 로 내림",
     )
     parser.add_argument("--dsn", default="", help="Postgres DSN (기본: settings.DB_DSN)")
     return asyncio.run(_main(parser.parse_args(argv)))
