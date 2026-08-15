@@ -75,11 +75,13 @@ class CurationResponse(BaseModel):
 class CurationImpression(BaseModel):
     section_id: str = Field(min_length=1, max_length=100)
     product_id: int
-    position: int | None = Field(default=None, ge=0, le=100)
+    position: int | None = Field(default=None, ge=0, le=200)
 
 
 class CurationImpressionRequest(BaseModel):
-    items: list[CurationImpression] = Field(min_length=1, max_length=50)
+    # 구좌 저장 상한(200)과 맞춘다 — 한 구좌가 통째로 보이면 클라가 그만큼
+    # 올리는데, 여기서 422 가 나면 개인화 학습이 조용히 끊긴다.
+    items: list[CurationImpression] = Field(min_length=1, max_length=200)
 
 
 class CurationImpressionResponse(BaseModel):
