@@ -128,6 +128,24 @@ async def test_product_lookup_flags_ineligible_and_missing(client: AsyncClient, 
     assert eligible == {ok: True, sold_out: False}
     # 붙여넣은 순서 유지 — 운영자가 정렬 의도를 갖고 넣는다.
     assert [p["product_id"] for p in data["products"]] == [ok, sold_out]
+    reasons = {p["product_id"]: p["ineligible_reason"] for p in data["products"]}
+    assert reasons == {ok: None, sold_out: "out_of_stock"}
+
+
+async def test_product_lookup_reports_each_ineligible_reason(client: AsyncClient, pool):
+    """사유는 `eligible` 과 같은 술어에서 나온다 — 둘이 어긋나면 어드민이 오진한다."""
+    cheap = await _insert_product(pool, brand="Cheap", price=3000)
+    men_only = await _insert_product(pool, brand="Men", price=42000, gender=["men"])
+    resp = await client.get(
+        "/admin/curation/products",
+        params={"gender": "women", "ids": f"{cheap} {men_only}"},
+    )
+    assert resp.status_code == 200
+    rows = {p["product_id"]: p for p in resp.json()["products"]}
+    assert rows[cheap]["eligible"] is False
+    assert rows[cheap]["ineligible_reason"] == "price_too_low"
+    assert rows[men_only]["eligible"] is False
+    assert rows[men_only]["ineligible_reason"] == "gender_mismatch"
 
 
 async def test_delete_removes_row(client: AsyncClient, pool):

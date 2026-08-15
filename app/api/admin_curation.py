@@ -105,6 +105,9 @@ class ProductRow(BaseModel):
     image_url: str
     in_stock: bool
     eligible: bool
+    # eligible=false 인 첫 번째 사유. `eligible` 과 같은 SQL 술어에서 계산되므로
+    # 둘이 어긋날 수 없다. 어드민이 "왜 안 뜨는지" 를 카드에 바로 띄운다.
+    ineligible_reason: Literal["out_of_stock", "no_image", "price_too_low", "gender_mismatch"] | None = None
 
 
 class ProductLookupResponse(BaseModel):
@@ -316,7 +319,14 @@ async def lookup_products(
                    (p.in_stock
                     AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
                     AND p.price >= 5000
-                    AND {GENDER_MATCH_SQL}) AS eligible
+                    AND {GENDER_MATCH_SQL}) AS eligible,
+                   CASE
+                       WHEN p.in_stock IS NOT TRUE THEN 'out_of_stock'
+                       WHEN p.image_url IS NULL OR btrim(p.image_url) = '' THEN 'no_image'
+                       WHEN p.price IS NULL OR p.price < 5000 THEN 'price_too_low'
+                       WHEN ({GENDER_MATCH_SQL}) IS NOT TRUE THEN 'gender_mismatch'
+                       ELSE NULL
+                   END AS ineligible_reason
             FROM public.products p
             {PRODUCT_FEATURES_JOIN}
             WHERE p.id = ANY(%(ids)s)
@@ -332,6 +342,7 @@ async def lookup_products(
                 image_url=r[4] or "",
                 in_stock=bool(r[5]),
                 eligible=bool(r[6]),
+                ineligible_reason=r[7],
             )
             for r in await cur.fetchall()
         }
