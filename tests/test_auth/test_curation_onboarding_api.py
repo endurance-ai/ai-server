@@ -264,6 +264,24 @@ async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient
 
 
 @pytest.mark.asyncio
+async def test_curation_editorial_section_is_not_truncated(client: AsyncClient, pool):
+    """운영자가 고른 목록은 개수와 무관하게 전부 나간다 (구 20개 컷 회귀 방지)."""
+    product_ids = [await _insert_product(pool, brand=f"Brand{i}", name=f"P{i}") for i in range(25)]
+    await _insert_section(
+        pool,
+        section_id="editorial-long",
+        gender="women",
+        product_ids=product_ids,
+        slot_type="editorial",
+        sort_order=1,
+    )
+
+    resp = await client.get("/v1/curation", params={"gender": "women"})
+    products = resp.json()["sections"][0]["products"]
+    assert [p["product_id"] for p in products] == product_ids
+
+
+@pytest.mark.asyncio
 async def test_curation_profile_gender_overrides_param(client: AsyncClient, pool):
     auth, _user_id = await _login(client)
     await client.post(
