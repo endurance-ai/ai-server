@@ -278,7 +278,7 @@ async def preview_feed(
         seen: set[int] = set()
         sections: list[PreviewSection] = []
         for section_id, display_type, title, sort_order, product_ids in rows:
-            candidates = [int(p) for p in (product_ids or [])][:20]
+            candidates = [int(p) for p in (product_ids or [])]
             remaining = [pid for pid in candidates if pid not in seen]
             seen.update(remaining)
             sections.append(

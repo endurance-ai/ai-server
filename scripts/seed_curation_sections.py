@@ -42,13 +42,10 @@ from app.services.curation_refresh import (  # noqa: E402
 )
 
 # 브랜드 구좌 하나에서 한 브랜드가 차지할 수 있는 최대 상품 수. 라운드로빈으로
-# 섞으므로 브랜드 9개 × 2 = 18 개까지 후보가 쌓이고, API 가 앞 20 개를 쓴다.
+# 섞으므로 브랜드 9개 × 2 = 18 개까지 후보가 쌓이고, 쌓인 만큼 전부 노출된다
+# (API 는 구좌를 자르지 않는다 — app/api/curation.py 참고).
 _PER_BRAND = 2
 _BRAND_SECTION_POOL = 24
-
-# app/api/curation.py `_PRODUCTS_PER_SECTION` 과 같은 값. 그 모듈을 import 하면
-# langfuse 쪽 pydantic v1 shim 이 딸려 와 stderr 를 더럽혀서 값만 복제한다.
-_PRODUCTS_PER_SECTION = 20
 
 
 # ── 구좌 정의 ─────────────────────────────────────────────────────────────────
@@ -436,7 +433,7 @@ async def _build_rows(cur: Any) -> list[dict[str, Any]]:
         for gender, product_ids in spec["products"].items():
             deduped = list(dict.fromkeys(product_ids))
             if spec["is_active"]:
-                claimed[gender].update(deduped[:_PRODUCTS_PER_SECTION])
+                claimed[gender].update(deduped)
             rows.append(
                 {
                     "section_id": spec["section_id"],

@@ -32,7 +32,10 @@ from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
 
-_PRODUCTS_PER_SECTION = 20
+# 구좌당 상품 수를 여기서 자르지 않는다. 상한은 이미 두 군데에 있다 —
+# editorial 은 저장 시 `SectionPayload.product_ids` max_length=200,
+# auto 는 리프레셔의 `_SECTION_SIZE` 쿼터(12). 읽기 경로에서 한 번 더 자르면
+# 운영자가 고른 목록이 조용히 버려진다.
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -134,9 +137,7 @@ async def _load_sections(
 
         for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
-                selected = [
-                    int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
-                ]
+                selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
             else:
                 await cur.execute(
                     """
@@ -170,9 +171,7 @@ async def _load_sections(
                     seed=f"{user_id}:{gender}:{section_id}",
                 )
                 if not selected:
-                    selected = [
-                        int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
-                    ]
+                    selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
             selected_by_section[section_id] = selected
             excluded_ids.update(selected)
 
@@ -213,7 +212,7 @@ async def _load_sections(
 
     sections: list[CurationSection] = []
     for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
-        selected = selected_by_section.get(section_id, (product_ids or [])[:_PRODUCTS_PER_SECTION])
+        selected = selected_by_section.get(section_id, product_ids or [])
         hydrated = [products[pid] for pid in selected if pid in products]
         sections.append(
             CurationSection(
