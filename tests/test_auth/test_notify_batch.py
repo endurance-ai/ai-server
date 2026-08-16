@@ -829,3 +829,93 @@ async def test_consent_off_saved_alert_is_not_lost_when_the_baseline_advances(cl
     assert second.detected[KIND_PRICE_DROP] == 0  # 기준가 전진으로 재감지 안 됨
     feed = (await client.get("/v1/notifications", headers={"Authorization": auth})).json()
     assert [(i["type"], i["old_price"], i["new_price"]) for i in feed["items"]] == [("price_drop", 100000, 50000)]
+
+
+# ── 스케일 가드 ───────────────────────────────────────────────────────────────
+#
+# 아웃박스 적재를 배치 전체 한 트랜잭션으로 묶으면, 유저·카테고리마다 잡는
+# pg_advisory_xact_lock 이 커밋까지 누적돼 공유 락 테이블(max_locks_per_transaction ×
+# max_connections)을 고갈시킨다. 아래 두 테스트는 청킹이 실제로 트랜잭션을 끊는지와,
+# 끊은 결과 부분 성공이 올바른 방향(이벤트 보존)으로 남는지를 고정한다.
+
+
+@pytest.mark.asyncio
+async def test_outbox_commits_per_chunk_instead_of_all_or_nothing(client: AsyncClient, pool, monkeypatch):
+    """청크 하나가 실패해도 앞서 커밋된 청크는 살아남는다."""
+    from app.core.config import settings as app_settings
+    from app.services import notifications as notif
+
+    auth, user_id = await _login(client)
+    first = await _insert_product(pool, price=100000)
+    second = await _insert_product(pool, price=100000)
+    for product_id in (first, second):
+        await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await run_notify_batch(pool, only_user=UUID(user_id))  # 기준가 백필
+    await _set_product(pool, first, price=50000)
+    await _set_product(pool, second, price=50000)
+
+    monkeypatch.setattr(app_settings, "NOTIFY_OUTBOX_CHUNK_USERS", 1)
+    events = [
+        notif.Event(user_id=UUID(user_id), kind=KIND_PRICE_DROP, product_id=first, payload={"price": 50000}),
+    ]
+    other_user = UUID("00000000-0000-0000-0000-0000000000ff")  # user_profiles 에 없음 → FK 위반
+    doomed = [
+        notif.Event(user_id=other_user, kind=KIND_PRICE_DROP, product_id=second, payload={"price": 50000}),
+    ]
+
+    calls: list[UUID] = []
+    original = notif._persist_user_messages
+
+    async def _tracking(cur, uid, user_events, now):
+        calls.append(uid)
+        return await original(cur, uid, user_events, now)
+
+    monkeypatch.setattr(notif, "_persist_user_messages", _tracking)
+
+    with pytest.raises(Exception):
+        await notif._persist_outbox(
+            pool,
+            selected={UUID(user_id): events, other_user: doomed},
+            inbox_only=[],
+            baselines=[],
+            now=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        )
+
+    assert calls == [UUID(user_id), other_user]
+    # 첫 청크는 이미 커밋됐다 — 전체 롤백이었다면 0건이다.
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'price_drop'") == 1
+
+
+@pytest.mark.asyncio
+async def test_events_are_committed_before_baselines_advance(client: AsyncClient, pool):
+    """기준값 전진이 실패해도 이벤트는 남는다 — 유실보다 중복 쪽으로 기운다.
+
+    반대 순서였다면 기준가가 먼저 커밋된 뒤 이벤트 적재가 깨졌을 때 그 하락은 소비된
+    채 영영 재감지되지 않는다 (detect_save_events 가 발동과 동시에 기준을 전진시킨다).
+    """
+    from app.services import notifications as notif
+
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+
+    events = [
+        notif.Event(user_id=UUID(user_id), kind=KIND_PRICE_DROP, product_id=product_id, payload={"price": 50000}),
+    ]
+    orphan = notif.BaselineWrite(
+        user_id=UUID("00000000-0000-0000-0000-0000000000ff"),  # FK 위반 → 기준값 단계에서 실패
+        product_id=product_id,
+        price=50000.0,
+        in_stock=True,
+    )
+
+    with pytest.raises(Exception):
+        await notif._persist_outbox(
+            pool,
+            selected={UUID(user_id): events},
+            inbox_only=[],
+            baselines=[orphan],
+            now=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        )
+
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'price_drop'") == 1

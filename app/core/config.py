@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     NOTIFY_DELIVERY_BATCH_SIZE: int = 100
     NOTIFY_APNS_CONCURRENCY: int = 20
     NOTIFY_MAX_DELIVERY_ATTEMPTS: int = 5
+    # 아웃박스 적재를 유저 N명씩 끊어 커밋한다. 전체를 한 트랜잭션으로 묶으면
+    # 유저·카테고리마다 잡는 pg_advisory_xact_lock 이 커밋까지 누적돼
+    # 공유 락 테이블(max_locks_per_transaction × max_connections)을 고갈시킨다.
+    NOTIFY_OUTBOX_CHUNK_USERS: int = 200
 
     # APNs — environment-specific topic keys. Base64 avoids multiline .env
     # parsing mistakes. Legacy APNS_* values remain a production fallback.
