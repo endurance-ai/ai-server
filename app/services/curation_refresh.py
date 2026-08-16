@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 _KST = ZoneInfo("Asia/Seoul")
 _GENDERS = ("women", "men")
 _AUTO_IDS = ("popular", "trending-search", "under-100")
-_SECTION_SIZE = 12
-_CANDIDATES_PER_SECTION = 60
+_SECTION_SIZE = 30
+_CANDIDATES_PER_SECTION = 150
 
 _WINTER_NAME_RE = "패딩|기모|플리스|무스탕|puffer|fleece"
 _BASE_EXCLUDED_CATEGORIES = ("other",)
@@ -291,7 +291,7 @@ def select_candidate_ids(
     seed: str,
     require_full: bool = True,
 ) -> list[int]:
-    """Select 12 products with a per-section brand cap and stable ties.
+    """Select 30 products with a per-section brand cap and stable ties.
 
     Personalization blends taste onto the base rank. The style-node axis
     (`taste_scores`) is joined by the visual-feature axes (`feature_scores`,

@@ -18,7 +18,7 @@ def test_chips_contract():
 
 def test_candidate_selection_enforces_brand_cap_and_cross_section_exclusion():
     rows = []
-    for pid in range(1, 31):
+    for pid in range(1, 46):
         rows.append(
             {
                 "product_id": pid,
@@ -34,7 +34,7 @@ def test_candidate_selection_enforces_brand_cap_and_cross_section_exclusion():
         excluded_ids={1},
         seed="test",
     )
-    assert len(selected) == 12
+    assert len(selected) == 30
     assert 1 not in selected
     selected_brands = [f"brand-{(pid - 1) // 3}" for pid in selected]
     assert all(selected_brands.count(brand) <= 2 for brand in set(selected_brands))
@@ -49,7 +49,7 @@ def test_candidate_selection_uses_taste_scores_without_weakening_brand_cap():
             "brand_key": f"brand-{pid}",
             "style_node_id": pid,
         }
-        for pid in range(1, 21)
+        for pid in range(1, 41)
     ]
     baseline = select_candidate_ids(
         rows,
@@ -57,7 +57,7 @@ def test_candidate_selection_uses_taste_scores_without_weakening_brand_cap():
         excluded_ids=set(),
         seed="taste-regression",
     )
-    taste_scores = {pid: -20.0 for pid in range(1, 21)}
+    taste_scores = {pid: -20.0 for pid in range(1, 41)}
     taste_scores[8] = 20.0
     personalized = select_candidate_ids(
         rows,
@@ -69,7 +69,7 @@ def test_candidate_selection_uses_taste_scores_without_weakening_brand_cap():
 
     assert baseline[0] == 1
     assert personalized[0] == 8
-    assert len(personalized) == 12
+    assert len(personalized) == 30
 
 
 def _feature_rows() -> list[dict]:
@@ -83,7 +83,7 @@ def _feature_rows() -> list[dict]:
             "style_node_id": pid,
             "feature_metadata": {"primary_color": "black" if pid == 8 else "beige"},
         }
-        for pid in range(1, 21)
+        for pid in range(1, 41)
     ]
 
 
@@ -101,7 +101,7 @@ def test_candidate_selection_uses_feature_scores_without_weakening_brand_cap():
     )
     assert baseline[0] == 1
     assert personalized[0] == 8
-    assert len(personalized) == 12
+    assert len(personalized) == 30
 
 
 def test_candidate_selection_missing_feature_metadata_is_neutral():
@@ -115,7 +115,7 @@ def test_candidate_selection_missing_feature_metadata_is_neutral():
             "brand_key": f"brand-{pid}",
             "style_node_id": pid,
         }
-        for pid in range(1, 21)
+        for pid in range(1, 41)
     ]
     selected = select_candidate_ids(
         rows,
@@ -125,4 +125,4 @@ def test_candidate_selection_missing_feature_metadata_is_neutral():
         seed="neutral",
     )
     assert selected[0] == 1
-    assert len(selected) == 12
+    assert len(selected) == 30

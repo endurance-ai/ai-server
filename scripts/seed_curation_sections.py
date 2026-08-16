@@ -41,12 +41,9 @@ from app.services.curation_refresh import (  # noqa: E402
     _query_params,
 )
 
-# 브랜드 구좌 하나에서 한 브랜드가 차지할 수 있는 최대 상품 수. 라운드로빈으로
-# 섞으므로 브랜드 9개 × 2 = 18 개까지 후보가 쌓이고, 쌓인 만큼 전부 노출된다
-# (API 는 구좌를 자르지 않는다 — app/api/curation.py 참고).
-_PER_BRAND = 2
-_BRAND_SECTION_POOL = 24
-
+# 어드민 `SectionPayload.product_ids` 계약과 같은 구좌 전체 상한.
+# 브랜드당 상한은 없어 한 브랜드만으로도 30개 이상을 채울 수 있다.
+_BRAND_SECTION_LIMIT = 200
 
 # ── 구좌 정의 ─────────────────────────────────────────────────────────────────
 #
@@ -269,7 +266,7 @@ async def _brand_breakdown(cur: Any, brand_ids: list[int], gender: str) -> list[
 
 
 async def _expand_brands(cur: Any, brand_ids: list[int], gender: str, excluded: set[int]) -> list[int]:
-    """브랜드별 인기 상위 상품을 라운드로빈으로 섞어 상품 ID 풀을 만든다.
+    """브랜드별 인기 순위로 라운드로빈해 적격 상품 ID를 최대 200개 만든다.
 
     인기 점수는 `popular` auto 구좌와 같은 신호·가중치를 쓴다 (조회 + 3×저장
     + 4×아웃바운드 + ln(1+리뷰), curation_refresh.py:99). 인기 정의가 구좌마다
@@ -331,16 +328,14 @@ async def _expand_brands(cur: Any, brand_ids: list[int], gender: str, excluded: 
         )
         SELECT product_id
         FROM ranked
-        WHERE r <= %(per_brand)s
         ORDER BY r ASC, brand_node_id ASC
-        LIMIT %(pool)s
+        LIMIT %(section_limit)s
         """,  # noqa: S608 -- 보간되는 값은 모두 모듈 소유 상수
         {
             **_query_params(gender),
             "brand_ids": brand_ids,
             "excluded": list(excluded),
-            "per_brand": _PER_BRAND,
-            "pool": _BRAND_SECTION_POOL,
+            "section_limit": _BRAND_SECTION_LIMIT,
         },
     )
     return [int(r[0]) for r in await cur.fetchall()]
@@ -493,7 +488,8 @@ async def _report(cur: Any, rows: list[dict[str, Any]]) -> None:
             row = {**row, "product_ids": current_auto.get((row["section_id"], row["gender"]), [])}
         live = await _hydratable_count(cur, row["product_ids"], row["gender"])
         flag = "on" if row["is_active"] else "off"
-        warn = "  ← 12개 미만" if row["is_active"] and row["slot_type"] == "editorial" and live < 12 else ""
+        is_brand_section = any(spec["section_id"] == row["section_id"] for spec in BRAND_SECTIONS)
+        warn = "  ← 30개 미만" if row["is_active"] and is_brand_section and live < 30 else ""
         print(
             f"{row['section_id']:<30} {row['gender']:<6} {row['slot_type']:<9} "
             f"{row['sort_order']:>3} {flag:<4} {len(row['product_ids']):>4} {live:>6}{warn}"

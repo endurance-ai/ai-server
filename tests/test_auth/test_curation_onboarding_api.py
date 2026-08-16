@@ -243,7 +243,7 @@ async def test_curation_men_chips_empty_until_goldenset(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient, pool):
+async def test_curation_sections_randomize_products_and_filter(client: AsyncClient, pool):
     p1 = await _insert_product(pool, brand="A")
     p2 = await _insert_product(pool, brand="B", original_price=70000, sale_price=45000)
     p_out = await _insert_product(pool, brand="C", in_stock=False)
@@ -251,16 +251,19 @@ async def test_curation_sections_hydrate_in_order_and_filter(client: AsyncClient
     await _insert_section(pool, section_id="hidden", gender="women", product_ids=[p1], is_active=False)
     await _insert_section(pool, section_id="men-only", gender="men", product_ids=[p1])
 
-    resp = await client.get("/v1/curation", params={"gender": "women"})
+    with patch("app.api.curation.shuffle", side_effect=lambda products: products.reverse()) as shuffled:
+        resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = resp.json()["sections"]
     assert [s["id"] for s in sections] == ["popular"]  # inactive/타 gender 제외
     products = sections[0]["products"]
     ids = [p["product_id"] for p in products]
-    assert ids == [p2, p1]  # product_ids 순서 보존, 품절 제외
-    assert products[0]["original_price"] == 70000.0
-    assert products[0]["sale_price"] == 45000.0
-    assert products[1]["original_price"] is None
-    assert products[1]["sale_price"] is None
+    assert ids == [p1, p2]  # 품절 제외 후 API 응답 직전 섞기
+    shuffled.assert_called_once()
+    by_id = {product["product_id"]: product for product in products}
+    assert by_id[p2]["original_price"] == 70000.0
+    assert by_id[p2]["sale_price"] == 45000.0
+    assert by_id[p1]["original_price"] is None
+    assert by_id[p1]["sale_price"] is None
 
 
 @pytest.mark.asyncio
@@ -278,7 +281,7 @@ async def test_curation_editorial_section_is_not_truncated(client: AsyncClient, 
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
     products = resp.json()["sections"][0]["products"]
-    assert [p["product_id"] for p in products] == product_ids
+    assert {p["product_id"] for p in products} == set(product_ids)
 
 
 @pytest.mark.asyncio
@@ -366,9 +369,11 @@ async def test_refresh_popular_ranks_brands_by_top_product_engagement(client: As
         await conn.commit()
 
     assert await refresh_auto_sections(pool, ("popular",), strict_quota=False) == 1
-    response = await client.get("/v1/curation", params={"gender": "women"})
-    popular = response.json()["sections"][0]["products"]
-    popular_ids = [product["product_id"] for product in popular]
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT product_ids FROM ai.curation_sections WHERE section_id = 'popular' AND gender = 'women'"
+        )
+        popular_ids = list((await cur.fetchone())[0])
 
     assert set(popular_ids[:2]).issubset(set(products_a))
     assert product_b == popular_ids[2]
@@ -395,10 +400,16 @@ async def test_refresh_auto_sections_popular_and_under100(client: AsyncClient, p
     written = await refresh_auto_sections(pool, ("popular",), strict_quota=False)
     assert written == 1
 
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT product_ids FROM ai.curation_sections WHERE section_id = 'popular' AND gender = 'women'"
+        )
+        stored_popular = list((await cur.fetchone())[0])
+    assert stored_popular[0] == viewed
+
     resp = await client.get("/v1/curation", params={"gender": "women"})
     sections = {s["id"]: s for s in resp.json()["sections"]}
     popular = [p["product_id"] for p in sections["popular"]["products"]]
-    assert popular[0] == viewed
     assert set(popular) == {cheap, pricey, viewed}
 
     async with pool.connection() as conn, conn.cursor() as cur:
@@ -447,7 +458,7 @@ async def test_refresh_auto_sections_never_repeats_products_across_slots(client:
     from app.services.curation_refresh import refresh_auto_sections
 
     await _insert_auto_sections(pool)
-    for index in range(36):
+    for index in range(90):
         await _insert_product(pool, brand=f"Distinct Brand {index}", price=50000 + index)
 
     written = await refresh_auto_sections(pool)
@@ -460,7 +471,7 @@ async def test_refresh_auto_sections_never_repeats_products_across_slots(client:
         for section_id in ("popular", "trending-search", "under-100")
     ]
 
-    assert [len(product_ids) for product_ids in product_sets] == [12, 12, 12]
+    assert [len(product_ids) for product_ids in product_sets] == [30, 30, 30]
     assert product_sets[0].isdisjoint(product_sets[1])
     assert product_sets[0].isdisjoint(product_sets[2])
     assert product_sets[1].isdisjoint(product_sets[2])

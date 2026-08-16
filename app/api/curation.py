@@ -12,6 +12,7 @@ gender 해석: 로그인 + 프로필 gender 확정이면 프로필 우선, 아�
 
 from __future__ import annotations
 
+from random import shuffle
 from typing import Literal
 from uuid import UUID
 
@@ -34,7 +35,7 @@ router = APIRouter(prefix="/v1", tags=["curation"])
 
 # 구좌당 상품 수를 여기서 자르지 않는다. 상한은 이미 두 군데에 있다 —
 # editorial 은 저장 시 `SectionPayload.product_ids` max_length=200,
-# auto 는 리프레셔의 `_SECTION_SIZE` 쿼터(12). 읽기 경로에서 한 번 더 자르면
+# auto 는 리프레셔의 `_SECTION_SIZE` 쿼터(30). 읽기 경로에서 한 번 더 자르면
 # 운영자가 고른 목록이 조용히 버려진다.
 
 
@@ -216,6 +217,7 @@ async def _load_sections(
     for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
         selected = selected_by_section.get(section_id, product_ids or [])
         hydrated = [products[pid] for pid in selected if pid in products]
+        shuffle(hydrated)
         sections.append(
             CurationSection(
                 id=section_id,
