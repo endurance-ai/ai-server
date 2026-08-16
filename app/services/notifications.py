@@ -658,8 +658,51 @@ _NOT_ONBOARDING_IMPORT = """
     p.created_at > f.first_seen_at + make_interval(hours => %(onboarding_grace_h)s)
 """
 
+# 조인 순서를 **팔로우 브랜드 → 상품 → 유저** 로 고정한다.
+#
+# 술어를 한 평면에 늘어놓으면 플래너가 `user_profiles × products`(성별 GIN 매칭)를 먼저
+# 전개하고 팔로우 브랜드로 나중에 걸렀다. 즉 중간 결과가 **유저 수 × 성별매칭 카탈로그**로
+# 커진다 — 실측(유저 84명, 상품 212k): 중간 2,418,360행 / 1.8초, 플래너 추정은 368행으로
+# 실제 12,441행 대비 34배 과소추정. 유저 1만이면 같은 형태로 ~288M 행이라 배치 창을 넘긴다.
+#
+# 유저는 늘어도 **팔로우된 브랜드 수와 최근 창의 상품 수는 카탈로그에 묶여 있다**. 그래서
+# 후보 상품(`candidates`)을 유저와 무관하게 한 번만 만들고, 그 다음에 picks 를 붙인다.
+# `MATERIALIZED` 는 플래너가 CTE 를 다시 인라인해 원래의 나쁜 순서로 되돌리는 것을 막는다.
+# `candidates` 는 `idx_products_notification_brand_created (brand_node_id, created_at DESC,
+# id DESC) WHERE brand_node_id IS NOT NULL` 을 타라고 만든 형태다.
+#
+# brand_first_seen 도 팔로우 브랜드로 좁힌다. min(created_at) 은 브랜드별 집계라 대상
+# 브랜드를 줄여도 값이 변하지 않는다 (전체 브랜드 집계는 브랜드 홈 요약 쪽
+# _BRAND_NEW_SUMMARY_SQL 이 따로 쓴다).
+#
+# 술어·감지 의미는 하나도 바꾸지 않았다 — 보존창, 온보딩 유예, 성별 fail-closed 매칭,
+# ai.notifications 안티조인, 정렬까지 그대로다.
+#
+# ── 하루 상한을 SQL 로 내린다 (`bucketed`) ──────────────────────────────────────
+#
+# 예전엔 후보 **전량**을 파이썬으로 올린 뒤 pick_brand_new 가 5건으로 잘랐다. 실측 유저당
+# 최대 1,294건이라 260배를 실어 나르고 버리는 구조였고, 세 자료구조(NewProductRow → Event
+# → per-user dict)가 동시에 상주해 후보당 약 780 B 를 썼다. 워커 컨테이너 상한 256 MB 를
+# 후보 ~330,000건(유저 약 2,500명)에서 넘겨 OOM 으로 배치가 완료되지 않았다.
+#
+# `bucketed` 는 유저를 두 버킷으로 쪼갠다 — 브랜드 상한 이내(brand_rank <= max_per_brand)와
+# 초과분 — 그리고 각 버킷에서 최신 max_items 개만 남긴다. **이 축소는 pick_brand_new 의
+# 결과를 바꾸지 않는다**:
+#
+#   pick_brand_new 는 (1) 입력 순서대로 훑어 브랜드 상한 이내면 picked, 아니면 overflow,
+#   (2) picked[:max_items], (3) 남은 슬롯을 overflow 앞에서부터 채움 — 이 순서다.
+#   (2)가 쓰는 건 picked 앞 max_items 개뿐이고, (3)이 쓰는 건 overflow 앞 max_items 개를
+#   넘지 않는다(빈 슬롯이 최대 max_items). 두 버킷의 앞부분을 그대로 보존했으므로
+#   축소본에서도 브랜드 순위가 재계산되지 않는다 — 상한 이내 행의 접두사를 통째로 남기기
+#   때문에 초과분이 상한 이내로 승격될 수 없다.
+#
+# 그래서 유저당 최대 2×max_items(기본 10)행만 올라온다. 등가성은
+# test_sql_side_cap_matches_pick_brand_new 가 순수 함수로 고정한다.
+#
+# **관측 주의**: `report.detected[brand_new_product]` 가 이제 "후보 총량" 이 아니라
+# "상한 적용 후 전달된 후보 수" 다. 예전 로그와 이 숫자를 직접 비교하면 안 된다.
 _NEW_PRODUCT_SQL = f"""
-    WITH picks AS (
+    WITH picks AS MATERIALIZED (
         SELECT ubp.user_id,
                ubp.brand_id,
                CASE up.gender WHEN 'female' THEN 'women' WHEN 'male' THEN 'men' END AS gender_app
@@ -668,25 +711,55 @@ _NEW_PRODUCT_SQL = f"""
         WHERE up.gender IN ('female', 'male')
           AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
     ),
-    {_BRAND_FIRST_SEEN_CTE}
-    SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price
-    FROM public.products p
-    JOIN picks k ON k.brand_id = p.brand_node_id
-    JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
-    {PRODUCT_FEATURES_JOIN}
-    WHERE p.created_at > %(since)s
-      AND p.created_at <= %(cutoff)s
-      AND {_NOT_ONBOARDING_IMPORT}
-      AND p.in_stock
-      AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
-      AND {_GENDER_MATCH_PER_USER}
-      AND NOT EXISTS (
-          SELECT 1 FROM ai.notifications n
-          WHERE n.user_id = k.user_id
-            AND n.kind = '{KIND_BRAND_NEW}'
-            AND n.product_id = p.id
-      )
-    ORDER BY p.created_at DESC, p.id DESC
+    followed_brands AS MATERIALIZED (
+        SELECT DISTINCT brand_id FROM picks
+    ),
+    brand_first_seen AS (
+        SELECT brand_node_id, min(created_at) AS first_seen_at
+        FROM public.products
+        WHERE brand_node_id IN (SELECT brand_id FROM followed_brands)
+        GROUP BY brand_node_id
+    ),
+    candidates AS MATERIALIZED (
+        SELECT p.id, p.brand_node_id, p.brand, p.name, p.price, p.gender, p.created_at
+        FROM followed_brands fb
+        JOIN public.products p ON p.brand_node_id = fb.brand_id
+        JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
+        {PRODUCT_FEATURES_JOIN}
+        WHERE p.created_at > %(since)s
+          AND p.created_at <= %(cutoff)s
+          AND {_NOT_ONBOARDING_IMPORT}
+          AND p.in_stock
+          AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
+    ),
+    matched AS MATERIALIZED (
+        SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price, p.created_at,
+               row_number() OVER (
+                   PARTITION BY k.user_id, p.brand_node_id
+                   ORDER BY p.created_at DESC, p.id DESC
+               ) AS brand_rank
+        FROM candidates p
+        JOIN picks k ON k.brand_id = p.brand_node_id
+        WHERE {_GENDER_MATCH_PER_USER}
+          AND NOT EXISTS (
+              SELECT 1 FROM ai.notifications n
+              WHERE n.user_id = k.user_id
+                AND n.kind = '{KIND_BRAND_NEW}'
+                AND n.product_id = p.id
+          )
+    ),
+    bucketed AS (
+        SELECT user_id, id, brand_node_id, brand, name, price, created_at,
+               row_number() OVER (
+                   PARTITION BY user_id, (brand_rank <= %(max_per_brand)s)
+                   ORDER BY created_at DESC, id DESC
+               ) AS bucket_rank
+        FROM matched
+    )
+    SELECT user_id, id, brand_node_id, brand, name, price
+    FROM bucketed
+    WHERE bucket_rank <= %(max_items)s
+    ORDER BY created_at DESC, id DESC
 """
 
 
@@ -717,7 +790,14 @@ async def fetch_new_product_rows(
     cutoff: datetime,
     onboarding_grace_h: int,
     only_user: UUID | None = None,
+    max_items: int | None = None,
+    max_per_brand: int | None = None,
 ) -> list[NewProductRow]:
+    """유저당 하루 상한에 필요한 만큼만 가져온다 (_NEW_PRODUCT_SQL `bucketed` 주석 참조).
+
+    상한 기본값은 pick_brand_new 에 넘기는 값과 **같은 설정**이어야 한다 — 다르면 SQL 이
+    잘라낸 몫을 파이썬이 다시 고르지 못한다.
+    """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             _NEW_PRODUCT_SQL,
@@ -726,6 +806,8 @@ async def fetch_new_product_rows(
                 "cutoff": cutoff,
                 "only_user": only_user,
                 "onboarding_grace_h": onboarding_grace_h,
+                "max_items": settings.NOTIFY_BRAND_NEW_MAX_ITEMS if max_items is None else max_items,
+                "max_per_brand": (settings.NOTIFY_BRAND_NEW_MAX_PER_BRAND if max_per_brand is None else max_per_brand),
             },
         )
         rows = await cur.fetchall()

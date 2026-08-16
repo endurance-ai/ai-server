@@ -227,7 +227,13 @@ async def test_user_gender_filled_in_later_is_still_caught(client: AsyncClient, 
 
 @pytest.mark.asyncio
 async def test_capped_overflow_carries_over_to_the_next_run(client: AsyncClient, pool, monkeypatch):
-    """상한에 걸려 못 나간 신상은 버려지지 않고 다음 회차에 다시 후보가 된다."""
+    """상한에 걸려 못 나간 신상은 버려지지 않고 다음 회차에 다시 후보가 된다.
+
+    `report.detected` 는 "후보 총량" 이 아니라 **상한 적용 후 배치로 올라온 후보 수** 다
+    (_NEW_PRODUCT_SQL `bucketed` — 유저당 최대 2×max_items 행만 가져온다). 그래서 상품 5건에
+    max_items=2 면 detected 는 5 가 아니라 4 다. 이 테스트가 지키는 건 그 숫자가 아니라
+    **잘린 몫이 다음 회차에 다시 올라와 결국 전부 전달된다**는 성질이다.
+    """
     from app.core.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "NOTIFY_BRAND_NEW_MAX_ITEMS", 2)
@@ -249,7 +255,7 @@ async def test_capped_overflow_carries_over_to_the_next_run(client: AsyncClient,
 
     first_run = datetime.now(tz=UTC)
     report = await run_notify_batch(pool, only_user=UUID(user_id), now=first_run)
-    assert report.detected[KIND_BRAND_NEW] == 5
+    assert report.detected[KIND_BRAND_NEW] == 4  # 5건 중 상한(2×max_items)만큼만 올라온다
     assert report.selected[KIND_BRAND_NEW] == 2
 
     report = await run_notify_batch(pool, only_user=UUID(user_id), now=first_run + timedelta(days=1))
@@ -258,6 +264,7 @@ async def test_capped_overflow_carries_over_to_the_next_run(client: AsyncClient,
 
     report = await run_notify_batch(pool, only_user=UUID(user_id), now=first_run + timedelta(days=2))
     assert report.detected[KIND_BRAND_NEW] == 1
+    # 핵심: 잘린 몫이 유실되지 않고 세 회차에 걸쳐 5건 전부 전달됐다.
     assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 5
 
 
