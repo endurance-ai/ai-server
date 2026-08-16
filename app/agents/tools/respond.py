@@ -807,9 +807,11 @@ async def send_hybrid_batch(
             continue
         eligible_pos.append((start + i, c))
     # 앱(SSE StreamingAdapter)은 미디어그룹 없이 카드별로 스트리밍하므로 텔레그램
-    # 앨범 10장 제약과 무관 — 어댑터가 `album_size` 를 노출하면 그 값을 쓴다(앱은
-    # 2열 그리드라 한 배치에 더 많이). 미노출 채널(텔레그램)은 기존 5장 유지.
-    album_size = getattr(adapter, "album_size", _ALBUM_SIZE)
+    # 앨범 10장 제약과 무관 — 어댑터가 `album_size`(int) 를 노출하면 그 값을 쓴다
+    # (앱은 2열 그리드라 한 배치에 더 많이). 미노출/비-int(테스트 MagicMock 등)는
+    # 기존 5장 유지 — MagicMock 자동 속성이 슬라이스를 오염시키지 않게 int 가드.
+    _album = getattr(adapter, "album_size", None)
+    album_size = _album if isinstance(_album, int) else _ALBUM_SIZE
     batch_pos = eligible_pos[:album_size]
     batch = [c for _, c in batch_pos]
     if not batch:
