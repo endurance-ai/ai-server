@@ -61,7 +61,10 @@ class Settings(BaseSettings):
     # 즉시 회귀 가능하도록 개별 플래그. RELAX_MIN 미만이면 필터 제거 재시도.
     SEARCH_SUBCATEGORY_FILTER_ENABLED: bool = True
     SEARCH_COLOR_FILTER_ENABLED: bool = True
-    SEARCH_FILTER_RELAX_MIN: int = 5
+    # 2026-08-16 — 5 → 20. 결과가 20개 미만이면 subcat/color 를 풀어 유사도로
+    # 채운다(정밀매치 먼저, 완화분 뒤 dedup). 2열 그리드가 빈약해 보이지 않게
+    # 리콜 보강 — 상한은 SEARCH_DEFAULT_K(50).
+    SEARCH_FILTER_RELAX_MIN: int = 20
     # 2026-07-16 — p_gender 상품 레벨 하드 필터 (gender[] && [g,'unisex']).
     # 시맨틱 제약이라 완화 재시도 대상 아님. kill-switch.
     SEARCH_GENDER_FILTER_ENABLED: bool = True
