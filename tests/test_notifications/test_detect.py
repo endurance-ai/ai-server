@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import random
 from uuid import UUID
+
+import pytest
 
 from app.services.notifications import (
     KIND_BRAND_NEW,
@@ -267,3 +270,53 @@ def test_brand_with_no_followers_still_writes_news_and_state():
     assert states[0].on_sale is True
     assert [n.opened for n in news] == [True]
     assert news[0].payload["brand"] == "MAISON"
+
+
+# ── SQL 축소 등가성 ───────────────────────────────────────────────────────────
+
+
+def _sql_side_reduction(events: list, *, max_items: int, max_per_brand: int) -> list:
+    """`_NEW_PRODUCT_SQL` 의 `bucketed` CTE 를 파이썬으로 그대로 옮긴 모델.
+
+    입력은 SQL 과 같은 최신순 전제. 유저 한 명분만 다룬다(SQL 은 PARTITION BY user_id).
+    브랜드별 순위로 두 버킷(상한 이내 / 초과분)을 만들고 각 버킷 앞 max_items 개만 남긴 뒤
+    원래 순서로 복원한다.
+    """
+    per_brand: dict[int | None, int] = {}
+    within: list[tuple[int, object]] = []
+    over: list[tuple[int, object]] = []
+    for index, event in enumerate(events):
+        rank = per_brand.get(event.brand_node_id, 0) + 1
+        per_brand[event.brand_node_id] = rank
+        (within if rank <= max_per_brand else over).append((index, event))
+    kept = within[:max_items] + over[:max_items]
+    return [event for _, event in sorted(kept, key=lambda pair: pair[0])]
+
+
+@pytest.mark.parametrize("max_items,max_per_brand", [(5, 2), (5, 1), (3, 3), (10, 2), (1, 1), (2, 5)])
+def test_sql_side_cap_matches_pick_brand_new(max_items, max_per_brand):
+    """SQL 이 미리 자른 뒤에 골라도 전량을 놓고 고른 것과 결과가 같아야 한다.
+
+    이 등가성이 깨지면 `_NEW_PRODUCT_SQL` 의 `bucketed` 축소가 유저에게 갈 상품을
+    조용히 바꾼다. 무작위 입력으로 넓게 훑는다.
+    """
+    rng = random.Random(20260816)
+    for _ in range(300):
+        brand_count = rng.randint(1, 6)
+        size = rng.randint(0, 40)
+        events = [
+            Event(
+                user_id=UUID(int=1),
+                kind=KIND_BRAND_NEW,
+                product_id=index,
+                brand_node_id=rng.randrange(brand_count),
+                payload={},
+            )
+            for index in range(size)
+        ]
+        full = pick_brand_new(events, max_items=max_items, max_per_brand=max_per_brand)
+        reduced_input = _sql_side_reduction(events, max_items=max_items, max_per_brand=max_per_brand)
+        reduced = pick_brand_new(reduced_input, max_items=max_items, max_per_brand=max_per_brand)
+        assert [e.product_id for e in full] == [e.product_id for e in reduced]
+        # 축소본은 유저당 2×max_items 를 넘지 않는다 — 메모리 상한의 근거.
+        assert len(reduced_input) <= 2 * max_items

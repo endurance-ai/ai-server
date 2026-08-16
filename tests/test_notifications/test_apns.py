@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from jose import jwt
 
 from app.core.config import settings
-from app.services.push.apns import ApnsClient, apns_configured
+from app.services.push.apns import ApnsClient, apns_configured, close_clients, get_client
 
 
 @pytest.fixture
@@ -127,6 +127,71 @@ async def test_provider_token_is_reused_across_sends(_apns_env):
         await client.send("b", title="t", body="b")
 
     assert tokens[0] == tokens[1]
+
+
+async def test_provider_token_survives_client_rebuilds(_apns_env):
+    """토큰 캐시는 인스턴스가 아니라 자격증명에 붙는다.
+
+    워커가 발송 사이클마다 클라이언트를 새로 세우던 시절엔 폴 간격(30초)마다 새 토큰이
+    서명돼 Apple 의 20분 갱신 제한에 걸렸다. 이제 새 인스턴스도 같은 토큰을 재사용한다.
+    """
+    tokens: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tokens.append(request.headers["authorization"])
+        return httpx.Response(200)
+
+    for _ in range(3):
+        client = ApnsClient()
+        await client._client.aclose()
+        client._client = _mock_client(handler)
+        async with client:
+            await client.send("a", title="t", body="b")
+
+    assert len(tokens) == 3
+    assert len(set(tokens)) == 1
+
+
+async def test_get_client_returns_one_instance_per_environment(_apns_env):
+    """발송 경로는 프로세스 수명 클라이언트를 재사용한다 (HTTP/2 연결 재사용)."""
+    try:
+        assert get_client("production") is get_client("production")
+        assert get_client("production") is not get_client("development")
+    finally:
+        await close_clients()
+
+    # 닫은 뒤에는 새 인스턴스를 만든다.
+    try:
+        assert get_client("production") is not None
+    finally:
+        await close_clients()
+
+
+async def test_rotating_the_signing_key_invalidates_the_cached_token(monkeypatch, _apns_env):
+    """key_id 를 유지한 채 .p8 만 교체해도 낡은 토큰을 계속 쓰지 않는다."""
+    tokens: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tokens.append(request.headers["authorization"])
+        return httpx.Response(200)
+
+    async def send_once() -> None:
+        client = ApnsClient()
+        await client._client.aclose()
+        client._client = _mock_client(handler)
+        async with client:
+            await client.send("a", title="t", body="b")
+
+    await send_once()
+    rotated = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    monkeypatch.setattr(settings, "APNS_AUTH_KEY", rotated.decode())
+    await send_once()
+
+    assert tokens[0] != tokens[1]
 
 
 async def test_unregistered_marks_the_token_dead(_apns_env):

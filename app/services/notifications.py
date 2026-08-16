@@ -58,6 +58,7 @@ NEWS_BRAND_NEW = "brand_new"
 NOTIFY_JOB = "notify_batch"
 SAVED_JOB = "notify_saved_detect"
 BRAND_JOB = "notify_brand_detect"
+RETENTION_JOB = "notify_retention"
 SAVED_CATEGORY = "saved_product_digest"
 BRAND_CATEGORY = "brand_new_digest"
 # brand_sale 전용 다이제스트 카테고리 — brand_new(BRAND_CATEGORY)와 분리한다.
@@ -658,8 +659,51 @@ _NOT_ONBOARDING_IMPORT = """
     p.created_at > f.first_seen_at + make_interval(hours => %(onboarding_grace_h)s)
 """
 
+# 조인 순서를 **팔로우 브랜드 → 상품 → 유저** 로 고정한다.
+#
+# 술어를 한 평면에 늘어놓으면 플래너가 `user_profiles × products`(성별 GIN 매칭)를 먼저
+# 전개하고 팔로우 브랜드로 나중에 걸렀다. 즉 중간 결과가 **유저 수 × 성별매칭 카탈로그**로
+# 커진다 — 실측(유저 84명, 상품 212k): 중간 2,418,360행 / 1.8초, 플래너 추정은 368행으로
+# 실제 12,441행 대비 34배 과소추정. 유저 1만이면 같은 형태로 ~288M 행이라 배치 창을 넘긴다.
+#
+# 유저는 늘어도 **팔로우된 브랜드 수와 최근 창의 상품 수는 카탈로그에 묶여 있다**. 그래서
+# 후보 상품(`candidates`)을 유저와 무관하게 한 번만 만들고, 그 다음에 picks 를 붙인다.
+# `MATERIALIZED` 는 플래너가 CTE 를 다시 인라인해 원래의 나쁜 순서로 되돌리는 것을 막는다.
+# `candidates` 는 `idx_products_notification_brand_created (brand_node_id, created_at DESC,
+# id DESC) WHERE brand_node_id IS NOT NULL` 을 타라고 만든 형태다.
+#
+# brand_first_seen 도 팔로우 브랜드로 좁힌다. min(created_at) 은 브랜드별 집계라 대상
+# 브랜드를 줄여도 값이 변하지 않는다 (전체 브랜드 집계는 브랜드 홈 요약 쪽
+# _BRAND_NEW_SUMMARY_SQL 이 따로 쓴다).
+#
+# 술어·감지 의미는 하나도 바꾸지 않았다 — 보존창, 온보딩 유예, 성별 fail-closed 매칭,
+# ai.notifications 안티조인, 정렬까지 그대로다.
+#
+# ── 하루 상한을 SQL 로 내린다 (`bucketed`) ──────────────────────────────────────
+#
+# 예전엔 후보 **전량**을 파이썬으로 올린 뒤 pick_brand_new 가 5건으로 잘랐다. 실측 유저당
+# 최대 1,294건이라 260배를 실어 나르고 버리는 구조였고, 세 자료구조(NewProductRow → Event
+# → per-user dict)가 동시에 상주해 후보당 약 780 B 를 썼다. 워커 컨테이너 상한 256 MB 를
+# 후보 ~330,000건(유저 약 2,500명)에서 넘겨 OOM 으로 배치가 완료되지 않았다.
+#
+# `bucketed` 는 유저를 두 버킷으로 쪼갠다 — 브랜드 상한 이내(brand_rank <= max_per_brand)와
+# 초과분 — 그리고 각 버킷에서 최신 max_items 개만 남긴다. **이 축소는 pick_brand_new 의
+# 결과를 바꾸지 않는다**:
+#
+#   pick_brand_new 는 (1) 입력 순서대로 훑어 브랜드 상한 이내면 picked, 아니면 overflow,
+#   (2) picked[:max_items], (3) 남은 슬롯을 overflow 앞에서부터 채움 — 이 순서다.
+#   (2)가 쓰는 건 picked 앞 max_items 개뿐이고, (3)이 쓰는 건 overflow 앞 max_items 개를
+#   넘지 않는다(빈 슬롯이 최대 max_items). 두 버킷의 앞부분을 그대로 보존했으므로
+#   축소본에서도 브랜드 순위가 재계산되지 않는다 — 상한 이내 행의 접두사를 통째로 남기기
+#   때문에 초과분이 상한 이내로 승격될 수 없다.
+#
+# 그래서 유저당 최대 2×max_items(기본 10)행만 올라온다. 등가성은
+# test_sql_side_cap_matches_pick_brand_new 가 순수 함수로 고정한다.
+#
+# **관측 주의**: `report.detected[brand_new_product]` 가 이제 "후보 총량" 이 아니라
+# "상한 적용 후 전달된 후보 수" 다. 예전 로그와 이 숫자를 직접 비교하면 안 된다.
 _NEW_PRODUCT_SQL = f"""
-    WITH picks AS (
+    WITH picks AS MATERIALIZED (
         SELECT ubp.user_id,
                ubp.brand_id,
                CASE up.gender WHEN 'female' THEN 'women' WHEN 'male' THEN 'men' END AS gender_app
@@ -668,25 +712,55 @@ _NEW_PRODUCT_SQL = f"""
         WHERE up.gender IN ('female', 'male')
           AND (%(only_user)s::uuid IS NULL OR ubp.user_id = %(only_user)s::uuid)
     ),
-    {_BRAND_FIRST_SEEN_CTE}
-    SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price
-    FROM public.products p
-    JOIN picks k ON k.brand_id = p.brand_node_id
-    JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
-    {PRODUCT_FEATURES_JOIN}
-    WHERE p.created_at > %(since)s
-      AND p.created_at <= %(cutoff)s
-      AND {_NOT_ONBOARDING_IMPORT}
-      AND p.in_stock
-      AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
-      AND {_GENDER_MATCH_PER_USER}
-      AND NOT EXISTS (
-          SELECT 1 FROM ai.notifications n
-          WHERE n.user_id = k.user_id
-            AND n.kind = '{KIND_BRAND_NEW}'
-            AND n.product_id = p.id
-      )
-    ORDER BY p.created_at DESC, p.id DESC
+    followed_brands AS MATERIALIZED (
+        SELECT DISTINCT brand_id FROM picks
+    ),
+    brand_first_seen AS (
+        SELECT brand_node_id, min(created_at) AS first_seen_at
+        FROM public.products
+        WHERE brand_node_id IN (SELECT brand_id FROM followed_brands)
+        GROUP BY brand_node_id
+    ),
+    candidates AS MATERIALIZED (
+        SELECT p.id, p.brand_node_id, p.brand, p.name, p.price, p.gender, p.created_at
+        FROM followed_brands fb
+        JOIN public.products p ON p.brand_node_id = fb.brand_id
+        JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
+        {PRODUCT_FEATURES_JOIN}
+        WHERE p.created_at > %(since)s
+          AND p.created_at <= %(cutoff)s
+          AND {_NOT_ONBOARDING_IMPORT}
+          AND p.in_stock
+          AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
+    ),
+    matched AS MATERIALIZED (
+        SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price, p.created_at,
+               row_number() OVER (
+                   PARTITION BY k.user_id, p.brand_node_id
+                   ORDER BY p.created_at DESC, p.id DESC
+               ) AS brand_rank
+        FROM candidates p
+        JOIN picks k ON k.brand_id = p.brand_node_id
+        WHERE {_GENDER_MATCH_PER_USER}
+          AND NOT EXISTS (
+              SELECT 1 FROM ai.notifications n
+              WHERE n.user_id = k.user_id
+                AND n.kind = '{KIND_BRAND_NEW}'
+                AND n.product_id = p.id
+          )
+    ),
+    bucketed AS (
+        SELECT user_id, id, brand_node_id, brand, name, price, created_at,
+               row_number() OVER (
+                   PARTITION BY user_id, (brand_rank <= %(max_per_brand)s)
+                   ORDER BY created_at DESC, id DESC
+               ) AS bucket_rank
+        FROM matched
+    )
+    SELECT user_id, id, brand_node_id, brand, name, price
+    FROM bucketed
+    WHERE bucket_rank <= %(max_items)s
+    ORDER BY created_at DESC, id DESC
 """
 
 
@@ -717,7 +791,14 @@ async def fetch_new_product_rows(
     cutoff: datetime,
     onboarding_grace_h: int,
     only_user: UUID | None = None,
+    max_items: int | None = None,
+    max_per_brand: int | None = None,
 ) -> list[NewProductRow]:
+    """유저당 하루 상한에 필요한 만큼만 가져온다 (_NEW_PRODUCT_SQL `bucketed` 주석 참조).
+
+    상한 기본값은 pick_brand_new 에 넘기는 값과 **같은 설정**이어야 한다 — 다르면 SQL 이
+    잘라낸 몫을 파이썬이 다시 고르지 못한다.
+    """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             _NEW_PRODUCT_SQL,
@@ -726,6 +807,8 @@ async def fetch_new_product_rows(
                 "cutoff": cutoff,
                 "only_user": only_user,
                 "onboarding_grace_h": onboarding_grace_h,
+                "max_items": settings.NOTIFY_BRAND_NEW_MAX_ITEMS if max_items is None else max_items,
+                "max_per_brand": (settings.NOTIFY_BRAND_NEW_MAX_PER_BRAND if max_per_brand is None else max_per_brand),
             },
         )
         rows = await cur.fetchall()
@@ -1034,6 +1117,10 @@ def _category_for(event: Event) -> str:
     return SAVED_CATEGORY
 
 
+def _chunks[T](items: list[T], size: int) -> list[list[T]]:
+    return [items[start : start + size] for start in range(0, len(items), size)]
+
+
 async def _persist_outbox(
     pool: AsyncConnectionPool,
     *,
@@ -1042,37 +1129,131 @@ async def _persist_outbox(
     baselines: list[BaselineWrite],
     now: datetime,
 ) -> tuple[int, int, int, int]:
-    """Atomically advance baselines and create events, messages, deliveries.
+    """Create events, messages, deliveries, then advance baselines — in user chunks.
 
     `inbox_only` 는 푸시 동의에 막힌 찜 알림이다 — 행은 남기되 메시지/딜리버리는
     만들지 않는다 (suppressed_saved_events docstring 참조).
+
+    **전체를 한 트랜잭션으로 묶지 않는다.** 유저·카테고리·발송일마다 잡는
+    `pg_advisory_xact_lock` 은 커밋까지 해제되지 않고 공유 락 테이블
+    (`max_locks_per_transaction` × `max_connections`, 실측 서버 기준 6,400 슬롯)에 쌓인다.
+    배치 전체를 한 트랜잭션에 담으면 알림 대상이 수천 명을 넘는 순간 `out of shared
+    memory` 로 배치가 통째로 롤백되고, 같은 입력으로 재시도해 영구 고착된다.
+    청크 경계의 부분 성공은 안전하다 — `uq_notifications_*`,
+    `notification_messages(user_id, category, scheduled_on)`, `ON CONFLICT DO NOTHING`
+    이 이미 재실행 멱등을 보장한다.
+
+    **순서가 중요하다: 이벤트가 먼저, 기준값이 나중이다.** `detect_save_events` 는 알림이
+    발동한 상품의 기준가·기준재고를 전진시키는데, 기준값이 먼저 커밋된 뒤 이벤트 적재가
+    실패하면 그 하락은 소비된 채 영영 재감지되지 않는다. 반대 순서의 실패는 다음 회차
+    재감지(=중복 발송 가능)에 그치므로, 유실 대신 중복 쪽으로 기운다.
     """
     recorded = 0
     messages = 0
     deliveries = 0
-    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
-        for baseline in baselines:
-            await cur.execute(
-                """
-                INSERT INTO ai.saved_product_baseline
-                    (user_id, product_id, baseline_price, baseline_in_stock, baseline_at)
-                VALUES (%s, %s, %s, %s, now())
-                ON CONFLICT (user_id, product_id) DO UPDATE SET
-                    baseline_price = EXCLUDED.baseline_price,
-                    baseline_in_stock = EXCLUDED.baseline_in_stock,
-                    baseline_at = now()
-                """,
-                (baseline.user_id, baseline.product_id, baseline.price, baseline.in_stock),
-            )
+    chunk_size = max(1, settings.NOTIFY_OUTBOX_CHUNK_USERS)
 
-        # 푸시는 막혔지만 알림함에는 남는 이벤트. 처리 완료로 표시해 두어 아웃박스가
-        # 나중에 집어가지 않게 한다.
-        for event in inbox_only:
+    for user_chunk in _chunks(list(selected.items()), chunk_size):
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            for user_id, user_events in user_chunk:
+                chunk_recorded, chunk_messages, chunk_deliveries = await _persist_user_messages(
+                    cur, user_id, user_events, now
+                )
+                recorded += chunk_recorded
+                messages += chunk_messages
+                deliveries += chunk_deliveries
+
+    # 푸시는 막혔지만 알림함에는 남는 이벤트. 처리 완료로 표시해 두어 아웃박스가
+    # 나중에 집어가지 않게 한다.
+    for event_chunk in _chunks(inbox_only, chunk_size):
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            for event in event_chunk:
+                await cur.execute(
+                    """
+                    INSERT INTO ai.notifications
+                        (user_id, kind, product_id, brand_node_id, payload, processed_at, suppressed_reason)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, now(), 'consent_off')
+                    ON CONFLICT DO NOTHING
+                    RETURNING id
+                    """,
+                    (
+                        event.user_id,
+                        event.kind,
+                        event.product_id,
+                        event.brand_node_id,
+                        json.dumps(event.payload, ensure_ascii=False, default=str),
+                    ),
+                )
+                if await cur.fetchone():
+                    recorded += 1
+
+    for baseline_chunk in _chunks(baselines, chunk_size):
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            for baseline in baseline_chunk:
+                await cur.execute(
+                    """
+                    INSERT INTO ai.saved_product_baseline
+                        (user_id, product_id, baseline_price, baseline_in_stock, baseline_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (user_id, product_id) DO UPDATE SET
+                        baseline_price = EXCLUDED.baseline_price,
+                        baseline_in_stock = EXCLUDED.baseline_in_stock,
+                        baseline_at = now()
+                    """,
+                    (baseline.user_id, baseline.product_id, baseline.price, baseline.in_stock),
+                )
+
+    return len(baselines), recorded, messages, deliveries
+
+
+async def _persist_user_messages(
+    cur: Any,
+    user_id: UUID,
+    user_events: list[Event],
+    now: datetime,
+) -> tuple[int, int, int]:
+    """유저 한 명분 이벤트를 카테고리별 다이제스트 메시지 + 딜리버리로 적재한다.
+
+    호출자가 트랜잭션을 소유한다 (`_persist_outbox` 의 청크 단위). 반환:
+    (recorded, messages_created, deliveries_created).
+    """
+    recorded = 0
+    messages = 0
+    deliveries = 0
+
+    by_category: dict[str, list[Event]] = {}
+    for event in user_events:
+        by_category.setdefault(_category_for(event), []).append(event)
+
+    for category, category_events in by_category.items():
+        scheduled_on, scheduled_at, expires_at = delivery_window(category, now)
+        # Serialize only this user's category/day. The unique key is the
+        # final guard; this lock also lets manual canaries safely race a
+        # scheduled detector without aborting the whole transaction.
+        await cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"notify:{user_id}:{category}:{scheduled_on.isoformat()}",),
+        )
+        await cur.execute(
+            """
+            SELECT message_id, status, scheduled_at
+            FROM ai.notification_messages
+            WHERE user_id = %s AND category = %s AND scheduled_on = %s
+            """,
+            (user_id, category, scheduled_on),
+        )
+        existing_message = await cur.fetchone()
+        # Brand overflow must remain outside the event log so the
+        # retention-window query can offer it again on a later day.
+        if existing_message and category == BRAND_CATEGORY:
+            continue
+
+        inserted: list[RecordedEvent] = []
+        for event in category_events:
             await cur.execute(
                 """
-                INSERT INTO ai.notifications
-                    (user_id, kind, product_id, brand_node_id, payload, processed_at, suppressed_reason)
-                VALUES (%s, %s, %s, %s, %s::jsonb, now(), 'consent_off')
+                INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload)
+                VALUES (%s, %s, %s, %s, %s::jsonb)
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
@@ -1084,180 +1265,132 @@ async def _persist_outbox(
                     json.dumps(event.payload, ensure_ascii=False, default=str),
                 ),
             )
-            if await cur.fetchone():
-                recorded += 1
+            row = await cur.fetchone()
+            if row:
+                inserted.append(RecordedEvent(int(row[0]), event))
+        if not inserted:
+            continue
 
-        for user_id, user_events in selected.items():
-            by_category: dict[str, list[Event]] = {}
-            for event in user_events:
-                by_category.setdefault(_category_for(event), []).append(event)
-
-            for category, category_events in by_category.items():
-                scheduled_on, scheduled_at, expires_at = delivery_window(category, now)
-                # Serialize only this user's category/day. The unique key is the
-                # final guard; this lock also lets manual canaries safely race a
-                # scheduled detector without aborting the whole transaction.
-                await cur.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                    (f"notify:{user_id}:{category}:{scheduled_on.isoformat()}",),
-                )
-                await cur.execute(
-                    """
-                    SELECT message_id, status, scheduled_at
-                    FROM ai.notification_messages
-                    WHERE user_id = %s AND category = %s AND scheduled_on = %s
-                    """,
-                    (user_id, category, scheduled_on),
-                )
-                existing_message = await cur.fetchone()
-                # Brand overflow must remain outside the event log so the
-                # retention-window query can offer it again on a later day.
-                if existing_message and category == BRAND_CATEGORY:
-                    continue
-
-                inserted: list[RecordedEvent] = []
-                for event in category_events:
-                    await cur.execute(
-                        """
-                        INSERT INTO ai.notifications (user_id, kind, product_id, brand_node_id, payload)
-                        VALUES (%s, %s, %s, %s, %s::jsonb)
-                        ON CONFLICT DO NOTHING
-                        RETURNING id
-                        """,
-                        (
-                            event.user_id,
-                            event.kind,
-                            event.product_id,
-                            event.brand_node_id,
-                            json.dumps(event.payload, ensure_ascii=False, default=str),
-                        ),
-                    )
-                    row = await cur.fetchone()
-                    if row:
-                        inserted.append(RecordedEvent(int(row[0]), event))
-                if not inserted:
-                    continue
-
-                if existing_message:
-                    existing_id, existing_status, existing_scheduled_at = existing_message
-                    if existing_status == "pending" and existing_scheduled_at > now:
-                        for item in inserted:
-                            await cur.execute(
-                                """
-                                INSERT INTO ai.notification_message_events (message_id, notification_id)
-                                VALUES (%s, %s)
-                                """,
-                                (existing_id, item.notification_id),
-                            )
-                        await cur.execute(
-                            """
-                            SELECT n.user_id, n.kind, n.product_id, n.brand_node_id, n.payload
-                            FROM ai.notification_message_events me
-                            JOIN ai.notifications n ON n.id = me.notification_id
-                            WHERE me.message_id = %s
-                            ORDER BY n.id
-                            """,
-                            (existing_id,),
-                        )
-                        merged_events = [
-                            Event(
-                                user_id=row[0],
-                                kind=row[1],
-                                product_id=int(row[2]),
-                                brand_node_id=row[3],
-                                payload=row[4],
-                            )
-                            for row in await cur.fetchall()
-                        ]
-                        digest = build_digest(merged_events)
-                        payload = _message_payload(existing_id, category, merged_events)
-                        await cur.execute(
-                            """
-                            UPDATE ai.notification_messages
-                            SET title = %s, body = %s, payload = %s::jsonb
-                            WHERE message_id = %s
-                            """,
-                            (digest.title, digest.body, json.dumps(payload, ensure_ascii=False), existing_id),
-                        )
-                        await cur.execute(
-                            "UPDATE ai.notifications SET processed_at = now() WHERE id = ANY(%s)",
-                            ([item.notification_id for item in inserted],),
-                        )
-                    else:
-                        await cur.execute(
-                            """
-                            UPDATE ai.notifications
-                            SET processed_at = now(), suppressed_reason = 'daily_cap'
-                            WHERE id = ANY(%s)
-                            """,
-                            ([item.notification_id for item in inserted],),
-                        )
-                    recorded += len(inserted)
-                    continue
-
-                message_id = uuid4()
-                digest = build_digest([item.event for item in inserted])
-                payload = _message_payload(message_id, category, [item.event for item in inserted])
-                await cur.execute(
-                    """
-                    INSERT INTO ai.notification_messages
-                        (message_id, user_id, category, scheduled_on, scheduled_at,
-                         expires_at, title, body, payload)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
-                    """,
-                    (
-                        message_id,
-                        user_id,
-                        category,
-                        scheduled_on,
-                        scheduled_at,
-                        expires_at,
-                        digest.title,
-                        digest.body,
-                        json.dumps(payload, ensure_ascii=False),
-                    ),
-                )
+        if existing_message:
+            existing_id, existing_status, existing_scheduled_at = existing_message
+            if existing_status == "pending" and existing_scheduled_at > now:
                 for item in inserted:
                     await cur.execute(
                         """
                         INSERT INTO ai.notification_message_events (message_id, notification_id)
                         VALUES (%s, %s)
                         """,
-                        (message_id, item.notification_id),
+                        (existing_id, item.notification_id),
                     )
+                await cur.execute(
+                    """
+                    SELECT n.user_id, n.kind, n.product_id, n.brand_node_id, n.payload
+                    FROM ai.notification_message_events me
+                    JOIN ai.notifications n ON n.id = me.notification_id
+                    WHERE me.message_id = %s
+                    ORDER BY n.id
+                    """,
+                    (existing_id,),
+                )
+                merged_events = [
+                    Event(
+                        user_id=row[0],
+                        kind=row[1],
+                        product_id=int(row[2]),
+                        brand_node_id=row[3],
+                        payload=row[4],
+                    )
+                    for row in await cur.fetchall()
+                ]
+                digest = build_digest(merged_events)
+                payload = _message_payload(existing_id, category, merged_events)
+                await cur.execute(
+                    """
+                    UPDATE ai.notification_messages
+                    SET title = %s, body = %s, payload = %s::jsonb
+                    WHERE message_id = %s
+                    """,
+                    (digest.title, digest.body, json.dumps(payload, ensure_ascii=False), existing_id),
+                )
                 await cur.execute(
                     "UPDATE ai.notifications SET processed_at = now() WHERE id = ANY(%s)",
                     ([item.notification_id for item in inserted],),
                 )
+            else:
                 await cur.execute(
                     """
-                    INSERT INTO ai.notification_deliveries (message_id, device_id, next_attempt_at)
-                    SELECT %s, d.device_id, %s
-                    FROM ai.devices d
-                    WHERE d.user_id = %s
-                      AND d.provider = 'apns'
-                      AND d.platform = 'ios'
-                      AND d.status = 'active'
-                    ON CONFLICT DO NOTHING
-                    RETURNING delivery_id
+                    UPDATE ai.notifications
+                    SET processed_at = now(), suppressed_reason = 'daily_cap'
+                    WHERE id = ANY(%s)
                     """,
-                    (message_id, scheduled_at, user_id),
+                    ([item.notification_id for item in inserted],),
                 )
-                delivery_rows = await cur.fetchall()
-                if not delivery_rows:
-                    await cur.execute(
-                        """
-                        UPDATE ai.notification_messages
-                        SET status = 'no_recipient', completed_at = now()
-                        WHERE message_id = %s
-                        """,
-                        (message_id,),
-                    )
-                recorded += len(inserted)
-                messages += 1
-                deliveries += len(delivery_rows)
+            recorded += len(inserted)
+            continue
 
-    return len(baselines), recorded, messages, deliveries
+        message_id = uuid4()
+        digest = build_digest([item.event for item in inserted])
+        payload = _message_payload(message_id, category, [item.event for item in inserted])
+        await cur.execute(
+            """
+            INSERT INTO ai.notification_messages
+                (message_id, user_id, category, scheduled_on, scheduled_at,
+                 expires_at, title, body, payload)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+            """,
+            (
+                message_id,
+                user_id,
+                category,
+                scheduled_on,
+                scheduled_at,
+                expires_at,
+                digest.title,
+                digest.body,
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+        for item in inserted:
+            await cur.execute(
+                """
+                INSERT INTO ai.notification_message_events (message_id, notification_id)
+                VALUES (%s, %s)
+                """,
+                (message_id, item.notification_id),
+            )
+        await cur.execute(
+            "UPDATE ai.notifications SET processed_at = now() WHERE id = ANY(%s)",
+            ([item.notification_id for item in inserted],),
+        )
+        await cur.execute(
+            """
+            INSERT INTO ai.notification_deliveries (message_id, device_id, next_attempt_at)
+            SELECT %s, d.device_id, %s
+            FROM ai.devices d
+            WHERE d.user_id = %s
+              AND d.provider = 'apns'
+              AND d.platform = 'ios'
+              AND d.status = 'active'
+            ON CONFLICT DO NOTHING
+            RETURNING delivery_id
+            """,
+            (message_id, scheduled_at, user_id),
+        )
+        delivery_rows = await cur.fetchall()
+        if not delivery_rows:
+            await cur.execute(
+                """
+                UPDATE ai.notification_messages
+                SET status = 'no_recipient', completed_at = now()
+                WHERE message_id = %s
+                """,
+                (message_id,),
+            )
+        recorded += len(inserted)
+        messages += 1
+        deliveries += len(delivery_rows)
+
+    return recorded, messages, deliveries
 
 
 async def _persist_brand_sale(
@@ -1287,7 +1420,18 @@ async def _persist_brand_sale(
     처럼 ai.notifications 안티조인(_NEW_PRODUCT_SQL)을 쓰지 않으므로, 게이트에 막힌
     유저의 행을 안 남겨도 다음 감지가 오염되지 않는다.
 
-    전 단계를 한 트랜잭션으로 원자화한다.
+    **트랜잭션 경계는 Phase 0+A / Phase B 로 나뉜다.** Phase 0·A 는 브랜드 수(실측 1,319)에
+    비례하고 advisory lock 을 잡지 않아 한 트랜잭션으로 안전하지만, Phase B 는
+    `_attach_brand_sale_message` 가 유저마다 `pg_advisory_xact_lock` 을 잡으므로 유저 수에
+    비례해 공유 락 테이블을 잠식한다 (_persist_outbox docstring 참조). 그래서 Phase B 만
+    유저 청크로 끊어 커밋한다.
+
+    Phase 0·A 를 **먼저** 커밋하는 쪽을 택했다. Phase B 가 중간에 실패하면 전환이 이미
+    소비돼 남은 유저는 푸시를 못 받지만, 인박스 노출은 ai.brand_news 정본이 담당하므로
+    소식 자체는 유실되지 않는다 — 이 모듈이 이미 명시적으로 수용하는 열화다
+    (_BRAND_FOLLOWERS_SQL 주석). 반대로 상태를 나중에 올리면 재감지가 일어나는데,
+    brand_sale 행은 유니크 아비터가 없어(product_id NULL) ON CONFLICT DO NOTHING 이 걸리지
+    않고 중복 행이 쌓여 이미 나간 다이제스트의 "N곳" 카운트가 부풀 수 있다.
     """
     news_written = 0
     recorded = 0
@@ -1363,61 +1507,67 @@ async def _persist_brand_sale(
                 (state.brand_node_id, state.on_sale, state.ratio, now),
             )
 
-        # Phase B ── 푸시 대상(동의 + 주간 캡)만 ai.notifications 에 적재한다.
-        #
-        # 0028 이전엔 여기서 팔로워 전원의 행을 만들고 인박스가 그걸 읽었다. 이제
-        # 인박스는 ai.brand_news 정본을 조회하므로(app/api/notifications.py source `b`)
-        # 유저별 복제가 필요 없다. 남은 행의 유일한 역할은 아웃박스 앵커다 —
-        # ai.notification_message_events.notification_id 가 이 테이블을 FK 로 건다.
-        #
-        # 그래서 게이트를 **적재 전에** 본다. 막힌 유저는 행 자체를 만들지 않는다.
-        # 인박스 노출은 정본이 담당하므로 유실이 아니다 — 푸시만 건너뛴다.
-        # (억제 사유는 행 대신 리포트 카운터로 관측한다.)
-        events_by_user: dict[UUID, list[Event]] = {}
-        for event in events:
-            events_by_user.setdefault(event.user_id, []).append(event)
+    # Phase B ── 푸시 대상(동의 + 주간 캡)만 ai.notifications 에 적재한다. 유저 수에
+    # 비례하는 유일한 단계라 여기만 청크 트랜잭션으로 끊는다.
+    #
+    # 0028 이전엔 여기서 팔로워 전원의 행을 만들고 인박스가 그걸 읽었다. 이제
+    # 인박스는 ai.brand_news 정본을 조회하므로(app/api/notifications.py source `b`)
+    # 유저별 복제가 필요 없다. 남은 행의 유일한 역할은 아웃박스 앵커다 —
+    # ai.notification_message_events.notification_id 가 이 테이블을 FK 로 건다.
+    #
+    # 그래서 게이트를 **적재 전에** 본다. 막힌 유저는 행 자체를 만들지 않는다.
+    # 인박스 노출은 정본이 담당하므로 유실이 아니다 — 푸시만 건너뛴다.
+    # (억제 사유는 행 대신 리포트 카운터로 관측한다.)
+    events_by_user: dict[UUID, list[Event]] = {}
+    for event in events:
+        events_by_user.setdefault(event.user_id, []).append(event)
 
-        for user_id, user_events in events_by_user.items():
-            consent_ok = kind_allowed(prefs.get(user_id), KIND_BRAND_SALE)
-            cap_ok = brand_sale_days_last_week.get(user_id, 0) < weekly_cap
-            if not consent_ok:
-                suppressed_consent += len(user_events)
-                continue
-            if not cap_ok:
-                suppressed_cap += len(user_events)
-                continue
+    pending_users: list[tuple[UUID, list[Event]]] = []
+    for user_id, user_events in events_by_user.items():
+        if not kind_allowed(prefs.get(user_id), KIND_BRAND_SALE):
+            suppressed_consent += len(user_events)
+            continue
+        if brand_sale_days_last_week.get(user_id, 0) >= weekly_cap:
+            suppressed_cap += len(user_events)
+            continue
+        pending_users.append((user_id, user_events))
 
-            user_inserted: list[RecordedEvent] = []
-            for event in user_events:
-                await cur.execute(
-                    """
-                    INSERT INTO ai.notifications
-                        (user_id, kind, product_id, brand_node_id, payload, brand_news_id)
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s)
-                    ON CONFLICT DO NOTHING
-                    RETURNING id
-                    """,
-                    (
-                        event.user_id,
-                        event.kind,
-                        event.product_id,
-                        event.brand_node_id,
-                        json.dumps(event.payload, ensure_ascii=False, default=str),
-                        news_ids.get(event.brand_node_id) if event.brand_node_id is not None else None,
-                    ),
+    for user_chunk in _chunks(pending_users, max(1, settings.NOTIFY_OUTBOX_CHUNK_USERS)):
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            for user_id, user_events in user_chunk:
+                user_inserted: list[RecordedEvent] = []
+                for event in user_events:
+                    await cur.execute(
+                        """
+                        INSERT INTO ai.notifications
+                            (user_id, kind, product_id, brand_node_id, payload, brand_news_id)
+                        VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+                        ON CONFLICT DO NOTHING
+                        RETURNING id
+                        """,
+                        (
+                            event.user_id,
+                            event.kind,
+                            event.product_id,
+                            event.brand_node_id,
+                            json.dumps(event.payload, ensure_ascii=False, default=str),
+                            news_ids.get(event.brand_node_id) if event.brand_node_id is not None else None,
+                        ),
+                    )
+                    row = await cur.fetchone()
+                    if row:
+                        user_inserted.append(RecordedEvent(int(row[0]), event))
+                        recorded += 1
+
+                if not user_inserted:
+                    continue
+
+                pushed += len(user_inserted)
+                created_messages, created_deliveries = await _attach_brand_sale_message(
+                    cur, user_id, user_inserted, now
                 )
-                row = await cur.fetchone()
-                if row:
-                    user_inserted.append(RecordedEvent(int(row[0]), event))
-                    recorded += 1
-
-            if not user_inserted:
-                continue
-
-            pushed += len(user_inserted)
-            created_messages, created_deliveries = await _attach_brand_sale_message(cur, user_id, user_inserted, now)
-            messages += created_messages
-            deliveries += created_deliveries
+                messages += created_messages
+                deliveries += created_deliveries
 
     return BrandSalePersistResult(
         news_written=news_written,
@@ -1863,9 +2013,10 @@ async def deliver_pending(
     if not tasks:
         return report
 
-    clients = {
-        environment: apns.ApnsClient(environment=environment) for environment in {task.environment for task in tasks}
-    }
+    # 클라이언트는 프로세스 수명이다 — 여기서 만들고 닫지 않는다. 사이클마다 새로 세우면
+    # HTTP/2 연결을 매번 다시 맺고, provider token 도 재서명돼 Apple 의 20분 갱신 제한
+    # (TooManyProviderTokenUpdates)에 걸린다. apns.get_client / close_clients 참조.
+    clients = {environment: apns.get_client(environment) for environment in {task.environment for task in tasks}}
     semaphore = asyncio.Semaphore(max(1, settings.NOTIFY_APNS_CONCURRENCY))
 
     async def send_one(task: DeliveryTask) -> str:
@@ -1896,10 +2047,7 @@ async def deliver_pending(
                 )
             return await _finish_delivery(pool, task, result, now=now)
 
-    try:
-        outcomes = await asyncio.gather(*(send_one(task) for task in tasks))
-    finally:
-        await asyncio.gather(*(client.aclose() for client in clients.values()))
+    outcomes = await asyncio.gather(*(send_one(task) for task in tasks))
 
     report.accepted = outcomes.count("accepted")
     report.retried = outcomes.count("retry")
@@ -2052,5 +2200,136 @@ async def run_notify_batch(
     else:
         job_name = NOTIFY_JOB
     await record_run(pool, job_name, cutoff)
+    logger.info(report.as_line())
+    return report
+
+
+# ── 보존 ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass(slots=True)
+class PurgeReport:
+    messages: int = 0
+    notifications: int = 0
+    brand_news: int = 0
+    feed_reads: int = 0
+    dry_run: bool = False
+
+    def as_line(self) -> str:
+        prefix = "DRY-RUN " if self.dry_run else ""
+        return (
+            f"🔔 [notify.retention] {prefix}"
+            f"messages={self.messages} notifications={self.notifications} "
+            f"brand_news={self.brand_news} feed_reads={self.feed_reads}"
+        )
+
+
+# 삭제는 PK 로 뽑은 배치를 한 트랜잭션씩 지운다. 한 문장으로 수백만 행을 지우면
+# _persist_outbox 가 겪은 것과 같은 문제가 난다 — 긴 트랜잭션이 vacuum 을 막고 락을 쥔다.
+_PURGE_MESSAGES = """
+    DELETE FROM ai.notification_messages
+    WHERE message_id IN (
+        SELECT message_id FROM ai.notification_messages
+        WHERE created_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# ai.notifications 를 지워도 brand_new_product 의 "평생 1회" 는 깨지지 않는다.
+#
+#   후보 조건은 `p.created_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 다 (_NEW_PRODUCT_SQL).
+#   brand_new 알림 행은 그 상품이 창 안에 있던 시점에만 만들어지므로
+#   `product.created_at >= notification.created_at - 창`. 보존 기간이 창보다 훨씬 길기
+#   때문에(기본 180일 vs 14일), 지울 나이가 된 알림 행이 가리키는 상품은 이미 창 밖이라
+#   안티조인 행이 없어도 다시 후보가 되지 않는다. products 조인이 필요 없는 이유다.
+#
+# restock/price_drop 의 멱등은 `uq_notifications_saved_daily` 의 created_on 이 날짜
+# 스코프라 애초에 며칠이면 충분하다. brand_sale 행은 아웃박스 앵커 전용이고 피드에서
+# 제외되므로 메시지와 함께 사라져도 무방하다.
+_PURGE_NOTIFICATIONS = """
+    DELETE FROM ai.notifications
+    WHERE id IN (
+        SELECT id FROM ai.notifications
+        WHERE created_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# 브랜드 소식 정본. **끝난 소식만** 지운다 — ended_at IS NULL 은 지금 진행 중이라
+# 브랜드 홈과 알림함이 현재 노출하고 있는 행이다.
+_PURGE_BRAND_NEWS = """
+    DELETE FROM ai.brand_news
+    WHERE id IN (
+        SELECT id FROM ai.brand_news
+        WHERE ended_at IS NOT NULL AND ended_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# feed_reads 는 brand_news 를 FK 로 걸지 않는다(source + ref_id 의 느슨한 참조).
+# 정본이 사라지면 읽음 예외 행은 가리킬 대상이 없으므로 같이 정리한다.
+_PURGE_ORPHAN_FEED_READS = """
+    DELETE FROM ai.feed_reads
+    WHERE source = 'brand_news'
+      AND NOT EXISTS (SELECT 1 FROM ai.brand_news b WHERE b.id = ai.feed_reads.ref_id)
+"""
+
+
+async def _purge_in_batches(pool: AsyncConnectionPool, sql: str, *, cutoff: datetime, batch: int) -> int:
+    total = 0
+    while True:
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            await cur.execute(sql, {"cutoff": cutoff, "batch": batch})
+            deleted = cur.rowcount
+        total += deleted
+        if deleted < batch:
+            return total
+
+
+async def _count_purgeable(pool: AsyncConnectionPool, table: str, predicate: str, cutoff: datetime) -> int:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(f"SELECT count(*) FROM {table} WHERE {predicate}", {"cutoff": cutoff})  # noqa: S608
+        return int((await cur.fetchone())[0])
+
+
+async def purge_expired_notifications(
+    pool: AsyncConnectionPool,
+    *,
+    now: datetime | None = None,
+    dry_run: bool = False,
+) -> PurgeReport:
+    """보존 기간이 지난 알림 이력을 지운다. 반환값은 지운(또는 지울) 행 수.
+
+    지우는 이유는 용량이 아니라 **만료 스윕 비용**이다. `claim_due_deliveries` 는 워커
+    폴 간격마다 돌고, 메시지 행은 유저·카테고리·날짜당 1건씩 영구히 쌓인다.
+    migration 0032 의 부분 인덱스가 스캔 비용을 진행 중 메시지로 묶어 주지만, 테이블
+    자체의 성장(유저 1만이면 연 100만 행)은 보존 정책만이 멈춘다.
+
+    FK 캐스케이드가 부수 테이블을 함께 정리한다:
+      notification_messages 삭제 → notification_deliveries, notification_message_events
+      notifications 삭제        → notification_message_events
+
+    되돌릴 수 없으므로 `NOTIFY_RETENTION_ENABLED` 가 기본 false 다. dry_run 은 같은
+    술어로 세기만 한다.
+    """
+    now = now or datetime.now(tz=UTC)
+    cutoff = now - timedelta(days=settings.NOTIFY_RETENTION_FEED_D)
+    batch = max(1, settings.NOTIFY_RETENTION_BATCH)
+    report = PurgeReport(dry_run=dry_run)
+
+    if dry_run:
+        report.messages = await _count_purgeable(pool, "ai.notification_messages", "created_at < %(cutoff)s", cutoff)
+        report.notifications = await _count_purgeable(pool, "ai.notifications", "created_at < %(cutoff)s", cutoff)
+        report.brand_news = await _count_purgeable(
+            pool, "ai.brand_news", "ended_at IS NOT NULL AND ended_at < %(cutoff)s", cutoff
+        )
+        logger.info(report.as_line())
+        return report
+
+    report.messages = await _purge_in_batches(pool, _PURGE_MESSAGES, cutoff=cutoff, batch=batch)
+    report.notifications = await _purge_in_batches(pool, _PURGE_NOTIFICATIONS, cutoff=cutoff, batch=batch)
+    report.brand_news = await _purge_in_batches(pool, _PURGE_BRAND_NEWS, cutoff=cutoff, batch=batch)
+    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        await cur.execute(_PURGE_ORPHAN_FEED_READS)
+        report.feed_reads = cur.rowcount
+
+    await record_run(pool, RETENTION_JOB, now)
     logger.info(report.as_line())
     return report

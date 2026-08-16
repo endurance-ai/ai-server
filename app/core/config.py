@@ -185,6 +185,24 @@ class Settings(BaseSettings):
     NOTIFY_DELIVERY_BATCH_SIZE: int = 100
     NOTIFY_APNS_CONCURRENCY: int = 20
     NOTIFY_MAX_DELIVERY_ATTEMPTS: int = 5
+    # 한 사이클에서 아웃박스를 비울 때까지 deliver_pending 을 반복하되 이 상한에서 멈춘다.
+    # 상한이 없으면 재시도가 계속 due 로 돌아오는 상황에서 사이클이 끝나지 않는다.
+    # BATCH_SIZE(=클레임 단위)와 다르다 — 이쪽은 사이클 전체 예산이다.
+    NOTIFY_DELIVERY_MAX_PER_CYCLE: int = 5000
+    # 아웃박스 적재를 유저 N명씩 끊어 커밋한다. 전체를 한 트랜잭션으로 묶으면
+    # 유저·카테고리마다 잡는 pg_advisory_xact_lock 이 커밋까지 누적돼
+    # 공유 락 테이블(max_locks_per_transaction × max_connections)을 고갈시킨다.
+    NOTIFY_OUTBOX_CHUNK_USERS: int = 200
+
+    # 보존 정책. 되돌릴 수 없는 삭제라 **기본 비활성**이다 — 운영에서 먼저
+    # `scripts/notify_retention.py --dry-run` 으로 삭제 대상 규모를 확인한 뒤 켠다.
+    NOTIFY_RETENTION_ENABLED: bool = False
+    # 알림함이 보여주는 기간. 피드 쿼리(app/api/notifications.py)에는 날짜 창이 없어
+    # keyset 으로 무한히 거슬러 올라갈 수 있으므로, 이 값이 사실상 그 상한이 된다.
+    NOTIFY_RETENTION_FEED_D: int = 180
+    NOTIFY_RETENTION_SCAN_TIME: str = "04:00"
+    # 한 트랜잭션에서 지울 행 수. 아웃박스 청킹과 같은 이유로 끊는다.
+    NOTIFY_RETENTION_BATCH: int = 5000
 
     # APNs — environment-specific topic keys. Base64 avoids multiline .env
     # parsing mistakes. Legacy APNS_* values remain a production fallback.
