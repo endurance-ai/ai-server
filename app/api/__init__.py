@@ -12,6 +12,7 @@ from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.history import router as history_router
 from app.api.iap import router as iap_router
+from app.api.image import router as image_router
 from app.api.legal import router as legal_router
 from app.api.me import router as me_router
 from app.api.notifications import router as notifications_router
@@ -44,6 +45,7 @@ router.include_router(products_router)
 router.include_router(results_router)
 router.include_router(history_router)
 router.include_router(feedback_router)
+router.include_router(image_router)
 router.include_router(devices_router)
 router.include_router(notifications_router)
 router.include_router(legal_router)
