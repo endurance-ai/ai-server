@@ -245,7 +245,7 @@ Respond in this exact JSON format (no markdown, no code fences):
       "distinctiveDetails": ["dropped shoulder", "mid-thigh length", "single-breasted", "notched lapel", "side pockets"],
       "searchQuery": "oversized charcoal grey wool single-breasted notched-lapel mid-thigh overcoat men",
       "searchQueryKo": "오버사이즈 차콜 그레이 울 싱글 브레스티드 노치드 라펠 미디 롱 코트 남성",
-      "position": {{"top": 30, "left": 50, "width": 60, "height": 52}}
+      "position": {{"top": 46, "left": 50, "width": 44, "height": 46}}
     }},
     {{
       "id": "top",
@@ -261,7 +261,7 @@ Respond in this exact JSON format (no markdown, no code fences):
       "distinctiveDetails": ["boxy crop", "crew-neck", "short-sleeve", "front graphic print", "ribbed neckline"],
       "searchQuery": "boxy cropped crew-neck short-sleeve black graphic-print ribbed-neck jersey t-shirt men",
       "searchQueryKo": "박시 크롭 크루넥 반팔 블랙 그래픽 프린트 립넥 저지 티셔츠 남성",
-      "position": {{"top": 42, "left": 48, "width": 42, "height": 24}}
+      "position": {{"top": 34, "left": 49, "width": 30, "height": 18}}
     }}
   ]
 }}
@@ -290,18 +290,27 @@ Rules:
 - Per item fabric: MUST be one of the enum values above (lowercase). Pick the PRIMARY fabric only.
 - Per item colorHex: MUST include a hex code for the dominant color of this specific item. This is CRITICAL for color-based product matching.
 - Per item colorFamily: MUST be one of the color_family enum values (UPPERCASE). Map the item's color to the nearest family. This is CRITICAL for enum-based product matching.
-- Per item position: estimate where the CENTER of this garment appears in the image as percentage coordinates. This is CRITICAL for the UI — a dot will be placed on the image at these exact coordinates.
-  - top: 0 = very top edge of image, 100 = very bottom edge
-  - left: 0 = very left edge of image, 100 = very right edge
-  - Look at where the garment is ACTUALLY visible in this specific photo, not where it would be on a generic body
-  - Consider whether the person is centered, offset, cropped, or in a specific pose
-  - If the person is not centered (e.g., shifted left or right), adjust left% accordingly
-  - Typical ranges for a full-body centered shot: hat 5-12%, face/neck area 12-20%, top/shirt chest area 28-40%, waist/belt 42-50%, bottom/pants thigh area 50-65%, bottom/pants knee area 65-75%, shoes 82-95%
-  - For accessories: bags/watches go where they actually appear in the image
-  - left% should reflect the actual horizontal position of the garment center in the image (usually 45-55% for centered photos, but adjust based on pose and framing)
-  - width: how much of the image WIDTH this garment spans, as a percentage (0-100). e.g. a top on a centered full-body shot ~35-50, a wide coat ~55-70, shoes ~15-25, a small bag/watch ~8-18.
-  - height: how much of the image HEIGHT this garment spans, as a percentage (0-100). e.g. a t-shirt ~18-28, a long coat ~45-55, full-length pants ~30-45, shoes ~10-16, a hat ~6-12.
-  - width/height define the garment's BOUNDING BOX (centered on top/left) — the app crops exactly this region as the item's thumbnail, so estimate the visible extent of THIS garment tightly and accurately. Clamp so the box stays within the image (center ± half-size within 0-100).
+- Per item position: DETECT the TIGHT BOUNDING BOX of this garment as it is ACTUALLY visible in THIS photo (like an object-detection annotator). The app crops exactly this box to make the item's thumbnail, so accuracy matters a lot and each item's box MUST be different.
+  METHOD — first find the 4 visible edges of the garment (as % of image, 0=top/left edge, 100=bottom/right edge), THEN convert to center + size:
+    1. topEdge%   = where the garment's HIGHEST visible point is (e.g. top/shirt = shoulder/collar line; pants = waistband; shoes = ankle line; hat = crown)
+    2. bottomEdge% = where the garment's LOWEST visible point is (e.g. shirt = hem; pants = ankle cuff; shoes = sole)
+    3. leftEdge%  = the garment's LEFTMOST visible pixel (include sleeves/arms out to the side)
+    4. rightEdge% = the garment's RIGHTMOST visible pixel
+    Then output:
+      top    = (topEdge + bottomEdge) / 2      # vertical CENTER of the box
+      left   = (leftEdge + rightEdge) / 2      # horizontal CENTER of the box
+      width  = rightEdge - leftEdge            # box width (% of image width)
+      height = bottomEdge - topEdge            # box height (% of image height)
+  Look at where the garment is ACTUALLY in THIS specific photo — the person may be off-center, cropped, zoomed, or posed. Do NOT default to generic body positions.
+  Sanity check your edges against these TYPICAL full-body-centered ranges (adjust for framing/pose/crop):
+    - hat/cap: top 3-8 / bottom 10-16
+    - top/shirt/jacket: top 20-30 (shoulders) / bottom 40-52 (hem) ; left 32-40 / right 60-68
+    - outer/long coat: top 20-28 / bottom 62-78 ; left 28-38 / right 62-72
+    - bottom/pants: top 46-54 (waist) / bottom 82-92 (ankle) ; left 38-46 / right 54-62
+    - skirt/shorts: top 46-54 / bottom 58-72
+    - shoes: top 84-90 / bottom 94-99 ; left 38-62
+    - bag/accessory: box only around where it actually appears
+  All four (top, left, width, height) are 0-100. Clamp the box to stay within the image (center ± half-size inside 0-100).
 - Be specific about silhouette, fabric, and fit in item names
 
 distinctiveDetails rules (NEW — CRITICAL: this drives searchQuery quality):
