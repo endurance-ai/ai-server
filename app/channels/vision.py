@@ -89,6 +89,10 @@ class VisionPosition(BaseModel):
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
     top: float = 0.0
     left: float = 0.0
+    # 항목 바운딩 박스 크기(이미지 대비 %). top/left(중심) ± 절반 = 크롭 영역.
+    # 앱이 이 박스로 원본을 정확히 크롭해 항목 썸네일을 만든다.
+    width: float = 0.0
+    height: float = 0.0
 
 
 class VisionItem(BaseModel):

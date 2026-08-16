@@ -54,7 +54,7 @@ async def test_image_analyze_returns_app_contract(
                     subcategory="t-shirt",
                     fit="boxy",
                     color="Black",
-                    position=VisionPosition(top=42.5, left=48.0),
+                    position=VisionPosition(top=42.5, left=48.0, width=42.0, height=24.0),
                 )
             ],
         )
@@ -77,7 +77,7 @@ async def test_image_analyze_returns_app_contract(
                 "subcategory": "t-shirt",
                 "fit": "boxy",
                 "color": "Black",
-                "position": {"top": 42.5, "left": 48.0},
+                "position": {"top": 42.5, "left": 48.0, "width": 42.0, "height": 24.0},
             }
         ],
         "mood_tags": ["Minimalist", "Street"],
