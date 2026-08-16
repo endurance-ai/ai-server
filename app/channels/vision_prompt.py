@@ -245,7 +245,7 @@ Respond in this exact JSON format (no markdown, no code fences):
       "distinctiveDetails": ["dropped shoulder", "mid-thigh length", "single-breasted", "notched lapel", "side pockets"],
       "searchQuery": "oversized charcoal grey wool single-breasted notched-lapel mid-thigh overcoat men",
       "searchQueryKo": "오버사이즈 차콜 그레이 울 싱글 브레스티드 노치드 라펠 미디 롱 코트 남성",
-      "position": {{"top": 30, "left": 50}}
+      "position": {{"top": 30, "left": 50, "width": 60, "height": 52}}
     }},
     {{
       "id": "top",
@@ -261,7 +261,7 @@ Respond in this exact JSON format (no markdown, no code fences):
       "distinctiveDetails": ["boxy crop", "crew-neck", "short-sleeve", "front graphic print", "ribbed neckline"],
       "searchQuery": "boxy cropped crew-neck short-sleeve black graphic-print ribbed-neck jersey t-shirt men",
       "searchQueryKo": "박시 크롭 크루넥 반팔 블랙 그래픽 프린트 립넥 저지 티셔츠 남성",
-      "position": {{"top": 42, "left": 48}}
+      "position": {{"top": 42, "left": 48, "width": 42, "height": 24}}
     }}
   ]
 }}
@@ -299,6 +299,9 @@ Rules:
   - Typical ranges for a full-body centered shot: hat 5-12%, face/neck area 12-20%, top/shirt chest area 28-40%, waist/belt 42-50%, bottom/pants thigh area 50-65%, bottom/pants knee area 65-75%, shoes 82-95%
   - For accessories: bags/watches go where they actually appear in the image
   - left% should reflect the actual horizontal position of the garment center in the image (usually 45-55% for centered photos, but adjust based on pose and framing)
+  - width: how much of the image WIDTH this garment spans, as a percentage (0-100). e.g. a top on a centered full-body shot ~35-50, a wide coat ~55-70, shoes ~15-25, a small bag/watch ~8-18.
+  - height: how much of the image HEIGHT this garment spans, as a percentage (0-100). e.g. a t-shirt ~18-28, a long coat ~45-55, full-length pants ~30-45, shoes ~10-16, a hat ~6-12.
+  - width/height define the garment's BOUNDING BOX (centered on top/left) — the app crops exactly this region as the item's thumbnail, so estimate the visible extent of THIS garment tightly and accurately. Clamp so the box stays within the image (center ± half-size within 0-100).
 - Be specific about silhouette, fabric, and fit in item names
 
 distinctiveDetails rules (NEW — CRITICAL: this drives searchQuery quality):

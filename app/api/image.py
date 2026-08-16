@@ -26,6 +26,9 @@ class ImageAnalyzeRequest(BaseModel):
 class ImageAnalyzePosition(BaseModel):
     top: float
     left: float
+    # 항목 바운딩 박스 크기(이미지 대비 %) — 앱이 정확 크롭에 사용.
+    width: float = 0.0
+    height: float = 0.0
 
 
 class ImageAnalyzeItem(BaseModel):
@@ -69,7 +72,12 @@ async def analyze_image(
                 subcategory=item.subcategory,
                 fit=item.fit,
                 color=item.color,
-                position=ImageAnalyzePosition(top=item.position.top, left=item.position.left),
+                position=ImageAnalyzePosition(
+                    top=item.position.top,
+                    left=item.position.left,
+                    width=item.position.width,
+                    height=item.position.height,
+                ),
             )
             for item in result.items
         ],
