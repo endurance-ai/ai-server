@@ -49,6 +49,23 @@ class ApnsCredential:
     topic: str
 
 
+# 서명된 provider token 을 **자격증명 단위로** 모듈에 캐시한다: 캐시키 → (token, issued_at).
+#
+# Apple 은 20분보다 잦은 provider token 갱신을 `TooManyProviderTokenUpdates` (429) 로
+# 거절한다. 캐시가 ApnsClient 인스턴스에만 있으면 인스턴스를 다시 만들 때마다 새 토큰이
+# 서명되므로, 워커가 사이클마다 클라이언트를 세우던 시절엔 30초에 한 번씩 재서명됐다.
+# 캐시를 인스턴스 밖에 두면 클라이언트 수명과 무관하게 TTL 이 실제로 지켜진다.
+#
+# 캐시키에 key_id 뿐 아니라 **키 본문 지문**을 넣는다. key_id 를 유지한 채 .p8 을 교체하면
+# key_id 만으로는 낡은 토큰을 계속 내주게 된다. 지문을 섞으면 자격증명이 바뀌는 순간
+# 자연히 새 항목이 된다.
+_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
+
+def _token_cache_key(credential: ApnsCredential) -> str:
+    return f"{credential.key_id}:{_fingerprint(credential.key)}"
+
+
 @dataclass(frozen=True, slots=True)
 class PushEndpoint:
     device_id: UUID
@@ -140,8 +157,6 @@ class ApnsClient:
             timeout=settings.APNS_TIMEOUT_S,
             limits=httpx.Limits(max_connections=max(1, settings.NOTIFY_APNS_CONCURRENCY)),
         )
-        self._token = ""
-        self._token_at = 0.0
 
     async def __aenter__(self) -> ApnsClient:
         return self
@@ -156,16 +171,18 @@ class ApnsClient:
         if self._credential is None:
             raise RuntimeError(f"APNs {self.environment} credentials are not configured")
         now = time.time()
-        if self._token and now - self._token_at < _TOKEN_TTL_S:
-            return self._token
-        self._token = jwt.encode(
+        cache_key = _token_cache_key(self._credential)
+        cached = _TOKEN_CACHE.get(cache_key)
+        if cached and now - cached[1] < _TOKEN_TTL_S:
+            return cached[0]
+        token = jwt.encode(
             {"iss": self._credential.team_id, "iat": int(now)},
             self._credential.key,
             algorithm="ES256",
             headers={"kid": self._credential.key_id},
         )
-        self._token_at = now
-        return self._token
+        _TOKEN_CACHE[cache_key] = (token, now)
+        return token
 
     async def send(
         self,
@@ -252,6 +269,36 @@ class ApnsClient:
 
 def _fingerprint(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()[:12]
+
+
+# ── 프로세스 수명 클라이언트 ─────────────────────────────────────────────────
+
+_CLIENTS: dict[PushEnvironment, ApnsClient] = {}
+
+
+def get_client(environment: PushEnvironment) -> ApnsClient:
+    """환경당 하나의 클라이언트를 프로세스 수명으로 재사용한다.
+
+    APNs 는 long-lived HTTP/2 연결을 전제한 프로토콜이다. 발송 사이클마다 클라이언트를
+    세우고 닫으면 30초에 한 번씩 TLS 핸드셰이크를 새로 하고 커넥션 풀을 버리게 된다.
+    provider token 은 `_TOKEN_CACHE` 가 따로 지키므로 재서명 문제와는 별개지만, 연결
+    재사용은 이 레지스트리만이 해결한다.
+
+    `ApnsClient` 를 직접 만드는 경로는 그대로 남는다 — 테스트가 그 seam 을 쓴다.
+    """
+    client = _CLIENTS.get(environment)
+    if client is None:
+        client = ApnsClient(environment=environment)
+        _CLIENTS[environment] = client
+    return client
+
+
+async def close_clients() -> None:
+    """프로세스 종료 시 열린 클라이언트를 모두 닫는다."""
+    clients = list(_CLIENTS.values())
+    _CLIENTS.clear()
+    for client in clients:
+        await client.aclose()
 
 
 async def fetch_endpoints(pool: AsyncConnectionPool, user_ids: list[UUID]) -> dict[UUID, list[PushEndpoint]]:

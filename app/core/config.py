@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     NOTIFY_DELIVERY_BATCH_SIZE: int = 100
     NOTIFY_APNS_CONCURRENCY: int = 20
     NOTIFY_MAX_DELIVERY_ATTEMPTS: int = 5
+    # 한 사이클에서 아웃박스를 비울 때까지 deliver_pending 을 반복하되 이 상한에서 멈춘다.
+    # 상한이 없으면 재시도가 계속 due 로 돌아오는 상황에서 사이클이 끝나지 않는다.
+    # BATCH_SIZE(=클레임 단위)와 다르다 — 이쪽은 사이클 전체 예산이다.
+    NOTIFY_DELIVERY_MAX_PER_CYCLE: int = 5000
     # 아웃박스 적재를 유저 N명씩 끊어 커밋한다. 전체를 한 트랜잭션으로 묶으면
     # 유저·카테고리마다 잡는 pg_advisory_xact_lock 이 커밋까지 누적돼
     # 공유 락 테이블(max_locks_per_transaction × max_connections)을 고갈시킨다.

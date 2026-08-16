@@ -2012,9 +2012,10 @@ async def deliver_pending(
     if not tasks:
         return report
 
-    clients = {
-        environment: apns.ApnsClient(environment=environment) for environment in {task.environment for task in tasks}
-    }
+    # 클라이언트는 프로세스 수명이다 — 여기서 만들고 닫지 않는다. 사이클마다 새로 세우면
+    # HTTP/2 연결을 매번 다시 맺고, provider token 도 재서명돼 Apple 의 20분 갱신 제한
+    # (TooManyProviderTokenUpdates)에 걸린다. apns.get_client / close_clients 참조.
+    clients = {environment: apns.get_client(environment) for environment in {task.environment for task in tasks}}
     semaphore = asyncio.Semaphore(max(1, settings.NOTIFY_APNS_CONCURRENCY))
 
     async def send_one(task: DeliveryTask) -> str:
@@ -2045,10 +2046,7 @@ async def deliver_pending(
                 )
             return await _finish_delivery(pool, task, result, now=now)
 
-    try:
-        outcomes = await asyncio.gather(*(send_one(task) for task in tasks))
-    finally:
-        await asyncio.gather(*(client.aclose() for client in clients.values()))
+    outcomes = await asyncio.gather(*(send_one(task) for task in tasks))
 
     report.accepted = outcomes.count("accepted")
     report.retried = outcomes.count("retry")

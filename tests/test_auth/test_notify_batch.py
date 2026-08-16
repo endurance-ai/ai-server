@@ -919,3 +919,88 @@ async def test_events_are_committed_before_baselines_advance(client: AsyncClient
         )
 
     assert await _count(pool, "SELECT count(*) FROM ai.notifications WHERE kind = 'price_drop'") == 1
+
+
+@pytest.mark.asyncio
+async def test_delivery_cycle_drains_beyond_one_batch(client: AsyncClient, pool, monkeypatch):
+    """사이클당 deliver_pending 1회면 처리량이 배치크기÷폴간격으로 묶인다.
+
+    _drain_deliveries 는 아웃박스가 빌 때까지 반복하되 사이클 예산에서 멈춘다.
+    """
+    from app.core.config import settings as app_settings
+    from app.workers.notification_worker import _drain_deliveries
+
+    auth, user_id = await _login(client)
+    for _ in range(3):
+        product_id = await _insert_product(pool, price=100000)
+        await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await run_notify_batch(pool, only_user=UUID(user_id))
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT product_id FROM ai.saved_product_baseline WHERE user_id = %s", (user_id,))
+        saved = [r[0] for r in await cur.fetchall()]
+    for product_id in saved:
+        await _set_product(pool, product_id, price=50000)
+
+    # 유저 한 명당 다이제스트 1건이라 딜리버리를 늘리려면 기기를 늘린다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        for index in range(3):
+            await cur.execute(
+                """
+                INSERT INTO ai.devices (user_id, push_token, platform, provider, environment, topic,
+                                        status, last_seen_at)
+                VALUES (%s, %s, 'ios', 'apns', 'production', 'com.kikoai.app', 'active', now())
+                """,
+                (user_id, f"drain-token-{index}"),
+            )
+        await conn.commit()
+
+    await run_notify_batch(pool, only_user=UUID(user_id), now=datetime(2026, 8, 2, 0, 0, tzinfo=UTC))
+    queued = await _count(pool, "SELECT count(*) FROM ai.notification_deliveries WHERE status = 'pending'")
+    assert queued >= 3
+
+    async def _fake_send(self, device_token, **kwargs):
+        return ApnsResult(device_token=device_token, status=200, apns_id=kwargs.get("apns_id"))
+
+    monkeypatch.setattr("app.services.notifications.apns.ApnsClient.send", _fake_send)
+    # 배치 크기를 1로 낮춰도 한 사이클에서 전부 소진돼야 한다.
+    monkeypatch.setattr(app_settings, "NOTIFY_DELIVERY_BATCH_SIZE", 1)
+
+    report = await _drain_deliveries(pool, now=datetime(2026, 8, 2, 5, 0, tzinfo=UTC))
+    assert report.claimed == queued
+    assert report.accepted == queued
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_deliveries WHERE status = 'pending'") == 0
+
+
+@pytest.mark.asyncio
+async def test_delivery_cycle_stops_at_its_budget(client: AsyncClient, pool, monkeypatch):
+    """재시도가 계속 due 로 돌아와도 사이클이 굶지 않는다."""
+    from app.core.config import settings as app_settings
+    from app.workers.notification_worker import _drain_deliveries
+
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await run_notify_batch(pool, only_user=UUID(user_id))
+    await _set_product(pool, product_id, price=50000)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.devices (user_id, push_token, platform, provider, environment, topic,
+                                    status, last_seen_at)
+            VALUES (%s, 'budget-token', 'ios', 'apns', 'production', 'com.kikoai.app', 'active', now())
+            """,
+            (user_id,),
+        )
+        await conn.commit()
+    await run_notify_batch(pool, only_user=UUID(user_id), now=datetime(2026, 8, 2, 0, 0, tzinfo=UTC))
+
+    async def _fake_send(self, device_token, **kwargs):
+        return ApnsResult(device_token=device_token, status=200, apns_id=kwargs.get("apns_id"))
+
+    monkeypatch.setattr("app.services.notifications.apns.ApnsClient.send", _fake_send)
+    monkeypatch.setattr(app_settings, "NOTIFY_DELIVERY_BATCH_SIZE", 1)
+    monkeypatch.setattr(app_settings, "NOTIFY_DELIVERY_MAX_PER_CYCLE", 1)
+
+    report = await _drain_deliveries(pool, now=datetime(2026, 8, 2, 5, 0, tzinfo=UTC))
+    assert report.claimed == 1  # 예산에서 정확히 멈춘다

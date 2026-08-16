@@ -20,9 +20,11 @@ from app.core.config import settings
 from app.services.notifications import (
     BRAND_JOB,
     SAVED_JOB,
+    DeliveryReport,
     deliver_pending,
     run_notify_batch,
 )
+from app.services.push.apns import close_clients
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ async def _run_cycle(pool: AsyncConnectionPool, *, force: bool, dry_run: bool) -
             lambda: run_notify_batch(pool, include_saved=False, include_brand=True, dry_run=dry_run, now=now),
         )
     if not dry_run:
-        report = await deliver_pending(pool, now=now)
+        report = await _drain_deliveries(pool, now=now)
         if report.claimed:
             logger.info(
                 "🔔 [notify.worker] claimed=%d accepted=%d retry=%d failed=%d expired=%d",
@@ -123,6 +125,38 @@ async def _run_cycle(pool: AsyncConnectionPool, *, force: bool, dry_run: bool) -
             )
 
 
+async def _drain_deliveries(pool: AsyncConnectionPool, *, now: datetime) -> DeliveryReport:
+    """아웃박스가 빌 때까지 클레임-발송을 반복한다. 사이클당 예산이 상한.
+
+    사이클당 `deliver_pending` 을 한 번만 부르면 처리량이 배치 크기 ÷ 폴 간격으로 묶인다
+    (기본 100건 / 30초 = 12,000건/시간). 다이제스트는 발송 시각에 한꺼번에 due 가 되는
+    버스트라 이 상한이 곧 "마지막 유저가 몇 시간 뒤에 받는가" 가 된다.
+
+    상한(NOTIFY_DELIVERY_MAX_PER_CYCLE)이 필요한 이유는 재시도다 — 즉시 재시도로 돌아오는
+    딜리버리가 있으면 `claimed`0 이 영영 안 될 수 있고, 그러면 감지 스케줄 체크까지 굶는다.
+    """
+    total = DeliveryReport()
+    budget = max(1, settings.NOTIFY_DELIVERY_MAX_PER_CYCLE)
+    batch = max(1, settings.NOTIFY_DELIVERY_BATCH_SIZE)
+
+    while total.claimed < budget:
+        report = await deliver_pending(pool, now=now, limit=min(batch, budget - total.claimed))
+        total.claimed += report.claimed
+        total.accepted += report.accepted
+        total.retried += report.retried
+        total.failed += report.failed
+        total.expired += report.expired
+        total.endpoints_disabled += report.endpoints_disabled
+        if not report.claimed:
+            break
+    else:
+        logger.warning(
+            "🔔 [notify.worker] cycle delivery budget exhausted at %d — 남은 딜리버리는 다음 사이클로",
+            budget,
+        )
+    return total
+
+
 async def _main(args: argparse.Namespace) -> int:
     if not settings.DB_DSN:
         logger.error("DB_DSN is required")
@@ -131,18 +165,25 @@ async def _main(args: argparse.Namespace) -> int:
         logger.error("NOTIFICATION_WORKER_ENABLED is false")
         return 2
 
-    async with AsyncConnectionPool(settings.DB_DSN, min_size=1, max_size=4, open=False) as pool:
-        await pool.wait()
-        while True:
-            try:
-                await _run_cycle(pool, force=args.force, dry_run=args.dry_run)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001
-                logger.exception("🔔 [notify.worker] cycle failed")
-            if args.once or args.force or args.dry_run:
-                return 0
-            await asyncio.sleep(max(5, settings.NOTIFY_WORKER_POLL_S))
+    # _finish_delivery 가 딜리버리마다 커넥션을 잡으므로 풀이 APNs 동시성보다 작으면
+    # 발송이 커넥션 대기로 직렬화된다. 여유분 2는 감지 쿼리·job_state 갱신 몫.
+    max_size = max(4, settings.NOTIFY_APNS_CONCURRENCY + 2)
+    try:
+        async with AsyncConnectionPool(settings.DB_DSN, min_size=1, max_size=max_size, open=False) as pool:
+            await pool.wait()
+            while True:
+                try:
+                    await _run_cycle(pool, force=args.force, dry_run=args.dry_run)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    logger.exception("🔔 [notify.worker] cycle failed")
+                if args.once or args.force or args.dry_run:
+                    return 0
+                await asyncio.sleep(max(5, settings.NOTIFY_WORKER_POLL_S))
+    finally:
+        # 클라이언트가 프로세스 수명이라 종료는 여기서만 일어난다 (apns.get_client 참조).
+        await close_clients()
 
 
 def main() -> int:
