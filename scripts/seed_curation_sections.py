@@ -3,7 +3,7 @@
 어드민 페이지가 나오기 전까지 구좌 메타데이터의 소스다. 어드민이 생기면 이
 스크립트는 초기 데이터 부트스트랩 용도로만 남는다.
 
-`curation_refresh_loop` 는 auto 구좌(popular / trending-search / under-100)의
+`curation_refresh_loop` 는 auto 구좌(trending-search / under-100)의
 product_ids 만 UPDATE 하고 행을 만들거나 지우지 않으므로, 여기서 넣은 구좌
 메타데이터는 리프레셔에 덮이지 않는다.
 
@@ -40,6 +40,7 @@ from app.services.curation_refresh import (  # noqa: E402
     _quality_sql,
     _query_params,
 )
+from app.services.curation_sections import PERSONALIZED_AUTO_SECTIONS  # noqa: E402
 
 # 어드민 `SectionPayload.product_ids` 계약과 같은 구좌 전체 상한.
 # 브랜드당 상한은 없어 한 브랜드만으로도 30개 이상을 채울 수 있다.
@@ -97,29 +98,23 @@ _SWIMWEAR_MEN = [
 
 
 # auto 구좌 — 상품은 refresh_auto_sections 가 채운다. 껍데기만 선점한다.
-# _AUTO_IDS 3개가 모두 있어야 리프레셔가 전부 채운다.
+# 일일 auto 2개가 모두 있어야 리프레셔가 전부 채운다. 개인화 auto는 요청 시 계산한다.
 AUTO_SECTIONS: list[dict[str, Any]] = [
-    {
-        "section_id": "popular",
-        "title": "지금 인기",
-        "subtitle": "이번 주 가장 많이 담긴",
-        "sort_order": 1,
-        "is_active": True,
-    },
     {
         "section_id": "trending-search",
         "title": "요즘 뜨는 브랜드",
         "subtitle": "검색량이 빠르게 오르는 중",
-        "sort_order": 2,
+        "sort_order": 1,
         "is_active": True,
     },
     {
         "section_id": "under-100",
         "title": "Under $100",
         "subtitle": "10만원 아래, 안목은 그대로",
-        "sort_order": 3,
+        "sort_order": 2,
         "is_active": True,
     },
+    *(dict(section) | {"is_active": True} for section in PERSONALIZED_AUTO_SECTIONS),
 ]
 
 
@@ -268,14 +263,14 @@ async def _brand_breakdown(cur: Any, brand_ids: list[int], gender: str) -> list[
 async def _expand_brands(cur: Any, brand_ids: list[int], gender: str, excluded: set[int]) -> list[int]:
     """브랜드별 인기 순위로 라운드로빈해 적격 상품 ID를 최대 200개 만든다.
 
-    인기 점수는 `popular` auto 구좌와 같은 신호·가중치를 쓴다 (조회 + 3×저장
+    인기 점수는 `trending-search` auto 구좌와 같은 신호·가중치를 쓴다 (조회 + 3×저장
     + 4×아웃바운드 + ln(1+리뷰), curation_refresh.py:99). 인기 정의가 구좌마다
     갈리지 않게 하려는 것이다.
 
     `excluded` 는 앞 구좌가 이미 차지한 상품이다. API 가 sort_order 순으로
     `excluded_ids` 를 누적해 뒤 구좌에서 중복을 빼기 때문에(curation.py:173),
-    여기서 미리 피하지 않으면 인기 브랜드일수록 `popular` 와 겹쳐 구좌가 반토막
-    난다 — 실측상 브랜드 픽(남) 8개 중 4개가 popular 에 먹혔다.
+    여기서 미리 피하지 않으면 인기 브랜드일수록 `trending-search`와 겹쳐
+    뒤 구좌가 반토막 난다.
 
     품질 게이트도 auto 구좌와 같은 `_quality_sql()` 을 쓴다 — 여기서 통과한
     상품만 하이드레이션(app/api/curation.py:183)도 통과한다.

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from app.services.curation_chips import chips_for
 from app.services.curation_refresh import select_candidate_ids
+from app.services.curation_sections import AUTO_SECTION_IDS, DAILY_AUTO_SECTION_IDS
+
+
+def test_auto_section_contract_excludes_retired_popular_slot():
+    assert DAILY_AUTO_SECTION_IDS == ("trending-search", "under-100")
+    assert "popular" not in AUTO_SECTION_IDS
 
 
 def test_chips_contract():
@@ -30,7 +36,7 @@ def test_candidate_selection_enforces_brand_cap_and_cross_section_exclusion():
         )
     selected = select_candidate_ids(
         rows,
-        section_id="popular",
+        section_id="trending-search",
         excluded_ids={1},
         seed="test",
     )
@@ -119,7 +125,7 @@ def test_candidate_selection_missing_feature_metadata_is_neutral():
     ]
     selected = select_candidate_ids(
         rows,
-        section_id="popular",
+        section_id="trending-search",
         excluded_ids=set(),
         feature_scores={("color", "black"): 20.0},
         seed="neutral",

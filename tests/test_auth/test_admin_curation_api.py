@@ -55,15 +55,15 @@ async def test_auto_section_product_ids_are_not_editable(client: AsyncClient, po
     """리프레셔 소유 필드 — 어드민이 써도 기존값이 남아야 한다."""
     keeper = await _insert_product(pool, brand="Keeper", price=42000)
     intruder = await _insert_product(pool, brand="Intruder", price=42000)
-    await _insert_section(pool, section_id="popular", gender="women", product_ids=[keeper], slot_type="auto")
+    await _insert_section(pool, section_id="trending-search", gender="women", product_ids=[keeper], slot_type="auto")
 
     resp = await client.put(
         "/admin/curation/sections",
         json={
-            "section_id": "popular",
+            "section_id": "trending-search",
             "gender": "women",
             "slot_type": "auto",
-            "title": "지금 인기",
+            "title": "요즘 뜨는 브랜드",
             "sort_order": 1,
             "is_active": True,
             "product_ids": [intruder],
@@ -88,12 +88,34 @@ async def test_auto_slot_type_rejects_unknown_section_id(client: AsyncClient):
     assert resp.status_code == 422
 
 
+async def test_personalized_auto_section_is_editable_as_metadata(client: AsyncClient):
+    resp = await client.put(
+        "/admin/curation/sections",
+        json={
+            "section_id": "recently-viewed",
+            "gender": "women",
+            "slot_type": "auto",
+            "title": "최근 본 상품",
+            "sort_order": 4,
+            "is_active": True,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["section_id"] == "recently-viewed"
+    assert resp.json()["product_ids"] == []
+
+
 async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
     """구좌 단독 live_count 로는 설명 안 되는 '앞 구좌가 먼저 가져감' 을 드러낸다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)
     only_later = await _insert_product(pool, brand="Later", price=42000)
     await _insert_section(
-        pool, section_id="popular", gender="women", product_ids=[shared], slot_type="auto", sort_order=1
+        pool,
+        section_id="trending-search",
+        gender="women",
+        product_ids=[shared],
+        slot_type="auto",
+        sort_order=1,
     )
     await _insert_section(
         pool,
@@ -110,8 +132,8 @@ async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
 
     preview = (await client.get("/admin/curation/preview", params={"gender": "women"})).json()
     shown = {s["section_id"]: s["shown"] for s in preview["sections"]}
-    assert shown["popular"] == 1
-    assert shown["editorial-brand-picks"] == 1  # shared 를 popular 가 먼저 가져갔다
+    assert shown["trending-search"] == 1
+    assert shown["editorial-brand-picks"] == 1  # shared 를 trending-search 가 먼저 가져갔다
 
 
 async def test_product_lookup_flags_ineligible_and_missing(client: AsyncClient, pool):

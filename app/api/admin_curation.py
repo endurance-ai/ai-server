@@ -7,7 +7,7 @@
 
 소유 경계 (curation_refresh.py 와 나눠 가진다):
   어드민(이 모듈) — 구좌의 존재·제목·순서·활성·display_type, editorial 상품 목록
-  리프레셔        — auto 구좌(popular / trending-search / under-100)의 product_ids
+  리프레셔        — 공용 auto 구좌(trending-search / under-100)의 product_ids
 
 그래서 auto 구좌의 product_ids 는 여기서 편집할 수 없다. 리프레셔가 KST 하루
 한 번 덮어쓰므로 편집해도 사라진다 — 필드 자체를 막아 혼란을 없앤다.
@@ -30,13 +30,14 @@ from pydantic import BaseModel, Field
 from app.core.auth import verify_internal_token
 from app.core.di import provide_db_pool
 from app.services.curation_refresh import GENDER_MATCH_SQL, PRODUCT_FEATURES_JOIN
+from app.services.curation_sections import AUTO_SECTION_IDS
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/curation", tags=["admin"], dependencies=[Depends(verify_internal_token)])
 
-# 리프레셔가 소유하는 구좌 — product_ids 편집 금지 (curation_refresh._AUTO_IDS).
-_AUTO_SECTION_IDS = ("popular", "trending-search", "under-100")
+# 서버가 상품을 계산하는 구좌 — product_ids 편집 금지.
+_AUTO_SECTION_IDS = AUTO_SECTION_IDS
 
 Gender = Literal["women", "men"]
 SlotType = Literal["auto", "editorial"]
@@ -188,14 +189,14 @@ async def upsert_section(
 ) -> SectionRow:
     """구좌 저장. (section_id, gender) 기준 upsert.
 
-    auto 구좌의 product_ids 는 무시하고 기존값을 보존한다 — 리프레셔 소유라
-    여기서 써 봐야 다음 계산에 덮인다.
+    auto 구좌의 product_ids 는 무시하고 기존값을 보존한다. 공용 auto는
+    리프레셔가, 개인화 auto는 요청 경로가 상품을 계산한다.
     """
     product_ids = list(dict.fromkeys(body.product_ids))
     if body.slot_type == "auto" and body.section_id not in _AUTO_SECTION_IDS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"auto slot_type requires section_id in {_AUTO_SECTION_IDS} (리프레셔가 계산할 수 없다)",
+            detail=f"auto slot_type requires section_id in {_AUTO_SECTION_IDS} (서버가 계산할 수 없다)",
         )
 
     async with pool.connection() as conn, conn.cursor() as cur:

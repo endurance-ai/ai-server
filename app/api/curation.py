@@ -3,8 +3,9 @@
 GET /v1/curation?gender=women|men — 메인 큐레이션 구좌 + 유도 칩 (auth optional)
 
 server-driven: 구좌 개수·순서·타이틀·상품 전부 이 응답으로 결정 — 앱 배포 불필요.
-구좌 데이터는 ai.curation_sections 캐시 테이블(백그라운드 refresher가 채움)만 읽고,
-요청 경로에서는 집계하지 않는다. 칩은 서버 상수(app/services/curation_chips.py).
+공용 auto/editorial 구좌는 ai.curation_sections 캐시를 읽고, 사용자별 auto
+구좌는 요청 시 조회·찜·취향·관심 브랜드 신호로 계산한다.
+칩은 서버 상수(app/services/curation_chips.py).
 
 gender 해석: 로그인 + 프로필 gender 확정이면 프로필 우선, 아니면 query param
 (비로그인은 온보딩 로컬값을 param으로 전달), 둘 다 없으면 422.
@@ -24,19 +25,19 @@ from app.api.deps import get_current_user_id, get_optional_user_id
 from app.core.di import provide_db_pool
 from app.core.gender import db_to_app
 from app.services.curation_chips import Chip, chips_for
+from app.services.curation_personalized import personalized_product_ids
 from app.services.curation_refresh import (
     GENDER_MATCH_SQL,
     PRODUCT_FEATURES_JOIN,
     select_candidate_ids,
 )
+from app.services.curation_sections import PERSONALIZED_AUTO_SECTION_IDS
 from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
 
-# 구좌당 상품 수를 여기서 자르지 않는다. 상한은 이미 두 군데에 있다 —
-# editorial 은 저장 시 `SectionPayload.product_ids` max_length=200,
-# auto 는 리프레셔의 `_SECTION_SIZE` 쿼터(30). 읽기 경로에서 한 번 더 자르면
-# 운영자가 고른 목록이 조용히 버려진다.
+# 구좌당 상품 수를 읽기 경로에서 자르지 않는다. 공용 auto는 리프레셔 쿼터,
+# editorial은 저장 계약을 따르고, 개인화 auto는 적격 상품을 전부 반환한다.
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -139,6 +140,25 @@ async def _load_sections(
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
         for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
+            if section_id in PERSONALIZED_AUTO_SECTION_IDS:
+                selected = (
+                    await personalized_product_ids(
+                        cur,
+                        section_id=section_id,
+                        user_id=user_id,
+                        gender=gender,
+                        # 각 개인화 구좌의 조건을 독립적으로 보장한다. 같은 상품이
+                        # "최근 본 상품"이자 "할인된 찜"이어도 두 구좌 모두 노출된다.
+                        excluded_ids=set(),
+                        taste_scores=taste_scores,
+                        feature_scores=feature_scores,
+                    )
+                    if user_id is not None
+                    else []
+                )
+                selected_by_section[section_id] = selected
+                continue
+
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
                 selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
             else:
@@ -217,7 +237,10 @@ async def _load_sections(
     for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
         selected = selected_by_section.get(section_id, product_ids or [])
         hydrated = [products[pid] for pid in selected if pid in products]
-        shuffle(hydrated)
+        if section_id in PERSONALIZED_AUTO_SECTION_IDS and not hydrated:
+            continue
+        if section_id != "recently-viewed":
+            shuffle(hydrated)
         sections.append(
             CurationSection(
                 id=section_id,

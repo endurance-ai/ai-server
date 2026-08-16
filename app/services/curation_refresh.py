@@ -1,7 +1,7 @@
 """auto 구좌 일일 후보 계산.
 
 구좌 메타데이터(존재·제목·순서·활성·display_type과 editorial 상품 목록)는
-어드민 페이지가 소유한다. 이 모듈은 auto 구좌(popular / trending-search /
+어드민 페이지가 소유한다. 이 모듈은 auto 구좌(trending-search /
 under-100)의 product_ids 를 KST 하루 한 번 다시 계산해 UPDATE 할 뿐,
 ai.curation_sections 에 행을 만들거나 지우지 않는다.
 
@@ -22,13 +22,14 @@ from zoneinfo import ZoneInfo
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
+from app.services.curation_sections import DAILY_AUTO_SECTION_IDS
 from app.services.curation_taste import feature_pairs
 
 logger = logging.getLogger(__name__)
 
 _KST = ZoneInfo("Asia/Seoul")
 _GENDERS = ("women", "men")
-_AUTO_IDS = ("popular", "trending-search", "under-100")
+_AUTO_IDS = DAILY_AUTO_SECTION_IDS
 _SECTION_SIZE = 30
 _CANDIDATES_PER_SECTION = 150
 
@@ -86,8 +87,23 @@ def _quality_sql() -> str:
 
 
 def _candidate_sql(section_id: str) -> str:
-    if section_id == "popular":
+    if section_id == "trending-search":
         signal_ctes = """
+            recent_search AS (
+                SELECT x.pid AS product_id, count(*)::float / 2 AS n
+                FROM ai.searches s
+                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
+                WHERE s.created_at > now() - interval '2 days'
+                GROUP BY x.pid
+            ),
+            prior_search AS (
+                SELECT x.pid AS product_id, count(*)::float / 7 AS n
+                FROM ai.searches s
+                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
+                WHERE s.created_at <= now() - interval '2 days'
+                  AND s.created_at > now() - interval '9 days'
+                GROUP BY x.pid
+            ),
             views AS (
                 SELECT product_id, count(DISTINCT user_id)::float AS n
                 FROM ai.product_views
@@ -112,10 +128,13 @@ def _candidate_sql(section_id: str) -> str:
             )
         """
         product_score = """
-            COALESCE(v.n, 0) + 3 * COALESCE(sv.n, 0) + 4 * COALESCE(o.n, 0)
+            greatest(0, COALESCE(rs.n, 0) - COALESCE(ps.n, 0))
+                + COALESCE(v.n, 0) + 3 * COALESCE(sv.n, 0) + 4 * COALESCE(o.n, 0)
                 + ln(1 + COALESCE(p.review_count, 0))
         """
         joins = """
+            LEFT JOIN recent_search rs ON rs.product_id = p.id
+            LEFT JOIN prior_search ps ON ps.product_id = p.id
             LEFT JOIN views v ON v.product_id = p.id
             LEFT JOIN saves sv ON sv.product_id = p.id
             LEFT JOIN outbound o ON o.product_id = p.id
@@ -168,40 +187,9 @@ def _candidate_sql(section_id: str) -> str:
             WHERE base_rank <= {_CANDIDATES_PER_SECTION}
             ORDER BY base_rank
         """  # noqa: S608 -- all interpolation is module-owned SQL
-    elif section_id == "trending-search":
-        signal_ctes = """
-            recent_search AS (
-                SELECT x.pid AS product_id, count(*)::float / 2 AS n
-                FROM ai.searches s
-                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
-                WHERE s.created_at > now() - interval '2 days'
-                GROUP BY x.pid
-            ),
-            prior_search AS (
-                SELECT x.pid AS product_id, count(*)::float / 7 AS n
-                FROM ai.searches s
-                CROSS JOIN LATERAL unnest(s.product_ids[1:20]) x(pid)
-                WHERE s.created_at <= now() - interval '2 days'
-                  AND s.created_at > now() - interval '9 days'
-                GROUP BY x.pid
-            )
-        """
-        score = "greatest(0, COALESCE(rs.n, 0) - COALESCE(ps.n, 0))"
-        joins = """
-            LEFT JOIN recent_search rs ON rs.product_id = p.id
-            LEFT JOIN prior_search ps ON ps.product_id = p.id
-        """
-        extra = ""
-    else:
-        signal_ctes = ""
-        score = "0::float"
-        joins = ""
-        extra = "AND p.price <= 150000"
-
-    signal_prefix = f"{signal_ctes}," if signal_ctes else ""
+    score = "0::float"
     return f"""
         WITH
-        {signal_prefix}
         eligible AS (
             SELECT
                 p.id AS product_id,
@@ -212,9 +200,8 @@ def _candidate_sql(section_id: str) -> str:
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
             {PRODUCT_FEATURES_JOIN}
-            {joins}
             WHERE {_quality_sql()}
-              {extra}
+              AND p.price <= 150000
         ),
         brand_limited AS (
             SELECT *,
