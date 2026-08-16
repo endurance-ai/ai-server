@@ -17,6 +17,7 @@
 | **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
 | 이미지 업로드 | S3 + CloudFront | `POST /v1/uploads` presigned PUT 발급, 클라이언트 직접 업로드, `ai.uploads` 메타 기록 |
+| 앱 이미지 분석 | kikoai/ai | `POST /v1/image/analyze` 사용자 인증 후 업로드 이미지를 기존 Vision 추출기로 분석 |
 | 벡터 DB | dev-app Postgres 16 + pgvector | `search_products_v6` RPC, embedding-first (cosine distance ASC). pgroonga/product_search_text DROPPED. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
 | LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
 | web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
@@ -43,6 +44,7 @@ flowchart TB
         GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
         PIPE["pipeline runner\nembed → search → diversify"]
         UPLOADS["POST /v1/uploads\nS3 presigned PUT"]
+        IMAGE_ANALYZE["POST /v1/image/analyze\nuser-auth Vision adapter"]
         LITELLM["LiteLLM proxy\nnova-lite via Bedrock"]
         LFW["Langfuse self-host"]
         REC["POST /recommend\n(현재 미사용)"]
@@ -57,6 +59,7 @@ flowchart TB
     end
 
     subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
+        IMAGE_INPUT["앱 이미지 인풋"]
         FIND["/api/find/search\n(현재 미사용)"]
         V4["/api/search-products\n(v4 폴백, 현재 미사용)"]
     end
@@ -74,6 +77,8 @@ flowchart TB
     PIPE -.score.-> LFW
     UPLOADS -->|presigned PUT target| S3
     UPLOADS -->|insert pending row| UPLOADDB
+    IMAGE_INPUT -->|Bearer + image_url| IMAGE_ANALYZE
+    IMAGE_ANALYZE -->|shared vision_extract| LITELLM
 
     FIND -. "현재 미사용" .-> REC
     FIND -. "v4 fallback" .-> V4
@@ -87,10 +92,11 @@ flowchart TB
     classDef muted fill:#757575,color:#fff
 
     class TG_USER,TG_API primary
-    class WH,GRAPH,PIPE,UPLOADS,LITELLM,LFW ai
+    class WH,GRAPH,PIPE,UPLOADS,IMAGE_ANALYZE,LITELLM,LFW ai
     class REC muted
     class MODAL,S3 ext
     class PG,CONVLOG,UPLOADDB data
+    class IMAGE_INPUT primary
     class FIND,V4 muted
 ```
 
