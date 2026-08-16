@@ -1004,3 +1004,53 @@ async def test_delivery_cycle_stops_at_its_budget(client: AsyncClient, pool, mon
 
     report = await _drain_deliveries(pool, now=datetime(2026, 8, 2, 5, 0, tzinfo=UTC))
     assert report.claimed == 1  # 예산에서 정확히 멈춘다
+
+
+@pytest.mark.asyncio
+async def test_expiry_sweep_uses_an_index_instead_of_scanning_every_message(client: AsyncClient, pool):
+    """만료 스윕은 30초마다 돈다 — 누적 메시지 전체를 훑으면 안 된다 (migration 0032).
+
+    메시지 행은 유저·카테고리·날짜당 1건씩 영구히 쌓인다. 인덱스가 없으면 스윕 비용이
+    누적 행 수에 정비례하고, 유저 1만이면 연 100만 행 규모가 된다.
+    """
+    _auth, user_id = await _login(client)
+
+    # 플래너가 인덱스를 고를 만큼 행을 채운다. 유니크 키가 (user_id, category, scheduled_on)
+    # 이라 날짜를 흘려 20,000건을 한 문장으로 만든다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.notification_messages
+                (user_id, category, scheduled_on, scheduled_at, expires_at, title, body, status)
+            SELECT %s, 'saved_product_digest',
+                   DATE '2020-01-01' + i,
+                   (DATE '2020-01-01' + i)::timestamptz,
+                   (DATE '2020-01-01' + i)::timestamptz + interval '12 hours',
+                   't', 'b',
+                   -- 대부분은 이미 마감된 행이라 부분 인덱스에서 빠진다.
+                   CASE WHEN mod(i, 1000) = 0 THEN 'pending' ELSE 'accepted' END
+            FROM generate_series(1, 20000) AS i
+            """,
+            (user_id,),
+        )
+        await cur.execute("ANALYZE ai.notification_messages")
+        await conn.commit()
+
+        await cur.execute(
+            """
+            EXPLAIN UPDATE ai.notification_messages m
+            SET status = 'expired', completed_at = now()
+            WHERE m.expires_at <= now()
+              AND m.status IN ('pending', 'processing')
+              AND NOT EXISTS (
+                  SELECT 1 FROM ai.notification_deliveries d
+                  WHERE d.message_id = m.message_id
+                    AND d.status IN ('pending', 'retry', 'processing')
+              )
+            """
+        )
+        plan = "\n".join(row[0] for row in await cur.fetchall())
+        await conn.rollback()
+
+    assert "idx_notification_messages_expiry" in plan, plan
+    assert "Seq Scan on notification_messages" not in plan, plan
