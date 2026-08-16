@@ -1054,3 +1054,197 @@ async def test_expiry_sweep_uses_an_index_instead_of_scanning_every_message(clie
 
     assert "idx_notification_messages_expiry" in plan, plan
     assert "Seq Scan on notification_messages" not in plan, plan
+
+
+# ── 보존 ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_retention_dry_run_counts_without_deleting(client: AsyncClient, pool, monkeypatch):
+    """되돌릴 수 없는 삭제라 dry-run 이 규모 확인의 정식 경로다."""
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await _set_product(pool, product_id, price=50000)
+    await run_notify_batch(pool, only_user=UUID(user_id))
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.notifications SET created_at = now() - interval '400 days'")
+        await cur.execute("UPDATE ai.notification_messages SET created_at = now() - interval '400 days'")
+        await conn.commit()
+
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    report = await purge_expired_notifications(pool, dry_run=True)
+
+    assert report.dry_run is True
+    assert report.notifications == 1
+    assert report.messages == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 1  # 아무것도 지우지 않았다
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 1
+
+
+@pytest.mark.asyncio
+async def test_retention_keeps_rows_inside_the_window(client: AsyncClient, pool, monkeypatch):
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    auth, user_id = await _login(client)
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await _set_product(pool, product_id, price=50000)
+    await run_notify_batch(pool, only_user=UUID(user_id))
+
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    report = await purge_expired_notifications(pool)
+
+    assert report.notifications == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 1
+
+
+@pytest.mark.asyncio
+async def test_retention_cascades_to_deliveries_and_message_events(client: AsyncClient, pool, monkeypatch):
+    """메시지를 지우면 딜리버리·연결행이 FK 캐스케이드로 함께 사라진다."""
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.devices (user_id, push_token, platform, provider, environment, topic,
+                                    status, last_seen_at)
+            VALUES (%s, 'retention-token', 'ios', 'apns', 'production', 'com.kikoai.app', 'active', now())
+            """,
+            (user_id,),
+        )
+        await conn.commit()
+    product_id = await _insert_product(pool, price=100000)
+    await client.post("/v1/saves", json={"product_id": str(product_id)}, headers={"Authorization": auth})
+    await _set_product(pool, product_id, price=50000)
+    await run_notify_batch(pool, only_user=UUID(user_id), now=datetime(2026, 8, 2, 0, 0, tzinfo=UTC))
+
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_deliveries") == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_message_events") == 1
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.notification_messages SET created_at = now() - interval '400 days'")
+        await cur.execute("UPDATE ai.notifications SET created_at = now() - interval '400 days'")
+        await conn.commit()
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    await purge_expired_notifications(pool)
+
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_deliveries") == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_message_events") == 0
+    # 기기는 남는다 — device_id 는 ON DELETE SET NULL 이고 딜리버리만 사라진다.
+    assert await _count(pool, "SELECT count(*) FROM ai.devices") == 1
+
+
+@pytest.mark.asyncio
+async def test_retention_does_not_resurrect_brand_new_notifications(client: AsyncClient, pool, monkeypatch):
+    """brand_new_product 의 '평생 1회' 는 안티조인 행이 사라져도 유지된다.
+
+    후보 조건이 `products.created_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 라, 지울 나이가
+    된 알림이 가리키는 상품은 이미 창 밖이다. 이 성질이 깨지면 보존 잡이 옛날 상품을
+    전부 신상으로 재발송한다 — 이 테스트가 그 회귀 가드다.
+    """
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.user_profiles SET gender = 'female' WHERE user_id = %s", (user_id,))
+        await conn.commit()
+    brand_node_id = await _aged_brand(pool, "Picked")
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "INSERT INTO ai.user_brand_picks (user_id, brand_id) VALUES (%s, %s)",
+            (user_id, brand_node_id),
+        )
+        await conn.commit()
+    product_id = await _insert_product(pool, brand="Picked", gender=["women"], brand_node_id=brand_node_id)
+
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 1
+
+    # 알림과 상품을 함께 나이 먹인다 — 보존 잡이 도는 시점의 실제 상태다.
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("UPDATE ai.notifications SET created_at = now() - interval '400 days'")
+        await cur.execute(
+            "UPDATE public.products SET created_at = now() - interval '400 days' WHERE id = %s",
+            (product_id,),
+        )
+        await conn.commit()
+
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    purged = await purge_expired_notifications(pool)
+    assert purged.notifications == 1
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 0
+
+    # 안티조인 행이 사라졌지만 상품이 14일 창 밖이라 다시 후보가 되지 않는다.
+    report = await run_notify_batch(pool, only_user=UUID(user_id))
+    assert report.detected[KIND_BRAND_NEW] == 0
+    assert await _count(pool, "SELECT count(*) FROM ai.notifications") == 0
+
+
+@pytest.mark.asyncio
+async def test_retention_never_closes_a_live_brand_news(client: AsyncClient, pool, monkeypatch):
+    """진행 중(ended_at IS NULL) 소식은 아무리 오래돼도 지우지 않는다.
+
+    브랜드 홈과 알림함이 지금 노출하고 있는 행이라 지우면 화면에서 사라진다.
+    """
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    brand_id = await _insert_brand(pool, "LiveNews")
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.brand_news (brand_node_id, kind, payload, started_at, ended_at, created_at)
+            VALUES (%s, 'brand_sale', '{}'::jsonb, now() - interval '400 days', NULL, now() - interval '400 days'),
+                   (%s, 'brand_new',  '{}'::jsonb, now() - interval '400 days',
+                    now() - interval '399 days', now() - interval '400 days')
+            """,
+            (brand_id, brand_id),
+        )
+        await conn.commit()
+
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    report = await purge_expired_notifications(pool)
+
+    assert report.brand_news == 1  # 끝난 소식만
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute("SELECT kind, ended_at IS NULL FROM ai.brand_news")
+        assert await cur.fetchall() == [("brand_sale", True)]
+
+
+@pytest.mark.asyncio
+async def test_retention_deletes_in_batches(client: AsyncClient, pool, monkeypatch):
+    """한 문장으로 수백만 행을 지우면 아웃박스가 겪은 긴 트랜잭션 문제가 그대로 난다."""
+    from app.core.config import settings as app_settings
+    from app.services.notifications import purge_expired_notifications
+
+    _auth, user_id = await _login(client)
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.notification_messages
+                (user_id, category, scheduled_on, scheduled_at, expires_at, title, body, status, created_at)
+            SELECT %s, 'saved_product_digest', DATE '2020-01-01' + i,
+                   (DATE '2020-01-01' + i)::timestamptz,
+                   (DATE '2020-01-01' + i)::timestamptz + interval '12 hours',
+                   't', 'b', 'accepted', now() - interval '400 days'
+            FROM generate_series(1, 250) AS i
+            """,
+            (user_id,),
+        )
+        await conn.commit()
+
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_FEED_D", 180)
+    monkeypatch.setattr(app_settings, "NOTIFY_RETENTION_BATCH", 100)  # 3 배치 + 잔여
+    report = await purge_expired_notifications(pool)
+
+    assert report.messages == 250
+    assert await _count(pool, "SELECT count(*) FROM ai.notification_messages") == 0

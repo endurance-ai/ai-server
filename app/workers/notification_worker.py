@@ -19,9 +19,11 @@ from psycopg_pool import AsyncConnectionPool
 from app.core.config import settings
 from app.services.notifications import (
     BRAND_JOB,
+    RETENTION_JOB,
     SAVED_JOB,
     DeliveryReport,
     deliver_pending,
+    purge_expired_notifications,
     run_notify_batch,
 )
 from app.services.push.apns import close_clients
@@ -112,6 +114,11 @@ async def _run_cycle(pool: AsyncConnectionPool, *, force: bool, dry_run: bool) -
             BRAND_JOB,
             lambda: run_notify_batch(pool, include_saved=False, include_brand=True, dry_run=dry_run, now=now),
         )
+    # 보존 잡은 감지와 독립이고 하루 1회다. force 로 끌어오지 않는다 — 되돌릴 수 없는
+    # 삭제라 수동 실행은 scripts/notify_retention.py 를 거치게 한다.
+    if settings.NOTIFY_RETENTION_ENABLED and not dry_run:
+        if await _job_due(pool, RETENTION_JOB, settings.NOTIFY_RETENTION_SCAN_TIME, now):
+            await _with_job_lock(pool, RETENTION_JOB, lambda: purge_expired_notifications(pool, now=now))
     if not dry_run:
         report = await _drain_deliveries(pool, now=now)
         if report.claimed:

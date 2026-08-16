@@ -58,6 +58,7 @@ NEWS_BRAND_NEW = "brand_new"
 NOTIFY_JOB = "notify_batch"
 SAVED_JOB = "notify_saved_detect"
 BRAND_JOB = "notify_brand_detect"
+RETENTION_JOB = "notify_retention"
 SAVED_CATEGORY = "saved_product_digest"
 BRAND_CATEGORY = "brand_new_digest"
 # brand_sale 전용 다이제스트 카테고리 — brand_new(BRAND_CATEGORY)와 분리한다.
@@ -2199,5 +2200,136 @@ async def run_notify_batch(
     else:
         job_name = NOTIFY_JOB
     await record_run(pool, job_name, cutoff)
+    logger.info(report.as_line())
+    return report
+
+
+# ── 보존 ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass(slots=True)
+class PurgeReport:
+    messages: int = 0
+    notifications: int = 0
+    brand_news: int = 0
+    feed_reads: int = 0
+    dry_run: bool = False
+
+    def as_line(self) -> str:
+        prefix = "DRY-RUN " if self.dry_run else ""
+        return (
+            f"🔔 [notify.retention] {prefix}"
+            f"messages={self.messages} notifications={self.notifications} "
+            f"brand_news={self.brand_news} feed_reads={self.feed_reads}"
+        )
+
+
+# 삭제는 PK 로 뽑은 배치를 한 트랜잭션씩 지운다. 한 문장으로 수백만 행을 지우면
+# _persist_outbox 가 겪은 것과 같은 문제가 난다 — 긴 트랜잭션이 vacuum 을 막고 락을 쥔다.
+_PURGE_MESSAGES = """
+    DELETE FROM ai.notification_messages
+    WHERE message_id IN (
+        SELECT message_id FROM ai.notification_messages
+        WHERE created_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# ai.notifications 를 지워도 brand_new_product 의 "평생 1회" 는 깨지지 않는다.
+#
+#   후보 조건은 `p.created_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 다 (_NEW_PRODUCT_SQL).
+#   brand_new 알림 행은 그 상품이 창 안에 있던 시점에만 만들어지므로
+#   `product.created_at >= notification.created_at - 창`. 보존 기간이 창보다 훨씬 길기
+#   때문에(기본 180일 vs 14일), 지울 나이가 된 알림 행이 가리키는 상품은 이미 창 밖이라
+#   안티조인 행이 없어도 다시 후보가 되지 않는다. products 조인이 필요 없는 이유다.
+#
+# restock/price_drop 의 멱등은 `uq_notifications_saved_daily` 의 created_on 이 날짜
+# 스코프라 애초에 며칠이면 충분하다. brand_sale 행은 아웃박스 앵커 전용이고 피드에서
+# 제외되므로 메시지와 함께 사라져도 무방하다.
+_PURGE_NOTIFICATIONS = """
+    DELETE FROM ai.notifications
+    WHERE id IN (
+        SELECT id FROM ai.notifications
+        WHERE created_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# 브랜드 소식 정본. **끝난 소식만** 지운다 — ended_at IS NULL 은 지금 진행 중이라
+# 브랜드 홈과 알림함이 현재 노출하고 있는 행이다.
+_PURGE_BRAND_NEWS = """
+    DELETE FROM ai.brand_news
+    WHERE id IN (
+        SELECT id FROM ai.brand_news
+        WHERE ended_at IS NOT NULL AND ended_at < %(cutoff)s
+        LIMIT %(batch)s
+    )
+"""
+# feed_reads 는 brand_news 를 FK 로 걸지 않는다(source + ref_id 의 느슨한 참조).
+# 정본이 사라지면 읽음 예외 행은 가리킬 대상이 없으므로 같이 정리한다.
+_PURGE_ORPHAN_FEED_READS = """
+    DELETE FROM ai.feed_reads
+    WHERE source = 'brand_news'
+      AND NOT EXISTS (SELECT 1 FROM ai.brand_news b WHERE b.id = ai.feed_reads.ref_id)
+"""
+
+
+async def _purge_in_batches(pool: AsyncConnectionPool, sql: str, *, cutoff: datetime, batch: int) -> int:
+    total = 0
+    while True:
+        async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            await cur.execute(sql, {"cutoff": cutoff, "batch": batch})
+            deleted = cur.rowcount
+        total += deleted
+        if deleted < batch:
+            return total
+
+
+async def _count_purgeable(pool: AsyncConnectionPool, table: str, predicate: str, cutoff: datetime) -> int:
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(f"SELECT count(*) FROM {table} WHERE {predicate}", {"cutoff": cutoff})  # noqa: S608
+        return int((await cur.fetchone())[0])
+
+
+async def purge_expired_notifications(
+    pool: AsyncConnectionPool,
+    *,
+    now: datetime | None = None,
+    dry_run: bool = False,
+) -> PurgeReport:
+    """보존 기간이 지난 알림 이력을 지운다. 반환값은 지운(또는 지울) 행 수.
+
+    지우는 이유는 용량이 아니라 **만료 스윕 비용**이다. `claim_due_deliveries` 는 워커
+    폴 간격마다 돌고, 메시지 행은 유저·카테고리·날짜당 1건씩 영구히 쌓인다.
+    migration 0032 의 부분 인덱스가 스캔 비용을 진행 중 메시지로 묶어 주지만, 테이블
+    자체의 성장(유저 1만이면 연 100만 행)은 보존 정책만이 멈춘다.
+
+    FK 캐스케이드가 부수 테이블을 함께 정리한다:
+      notification_messages 삭제 → notification_deliveries, notification_message_events
+      notifications 삭제        → notification_message_events
+
+    되돌릴 수 없으므로 `NOTIFY_RETENTION_ENABLED` 가 기본 false 다. dry_run 은 같은
+    술어로 세기만 한다.
+    """
+    now = now or datetime.now(tz=UTC)
+    cutoff = now - timedelta(days=settings.NOTIFY_RETENTION_FEED_D)
+    batch = max(1, settings.NOTIFY_RETENTION_BATCH)
+    report = PurgeReport(dry_run=dry_run)
+
+    if dry_run:
+        report.messages = await _count_purgeable(pool, "ai.notification_messages", "created_at < %(cutoff)s", cutoff)
+        report.notifications = await _count_purgeable(pool, "ai.notifications", "created_at < %(cutoff)s", cutoff)
+        report.brand_news = await _count_purgeable(
+            pool, "ai.brand_news", "ended_at IS NOT NULL AND ended_at < %(cutoff)s", cutoff
+        )
+        logger.info(report.as_line())
+        return report
+
+    report.messages = await _purge_in_batches(pool, _PURGE_MESSAGES, cutoff=cutoff, batch=batch)
+    report.notifications = await _purge_in_batches(pool, _PURGE_NOTIFICATIONS, cutoff=cutoff, batch=batch)
+    report.brand_news = await _purge_in_batches(pool, _PURGE_BRAND_NEWS, cutoff=cutoff, batch=batch)
+    async with pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+        await cur.execute(_PURGE_ORPHAN_FEED_READS)
+        report.feed_reads = cur.rowcount
+
+    await record_run(pool, RETENTION_JOB, now)
     logger.info(report.as_line())
     return report
