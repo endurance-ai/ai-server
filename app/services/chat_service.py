@@ -281,6 +281,9 @@ class StreamingAdapter(MessengerAdapter):
 
     _CHUNK_SIZE = 3  # characters per text_delta event
     _CHUNK_DELAY = 0.030  # seconds between chunks (~100 chars/s typing speed)
+    # 앱은 미디어그룹(텔레그램 앨범 10장) 제약이 없고 2열 그리드라 한 배치에 더
+    # 많은 카드를 보낸다. respond.send_hybrid_batch 가 이 값으로 슬라이스한다.
+    album_size = 40
 
     def __init__(self) -> None:
         self._queue: asyncio.Queue[tuple[str, dict] | object] = asyncio.Queue()
