@@ -515,7 +515,7 @@ async def run_text_only_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
     override_embedding: list[float] | None = None,
@@ -640,7 +640,7 @@ async def run_multi_query_search(
     queries: list[str],
     gender: str | None = None,
     brand_filter: list[str] | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -713,7 +713,7 @@ async def run_blended_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -842,7 +842,7 @@ async def run_smart_blended_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -987,7 +987,7 @@ async def run_image_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
