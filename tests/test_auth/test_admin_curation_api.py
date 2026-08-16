@@ -105,6 +105,44 @@ async def test_personalized_auto_section_is_editable_as_metadata(client: AsyncCl
     assert resp.json()["product_ids"] == []
 
 
+async def test_reorder_sections_updates_the_complete_gender_order(client: AsyncClient, pool):
+    await _insert_section(pool, section_id="editorial-first", gender="women", product_ids=[], sort_order=10)
+    await _insert_section(pool, section_id="editorial-second", gender="women", product_ids=[], sort_order=20)
+    await _insert_section(pool, section_id="men-only", gender="men", product_ids=[], sort_order=5)
+
+    response = await client.patch(
+        "/admin/curation/sections/order",
+        json={"gender": "women", "section_ids": ["editorial-second", "editorial-first"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"updated": 2}
+    listing = (await client.get("/admin/curation/sections", params={"gender": "women"})).json()
+    assert [(row["section_id"], row["sort_order"]) for row in listing["sections"]] == [
+        ("editorial-second", 1),
+        ("editorial-first", 2),
+    ]
+    men = (await client.get("/admin/curation/sections", params={"gender": "men"})).json()
+    assert [(row["section_id"], row["sort_order"]) for row in men["sections"]] == [("men-only", 5)]
+
+
+async def test_reorder_sections_rejects_stale_or_duplicate_lists(client: AsyncClient, pool):
+    await _insert_section(pool, section_id="editorial-a", gender="women", product_ids=[])
+    await _insert_section(pool, section_id="editorial-b", gender="women", product_ids=[])
+
+    duplicate = await client.patch(
+        "/admin/curation/sections/order",
+        json={"gender": "women", "section_ids": ["editorial-a", "editorial-a"]},
+    )
+    assert duplicate.status_code == 422
+
+    stale = await client.patch(
+        "/admin/curation/sections/order",
+        json={"gender": "women", "section_ids": ["editorial-a"]},
+    )
+    assert stale.status_code == 409
+
+
 async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
     """구좌 단독 live_count 로는 설명 안 되는 '앞 구좌가 먼저 가져감' 을 드러낸다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)

@@ -82,6 +82,17 @@ class DeleteResponse(BaseModel):
     deleted: bool
 
 
+class SectionOrderPayload(BaseModel):
+    """한 성별의 전체 구좌 순서. 누락된 목록은 부분 재정렬로 보지 않고 거부한다."""
+
+    gender: Gender
+    section_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class ReorderResponse(BaseModel):
+    updated: int
+
+
 class PreviewSection(BaseModel):
     section_id: str
     gender: Gender
@@ -238,6 +249,46 @@ async def upsert_section(
         await conn.commit()
     logger.info("🗂 [admin] section saved · %s/%s live=%d", saved.section_id, saved.gender, saved.live_count)
     return saved
+
+
+@router.patch("/sections/order", response_model=ReorderResponse)
+async def reorder_sections(
+    body: SectionOrderPayload,
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> ReorderResponse:
+    """현재 성별의 전체 구좌 순서를 한 트랜잭션으로 저장한다."""
+    if len(body.section_ids) != len(set(body.section_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="section_ids must not contain duplicates",
+        )
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            "SELECT section_id FROM ai.curation_sections WHERE gender = %s FOR UPDATE",
+            (body.gender,),
+        )
+        existing_ids = {str(row[0]) for row in await cur.fetchall()}
+        requested_ids = set(body.section_ids)
+        if requested_ids != existing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="curation sections changed; reload before reordering",
+            )
+
+        for sort_order, section_id in enumerate(body.section_ids, start=1):
+            await cur.execute(
+                """
+                UPDATE ai.curation_sections
+                SET sort_order = %s, updated_at = now()
+                WHERE section_id = %s AND gender = %s
+                """,
+                (sort_order, section_id, body.gender),
+            )
+        await conn.commit()
+
+    logger.info("🗂 [admin] sections reordered · %s count=%d", body.gender, len(body.section_ids))
+    return ReorderResponse(updated=len(body.section_ids))
 
 
 @router.delete("/sections/{section_id}/{gender}", response_model=DeleteResponse)
