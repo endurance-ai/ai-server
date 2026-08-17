@@ -150,18 +150,20 @@ def _resolve_brand_filter(raw: Any) -> list[str] | None:
     """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
 
     RPC 는 `brand_nodes.brand_name = ANY(p_brand_names)` EXACT 매치라 LLM
-    표기("acne studios", "ACNE")를 그대로 보내면 미스난다 —
-    `brand_node_cache.lookup` (lifespan 워밍, ~2.9k 브랜드)으로 canonical
-    `brand_name` 을 resolve. 미인식/캐시 미워밍이면 None (fail-open: 필터
-    없이 진행, 브랜드 토큰은 text_query 임베딩에 남아 soft 신호로 작동)."""
+    표기("acne studios", "ACNE", "paf", "포스트아카이브팩션")를 그대로 보내면
+    미스난다 — `brand_node_cache.resolve_brand_names` 로 canonical `brand_name`
+    (들)을 resolve 한다. 한/영 표면형·괄호 약칭·이니셜 약칭을 모두 흡수하고,
+    같은 브랜드의 중복 노드(예: 'Post Archive Faction' + '… (PAF)')는 모든
+    canonical 명을 함께 반환해 RPC 가 두 노드에 걸린 상품을 다 잡는다.
+    미인식/캐시 미워밍이면 None (fail-open: 필터 없이 진행)."""
     if not raw or not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        from app.infrastructure.repositories.brand_node_cache import lookup
+        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names
 
-        attrs = lookup(raw)
-        if attrs is not None and attrs.brand_name:
-            return [attrs.brand_name]
+        names = resolve_brand_names(raw)
+        if names:
+            return names
         logger.info("[tool.search_products] brand %r not in brand_node_cache — filter skipped (fail-open)", raw)
     except Exception as exc:  # noqa: BLE001 — 브랜드 필터는 부가 기능, 검색을 막지 않는다
         logger.warning("[tool.search_products] brand resolve failed: %r", exc)
