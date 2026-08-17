@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections import Counter
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
-from app.services.curation_sections import DAILY_AUTO_SECTION_IDS
+from app.services.curation_sections import CURATION_SECTION_PRODUCT_LIMIT, DAILY_AUTO_SECTION_IDS
 from app.services.curation_taste import feature_pairs
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,10 @@ logger = logging.getLogger(__name__)
 _KST = ZoneInfo("Asia/Seoul")
 _GENDERS = ("women", "men")
 _AUTO_IDS = DAILY_AUTO_SECTION_IDS
-_SECTION_SIZE = 30
-_CANDIDATES_PER_SECTION = 150
+_SECTION_SIZE = CURATION_SECTION_PRODUCT_LIMIT
+# The second auto slot must still have 100 candidates after the first slot's
+# products are excluded. Keep extra headroom for differing quality filters.
+_CANDIDATES_PER_SECTION = CURATION_SECTION_PRODUCT_LIMIT * 3
 
 _WINTER_NAME_RE = "패딩|기모|플리스|무스탕|puffer|fleece"
 _BASE_EXCLUDED_CATEGORIES = ("other",)
@@ -179,7 +181,6 @@ def _candidate_sql(section_id: str) -> str:
                     ) AS base_rank
                 FROM brand_products bp
                 JOIN brand_scores bs USING (brand_key)
-                WHERE bp.product_rank <= 6
             )
             SELECT product_id, false AS is_hot, brand_score AS base_score, base_rank,
                    brand_key, brand_node_id, style_node_id
@@ -203,23 +204,13 @@ def _candidate_sql(section_id: str) -> str:
             WHERE {_quality_sql()}
               AND p.price <= 150000
         ),
-        brand_limited AS (
-            SELECT *,
-                row_number() OVER (
-                    PARTITION BY brand_key
-                    ORDER BY base_score DESC,
-                             md5(product_id::text || current_date::text)
-                ) AS brand_rank
-            FROM eligible
-        ),
         ranked AS (
-            SELECT *,
+            SELECT eligible.*,
                 row_number() OVER (
                     ORDER BY base_score DESC,
                              md5(product_id::text || current_date::text)
                 ) AS base_rank
-            FROM brand_limited
-            WHERE brand_rank <= 6
+            FROM eligible
         )
         SELECT product_id, false AS is_hot, base_score, base_rank, brand_key,
                brand_node_id, style_node_id
@@ -278,7 +269,7 @@ def select_candidate_ids(
     seed: str,
     require_full: bool = True,
 ) -> list[int]:
-    """Select 30 products with a per-section brand cap and stable ties.
+    """Select up to 100 products, distributed round-robin across brands.
 
     Personalization blends taste onto the base rank. The style-node axis
     (`taste_scores`) is joined by the visual-feature axes (`feature_scores`,
@@ -315,18 +306,37 @@ def select_candidate_ids(
         return combined, -_stable_tie(seed, int(row["product_id"]))
 
     ranked = sorted(usable, key=rank_value, reverse=True)
-    selected: list[int] = []
-    brands: Counter[str] = Counter()
-
+    brand_order: list[str] = []
+    brand_rows: dict[str, list[int]] = defaultdict(list)
+    seen_ids: set[int] = set()
     for row in ranked:
-        if len(selected) >= _SECTION_SIZE:
-            break
         pid = int(row["product_id"])
         brand = str(row["brand_key"])
-        if pid in selected or brands[brand] >= 2:
+        if pid in seen_ids:
             continue
-        selected.append(pid)
-        brands[brand] += 1
+        seen_ids.add(pid)
+        if brand not in brand_rows:
+            brand_order.append(brand)
+        brand_rows[brand].append(pid)
+
+    # Rank decides the order within each brand and the order in which brands
+    # enter the rotation. Repeated rounds keep the mix even, while allowing a
+    # single/few brands to fill the full section instead of stopping at a cap.
+    selected: list[int] = []
+    depth = 0
+    while len(selected) < _SECTION_SIZE:
+        added = False
+        for brand in brand_order:
+            products = brand_rows[brand]
+            if depth >= len(products):
+                continue
+            selected.append(products[depth])
+            added = True
+            if len(selected) >= _SECTION_SIZE:
+                break
+        if not added:
+            break
+        depth += 1
 
     if require_full and len(selected) != _SECTION_SIZE:
         return []

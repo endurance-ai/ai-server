@@ -267,9 +267,9 @@ async def test_curation_sections_randomize_products_and_filter(client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_curation_editorial_section_is_not_truncated(client: AsyncClient, pool):
-    """운영자가 고른 목록은 개수와 무관하게 전부 나간다 (구 20개 컷 회귀 방지)."""
-    product_ids = [await _insert_product(pool, brand=f"Brand{i}", name=f"P{i}") for i in range(25)]
+async def test_curation_caps_editorial_section_at_one_hundred(client: AsyncClient, pool):
+    """저장된 editorial 목록도 API에서는 앞 100개까지만 반환한다."""
+    product_ids = [await _insert_product(pool, brand=f"Brand{i}", name=f"P{i}") for i in range(105)]
     await _insert_section(
         pool,
         section_id="editorial-long",
@@ -281,7 +281,8 @@ async def test_curation_editorial_section_is_not_truncated(client: AsyncClient, 
 
     resp = await client.get("/v1/curation", params={"gender": "women"})
     products = resp.json()["sections"][0]["products"]
-    assert {p["product_id"] for p in products} == set(product_ids)
+    assert len(products) == 100
+    assert {p["product_id"] for p in products} == set(product_ids[:100])
 
 
 @pytest.mark.asyncio
@@ -324,6 +325,28 @@ async def test_recently_viewed_is_conditional_authenticated_and_newest_first(cli
     response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
     section = {item["id"]: item for item in response.json()["sections"]}["recently-viewed"]
     assert [product["product_id"] for product in section["products"]] == [newer, older]
+
+
+@pytest.mark.asyncio
+async def test_recently_viewed_caps_at_one_hundred_and_keeps_newest(client: AsyncClient, pool):
+    auth, user_id = await _login(client)
+    product_ids = [await _insert_product(pool, brand=f"Viewed {index}") for index in range(105)]
+    await _insert_section(pool, section_id="recently-viewed", gender="women", product_ids=[], sort_order=4)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        for index, product_id in enumerate(product_ids):
+            await cur.execute(
+                """
+                INSERT INTO ai.product_views (user_id, product_id, session_id, viewed_at)
+                VALUES (%s, %s, %s, now() - make_interval(secs => %s))
+                """,
+                (user_id, product_id, str(uuid4()), 105 - index),
+            )
+        await conn.commit()
+
+    response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
+    section = {item["id"]: item for item in response.json()["sections"]}["recently-viewed"]
+    assert [product["product_id"] for product in section["products"]] == list(reversed(product_ids[5:]))
 
 
 @pytest.mark.asyncio
@@ -385,12 +408,38 @@ async def test_taste_picks_requires_positive_taste_and_matches_style(client: Asy
 
 
 @pytest.mark.asyncio
-async def test_favorite_brands_returns_more_than_thirty_products_from_one_brand(client: AsyncClient, pool):
+async def test_taste_picks_caps_at_one_hundred_products(client: AsyncClient, pool):
+    auth, user_id = await _login(client)
+    brand_id = await _insert_brand(pool, "Taste Limit", node_id=17)
+    product_ids = [
+        await _insert_product(pool, brand="Taste Limit", brand_node_id=brand_id, name=f"Taste {index}")
+        for index in range(105)
+    ]
+    await _insert_section(pool, section_id="taste-picks", gender="women", product_ids=[], sort_order=6)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO ai.user_style_scores (user_id, style_node_id, score, signal_count)
+            VALUES (%s, 17, 5, 1)
+            """,
+            (user_id,),
+        )
+        await conn.commit()
+
+    response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
+    section = {item["id"]: item for item in response.json()["sections"]}["taste-picks"]
+    assert len(section["products"]) == 100
+    assert {product["product_id"] for product in section["products"]} == set(product_ids[-100:])
+
+
+@pytest.mark.asyncio
+async def test_favorite_brands_caps_at_one_hundred_products(client: AsyncClient, pool):
     auth, user_id = await _login(client)
     brand_id = await _insert_brand(pool, "Favorite Brand")
     product_ids = [
         await _insert_product(pool, brand="Favorite Brand", brand_node_id=brand_id, name=f"Favorite {index}")
-        for index in range(35)
+        for index in range(105)
     ]
     await _insert_section(pool, section_id="favorite-brands", gender="women", product_ids=[], sort_order=7)
 
@@ -406,8 +455,8 @@ async def test_favorite_brands_returns_more_than_thirty_products_from_one_brand(
 
     response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
     section = {item["id"]: item for item in response.json()["sections"]}["favorite-brands"]
-    assert len(section["products"]) == 35
-    assert {product["product_id"] for product in section["products"]} == set(product_ids)
+    assert len(section["products"]) == 100
+    assert {product["product_id"] for product in section["products"]} == set(product_ids[-100:])
 
 
 @pytest.mark.asyncio
@@ -485,9 +534,9 @@ async def test_refresh_trending_ranks_brands_by_top_product_engagement(client: A
         )
         trending_ids = list((await cur.fetchone())[0])
 
-    assert set(trending_ids[:2]).issubset(set(products_a))
-    assert product_b == trending_ids[2]
-    assert len(set(products_a) & set(trending_ids)) == 2  # per-brand cap
+    assert trending_ids[0] in products_a
+    assert product_b == trending_ids[1]
+    assert len(set(products_a) & set(trending_ids)) == 3
 
 
 @pytest.mark.asyncio
@@ -559,7 +608,7 @@ async def test_refresh_under100_filters_bad_data(client: AsyncClient, pool):
     # unisex 는 검색(v6)과 같이 남녀 양쪽에 노출된다 — GENDER_MATCH_SQL 참조.
     for included in (mixed_gender, unisex):
         assert included in under
-    assert len([pid for pid in dupes if pid in under]) == 2  # 브랜드당 2개 캡
+    assert len([pid for pid in dupes if pid in under]) == 3
 
 
 @pytest.mark.asyncio
@@ -568,7 +617,7 @@ async def test_refresh_auto_sections_never_repeats_products_across_slots(client:
     from app.services.curation_refresh import refresh_auto_sections
 
     await _insert_auto_sections(pool)
-    for index in range(60):
+    for index in range(200):
         await _insert_product(pool, brand=f"Distinct Brand {index}", price=50000 + index)
 
     written = await refresh_auto_sections(pool)
@@ -581,7 +630,7 @@ async def test_refresh_auto_sections_never_repeats_products_across_slots(client:
         for section_id in ("trending-search", "under-100")
     ]
 
-    assert [len(product_ids) for product_ids in product_sets] == [30, 30]
+    assert [len(product_ids) for product_ids in product_sets] == [100, 100]
     assert product_sets[0].isdisjoint(product_sets[1])
 
 
