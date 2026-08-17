@@ -7,7 +7,6 @@ from uuid import UUID
 
 from app.services.curation_refresh import PRODUCT_FEATURES_JOIN, _quality_sql, _query_params
 from app.services.curation_sections import CURATION_SECTION_PRODUCT_LIMIT
-from app.services.curation_taste import feature_pairs
 
 
 async def personalized_product_ids(
@@ -114,6 +113,11 @@ async def personalized_product_ids(
 
     params.update(
         {
+            "taste_style_ids": list(taste_scores),
+            "taste_style_scores": list(taste_scores.values()),
+            "taste_feature_axes": [axis for axis, _value in feature_scores],
+            "taste_feature_values": [value for _axis, value in feature_scores],
+            "taste_feature_scores": list(feature_scores.values()),
             "positive_style_ids": positive_style_ids,
             "positive_colors": positive_features["color"],
             "positive_fits": positive_features["fit"],
@@ -124,40 +128,86 @@ async def personalized_product_ids(
     )
     await cur.execute(
         f"""
-        SELECT p.id, bn.primary_style_node_id, pf.feature_metadata
-        FROM public.products p
-        LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
-        {PRODUCT_FEATURES_JOIN}
-        WHERE NOT (p.id = ANY(%(excluded_ids)s))
-          AND {_quality_sql()}
-          AND (
-              bn.primary_style_node_id = ANY(CAST(%(positive_style_ids)s AS bigint[]))
-              OR pf.feature_metadata->>'primary_color' = ANY(CAST(%(positive_colors)s AS text[]))
-              OR pf.feature_metadata->>'fit' = ANY(CAST(%(positive_fits)s AS text[]))
-              OR pf.feature_metadata->>'pattern' = ANY(CAST(%(positive_patterns)s AS text[]))
-              OR pf.feature_metadata->>'neckline' = ANY(CAST(%(positive_necklines)s AS text[]))
-              OR EXISTS (
-                  SELECT 1
-                  FROM jsonb_array_elements_text(
-                      CASE
-                          WHEN jsonb_typeof(pf.feature_metadata->'material') = 'array'
-                          THEN pf.feature_metadata->'material'
-                          ELSE '[]'::jsonb
-                      END
-                  ) AS material(value)
-                  WHERE material.value = ANY(CAST(%(positive_materials)s AS text[]))
+        WITH style_preferences AS (
+            SELECT preference.style_node_id, preference.score
+            FROM unnest(
+                CAST(%(taste_style_ids)s AS bigint[]),
+                CAST(%(taste_style_scores)s AS double precision[])
+            ) AS preference(style_node_id, score)
+        ),
+        feature_preferences AS (
+            SELECT preference.axis, preference.value, preference.score
+            FROM unnest(
+                CAST(%(taste_feature_axes)s AS text[]),
+                CAST(%(taste_feature_values)s AS text[]),
+                CAST(%(taste_feature_scores)s AS double precision[])
+            ) AS preference(axis, value, score)
+        ),
+        candidates AS (
+            SELECT p.id,
+                   COALESCE(p.review_count, 0) AS review_count,
+                   COALESCE(sp.score, 0.0) AS style_score,
+                   pf.feature_metadata
+            FROM public.products p
+            LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
+            {PRODUCT_FEATURES_JOIN}
+            LEFT JOIN style_preferences sp ON sp.style_node_id = bn.primary_style_node_id
+            WHERE NOT (p.id = ANY(%(excluded_ids)s))
+              AND {_quality_sql()}
+              AND (
+                  bn.primary_style_node_id = ANY(CAST(%(positive_style_ids)s AS bigint[]))
+                  OR pf.feature_metadata->>'primary_color' = ANY(CAST(%(positive_colors)s AS text[]))
+                  OR pf.feature_metadata->>'fit' = ANY(CAST(%(positive_fits)s AS text[]))
+                  OR pf.feature_metadata->>'pattern' = ANY(CAST(%(positive_patterns)s AS text[]))
+                  OR pf.feature_metadata->>'neckline' = ANY(CAST(%(positive_necklines)s AS text[]))
+                  OR EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements_text(
+                          CASE
+                              WHEN jsonb_typeof(pf.feature_metadata->'material') = 'array'
+                              THEN pf.feature_metadata->'material'
+                              ELSE '[]'::jsonb
+                          END
+                      ) AS material(value)
+                      WHERE material.value = ANY(CAST(%(positive_materials)s AS text[]))
+                  )
               )
-          )
-        ORDER BY COALESCE(p.review_count, 0) DESC, p.id DESC
+        ),
+        scored AS (
+            SELECT c.id,
+                   c.review_count,
+                   c.style_score + COALESCE((
+                       SELECT sum(fp.score)
+                       FROM (
+                           SELECT 'color'::text AS axis, c.feature_metadata->>'primary_color' AS value
+                           UNION ALL
+                           SELECT 'fit', c.feature_metadata->>'fit'
+                           UNION ALL
+                           SELECT 'pattern', c.feature_metadata->>'pattern'
+                           UNION ALL
+                           SELECT 'neckline', c.feature_metadata->>'neckline'
+                           UNION ALL
+                           SELECT 'material', material.value
+                           FROM jsonb_array_elements_text(
+                               CASE
+                                   WHEN jsonb_typeof(c.feature_metadata->'material') = 'array'
+                                   THEN c.feature_metadata->'material'
+                                   ELSE '[]'::jsonb
+                               END
+                           ) AS material(value)
+                       ) AS product_feature
+                       JOIN feature_preferences fp
+                         ON fp.axis = product_feature.axis
+                        AND fp.value = product_feature.value
+                   ), 0.0) AS taste_score
+            FROM candidates c
+        )
+        SELECT id
+        FROM scored
+        WHERE taste_score > 0
+        ORDER BY taste_score DESC, review_count DESC, id DESC
+        LIMIT %(section_limit)s
         """,  # noqa: S608 -- interpolated SQL is composed only from module-owned fragments
         params,
     )
-    selected: list[int] = []
-    for product_id, style_node_id, metadata in await cur.fetchall():
-        score = taste_scores.get(int(style_node_id), 0.0) if style_node_id is not None else 0.0
-        score += sum(feature_scores.get(pair, 0.0) for pair in feature_pairs(metadata))
-        if score > 0:
-            selected.append(int(product_id))
-            if len(selected) >= CURATION_SECTION_PRODUCT_LIMIT:
-                break
-    return selected
+    return [int(row[0]) for row in await cur.fetchall()]
