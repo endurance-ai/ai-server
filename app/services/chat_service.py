@@ -345,9 +345,7 @@ class StreamingAdapter(MessengerAdapter):
         )
         return None
 
-    async def send_text_with_keyboard(
-        self, chat_id: int, text: str, keyboard: Any, **_kwargs: Any
-    ) -> int | None:
+    async def send_text_with_keyboard(self, chat_id: int, text: str, keyboard: Any, **_kwargs: Any) -> int | None:
         # parse_mode / disable_web_page_preview 같은 텔레그램 전용 kwargs 는 무시.
         # keyboard 정규화는 send_text_with_buttons 가 담당(모바일은 세로 리스트).
         return await self.send_text_with_buttons(chat_id, text, keyboard)
