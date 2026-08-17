@@ -59,6 +59,7 @@ async def _insert_product(
     in_stock: bool = True,
     name: str = "Test Product",
     category: str = "tops",
+    review_count: int = 0,
 ) -> int:
     async with pool.connection() as conn, conn.cursor() as cur:
         if brand_node_id is None:
@@ -75,8 +76,8 @@ async def _insert_product(
             """
             INSERT INTO public.products
                 (brand, name, price, original_price, sale_price, gender,
-                 image_url, product_url, brand_node_id, in_stock, category)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+                 image_url, product_url, brand_node_id, in_stock, category, review_count)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
             """,
             (
                 brand,
@@ -90,6 +91,7 @@ async def _insert_product(
                 brand_node_id,
                 in_stock,
                 category,
+                review_count,
             ),
         )
         row = await cur.fetchone()
@@ -105,6 +107,14 @@ async def _insert_section(pool, *, section_id: str, gender: str, product_ids: li
                 (section_id, gender, slot_type, display_type, title, subtitle,
                  product_ids, sort_order, is_active)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (section_id, gender) DO UPDATE SET
+                slot_type = EXCLUDED.slot_type,
+                display_type = EXCLUDED.display_type,
+                title = EXCLUDED.title,
+                subtitle = EXCLUDED.subtitle,
+                product_ids = EXCLUDED.product_ids,
+                sort_order = EXCLUDED.sort_order,
+                is_active = EXCLUDED.is_active
             """,
             (
                 section_id,
@@ -247,7 +257,14 @@ async def test_curation_sections_randomize_products_and_filter(client: AsyncClie
     p1 = await _insert_product(pool, brand="A")
     p2 = await _insert_product(pool, brand="B", original_price=70000, sale_price=45000)
     p_out = await _insert_product(pool, brand="C", in_stock=False)
-    await _insert_section(pool, section_id="trending-search", gender="women", product_ids=[p2, p_out, p1], sort_order=1)
+    p_men = await _insert_product(pool, brand="D", gender=["men"])
+    await _insert_section(
+        pool,
+        section_id="trending-search",
+        gender="women",
+        product_ids=[p2, p_out, p_men, p1],
+        sort_order=1,
+    )
     await _insert_section(pool, section_id="hidden", gender="women", product_ids=[p1], is_active=False)
     await _insert_section(pool, section_id="men-only", gender="men", product_ids=[p1])
 
@@ -257,7 +274,7 @@ async def test_curation_sections_randomize_products_and_filter(client: AsyncClie
     assert [s["id"] for s in sections] == ["trending-search"]  # inactive/타 gender 제외
     products = sections[0]["products"]
     ids = [p["product_id"] for p in products]
-    assert ids == [p1, p2]  # 품절 제외 후 API 응답 직전 섞기
+    assert ids == [p1, p2]  # 품절·반대 성별 제외 후 API 응답 직전 섞기
     shuffled.assert_called_once()
     by_id = {product["product_id"]: product for product in products}
     assert by_id[p2]["original_price"] == 70000.0
@@ -293,6 +310,81 @@ async def test_curation_profile_gender_overrides_param(client: AsyncClient, pool
     )
     resp = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
     assert resp.json()["gender"] == "men"  # 로그인은 프로필 우선
+
+
+@pytest.mark.asyncio
+async def test_curation_all_slots_exclude_opposite_gender_and_include_unisex(client: AsyncClient, pool):
+    auth, user_id = await _login(client)
+    await client.post(
+        "/v1/onboarding",
+        json={"gender": "women", "selected_brand_ids": []},
+        headers={"Authorization": auth},
+    )
+
+    products: dict[str, tuple[int, int]] = {}
+    for gender in ("women", "men", "unisex"):
+        brand_id = await _insert_brand(pool, f"{gender} Brand", node_id=17)
+        product_id = await _insert_product(
+            pool,
+            brand=f"{gender} Brand",
+            brand_node_id=brand_id,
+            gender=[gender],
+            original_price=100000,
+            sale_price=70000,
+        )
+        products[gender] = (product_id, brand_id)
+
+    all_product_ids = [product_id for product_id, _brand_id in products.values()]
+    await _insert_section(
+        pool,
+        section_id="trending-search",
+        gender="women",
+        product_ids=all_product_ids,
+        sort_order=1,
+    )
+    for sort_order, section_id in enumerate(
+        ("recently-viewed", "saved-on-sale", "taste-picks", "favorite-brands"),
+        start=2,
+    ):
+        await _insert_section(pool, section_id=section_id, gender="women", product_ids=[], sort_order=sort_order)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        for product_id, brand_id in products.values():
+            await cur.execute(
+                "INSERT INTO ai.product_views (user_id, product_id, session_id) VALUES (%s, %s, %s)",
+                (user_id, product_id, str(uuid4())),
+            )
+            await cur.execute(
+                "INSERT INTO ai.saves (user_id, product_id) VALUES (%s, %s)",
+                (user_id, str(product_id)),
+            )
+            await cur.execute(
+                """
+                INSERT INTO ai.user_brand_picks (user_id, brand_id, style_node_id, source)
+                VALUES (%s, %s, 17, 'follow')
+                """,
+                (user_id, brand_id),
+            )
+        await cur.execute(
+            """
+            INSERT INTO ai.user_style_scores (user_id, style_node_id, score, signal_count)
+            VALUES (%s, 17, 5, 1)
+            """,
+            (user_id,),
+        )
+        await conn.commit()
+
+    response = await client.get(
+        "/v1/curation",
+        params={"gender": "men"},
+        headers={"Authorization": auth},
+    )
+    assert response.status_code == 200
+    assert response.json()["gender"] == "women"
+    sections = {section["id"]: section for section in response.json()["sections"]}
+    expected = {products["women"][0], products["unisex"][0]}
+    for section_id in ("trending-search", "recently-viewed", "saved-on-sale", "taste-picks", "favorite-brands"):
+        assert {product["product_id"] for product in sections[section_id]["products"]} == expected
 
 
 @pytest.mark.asyncio
@@ -410,18 +502,74 @@ async def test_taste_picks_requires_positive_taste_and_matches_style(client: Asy
 @pytest.mark.asyncio
 async def test_taste_picks_caps_at_one_hundred_products(client: AsyncClient, pool):
     auth, user_id = await _login(client)
-    brand_id = await _insert_brand(pool, "Taste Limit", node_id=17)
-    product_ids = [
-        await _insert_product(pool, brand="Taste Limit", brand_node_id=brand_id, name=f"Taste {index}")
-        for index in range(105)
+    weak_brand_id = await _insert_brand(pool, "Weak Taste", node_id=17)
+    strong_brand_id = await _insert_brand(pool, "Strong Taste", node_id=18)
+    weak_product_ids = [
+        await _insert_product(
+            pool,
+            brand="Weak Taste",
+            brand_node_id=weak_brand_id,
+            name=f"Weak Taste {index}",
+            review_count=100,
+        )
+        for index in range(101)
     ]
+    strong_product_id = await _insert_product(
+        pool,
+        brand="Strong Taste",
+        brand_node_id=strong_brand_id,
+        name="Strong Taste Product",
+        review_count=0,
+    )
     await _insert_section(pool, section_id="taste-picks", gender="women", product_ids=[], sort_order=6)
 
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
             INSERT INTO ai.user_style_scores (user_id, style_node_id, score, signal_count)
-            VALUES (%s, 17, 5, 1)
+            VALUES (%s, 17, 1, 1), (%s, 18, 10, 1)
+            """,
+            (user_id, user_id),
+        )
+        await conn.commit()
+
+    response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
+    section = {item["id"]: item for item in response.json()["sections"]}["taste-picks"]
+    assert len(section["products"]) == 100
+    selected_ids = {product["product_id"] for product in section["products"]}
+    assert strong_product_id in selected_ids
+    assert len(selected_ids & set(weak_product_ids)) == 99
+
+
+@pytest.mark.asyncio
+async def test_taste_picks_applies_negative_feature_scores_to_total(client: AsyncClient, pool):
+    auth, user_id = await _login(client)
+    brand_id = await _insert_brand(pool, "Feature Taste", node_id=17)
+    blocked = await _insert_product(pool, brand="Feature Taste", brand_node_id=brand_id, name="Blocked")
+    allowed = await _insert_product(pool, brand="Feature Taste", brand_node_id=brand_id, name="Allowed")
+    await _insert_section(pool, section_id="taste-picks", gender="women", product_ids=[], sort_order=6)
+
+    async with pool.connection() as conn, conn.cursor() as cur:
+        for product_id, color in ((blocked, "BLACK"), (allowed, "WHITE")):
+            await cur.execute(
+                """
+                INSERT INTO public.product_features
+                    (product_id, retrieval_text, feature_metadata, feature_version, vlm_model)
+                VALUES (%s, '', jsonb_build_object('primary_color', %s::text), 'test', 'test')
+                """,
+                (product_id, color),
+            )
+        await cur.execute(
+            """
+            INSERT INTO ai.user_style_scores (user_id, style_node_id, score, signal_count)
+            VALUES (%s, 17, 3, 1)
+            """,
+            (user_id,),
+        )
+        await cur.execute(
+            """
+            INSERT INTO ai.user_feature_scores (user_id, axis, value, score, signal_count)
+            VALUES (%s, 'color', 'BLACK', -4, 1)
             """,
             (user_id,),
         )
@@ -429,8 +577,7 @@ async def test_taste_picks_caps_at_one_hundred_products(client: AsyncClient, poo
 
     response = await client.get("/v1/curation", params={"gender": "women"}, headers={"Authorization": auth})
     section = {item["id"]: item for item in response.json()["sections"]}["taste-picks"]
-    assert len(section["products"]) == 100
-    assert {product["product_id"] for product in section["products"]} == set(product_ids[-100:])
+    assert {product["product_id"] for product in section["products"]} == {allowed}
 
 
 @pytest.mark.asyncio
