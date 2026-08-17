@@ -40,10 +40,13 @@ from app.services.curation_refresh import (  # noqa: E402
     _quality_sql,
     _query_params,
 )
-from app.services.curation_sections import PERSONALIZED_AUTO_SECTIONS  # noqa: E402
+from app.services.curation_sections import (  # noqa: E402
+    CURATION_SECTION_PRODUCT_LIMIT,
+    PERSONALIZED_AUTO_SECTIONS,
+)
 
 # 어드민 `SectionPayload.product_ids` 계약과 같은 구좌 전체 상한.
-# 브랜드당 상한은 없어 한 브랜드만으로도 30개 이상을 채울 수 있다.
+# 브랜드당 상한은 없어 한 브랜드만으로도 응답 상한 100개를 채울 수 있다.
 _BRAND_SECTION_LIMIT = 200
 
 # ── 구좌 정의 ─────────────────────────────────────────────────────────────────
@@ -484,7 +487,11 @@ async def _report(cur: Any, rows: list[dict[str, Any]]) -> None:
         live = await _hydratable_count(cur, row["product_ids"], row["gender"])
         flag = "on" if row["is_active"] else "off"
         is_brand_section = any(spec["section_id"] == row["section_id"] for spec in BRAND_SECTIONS)
-        warn = "  ← 30개 미만" if row["is_active"] and is_brand_section and live < 30 else ""
+        warn = (
+            f"  ← {CURATION_SECTION_PRODUCT_LIMIT}개 미만"
+            if row["is_active"] and is_brand_section and live < CURATION_SECTION_PRODUCT_LIMIT
+            else ""
+        )
         print(
             f"{row['section_id']:<30} {row['gender']:<6} {row['slot_type']:<9} "
             f"{row['sort_order']:>3} {flag:<4} {len(row['product_ids']):>4} {live:>6}{warn}"

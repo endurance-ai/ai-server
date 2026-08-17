@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Final
 
+CURATION_SECTION_PRODUCT_LIMIT: Final = 100
+
 DAILY_AUTO_SECTION_IDS: Final = ("trending-search", "under-100")
 
 PERSONALIZED_AUTO_SECTIONS: Final = (

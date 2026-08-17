@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from app.services.curation_refresh import PRODUCT_FEATURES_JOIN, _quality_sql, _query_params
+from app.services.curation_sections import CURATION_SECTION_PRODUCT_LIMIT
 from app.services.curation_taste import feature_pairs
 
 
@@ -19,11 +20,12 @@ async def personalized_product_ids(
     taste_scores: dict[int, float],
     feature_scores: dict[tuple[str, str], float],
 ) -> list[int]:
-    """Return every eligible ID, or an empty list when the slot condition is unmet."""
+    """Return up to the API section limit, or an empty list when ineligible."""
     params = {
         **_query_params(gender),
         "user_id": user_id,
         "excluded_ids": list(excluded_ids),
+        "section_limit": CURATION_SECTION_PRODUCT_LIMIT,
     }
 
     if section_id == "recently-viewed":
@@ -42,6 +44,7 @@ async def personalized_product_ids(
             WHERE NOT (p.id = ANY(%(excluded_ids)s))
               AND {_quality_sql()}
             ORDER BY r.last_viewed_at DESC, p.id DESC
+            LIMIT %(section_limit)s
             """,  # noqa: S608 -- interpolated SQL is composed only from module-owned fragments
             params,
         )
@@ -64,6 +67,7 @@ async def personalized_product_ids(
               AND {_quality_sql()}
             ORDER BY ((p.original_price - p.sale_price) / NULLIF(p.original_price, 0)) DESC,
                      s.created_at DESC, p.id DESC
+            LIMIT %(section_limit)s
             """,  # noqa: S608 -- interpolated SQL is composed only from module-owned fragments
             params,
         )
@@ -89,6 +93,7 @@ async def personalized_product_ids(
             SELECT id
             FROM ranked
             ORDER BY brand_rank ASC, brand_node_id ASC, id DESC
+            LIMIT %(section_limit)s
             """,  # noqa: S608 -- interpolated SQL is composed only from module-owned fragments
             params,
         )
@@ -153,4 +158,6 @@ async def personalized_product_ids(
         score += sum(feature_scores.get(pair, 0.0) for pair in feature_pairs(metadata))
         if score > 0:
             selected.append(int(product_id))
+            if len(selected) >= CURATION_SECTION_PRODUCT_LIMIT:
+                break
     return selected

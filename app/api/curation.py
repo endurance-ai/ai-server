@@ -31,13 +31,13 @@ from app.services.curation_refresh import (
     PRODUCT_FEATURES_JOIN,
     select_candidate_ids,
 )
-from app.services.curation_sections import PERSONALIZED_AUTO_SECTION_IDS
+from app.services.curation_sections import CURATION_SECTION_PRODUCT_LIMIT, PERSONALIZED_AUTO_SECTION_IDS
 from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
 
-# 구좌당 상품 수를 읽기 경로에서 자르지 않는다. 공용 auto는 리프레셔 쿼터,
-# editorial은 저장 계약을 따르고, 개인화 auto는 적격 상품을 전부 반환한다.
+# 모바일은 홈에서 구좌당 10개만 렌더한다. 개인화 구좌가 수만 개 상품을 반환해
+# 캐시 교체가 늦어지지 않도록 모든 구좌의 API 응답을 공통으로 제한한다.
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ async def _load_sections(
                     if user_id is not None
                     else []
                 )
-                selected_by_section[section_id] = selected
+                selected_by_section[section_id] = selected[:CURATION_SECTION_PRODUCT_LIMIT]
                 continue
 
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
@@ -195,6 +195,7 @@ async def _load_sections(
                 )
                 if not selected:
                     selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
+            selected = selected[:CURATION_SECTION_PRODUCT_LIMIT]
             selected_by_section[section_id] = selected
             excluded_ids.update(selected)
 

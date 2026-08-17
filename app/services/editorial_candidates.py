@@ -7,8 +7,7 @@ This is intentionally separate from the customer-facing search path:
 2. Each archetype retrieves only its strongest catalog matches.
 3. A vision model reviews the actual product images for concept fit and image
    quality.
-4. The final list is quality-ranked with archetype balancing and a global
-   brand cap.
+4. The final list is quality-ranked with archetype and brand balancing.
 """
 
 from __future__ import annotations
@@ -340,11 +339,13 @@ def _select_final_candidates(
     query_cap = max(2, (limit + max(query_count, 1) - 1) // max(query_count, 1))
     selected: list[EditorialCandidate] = []
     deferred: list[EditorialCandidate] = []
+    brand_overflow: list[EditorialCandidate] = []
     brand_counts: dict[str, int] = defaultdict(int)
     query_counts: dict[str, int] = defaultdict(int)
     for candidate in eligible:
         brand_key = candidate.brand.casefold()
         if brand_counts[brand_key] >= brand_cap:
+            brand_overflow.append(candidate)
             continue
         if query_counts[candidate.matched_query] >= query_cap:
             deferred.append(candidate)
@@ -358,11 +359,36 @@ def _select_final_candidates(
     for candidate in deferred:
         brand_key = candidate.brand.casefold()
         if brand_counts[brand_key] >= brand_cap:
+            brand_overflow.append(candidate)
             continue
         brand_counts[brand_key] += 1
         selected.append(candidate)
         if len(selected) >= limit:
             break
+
+    if len(selected) < limit and brand_overflow:
+        overflow_by_brand: dict[str, list[EditorialCandidate]] = defaultdict(list)
+        brand_order: list[str] = []
+        for candidate in brand_overflow:
+            brand_key = candidate.brand.casefold()
+            if brand_key not in overflow_by_brand:
+                brand_order.append(brand_key)
+            overflow_by_brand[brand_key].append(candidate)
+
+        depth = 0
+        while len(selected) < limit:
+            added = False
+            for brand_key in brand_order:
+                candidates = overflow_by_brand[brand_key]
+                if depth >= len(candidates):
+                    continue
+                selected.append(candidates[depth])
+                added = True
+                if len(selected) >= limit:
+                    break
+            if not added:
+                break
+            depth += 1
 
     selected.sort(key=lambda row: (-row.editorial_score, row.distance))
     return selected
