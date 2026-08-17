@@ -346,8 +346,14 @@ class StreamingAdapter(MessengerAdapter):
         return None
 
     async def send_text_with_keyboard(self, chat_id: int, text: str, keyboard: Any, **_kwargs: Any) -> int | None:
-        # parse_mode / disable_web_page_preview 같은 텔레그램 전용 kwargs 는 무시.
-        # keyboard 정규화는 send_text_with_buttons 가 담당(모바일은 세로 리스트).
+        # respond.py 의 상품 요약(_build_summary)은 parse_mode="HTML" 로 온다 —
+        # `<b>브랜드<b>` + 링크가 박힌 번호 목록. 앱은 HTML 을 렌더하지 않으므로
+        # 태그가 raw 로 노출되고, self._texts 에 쌓여 get_reply()→DB 저장까지 돼
+        # 재진입 시에도 남는다. 앱은 상품 카드로 결과를 이미 보여주므로 요약은
+        # 통째로 버린다. (진짜 clarify — pick_item / gender / search prompt — 는
+        # parse_mode 없이 오므로 아래 send_text_with_buttons 로 정상 통과.)
+        if _kwargs.get("parse_mode"):
+            return None
         return await self.send_text_with_buttons(chat_id, text, keyboard)
 
     async def send_progress(self, chat_id: int, stage: str) -> bool:
