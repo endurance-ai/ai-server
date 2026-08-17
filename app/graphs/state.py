@@ -62,6 +62,10 @@ class InputState(BaseModel):
     thread_id: UUID = Field(default_factory=uuid4)
     turn_no: int = 0
 
+    # 앱 이미지 인풋(스테이징)에서 사용자가 이미 항목을 골랐을 때 True — 이미지가
+    # 첨부돼도 pick_item(1,2,3,4) 재선택을 건너뛰고 바로 검색으로 간다.
+    skip_item_pick: bool = False
+
     # Per-request search filters from the consumer mobile filter UI (chat API).
     # Threaded into the tool dispatch ctx by react_loop._build_ctx so
     # search_products / refine_search can apply them. Telegram intake leaves

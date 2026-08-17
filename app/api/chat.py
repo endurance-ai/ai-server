@@ -84,6 +84,9 @@ class ChatRequest(BaseModel):
     # Passed through to ChannelMessage.urls — the existing SSRF guard there drops
     # it silently if malformed, same fail-open contract as the Pinterest-link path.
     attached_image_url: str | None = None
+    # 앱 이미지 인풋 스테이징에서 사용자가 이미 항목을 골랐을 때 true — 이미지가
+    # 첨부돼도 pick_item(1,2,3,4) 을 건너뛰고 바로 검색(이미지 임베딩 블렌드)으로.
+    skip_item_pick: bool = False
 
     @field_validator("gender", mode="before")
     @classmethod
@@ -176,6 +179,7 @@ async def create_session(
         gender=body.gender,
         price_max=body.price_max,
         attached_image_url=body.attached_image_url,
+        skip_item_pick=body.skip_item_pick,
     )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 
@@ -207,6 +211,7 @@ async def continue_session(
         gender=body.gender,
         price_max=body.price_max,
         attached_image_url=body.attached_image_url,
+        skip_item_pick=body.skip_item_pick,
     )
     return StreamingResponse(_to_sse(gen), media_type="text/event-stream", headers=_SSE_HEADERS)
 

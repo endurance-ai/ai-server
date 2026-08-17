@@ -139,6 +139,10 @@ def build_graph() -> Any:
     def _route_after_vision_v2(state: WorkingState) -> str:
         rich = state.vision_result
         items = state.detected_items
+        # 앱 스테이징에서 이미 항목을 골라 보낸 경우 — 여러 항목이 검출돼도
+        # pick_item(1,2,3,4) 재선택을 건너뛰고 바로 검색으로.
+        if state.skip_item_pick:
+            return "agent"
         if rich is not None and not getattr(rich, "isApparel", True):
             return "agent"
         if items and len(items) > 1:
