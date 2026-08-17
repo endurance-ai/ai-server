@@ -557,6 +557,7 @@ async def invoke(
     *,
     gender: str | None = None,
     price_max: int | None = None,
+    skip_item_pick: bool = False,
 ) -> tuple[UUID, BotReply]:
     """Invoke the fashion bot graph for a consumer user.
 
@@ -588,6 +589,7 @@ async def invoke(
         turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
+        skip_item_pick=skip_item_pick,
     )
 
     capture = CaptureAdapter()
@@ -629,6 +631,7 @@ async def invoke_streaming(
     gender: str | None = None,
     price_max: int | None = None,
     attached_image_url: str | None = None,
+    skip_item_pick: bool = False,
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
 
@@ -691,6 +694,7 @@ async def invoke_streaming(
         turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
+        skip_item_pick=skip_item_pick,
     )
 
     streaming = StreamingAdapter()
