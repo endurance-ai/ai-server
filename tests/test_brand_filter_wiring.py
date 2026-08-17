@@ -10,12 +10,19 @@ from __future__ import annotations
 
 from app.agents.tools.search_products import _resolve_brand_filter
 from app.infrastructure.repositories import brand_node_cache
-from app.infrastructure.repositories.brand_node_cache import BrandAttributes, normalize_brand
+from app.infrastructure.repositories.brand_node_cache import _surface_keys
 
 
 def _seed_cache(monkeypatch, *names: str) -> None:
-    cache = {normalize_brand(n): BrandAttributes(brand_name=n) for n in names}
-    monkeypatch.setattr(brand_node_cache, "_cache", cache)
+    """Build the filter index the way warm_cache does (every Latin/Hangul
+    surface key → the group's canonical name(s)), so the wiring test exercises
+    `_resolve_brand_filter` against a realistic `_filter_index`."""
+    filt: dict[str, list[str]] = {}
+    for n in names:
+        for key in _surface_keys(n):
+            filt.setdefault(key, []).append(n)
+    monkeypatch.setattr(brand_node_cache, "_filter_index", filt)
+    monkeypatch.setattr(brand_node_cache, "_acronym_index", {})
 
 
 def test_resolves_canonical_name_case_insensitive(monkeypatch):
@@ -27,6 +34,18 @@ def test_resolves_canonical_name_case_insensitive(monkeypatch):
 def test_normalization_strips_punctuation(monkeypatch):
     _seed_cache(monkeypatch, "1017 ALYX 9SM")
     assert _resolve_brand_filter("1017 alyx 9sm") == ["1017 ALYX 9SM"]
+
+
+def test_resolves_korean_surface_of_bilingual_name(monkeypatch):
+    # brand_name carries both languages; a Korean-language query must resolve.
+    _seed_cache(monkeypatch, "MONDAY EDITION (먼데이에디션)")
+    assert _resolve_brand_filter("먼데이에디션") == ["MONDAY EDITION (먼데이에디션)"]
+    assert _resolve_brand_filter("monday edition") == ["MONDAY EDITION (먼데이에디션)"]
+
+
+def test_resolves_parenthetical_acronym(monkeypatch):
+    _seed_cache(monkeypatch, "Post Archive Faction (PAF)")
+    assert _resolve_brand_filter("paf") == ["Post Archive Faction (PAF)"]
 
 
 def test_unknown_brand_fails_open(monkeypatch):
