@@ -19,6 +19,7 @@ import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
@@ -308,28 +309,48 @@ class StreamingAdapter(MessengerAdapter):
         )
         return 0
 
-    async def send_text_with_buttons(self, chat_id: int, text: str, buttons: list[tuple[str, str]]) -> int | None:
+    async def send_text_with_buttons(self, chat_id: int, text: str, buttons: Any) -> int | None:
         self._texts.append(text)  # keep get_reply() history parity with send_text
-        axis = _infer_clarify_axis(buttons[0][1]) if buttons else "unknown"
+        # 호출자마다 버튼 모양이 다르다 — flat (label,cb) 튜플(pick_item/gender),
+        # 텔레그램식 rows-of-dicts([[{"text","callback_data"}]], ask_user_clarification)
+        # 모두 (label, cb) 튜플로 정규화. (기존엔 dict 모양에서 buttons[0][1] 이
+        # IndexError → clarify 실패 → 텍스트만 응답하던 버그.)
+        opts: list[tuple[str, str]] = []
+        for item in buttons or []:
+            if (
+                isinstance(item, (tuple, list))
+                and len(item) == 2
+                and isinstance(item[0], str)
+                and isinstance(item[1], str)
+            ):
+                opts.append((item[0], item[1]))
+            elif isinstance(item, dict):
+                opts.append((str(item.get("text", "")), str(item.get("callback_data", ""))))
+            elif isinstance(item, (tuple, list)):
+                for b in item:
+                    if isinstance(b, dict):
+                        opts.append((str(b.get("text", "")), str(b.get("callback_data", ""))))
+                    elif isinstance(b, (tuple, list)) and len(b) == 2:
+                        opts.append((str(b[0]), str(b[1])))
+        axis = _infer_clarify_axis(opts[0][1]) if opts else "unknown"
         await self._queue.put(
             (
                 "clarify",
                 {
                     "axis": axis,
                     "prompt": text,
-                    "options": [{"label": label, "callback": cb} for label, cb in buttons],
+                    "options": [{"label": label, "callback": cb} for label, cb in opts],
                 },
             )
         )
         return None
 
     async def send_text_with_keyboard(
-        self, chat_id: int, text: str, keyboard: list[list[tuple[str, str]]]
+        self, chat_id: int, text: str, keyboard: Any, **_kwargs: Any
     ) -> int | None:
-        # Mobile renders options as a vertical list — row grouping (a Telegram
-        # inline-keyboard concern) doesn't matter here, so flatten.
-        flat = [pair for row in keyboard for pair in row]
-        return await self.send_text_with_buttons(chat_id, text, flat)
+        # parse_mode / disable_web_page_preview 같은 텔레그램 전용 kwargs 는 무시.
+        # keyboard 정규화는 send_text_with_buttons 가 담당(모바일은 세로 리스트).
+        return await self.send_text_with_buttons(chat_id, text, keyboard)
 
     async def send_progress(self, chat_id: int, stage: str) -> bool:
         # Non-visible heartbeat — clients use it to reset stall-timeout while
