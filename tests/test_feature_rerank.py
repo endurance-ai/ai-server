@@ -43,6 +43,37 @@ def test_rerank_no_signal_no_feature_is_noop():
     assert out is cands
 
 
+def test_attr_align_fit_lifts_matching_candidate_without_profile():
+    # "우와 비슷하다" — 쿼리 target fit 과 맞는 후보를, 임베딩 거리가 더 먼데도 위로.
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.10, "feature_metadata": {"fit": "slim"}},
+        {"id": "2", "brand": "B", "distance": 0.16, "feature_metadata": {"fit": "oversized"}},
+    ]
+    out = rerank(
+        cands,
+        None,
+        weights=RerankWeights(attr_fit=0.20),
+        target_attrs={"fit": {"oversized"}},
+    )
+    assert [c["id"] for c in out] == ["2", "1"]
+
+
+def test_attr_align_alone_triggers_reorder_for_anonymous():
+    # target_attrs 만으로 (profile/feature_scores 없이) reorder 가 켜져야 한다.
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.12, "feature_metadata": {"fit": "regular"}},
+        {"id": "2", "brand": "B", "distance": 0.14, "feature_metadata": {"fit": "relaxed"}},
+    ]
+    out = rerank(cands, None, weights=RerankWeights(attr_fit=0.20), target_attrs={"fit": {"relaxed"}})
+    assert [c["id"] for c in out] == ["2", "1"]
+
+
+def test_attr_align_no_target_is_noop():
+    cands = [{"id": "1", "brand": "A", "distance": 0.1, "feature_metadata": {"fit": "slim"}}]
+    out = rerank(cands, None, weights=RerankWeights(attr_fit=0.20), target_attrs={})
+    assert out is cands
+
+
 def test_mean_feature_pref_excludes_pinned_axes():
     # Phase 6-② adaptive α — "blanks = taste": a query-pinned axis is dropped
     # from the match so taste only speaks for the axes the user left open.

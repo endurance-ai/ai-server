@@ -114,6 +114,46 @@ def _query_pinned_axes(item: Any) -> frozenset[str]:
     return frozenset(pinned)
 
 
+# 입력 fit 표현 → product_features.feature_metadata.fit vocab
+# (regular/relaxed/slim/longline/oversized/cropped/skinny) 정규화 맵.
+_FIT_NORM: dict[str, set[str]] = {
+    "oversized": {"oversized"},
+    "oversize": {"oversized"},
+    "loose": {"relaxed", "oversized"},
+    "relaxed": {"relaxed"},
+    "boxy": {"oversized", "relaxed"},
+    "drop-shoulder": {"oversized"},
+    "wide": {"relaxed"},
+    "wide-leg": {"relaxed"},
+    "wideleg": {"relaxed"},
+    "regular": {"regular"},
+    "slim": {"slim", "skinny"},
+    "skinny": {"skinny"},
+    "fitted": {"slim", "skinny"},
+    "cropped": {"cropped"},
+    "crop": {"cropped"},
+    "longline": {"longline"},
+}
+
+
+def _query_target_attrs(item: Any) -> dict[str, set[str]]:
+    """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
+
+    request 계약에 존재하는 fit/fabric 만 취한다. color/subcategory 는 이미 RPC
+    하드게이트라(모든 후보가 이미 일치) 정렬에서 제외. 값은 feature vocab 집합으로
+    정규화 — fit 은 동의어 맵, material 은 소문자 토큰.
+    """
+    out: dict[str, set[str]] = {}
+    fit = str(getattr(item, "fit", None) or "").strip().lower()
+    if fit:
+        vals = _FIT_NORM.get(fit)
+        out["fit"] = vals if vals else {fit}
+    fab = str(getattr(item, "fabric", None) or "").strip().lower()
+    if fab:
+        out["material"] = {fab}
+    return {k: v for k, v in out.items() if v}
+
+
 async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
     """Attach `public.product_features.feature_metadata` to candidate rows in place.
 
@@ -314,19 +354,27 @@ async def search_service(state: PipelineState) -> PipelineState:
     # the personalized order. Skipped when (a) flag off, (b) no user_key
     # (e.g., public /recommend), (c) no signal in the profile, (d) any
     # unexpected error (fail-open: keep RPC order).
-    if settings.PERSONALIZE_RERANK_ENABLED and rows and state.user_key:
+    # 속성정렬 ("우와 비슷하다") 은 쿼리 의도라 익명/콜드 유저에도 적용.
+    target_attrs = _query_target_attrs(req.item) if settings.ATTR_ALIGN_ENABLED else {}
+    want_personalize = settings.PERSONALIZE_RERANK_ENABLED and bool(state.user_key)
+    want_attr = bool(target_attrs)
+    if rows and (want_personalize or want_attr):
         try:
-            from app.infrastructure.memory.taste_profile import get_taste_store
-            from app.scoring import feature_scores_cache
+            profile = None
+            feature_scores = None
+            exclude_axes = None
+            if want_personalize:
+                from app.infrastructure.memory.taste_profile import get_taste_store
+                from app.scoring import feature_scores_cache
 
-            profile = get_taste_store().get_or_create(state.user_key)
-            # Visual-feature taste (ai.user_feature_scores) is only primed for the
-            # app-auth'd search path; Telegram / internal /recommend read None here
-            # and stay unchanged. When present, attach each candidate's enriched
-            # features (one batch query) so the rerank can score color/fit/material.
-            feature_scores = feature_scores_cache.get(state.user_key)
-            exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
-            if feature_scores:
+                profile = get_taste_store().get_or_create(state.user_key)
+                # Visual-feature taste (ai.user_feature_scores) is only primed for the
+                # app-auth'd search path; Telegram / internal /recommend read None.
+                feature_scores = feature_scores_cache.get(state.user_key)
+                exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
+            # 후보 feature_metadata 는 개인화(feature_scores) 또는 속성정렬 둘 중
+            # 하나라도 필요하면 한 번에 붙인다(1 batch query).
+            if feature_scores or want_attr:
                 await _attach_feature_metadata(rows)
             weights = RerankWeights(
                 liked_brand=settings.PERSONALIZE_LIKED_BRAND_W,
@@ -335,15 +383,24 @@ async def search_service(state: PipelineState) -> PipelineState:
                 price_fit=settings.PERSONALIZE_PRICE_FIT_W,
                 gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
                 feature=settings.PERSONALIZE_FEATURE_W,
+                attr_fit=settings.ATTR_ALIGN_FIT_W if want_attr else 0.0,
+                attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(
                     "[STEP 4.65][rerank] adaptive-α: query pinned axes=%s → excluded from feature match",
                     sorted(exclude_axes),
                 )
+            if want_attr:
+                logger.info("[STEP 4.65][rerank] 속성정렬 target=%s", {k: sorted(v) for k, v in target_attrs.items()})
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
             state.raw_candidates = _personalize_rerank(
-                rows, profile, weights=weights, feature_scores=feature_scores, exclude_axes=exclude_axes
+                rows,
+                profile,
+                weights=weights,
+                feature_scores=feature_scores,
+                exclude_axes=exclude_axes,
+                target_attrs=target_attrs,
             )
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:
