@@ -60,6 +60,73 @@ _MODAL_TIMEOUT = 60.0
 _DEFAULT_TOP_K = 5
 
 
+# --- Feature-metadata attribute maps ("우와 비슷하다" — 구조화 속성 채점) ---
+# products.product_features.feature_metadata 는 VLM 추출 구조화 속성(핏/색/넥라인/
+# 패턴, 커버리지 사실상 완전)이다. color/fit 을 상품 NAME substring 이 아니라 이
+# 속성으로 채점하면 "결과가 실제로 그 핏/색인가"를 정확히 잰다 (legacy name-proxy
+# 는 이름에 색·핏이 적힌 상품에서만 맞아 저평가된다).
+_COLOR_TOKEN_TO_FAMILY: dict[str, set[str]] = {
+    "black": {"BLACK"},
+    "블랙": {"BLACK"},
+    "white": {"WHITE"},
+    "화이트": {"WHITE"},
+    "ivory": {"CREAM", "WHITE"},
+    "cream": {"CREAM"},
+    "beige": {"BEIGE", "CREAM"},
+    "베이지": {"BEIGE", "CREAM"},
+    "camel": {"BEIGE", "BROWN", "KHAKI"},
+    "tan": {"BEIGE", "BROWN", "KHAKI"},
+    "khaki": {"KHAKI"},
+    "grey": {"GREY"},
+    "gray": {"GREY"},
+    "그레이": {"GREY"},
+    "blue": {"BLUE", "NAVY"},
+    "baby blue": {"BLUE"},
+    "navy": {"NAVY"},
+    "brown": {"BROWN"},
+    "브라운": {"BROWN"},
+    "cognac": {"BROWN"},
+    "chocolate": {"BROWN"},
+    "green": {"GREEN"},
+    "red": {"RED"},
+    "yellow": {"YELLOW"},
+    "orange": {"ORANGE"},
+    "pink": {"PINK"},
+    "lavender": {"PURPLE"},
+    "purple": {"PURPLE"},
+    # 의도적으로 미매핑(너무 모호해 채점 제외): "pastel", "multi"
+}
+_FIT_TOKEN_TO_VALUE: dict[str, set[str]] = {
+    "oversized": {"oversized"},
+    "loose": {"relaxed", "oversized"},
+    "relaxed": {"relaxed"},
+    "boxy": {"oversized", "relaxed"},
+    "drop-shoulder": {"oversized"},
+    "wide": {"relaxed"},
+    "wide-leg": {"relaxed"},
+    "wideleg": {"relaxed"},
+    "slim": {"slim", "skinny"},
+    "skinny": {"skinny"},
+    "cropped": {"cropped"},
+    "longline": {"longline"},
+    "regular": {"regular"},
+}
+
+
+def _expected_color_families(color_any: list[str]) -> set[str]:
+    fams: set[str] = set()
+    for tok in color_any or []:
+        fams |= _COLOR_TOKEN_TO_FAMILY.get(tok.strip().lower(), set())
+    return fams
+
+
+def _expected_fit_values(fit_any: list[str]) -> set[str]:
+    vals: set[str] = set()
+    for tok in fit_any or []:
+        vals |= _FIT_TOKEN_TO_VALUE.get(tok.strip().lower(), set())
+    return vals
+
+
 # --- Modal embedding -------------------------------------------------------
 
 
@@ -169,6 +236,24 @@ def _search_products_v6(
         return list(cur.fetchall())
 
 
+def _attach_feature_metadata(conn: psycopg.Connection, rows: list[dict[str, Any]]) -> None:
+    """결과 id 들의 product_features.feature_metadata 를 배치 조회해 row['fmeta']
+    로 붙인다. 구조화 속성 채점의 ground-truth 단일 출처."""
+    ids = [r["id"] for r in rows if r.get("id") is not None]
+    if not ids:
+        return
+    by_id: dict[Any, dict[str, Any]] = {}
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT product_id, feature_metadata FROM product_features WHERE product_id = ANY(%s)",
+            [ids],
+        )
+        for r in cur.fetchall():
+            by_id[r["product_id"]] = r["feature_metadata"] or {}
+    for row in rows:
+        row["fmeta"] = by_id.get(row.get("id"))
+
+
 # --- Scoring ---------------------------------------------------------------
 
 
@@ -214,6 +299,9 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
             "keyword_hit": 0.0,
             "color_hit": None,
             "fit_hit": None,
+            "color_feat_hit": None,
+            "fit_feat_hit": None,
+            "feat_coverage": 0.0,
             "brand_hit": None,
             "brand_diversity": 0,
             "distance_p50": None,
@@ -229,6 +317,9 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     colors = expected.get("color_any") or []
     fits = expected.get("fit_any") or []
     brand_hints = expected.get("brand_any") or []
+    # feature-metadata ground truth (구조화 채점): color_any/fit_any → 실제 축 값
+    exp_color_fams = _expected_color_families(colors)
+    exp_fit_vals = _expected_fit_values(fits)
 
     subcat_hits = 0
     subcat_hits_tagged = 0
@@ -236,6 +327,9 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     keyword_hits = 0
     color_hits = 0
     fit_hits = 0
+    color_feat_hits = 0
+    fit_feat_hits = 0
+    feat_present = 0
     brand_hits = 0
     brands: set[str] = set()
     distances: list[float] = []
@@ -285,6 +379,17 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
         if isinstance(distance, (int, float)):
             distances.append(float(distance))
 
+        # 구조화 속성 채점 — 상품 feature_metadata 실측 vs 기대 축.
+        fmeta = row.get("fmeta") or {}
+        if fmeta:
+            feat_present += 1
+        pcol = str(fmeta.get("primary_color") or "").strip().upper()
+        pfit = str(fmeta.get("fit") or "").strip().lower()
+        if exp_color_fams and pcol in exp_color_fams:
+            color_feat_hits += 1
+        if exp_fit_vals and pfit in exp_fit_vals:
+            fit_feat_hits += 1
+
         samples.append(
             {
                 "id": row.get("id"),
@@ -312,6 +417,11 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     return {
         "quality_score": round(quality, 3),
         "keyword_hit": round(keyword_hit, 3),
+        # 구조화 속성 채점 (PRIMARY for "우와 비슷하다")
+        "color_feat_hit": round(color_feat_hits / n, 3) if exp_color_fams else None,
+        "fit_feat_hit": round(fit_feat_hits / n, 3) if exp_fit_vals else None,
+        "feat_coverage": round(feat_present / n, 3),
+        # legacy name-substring 채점 (진단용 — 상품명에 색·핏 적힌 경우만 잡음)
         "color_hit": round(color_hits / n, 3) if colors else None,
         "fit_hit": round(fit_hits / n, 3) if fits else None,
         "brand_hit": round(brand_hits / n, 3) if brand_hints else None,
@@ -350,6 +460,11 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
             "n": len(rs),
             "quality_score_mean": _mean_optional([r["scores"]["quality_score"] for r in rs]),
             "keyword_hit_mean": _mean_optional([r["scores"]["keyword_hit"] for r in rs]),
+            # 구조화 속성 (PRIMARY)
+            "color_feat_hit_mean": _mean_optional([r["scores"]["color_feat_hit"] for r in rs]),
+            "fit_feat_hit_mean": _mean_optional([r["scores"]["fit_feat_hit"] for r in rs]),
+            "feat_coverage_mean": _mean_optional([r["scores"]["feat_coverage"] for r in rs]),
+            # legacy name-substring (진단)
             "color_hit_mean": _mean_optional([r["scores"]["color_hit"] for r in rs]),
             "fit_hit_mean": _mean_optional([r["scores"]["fit_hit"] for r in rs]),
             "brand_diversity_mean": _mean_optional([r["scores"]["brand_diversity"] for r in rs]),
@@ -467,6 +582,7 @@ async def main() -> None:
                         embed_input = raw_input
                     query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
                     rows = _search_products_v6(conn, query_embedding=query_vec, top_k=args.top_k)
+                    _attach_feature_metadata(conn, rows)
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
@@ -479,15 +595,19 @@ async def main() -> None:
                         }
                     )
                     rewrite_note = f' → "{embed_input}"' if args.rewrite and embed_input != raw_input else ""
+                    _cf = scores["color_feat_hit"]
+                    _ff = scores["fit_feat_hit"]
                     logger.info(
-                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f sc=%.2f n=%d%s",
+                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f cf=%s ff=%s cov=%.2f n=%d%s",
                         i,
                         len(cases),
                         case["id"],
                         case["type"],
                         scores["quality_score"],
                         scores["keyword_hit"],
-                        scores["subcat_hit"],
+                        f"{_cf:.2f}" if _cf is not None else "—",
+                        f"{_ff:.2f}" if _ff is not None else "—",
+                        scores["feat_coverage"],
                         scores["result_count"],
                         rewrite_note,
                     )
