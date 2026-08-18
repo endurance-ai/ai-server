@@ -311,6 +311,14 @@ class Settings(BaseSettings):
     PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
     PERSONALIZE_FEATURE_W: float = 0.06
 
+    # 속성정렬 rerank ("우와 비슷하다") — 쿼리가 명시한 fit/material 을 후보
+    # product_features.feature_metadata 와 정렬해 가산. color/subcategory 는 이미
+    # 하드게이트라 제외. 개인화와 달리 쿼리 의도라 익명/콜드 유저에도 적용된다.
+    # 골든셋 실측(pool60→top20): fit_feat 0.38→0.83, color_feat 0.52→0.70.
+    ATTR_ALIGN_ENABLED: bool = True
+    ATTR_ALIGN_FIT_W: float = 0.20
+    ATTR_ALIGN_MATERIAL_W: float = 0.08
+
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
 

@@ -50,6 +50,9 @@ class RerankWeights:
     price_fit: float = 0.05
     gender_mismatch: float = 0.10
     feature: float = 0.15
+    # 속성정렬 ("우와 비슷하다") — 쿼리 target fit/material ↔ 후보 feature_metadata.
+    attr_fit: float = 0.0
+    attr_material: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -114,12 +117,35 @@ def _gender_penalty(profile_gender: str, brand_gender_lean: str, weight: float) 
     return weight if _GENDER_CONFLICT.get(key, False) else 0.0
 
 
+def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[str, set[str]]) -> float:
+    """쿼리 target 속성(fit/material) ↔ 후보 feature_metadata 정렬 가산.
+    color/subcategory 는 RPC 하드게이트라 제외. 개인화가 아니라 쿼리 의도이므로
+    프로필 유무와 무관하게 적용된다 ("우와 비슷하다")."""
+    if not target_attrs:
+        return 0.0
+    fmeta = c.get("feature_metadata")
+    if not isinstance(fmeta, dict):
+        return 0.0
+    bonus = 0.0
+    tfit = target_attrs.get("fit")
+    if tfit and str(fmeta.get("fit") or "").strip().lower() in tfit:
+        bonus += w.attr_fit
+    tmat = target_attrs.get("material")
+    if tmat:
+        raw = fmeta.get("material")
+        cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
+        if tmat & cand:
+            bonus += w.attr_material
+    return bonus
+
+
 def _score_candidate(
     c: dict[str, Any],
     profile: TasteProfile | None,
     w: RerankWeights,
     feature_scores: dict[tuple[str, str], float] | None = None,
     exclude_axes: frozenset[str] | None = None,
+    target_attrs: dict[str, set[str]] | None = None,
 ) -> float:
     """Compute personalized score for one row. Higher = better.
 
@@ -133,6 +159,10 @@ def _score_candidate(
     """
     distance = float(c.get("distance", 1.0))
     score = 1.0 - distance
+
+    # 쿼리 의도 속성정렬 — 프로필/개인화 유무와 무관하게 항상 적용.
+    if target_attrs:
+        score += _attr_align_bonus(c, w, target_attrs)
 
     if feature_scores:
         pref = mean_feature_pref(c.get("feature_metadata"), feature_scores, exclude_axes)
@@ -179,22 +209,26 @@ def rerank(
     weights: RerankWeights,
     feature_scores: dict[tuple[str, str], float] | None = None,
     exclude_axes: frozenset[str] | None = None,
+    target_attrs: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return `candidates` re-ordered by personalized score (desc).
+    """Return `candidates` re-ordered by score (desc).
 
-    Two personalization axes may apply: the brand/keyword/price/gender
-    `TasteProfile` and the visual-feature `feature_scores` (matched against each
-    row's attached `feature_metadata`). Either axis alone triggers the reorder.
+    Three axes may apply: the brand/keyword/price/gender `TasteProfile`, the
+    visual-feature `feature_scores` (personalization), and `target_attrs` — the
+    query's own fit/material intent matched against each row's `feature_metadata`
+    ("우와 비슷하다", applies to anonymous/cold users too). Any axis triggers the
+    reorder.
 
     Stable sort: ties (e.g., score equal because no signal applied) keep
-    their RPC order. Empty list / neither axis with signal → return the
+    their RPC order. Empty list / no axis with signal → return the
     input unchanged.
 
     The function never drops candidates — diversify handles cap and dedup
     after this step.
     """
     has_profile_signal = profile is not None and _has_any_signal(profile)
-    if not candidates or (not has_profile_signal and not feature_scores):
+    has_attr = bool(target_attrs) and any(target_attrs.values())
+    if not candidates or (not has_profile_signal and not feature_scores and not has_attr):
         return candidates
     profile = profile if has_profile_signal else None
 
@@ -202,7 +236,7 @@ def rerank(
     # scores fall back to original insertion order — preserves "RPC
     # distance ASC" as the deterministic tie-breaker.
     scored: list[tuple[float, dict[str, Any]]] = [
-        (_score_candidate(c, profile, weights, feature_scores, exclude_axes), c) for c in candidates
+        (_score_candidate(c, profile, weights, feature_scores, exclude_axes, target_attrs), c) for c in candidates
     ]
     reranked = [c for _, c in sorted(scored, key=lambda kv: -kv[0])]
 

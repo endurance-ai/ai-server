@@ -254,6 +254,34 @@ def _attach_feature_metadata(conn: psycopg.Connection, rows: list[dict[str, Any]
         row["fmeta"] = by_id.get(row.get("id"))
 
 
+# --- Attribute-alignment rerank (검증용 — 실 파이프라인 적용 전 리프트 측정) --
+
+_ATTR_FIT_W = 0.20
+_ATTR_COLOR_W = 0.12
+
+
+def _attr_align_rerank(rows: list[dict[str, Any]], expected: dict[str, Any]) -> list[dict[str, Any]]:
+    """pool 을 (1−distance) + fit/color 정렬 boost 로 재정렬한다. 후보 feature_metadata
+    가 쿼리 target(expected color/fit)과 맞으면 위로 끌어올려, 임베딩이 놓친 정확
+    속성 매치를 visible top-K 안으로 넣는다 — "우와 비슷하다"의 핵심 배선.
+    실 파이프라인의 personalize_rerank 가산 항과 동일 원리."""
+    exp_fams = _expected_color_families(expected.get("color_any") or [])
+    exp_fit = _expected_fit_values(expected.get("fit_any") or [])
+    if not exp_fams and not exp_fit:
+        return rows
+
+    def _s(r: dict[str, Any]) -> float:
+        base = 1.0 - float(r.get("distance", 1.0))
+        fm = r.get("fmeta") or {}
+        if exp_fams and str(fm.get("primary_color") or "").strip().upper() in exp_fams:
+            base += _ATTR_COLOR_W
+        if exp_fit and str(fm.get("fit") or "").strip().lower() in exp_fit:
+            base += _ATTR_FIT_W
+        return base
+
+    return sorted(rows, key=_s, reverse=True)
+
+
 # --- Scoring ---------------------------------------------------------------
 
 
@@ -513,6 +541,12 @@ async def main() -> None:
         help="골든 세트 경로",
     )
     parser.add_argument("--top-k", type=int, default=_DEFAULT_TOP_K, help="top-K (default 5)")
+    parser.add_argument(
+        "--attr-align",
+        action="store_true",
+        help="속성정렬 rerank(fit/color) 적용 후 top-K — pool 검색→재정렬→절단",
+    )
+    parser.add_argument("--pool", type=int, default=60, help="--attr-align 재정렬 풀 크기 (default 60)")
     parser.add_argument("--limit", type=int, default=None, help="처음 N개만 실행")
     parser.add_argument("--label", default=None, help="결과 파일 라벨 (예: 'raw_baseline' / 'prod_baseline')")
     parser.add_argument(
@@ -581,8 +615,11 @@ async def main() -> None:
                     else:
                         embed_input = raw_input
                     query_vec = await _embed_text(http_client, modal_url, modal_token, embed_input)
-                    rows = _search_products_v6(conn, query_embedding=query_vec, top_k=args.top_k)
+                    pool_k = args.pool if args.attr_align else args.top_k
+                    rows = _search_products_v6(conn, query_embedding=query_vec, top_k=pool_k)
                     _attach_feature_metadata(conn, rows)
+                    if args.attr_align:
+                        rows = _attr_align_rerank(rows, case.get("expected", {}))[: args.top_k]
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
