@@ -87,10 +87,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # The stored query is the actual product query ('grey floral lace dress
     # women'); a "cheaper" refine then just re-applies the price clamp on it.
     base_query = ""
+    refine_brand: list[str] | None = None
     try:
-        from app.agents.last_query import get_last_query
+        from app.agents.last_query import get_last_brand, get_last_query
 
         base_query = get_last_query(ctx.get("chat_id")) or ""
+        # 2026-08-19 — 직전 검색 브랜드를 이어받는다. '다른 색상으로' 같은 refine 이
+        # 브랜드를 잃고 다른 브랜드 상품을 뽑던 버그 대응. exclude_brands refine 은
+        # 브랜드를 좁히는 게 아니라 배제하는 것이므로 이어받지 않는다.
+        if args.get("action") != "exclude_brands":
+            refine_brand = get_last_brand(ctx.get("chat_id"))
     except Exception:  # noqa: BLE001
         base_query = ""
     if not base_query:
@@ -154,9 +160,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     if text_query and text_query != "fashion" and pinned_embedding is None:
         ctx["text_query"] = text_query
         try:
-            from app.agents.last_query import set_last_query
+            from app.agents.last_query import set_last_brand, set_last_query
 
             set_last_query(ctx.get("chat_id"), text_query)
+            # 이어받은 브랜드를 다시 저장 → 체인 refine("다른 색상으로" → "더 슬림하게")
+            # 도 브랜드를 계속 유지한다.
+            set_last_brand(ctx.get("chat_id"), refine_brand)
         except Exception:  # noqa: BLE001
             pass
 
@@ -271,6 +280,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 text_query=text_query,
                 category=category,
                 gender=refine_gender,
+                brand_filter=refine_brand,
                 fit=fit,
                 color_family=color_family,
                 top_k=15,
