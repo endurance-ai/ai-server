@@ -297,9 +297,13 @@ async def search_service(state: PipelineState) -> PipelineState:
     # 매치에서 무조건 탈락) + color 크롤러 원본값 특성상 정밀 필터가 풀을
     # 과도하게 조일 수 있다. 결과가 부족하면 두 필터를 빼고 1회 재시도,
     # 정밀 매치(1차)를 앞에 두고 id dedup 병합 — 정확도는 지키고 리콜만 보강.
+    relaxed_color_family: str | None = None
     if len(rows) < settings.SEARCH_FILTER_RELAX_MIN and (
         params.get("p_subcategory") is not None or params.get("p_color_family") is not None
     ):
+        # 색 게이트가 relax 되면 그 색을 rerank 소프트 부스트로 되살려 exact-color 를
+        # 상단에 유지한다(재고 부족 시 "요청 색 먼저 + 유사상품 채우기").
+        relaxed_color_family = params.get("p_color_family")
         relaxed = dict(params, p_subcategory=None, p_color_family=None)
         logger.info(
             "[STEP 4.55][search] precision-filter relax retry — strict_count=%d (<%d) subcat=%r color=%r dropped",
@@ -357,6 +361,9 @@ async def search_service(state: PipelineState) -> PipelineState:
     # unexpected error (fail-open: keep RPC order).
     # 속성정렬 ("우와 비슷하다") 은 쿼리 의도라 익명/콜드 유저에도 적용.
     target_attrs = _query_target_attrs(req.item) if settings.ATTR_ALIGN_ENABLED else {}
+    # 색 게이트가 relax 됐다면 요청 색을 소프트 부스트 축으로 추가 → exact-color 상단.
+    if settings.ATTR_ALIGN_ENABLED and relaxed_color_family:
+        target_attrs = {**target_attrs, "color": {str(relaxed_color_family).strip().upper()}}
     want_personalize = settings.PERSONALIZE_RERANK_ENABLED and bool(state.user_key)
     want_attr = bool(target_attrs)
     if rows and (want_personalize or want_attr):
@@ -386,6 +393,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 feature=settings.PERSONALIZE_FEATURE_W,
                 attr_fit=settings.ATTR_ALIGN_FIT_W if want_attr else 0.0,
                 attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
+                attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(
