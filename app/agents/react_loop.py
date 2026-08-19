@@ -105,9 +105,15 @@ _SYSTEM_PROMPT = (
     "When the user gives you ANY two of {category, color, fit, brand, style, garment_name}, your "
     "FIRST action MUST be `search_products`, not `ask_user_clarification`. Clarify is for AFTER a "
     "weak result, not before a never-tried search. Example: '검정 오버사이즈 후드 추천해줘' → "
-    "search_products immediately (3 signals — enough). Only with ≤1 signal (bare '셔츠 추천해줘' / "
-    "'something nice') do you ask, and even then prefer "
-    "`ask_user_clarification(axis='category_pick' or 'subcategory_disambiguation')`.\n"
+    "search_products immediately (3 signals — enough).\n"
+    "ONE COARSE CLARIFY MAX (2026-08-19): with ≤1 signal (bare '셔츠 추천해줘' / 'something nice') you "
+    "may ask AT MOST ONE coarse `ask_user_clarification(axis='category_pick')` — the BIG bucket only "
+    "(top/bottom/outer/dress/shoes/bag). The moment the user picks a bucket, OR whenever the incoming "
+    "message is a `clarify:*` answer, your NEXT action MUST be `search_products` and show the FULL "
+    "result set — NEVER chain a second, narrower clarify. Do NOT use `subcategory_disambiguation` to "
+    "drill down (top → shirt vs knit vs cardigan): double-narrowing tires users and kills engagement. "
+    "Showing MANY products lets people browse and tap — that is the goal. Prefer broad results over "
+    "another question.\n"
     "GENDER (260522 fix) — gender is NEVER a blocker (do NOT ask just for gender). Rule:\n"
     "  - Add a gender word to text_query ONLY when there is an EXPLICIT signal. Sources:\n"
     "    (a) user text ('men shirt', '남자 후드'); (b) the `suggested_query:` line from a picked "
@@ -175,8 +181,10 @@ _PROACTIVE_DIRECTIVE = (
     "broaden). This 'rescue once, then escalate' rule prevents dead-end turns where the "
     "catalog just doesn't have anything at the exact price/style slice the user asked "
     "for — one broadened retry almost always yields something usable.\n"
-    "When the user's intent is ambiguous, prefer calling `ask_user_clarification` "
-    "BEFORE searching rather than guessing. Always end the turn with `respond`."
+    "When intent is genuinely too thin to search (≤1 signal AND no garment bucket), ONE coarse "
+    "`ask_user_clarification(axis='category_pick')` is fine — but never more than one per request, and "
+    "never to narrow within a bucket (see ONE COARSE CLARIFY MAX). Otherwise just search and show "
+    "products. Always end the turn with `respond`."
 )
 
 
@@ -447,8 +455,12 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         ctx_image_url = state.image_url
         ctx_text_query = (state.message.text or "") if state.message else ""
 
+    # 이번 턴이 clarify 답(clarify:<axis>:<value> 콜백)에서 시작됐는지 — 그렇다면
+    # 2차 좁히기(subcategory 등)를 코드로 차단해 "큰 틀 한 번 → 상품" 을 강제한다.
+    _cb = (state.message.callback_data or "") if state.message else ""
     return {
         "chat_id": state.chat_id,
+        "from_clarify_answer": _cb.startswith("clarify:"),
         "from_user_id": state.from_user_id,
         "user_key": user_key_for(state.from_user_id, state.chat_id),
         "image_url": ctx_image_url,
