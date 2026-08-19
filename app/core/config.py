@@ -318,6 +318,10 @@ class Settings(BaseSettings):
     ATTR_ALIGN_ENABLED: bool = True
     ATTR_ALIGN_FIT_W: float = 0.20
     ATTR_ALIGN_MATERIAL_W: float = 0.08
+    # 색 필터가 재고 부족으로 relax(하드게이트 해제)됐을 때, 요청 색을 소프트
+    # 부스트로 돌려 exact-color(예: 아크네 블랙 진)를 상단에 유지하고 유사상품이
+    # 아래를 채우게 한다. relax 안 됐으면(게이트 유지) color 는 부스트 대상 아님.
+    ATTR_ALIGN_COLOR_W: float = 0.25
 
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
