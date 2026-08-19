@@ -36,6 +36,12 @@
 
 BEGIN;
 
+-- ── 상품명 trigram 매칭 지원 (특정 상품/모델 지목 검색) ────────────────────
+-- p_name_query 로 products.name 을 trigram 유사매칭해 정확 상품을 부스트한다.
+-- pg_trgm + GIN trgm 인덱스(idempotent). idx 는 % 연산자/similarity 를 가속.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (name gin_trgm_ops);
+
 -- ── 모든 오버로드 제거 후 캐노니컬 1개 재생성 (v6 와 동일한 재발방지 패턴) ──
 DO $$
 DECLARE r record;
@@ -57,6 +63,8 @@ CREATE OR REPLACE FUNCTION public.search_products_hybrid_v1(
   p_color_family  text DEFAULT NULL::text,
   p_gender        text DEFAULT NULL::text,
   p_w_text        double precision DEFAULT 0.3,   -- 블렌드 텍스트 가중 (0=이미지, 1=텍스트)
+  p_name_query    text DEFAULT NULL,              -- 상품명 trigram 매칭어 (특정 상품 지목)
+  p_w_name        double precision DEFAULT 0.35,  -- 이름 매치 부스트 가중 (distance 에서 차감)
   p_pool          integer DEFAULT 100,            -- 공간별 kNN 풀 크기
   p_limit         integer DEFAULT 50
 )
@@ -116,14 +124,38 @@ BEGIN
     ORDER BY pf.text_embedding <=> query_embedding
     LIMIT p_pool
   ),
+  nam AS (
+    -- 상품명 trigram 매칭 — 특정 상품/모델 지목 대응. p_name_query NULL 이면 빈 집합.
+    -- 임베딩 풀에 안 들어온 정확 이름 매치도 후보로 끌어온다(idx_products_name_trgm).
+    SELECT p.id AS pid
+    FROM products p
+    LEFT JOIN brand_nodes bn ON bn.id = p.brand_node_id
+    LEFT JOIN category_canonical cc ON cc.raw_category = p.category
+    LEFT JOIN product_features pf ON pf.product_id = p.id
+    WHERE p_name_query IS NOT NULL AND p.in_stock = true
+      AND (p_category IS NULL OR v_target_family IS NULL OR v_target_family = 'other'
+           OR COALESCE(cc.family, 'other') = v_target_family)
+      AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
+      AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
+      AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
+      AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
+      -- word_similarity(<%): 짧은 서술어/모델토큰이 긴 상품명 안의 단어와 매칭될 때
+      -- similarity() 보다 훨씬 정확('2021M' → wsim 1.0 vs sim 0.13). idx 가속.
+      AND p_name_query <% p.name
+    ORDER BY word_similarity(p_name_query, p.name) DESC
+    LIMIT p_pool
+  ),
   un AS (
-    SELECT pid FROM img UNION SELECT pid FROM txt
+    SELECT pid FROM img UNION SELECT pid FROM txt UNION SELECT pid FROM nam
   ),
   dd AS (
     -- union 후보에 대해 두 거리를 모두 계산 (양쪽 index 없이 직접 계산 — 풀 작음)
     SELECT u.pid,
            (pe.embedding::halfvec <=> query_embedding)::double precision AS d_img,
            (pf.text_embedding <=> query_embedding)::double precision AS d_txt,
+           CASE WHEN p_name_query IS NULL THEN 0.0
+                ELSE word_similarity(p_name_query, p.name)::double precision END AS name_sim,
            p.brand, p.name, p.price, p.image_url, p.product_url, p.platform, p.subcategory
     FROM un u
     JOIN products p ON p.id = u.pid
@@ -139,10 +171,12 @@ BEGIN
   )
   SELECT nn.pid AS id, nn.brand, nn.name, nn.price, nn.image_url, nn.product_url,
          nn.platform, nn.subcategory,
-         ((1.0 - p_w_text) * COALESCE(nn.nzi, 0.0) + p_w_text * COALESCE(nn.nzt, 0.0)) AS distance,
+         ((1.0 - p_w_text) * COALESCE(nn.nzi, 0.0) + p_w_text * COALESCE(nn.nzt, 0.0)
+          - p_w_name * COALESCE(nn.name_sim, 0.0)) AS distance,
          false AS degraded
   FROM nn
-  ORDER BY (1.0 - p_w_text) * COALESCE(nn.nzi, 0.0) + p_w_text * COALESCE(nn.nzt, 0.0) ASC
+  ORDER BY ((1.0 - p_w_text) * COALESCE(nn.nzi, 0.0) + p_w_text * COALESCE(nn.nzt, 0.0)
+            - p_w_name * COALESCE(nn.name_sim, 0.0)) ASC
   LIMIT p_limit;
 END;
 $function$;
