@@ -12,7 +12,27 @@ import asyncio
 
 import pytest
 
-from app.agents.tools.ask_user_clarification import _split_crammed_options, dispatch
+from app.agents.tools.ask_user_clarification import (
+    _clean_option_label,
+    _split_crammed_options,
+    dispatch,
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('"니트"', "니트"),
+        ("(가디건)", "가디건"),
+        ("'코트'", "코트"),
+        ("“셔츠”", "셔츠"),  # smart quotes
+        ("[티셔츠]", "티셔츠"),
+        ("  니트  ", "니트"),
+        ("니트", "니트"),
+    ],
+)
+def test_clean_option_label_strips_wrappers(raw: str, expected: str) -> None:
+    assert _clean_option_label(raw) == expected
 
 
 @pytest.mark.parametrize(

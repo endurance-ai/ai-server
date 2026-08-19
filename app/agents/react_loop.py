@@ -773,6 +773,20 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
             anchor_line = _anchor_card_line(msg.callback_data, sess)
             if anchor_line:
                 parts.append(anchor_line)
+        # 2026-08-19 — clarify 답(clarify:<axis>:<value>) 은 "큰 틀 골랐으니 바로 상품"
+        # 신호다. 값을 명시하고 검색을 강제(응답/재질문 금지) — 프롬프트 정책만으론
+        # 에이전트가 clarify 답 후 검색을 건너뛰고 그냥 respond 하던 버그 대응.
+        _cd = msg.callback_data or ""
+        if _cd.startswith("clarify:"):
+            _cv = _cd.split(":", 2)
+            _clarify_val = _cv[2].strip() if len(_cv) >= 3 else ""
+            if _clarify_val and _clarify_val.lower() != "skip":
+                parts.append(
+                    f"clarify_answered: the user just picked '{_clarify_val}'. Your VERY FIRST action "
+                    f"MUST be `search_products` for '{_clarify_val}' (keep any brand / color / gender "
+                    f"already in context). Do NOT call ask_user_clarification again, and do NOT "
+                    f"`respond` before searching — just show the products."
+                )
     # 260612 — direct photo upload (`photo_file_id` without a `urls` link).
     # `resolve_image` skips the file path (we can't pull bytes through Vision
     # right now). Without surfacing this, the LLM sees an empty user_text and
