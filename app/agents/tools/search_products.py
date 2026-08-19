@@ -1412,6 +1412,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # only the small `top_candidates` summary below.
     persist_last_results(ctx, cands)
 
+    # 2026-08-19 — 직전 브랜드 필터 보관 → refine("다른 색상으로")이 브랜드를
+    # 유지한다. 브랜드 없는 검색이면 set_last_brand(None) 이 이전 값을 지워 stale
+    # 브랜드가 새지 않게 한다. pinned anchor 턴은 last_query 와 동일하게 제외.
+    if pinned_embedding is None:
+        try:
+            from app.agents.last_query import set_last_brand
+
+            set_last_brand(ctx.get("chat_id"), brand_filter)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 260611 — emit `search_done` so subsequent turns' memory context surfaces
     # the prior query (drives the LLM toward `refine_search` instead of a fresh
     # `search_products` or a confused `get_recent_history`).
