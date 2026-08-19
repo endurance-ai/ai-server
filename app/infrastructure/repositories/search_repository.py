@@ -137,6 +137,7 @@ class SearchRepository:
         gender: str | None = None,
         w_text: float,
         pool: int,
+        name_query: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_hybrid_v1` RPC param dict (SPEC-SEARCH-HYBRID-001).
 
@@ -156,6 +157,8 @@ class SearchRepository:
             "p_color_family": color_family or None,
             "p_gender": gender,
             "p_w_text": w_text,
+            # 상품명 trigram 매칭 (특정 상품/모델 지목). None 이면 RPC 에서 무시.
+            "p_name_query": (name_query or None),
             "p_pool": pool,
             "p_limit": settings.SEARCH_DEFAULT_K,
         }

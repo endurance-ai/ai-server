@@ -229,6 +229,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             gender=gender_norm,
             w_text=settings.SEARCH_HYBRID_W_TEXT,
             pool=settings.SEARCH_HYBRID_POOL,
+            name_query=(str(getattr(req.item, "name_query", None) or "").strip() or None),
         )
         _do_search = SearchRepository.search_hybrid
         rpc_name = "search_products_hybrid_v1"

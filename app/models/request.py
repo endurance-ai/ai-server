@@ -20,6 +20,8 @@ class AnalyzedItem(BaseModel):
     fit: str | None = None
     fabric: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
+    # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
+    name_query: str | None = None
     search_query: str = Field(alias="searchQuery")
     search_query_ko: str | None = Field(default=None, alias="searchQueryKo")
 

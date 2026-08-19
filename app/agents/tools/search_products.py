@@ -517,6 +517,7 @@ async def run_text_only_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
+    name_query: str | None = None,
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
@@ -557,6 +558,7 @@ async def run_text_only_search(
         subcategory=subcategory,
         fit=fit,
         color_family=color_family,
+        name_query=name_query,
         search_query=text_query,
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
@@ -1216,6 +1218,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         subcategory = ctx.get("vision_subcategory")
     fit = args.get("fit")
     color_family = args.get("color_family")
+    # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
+    name_query = (str(args.get("name_query") or "").strip() or None)
 
     # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
     # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
@@ -1357,6 +1361,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
+                name_query=name_query,
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,

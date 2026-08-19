@@ -89,6 +89,10 @@ class SearchProductsArgs(TypedDict, total=False):
     # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
     # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
     brand: str | None
+    # 2026-08-19 — 특정 상품/모델을 지목한 경우 상품명 매칭어. 상품명에 나올
+    # 법한 고유 서술어/모델 토큰만 (예: '2021M', 'trompe l’oeil', 'museum').
+    # products.name 을 word-trigram 매칭해 그 상품을 상단으로 부스트한다.
+    name_query: str | None
     # 2026-07-16 — 상황/TPO 쿼리("결혼식 하객룩")를 구성 아이템으로 확장.
     # 특정 옷 이름이 없는 상황 쿼리에서만 2~3개 아이템 쿼리를 채운다.
     # dispatch 가 각각 병렬 검색 후 인터리브 병합. gender 는 시스템이
@@ -265,6 +269,11 @@ REGISTRY: dict[str, ToolMetadata] = {
             "indie labels, abbreviations like 'paf'), pass the brand exactly as "
             "the user wrote it — the resolver matches Korean, English, and "
             "acronyms. NEVER invent a brand the user didn't mention.\n"
+            "  - `name_query`: ONLY when the user names a SPECIFIC product / model / "
+            "line (e.g. '아크네 2021M 진', 'the museum shirt', 'trompe l’oeil 진'). Put "
+            "the distinctive descriptor here in ENGLISH ('2021M', 'museum', 'trompe "
+            "l’oeil'); it word-matches products.name and boosts that exact item to the "
+            "top. Leave empty for generic garment requests ('바지 추천').\n"
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"
