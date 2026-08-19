@@ -396,7 +396,11 @@ REGISTRY: dict[str, ToolMetadata] = {
             "  - 'occasion'                   — daily/date/work/party/wedding/etc\n"
             "  - 'subcategory_disambiguation' — narrowing within a category (e.g. shirt: oxford vs linen vs flannel)\n"
             "  - 'generic_fallback'           — when none of the above fit (last resort)\n"
-            "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected."
+            "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected.\n"
+            "`options` MUST be an ARRAY of 2-6 SHORT, mutually-exclusive choice labels — one label per "
+            "array element, each 1-3 words (e.g. [\"니트\", \"가디건\", \"코트\", \"셔츠\"]). Each becomes its own "
+            "tappable button. NEVER put several choices into a single string like [\"니트, 가디건, 코트\"] — that "
+            "renders as one useless button."
         ),
         "args_typeddict": AskUserClarificationArgs,
         "result_typeddict": AskUserClarificationResult,
