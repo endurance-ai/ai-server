@@ -1219,7 +1219,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     fit = args.get("fit")
     color_family = args.get("color_family")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
-    name_query = (str(args.get("name_query") or "").strip() or None)
+    name_query = str(args.get("name_query") or "").strip() or None
 
     # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
     # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
