@@ -23,6 +23,16 @@ _VALID_AXES = ("category_pick", "formality", "fit", "occasion", "subcategory_dis
 # 세로줄/개행/한글 쉼표). 객관식이 한 버튼에 다 뭉쳐 뜨던 버그(2026-08-19) 방어.
 _OPTION_SPLIT_RE = re.compile(r"\s*[,/·、|\n]\s*")
 
+# 라벨 양끝에서 벗겨낼 감싸개 — 따옴표(직/스마트)·괄호·대괄호·중괄호·한글 괄호.
+# LLM 이 '"니트"' / '(니트)' / "'가디건'" 처럼 넘겨 버튼에 노출되던 버그(2026-08-19).
+_WRAP_CHARS = "\"'“”‘’「」『』()[]{}（）〔〕〈〉《》 \t"
+
+
+def _clean_option_label(s: str) -> str:
+    """옵션 라벨에서 감싼 따옴표/괄호와 양끝 잔여 인용부호를 제거한다.
+    `str.strip(set)` 은 양끝의 해당 문자를 모두 벗기므로 '"(니트)"' → '니트'."""
+    return s.strip().strip(_WRAP_CHARS).strip()
+
 
 def _split_crammed_options(options: list[str]) -> list[str]:
     """LLM 이 객관식을 한 문자열로 뭉쳐 넘긴 경우(options=list[1]) 구분자로 분리한다.
@@ -63,6 +73,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarific
     options = [str(o) for o in (args.get("options") or []) if o]
     # LLM 이 "니트, 가디건, 코트" 처럼 선택지를 한 문자열로 뭉쳐 넘기면 낱개로 분리.
     options = _split_crammed_options(options)
+    # 감싼 따옴표/괄호 제거 후 빈값 탈락 ('"니트"' → '니트').
+    options = [c for c in (_clean_option_label(o) for o in options) if c]
     prompt = (args.get("prompt") or "").strip()
     if not options or not prompt:
         return AskUserClarificationResult(ok=False, error="missing_options_or_prompt", card_sent=False, axis=axis)
