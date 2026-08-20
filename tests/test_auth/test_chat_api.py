@@ -372,6 +372,36 @@ async def test_append_message_returns_reply(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_app_graph_state_is_session_scoped_but_user_identity_is_stable(client: AsyncClient):
+    """A new app chat must not reuse the prior chat's graph-memory key."""
+    auth = await _login(client)
+    states = []
+
+    async def _capture(state, **_):
+        states.append(state)
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_capture)
+        first = await client.post("/v1/chat/sessions", json={"message": "첫 검색"}, headers={"Authorization": auth})
+        first_session = UUID(_parse_sse(first.text)["session"]["session_id"])
+        continued = await client.post(
+            f"/v1/chat/sessions/{first_session}/messages",
+            json={"message": "더 저렴하게"},
+            headers={"Authorization": auth},
+        )
+        second = await client.post("/v1/chat/sessions", json={"message": "새 검색"}, headers={"Authorization": auth})
+        second_session = UUID(_parse_sse(second.text)["session"]["session_id"])
+
+    assert continued.status_code == 200
+    assert len(states) == 3
+    assert states[0].chat_id == states[1].chat_id
+    assert states[0].chat_id != states[2].chat_id
+    assert states[0].from_user_id == states[1].from_user_id == states[2].from_user_id
+    assert states[0].thread_id == states[1].thread_id == first_session
+    assert states[2].thread_id == second_session
+
+
+@pytest.mark.asyncio
 async def test_append_message_to_nonexistent_session_returns_404(client: AsyncClient):
     auth = await _login(client)
     fake_id = "00000000-0000-0000-0000-000000000001"

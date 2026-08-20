@@ -26,6 +26,19 @@
 
 > **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 환경변수 `DB_URL`/`DB_TOKEN` (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), PostgREST shim `http://172.31.59.31:3001` 경유. Qdrant 미사용.
 
+### 앱 채팅 상태 범위
+
+앱의 `ai.chat_sessions.session_id`는 대화 상태의 경계다. 앱 경로는 이 UUID에서
+파생한 내부 `chat_id`를 LangGraph `SessionStore`, pending 질문/성별, last-query,
+카드 cursor·impression 상태에 사용하고, `thread_id`도 같은 `session_id`로 기록한다.
+반면 TasteProfile·feature score는 안정적인 앱 사용자 식별자로 키잉하므로 새 채팅에도
+유지된다. Telegram transport의 `chat_id` 의미와는 별개로, 앱의 새 채팅은 이전 검색
+기억을 절대 상속하지 않는다.
+
+세션 격리 도입 전 앱 TasteProfile은 유저 파생 `chat_id`의 `c:<id>` 키로 저장됐다.
+첫 앱 요청에서 비어 있는 표준 `u:<id>` 프로필에만 해당 값을 복사해 기존 취향을 보존한다.
+원본 행은 롤백 호환을 위해 유지하며, 이후 읽기·쓰기는 `u:<id>`만 사용한다.
+
 ---
 
 ## 시스템 토폴로지

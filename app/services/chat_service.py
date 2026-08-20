@@ -14,6 +14,7 @@ User identity bridge:
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import re
 from collections.abc import AsyncGenerator
@@ -73,6 +74,18 @@ def _user_id_to_chat_id(user_id: UUID) -> int:
     return abs(int.from_bytes(user_id.bytes[:8], "big")) % (2**62)
 
 
+def _session_id_to_chat_id(session_id: UUID) -> int:
+    """Derive the graph's per-conversation state key from an app session UUID.
+
+    The LangGraph/Telegram-era interfaces call this value ``chat_id``.  On the
+    app path it must *not* be the user-derived compatibility id: SessionStore,
+    pending prompts, last-query, and Redis card state are conversational state.
+    A UUID-derived positive int keeps those existing int-keyed stores isolated
+    without changing the Telegram transport contract.
+    """
+    return abs(int.from_bytes(session_id.bytes[:8], "big")) % (2**62)
+
+
 # user_profiles uses ('male','female','other'); taste_profile uses ('men','women','unisex')
 _GENDER_MAP = {"male": "men", "female": "women", "other": "unisex"}
 _APP_TO_CAP_TIER = {
@@ -83,6 +96,59 @@ _APP_TO_CAP_TIER = {
     "premium": "pro",
     "developer": "developer",
 }
+
+
+def _has_taste_data(profile: Any) -> bool:
+    """Whether a profile contains a user preference worth migrating."""
+    return bool(
+        profile.gender
+        or profile.liked_brands
+        or profile.disliked_brands
+        or profile.liked_keywords
+        or profile.disliked_keywords
+        or profile.disliked_brands_ts
+        or profile.disliked_keywords_ts
+        or profile.price_min_observed is not None
+        or profile.price_max_observed is not None
+    )
+
+
+def _migrate_legacy_taste_profile(user_chat_id: int) -> Any:
+    """Copy a pre-session-isolation app profile to the stable user key once.
+
+    Older app turns keyed taste as ``c:<user-derived-id>`` because the graph's
+    chat_id was user-scoped. App turns now use ``u:<user-derived-id>`` while
+    their graph chat_id is session-scoped. Copy only into an empty canonical
+    profile and retain the legacy row for rollback/read-only compatibility.
+    """
+    from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
+
+    store = get_taste_store()
+    canonical_key = user_key_for(user_chat_id, 0)
+    profile = store.get_or_create(canonical_key)
+    if _has_taste_data(profile):
+        return profile
+
+    legacy_key = user_key_for(None, user_chat_id)
+    legacy = store.get(legacy_key)
+    if legacy is None or not _has_taste_data(legacy):
+        return profile
+
+    for field in (
+        "liked_brands",
+        "disliked_brands",
+        "liked_keywords",
+        "disliked_keywords",
+        "price_min_observed",
+        "price_max_observed",
+        "disliked_brands_ts",
+        "disliked_keywords_ts",
+        "gender",
+    ):
+        setattr(profile, field, copy.deepcopy(getattr(legacy, field)))
+    store.update(profile)
+    logger.info("[chat_service] migrated legacy taste profile user=%s", user_chat_id)
+    return profile
 
 
 @dataclass(frozen=True)
@@ -145,14 +211,12 @@ async def _sync_gender_to_taste_profile(
         db_gender = (row[0] or "").strip().lower() if row else None
         # Default to unisex so the gender-pin gate never blocks REST API users.
         gender_token = _GENDER_MAP.get(db_gender or "", "unisex")
-        from app.infrastructure.memory.taste_profile import get_taste_store, user_key_for
+        from app.infrastructure.memory.taste_profile import get_taste_store
 
-        user_key = user_key_for(None, synthetic_chat_id)
-        store = get_taste_store()
-        profile = store.get_or_create(user_key)
+        profile = _migrate_legacy_taste_profile(synthetic_chat_id)
         if not profile.gender:
             profile.gender = gender_token
-            store.update(profile)
+            get_taste_store().update(profile)
     except Exception:
         logger.debug("[chat_service] gender sync skipped", exc_info=True)
 
@@ -178,9 +242,10 @@ async def _prime_feature_scores(pool: AsyncConnectionPool, user_id: UUID, synthe
                 (user_id,),
             )
             scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
+        from app.infrastructure.memory.taste_profile import user_key_for
         from app.scoring import feature_scores_cache
 
-        feature_scores_cache.put(user_key_for(None, synthetic_chat_id), scores)
+        feature_scores_cache.put(user_key_for(synthetic_chat_id, 0), scores)
     except Exception as exc:  # noqa: BLE001 — never break the turn
         logger.debug("[feature-prime] skipped: %r", exc)
 
@@ -474,13 +539,13 @@ def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str, *, turn_id: str
     return [handler] if handler is not None else []
 
 
-def _reset_app_turn(user_id: UUID, synthetic_chat_id: int, thread_id: UUID, turn_no: int) -> str:
+def _reset_app_turn(user_id: UUID, session_chat_id: int, thread_id: UUID, turn_no: int) -> str:
     turn_id = f"{thread_id}:{turn_no}"
     reset_turn(
         turn_id=turn_id,
-        user_key=user_key_for(None, synthetic_chat_id),
+        user_key=user_key_for(_user_id_to_chat_id(user_id), 0),
         user_id=user_id,
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
     )
@@ -509,7 +574,10 @@ async def _persist_search(
     try:
         from app.infrastructure.memory.session import get_store
 
-        sess = get_store().get_or_create(_user_id_to_chat_id(user_id))
+        # Graph conversational state is keyed by the app session, not the
+        # user. Reading the user-derived compatibility id here would lose the
+        # current session's result set after session isolation was introduced.
+        sess = get_store().get_or_create(_session_id_to_chat_id(session_id))
         candidates = list(getattr(sess, "last_results", None) or [])
     except Exception:
         logger.debug("[chat_service] search persist: session read failed", exc_info=True)
@@ -597,19 +665,22 @@ async def invoke(
     # Set session title from first message
     await set_session_title(pool, resolved_session_id, text)
 
-    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    user_chat_id = _user_id_to_chat_id(user_id)
+    session_chat_id = _session_id_to_chat_id(resolved_session_id)
     urls = _extract_urls(text)
     message = ChannelMessage(
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         text=text,
         urls=urls,
         received_at=datetime.now(UTC),
     )
-    thread_id = uuid4()
+    thread_id = resolved_session_id
     turn_no = 0
     input_state = InputState(
         message=message,
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
         req_gender=gender,
@@ -619,7 +690,7 @@ async def invoke(
 
     capture = CaptureAdapter()
     token = set_adapter(capture)
-    turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
+    turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
     try:
         callbacks = _bind_chat_trace(resolved_session_id, user_id, text, turn_id=turn_id)
         await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
@@ -662,8 +733,9 @@ async def invoke_streaming(
 
     Event sequence: session → text* → product* → done   (or error on failure)
     """
-    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    user_chat_id = _user_id_to_chat_id(user_id)
     resolved_session_id = await get_or_create_session(pool, user_id, session_id)
+    session_chat_id = _session_id_to_chat_id(resolved_session_id)
     cap_status = await get_app_cap_status(pool, user_id)
 
     yield "session", {"session_id": str(resolved_session_id), **cap_status.session_payload()}
@@ -684,9 +756,9 @@ async def invoke_streaming(
 
             emit(
                 event_type="cap_reached",
-                user_key=user_key_for(None, synthetic_chat_id),
-                chat_id=synthetic_chat_id,
-                thread_id=uuid4(),
+                user_key=user_key_for(user_chat_id, 0),
+                chat_id=session_chat_id,
+                thread_id=resolved_session_id,
                 turn_no=0,
                 payload=CapReachedPayload(lang=detect_lang(text)),
             )
@@ -696,8 +768,8 @@ async def invoke_streaming(
         yield "done", {}
         return
 
-    await _sync_gender_to_taste_profile(pool, user_id, synthetic_chat_id)
-    await _prime_feature_scores(pool, user_id, synthetic_chat_id)
+    await _sync_gender_to_taste_profile(pool, user_id, user_chat_id)
+    await _prime_feature_scores(pool, user_id, user_chat_id)
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 
@@ -705,16 +777,18 @@ async def invoke_streaming(
     # free text — it's a deliberate attach action, not an incidental link.
     urls = ([attached_image_url] if attached_image_url else []) + _extract_urls(text)
     message = ChannelMessage(
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         text=text,
         urls=urls,
         received_at=datetime.now(UTC),
     )
-    thread_id = uuid4()
+    thread_id = resolved_session_id
     turn_no = 0
     input_state = InputState(
         message=message,
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
         req_gender=gender,
@@ -735,7 +809,7 @@ async def invoke_streaming(
         # context (the SSE generator runs in the outer context), so nested
         # node/LLM spans nest under a single conversation trace.
         token = set_adapter(streaming)
-        turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
+        turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
         try:
             callbacks = _bind_chat_trace(resolved_session_id, user_id, text, turn_id=turn_id)
             await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
@@ -803,12 +877,11 @@ async def invoke_streaming_callback(
     through even over-cap since they're cheap UI actions, not new generations
     (app/api/webhooks/telegram.py `_invoke_graph`).
 
-    thread_id/turn_no are freshly minted per callback (no card_sent DB correlation
-    like Telegram's `_resolve_thread_id`) — graph routing (`_route_after_ingest_v2`)
-    decides purely from the `callback_data` string, so this only affects conversation-
-    log thread grouping, not behavior.
+    The callback shares its parent app session's graph-state key and thread_id,
+    so pending cards and refine context remain available within that session.
     """
-    synthetic_chat_id = _user_id_to_chat_id(user_id)
+    user_chat_id = _user_id_to_chat_id(user_id)
+    session_chat_id = _session_id_to_chat_id(session_id)
     cap_status = await get_app_cap_status(pool, user_id)
     yield "session", {"session_id": str(session_id), **cap_status.session_payload()}
 
@@ -817,15 +890,17 @@ async def invoke_streaming_callback(
 
     trace_text = label or callback_data
     message = ChannelMessage(
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         callback_data=callback_data,
         received_at=datetime.now(UTC),
     )
-    thread_id = uuid4()
+    thread_id = session_id
     turn_no = 0
     input_state = InputState(
         message=message,
-        chat_id=synthetic_chat_id,
+        chat_id=session_chat_id,
+        from_user_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
     )
@@ -837,7 +912,7 @@ async def invoke_streaming_callback(
     async def _run_graph() -> None:
         nonlocal graph_exc
         token = set_adapter(streaming)
-        turn_id = _reset_app_turn(user_id, synthetic_chat_id, thread_id, turn_no)
+        turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
         try:
             callbacks = _bind_chat_trace(session_id, user_id, trace_text, turn_id=turn_id)
             await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})

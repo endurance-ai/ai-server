@@ -94,7 +94,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> GetRecentHistor
     n = max(1, min(20, int(args.get("n") or 10)))
     event_types = list(args.get("event_types") or [])
     user_key = ctx.get("user_key")
-    if not user_key:
+    thread_id = ctx.get("thread_id")
+    if not user_key or thread_id is None:
         return GetRecentHistoryResult(ok=True, error=None, events=[])
 
     # Backend probe — same pattern as conversation_log._backend_is_postgres.
@@ -110,8 +111,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> GetRecentHistor
         from app.providers.db_pool import get_pool
 
         pool = get_pool()
-        params: list[Any] = [user_key]
-        sql = "SELECT event_type, payload, created_at FROM ai.log_conversation_event WHERE user_key=%s"
+        params: list[Any] = [user_key, thread_id]
+        sql = "SELECT event_type, payload, created_at FROM ai.log_conversation_event WHERE user_key=%s AND thread_id=%s"
         if event_types:
             sql += " AND event_type = ANY(%s)"
             params.append(event_types)
