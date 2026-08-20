@@ -50,6 +50,9 @@ class PostgresTasteProfileStore:
             self._locks[user_key] = lock
         return lock
 
+    def get(self, user_key: str) -> TasteProfile | None:
+        return run_in_pool_loop(_aget(user_key))
+
     def get_or_create(self, user_key: str) -> TasteProfile:
         return run_in_pool_loop(_aget_or_create(user_key))
 
@@ -85,6 +88,23 @@ async def _aget_or_create(user_key: str) -> TasteProfile:
         row = await cur.fetchone()
         await conn.commit()
     return _row_to_profile(row)
+
+
+async def _aget(user_key: str) -> TasteProfile | None:
+    pool = get_pool()
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT user_key, liked_brands, disliked_brands, liked_keywords,
+                   disliked_keywords, price_min_observed, price_max_observed,
+                   last_active, disliked_brands_ts, disliked_keywords_ts, gender
+              FROM ai.user_taste_profile
+             WHERE user_key = %s
+            """,
+            (user_key,),
+        )
+        row = await cur.fetchone()
+    return _row_to_profile(row) if row else None
 
 
 @observe(name="memory.taste.update", as_type="span")

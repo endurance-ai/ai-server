@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from uuid import uuid4
 
 from app.agents.tools import get_recent_history as tool
 
@@ -196,14 +197,18 @@ async def test_dispatch_postgres_returns_summarized_events(monkeypatch):
     fake_pool = _FakePool(rows)
     monkeypatch.setattr(db_pool, "get_pool", lambda: fake_pool)
 
-    res = await tool.dispatch({"n": 5, "event_types": ["user_text", "search_done"]}, {"user_key": "u:1"})
+    thread_id = uuid4()
+    res = await tool.dispatch(
+        {"n": 5, "event_types": ["user_text", "search_done"]}, {"user_key": "u:1", "thread_id": thread_id}
+    )
     assert res["ok"] is True
     assert [e["event_type"] for e in res["events"]] == ["user_text", "search_done"]
     assert res["events"][0]["payload_summary"]["text"] == "hello"
-    # event_types filter appended ANY clause + user_key + limit params.
+    # event_types filter appended ANY clause + user/thread scope + limit params.
     sql, params = fake_pool.cursor_obj.executed
     assert "ANY(%s)" in sql
-    assert params == ("u:1", ["user_text", "search_done"], 5)
+    assert "thread_id=%s" in sql
+    assert params == ("u:1", thread_id, ["user_text", "search_done"], 5)
 
 
 async def test_dispatch_postgres_db_error_returns_empty(monkeypatch):
@@ -216,7 +221,7 @@ async def test_dispatch_postgres_db_error_returns_empty(monkeypatch):
         raise RuntimeError("pool down")
 
     monkeypatch.setattr(db_pool, "get_pool", _boom)
-    res = await tool.dispatch({"n": 5}, {"user_key": "u:1"})
+    res = await tool.dispatch({"n": 5}, {"user_key": "u:1", "thread_id": uuid4()})
     assert res == {"ok": True, "error": None, "events": []}
 
 
@@ -228,6 +233,6 @@ async def test_dispatch_clamps_n_to_bounds(monkeypatch):
     fake_pool = _FakePool([])
     monkeypatch.setattr(db_pool, "get_pool", lambda: fake_pool)
 
-    await tool.dispatch({"n": 999}, {"user_key": "u:1"})
+    await tool.dispatch({"n": 999}, {"user_key": "u:1", "thread_id": uuid4()})
     _, params = fake_pool.cursor_obj.executed
     assert params[-1] == 20  # clamped to max 20
