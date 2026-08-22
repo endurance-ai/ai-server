@@ -437,7 +437,7 @@ def pick_brand_new(events: list[Event], *, max_items: int, max_per_brand: int) -
     """유저 한 명분 brand_new 후보에서 하루치를 고른다. 입력은 최신순 전제.
 
     단순히 앞에서 max_items 개를 자르면 **한 브랜드가 하루 몫을 독식**한다.
-    products.created_at 은 출시일이 아니라 우리 DB 적재 시각이고, 크롤은 브랜드 단위로
+    products.first_seen_at 은 출시일이 아니라 우리 DB 적재 시각이고, 크롤은 브랜드 단위로
     통째 돌아서 한 브랜드의 수백 건이 같은 초에 들어온다(실측: 한 브랜드 775건이 2초).
     그래서 "가장 새로운 5개" 가 사실상 "마지막에 크롤된 브랜드 5개" 가 되고, 나머지
     팔로우 브랜드는 영영 묻힌다.
@@ -649,14 +649,14 @@ _GENDER_MATCH_PER_USER = GENDER_MATCH_SQL.replace("%(gender)s", "k.gender_app")
 # 적재 후 유예시간 안에 들어온 행은 후보에서 뺀다.
 _BRAND_FIRST_SEEN_CTE = """
     brand_first_seen AS (
-        SELECT brand_node_id, min(created_at) AS first_seen_at
+        SELECT brand_node_id, min(first_seen_at) AS first_seen_at
         FROM public.products
         WHERE brand_node_id IS NOT NULL
         GROUP BY brand_node_id
     )
 """
 _NOT_ONBOARDING_IMPORT = """
-    p.created_at > f.first_seen_at + make_interval(hours => %(onboarding_grace_h)s)
+    p.first_seen_at > f.first_seen_at + make_interval(hours => %(onboarding_grace_h)s)
 """
 
 # 조인 순서를 **팔로우 브랜드 → 상품 → 유저** 로 고정한다.
@@ -669,10 +669,10 @@ _NOT_ONBOARDING_IMPORT = """
 # 유저는 늘어도 **팔로우된 브랜드 수와 최근 창의 상품 수는 카탈로그에 묶여 있다**. 그래서
 # 후보 상품(`candidates`)을 유저와 무관하게 한 번만 만들고, 그 다음에 picks 를 붙인다.
 # `MATERIALIZED` 는 플래너가 CTE 를 다시 인라인해 원래의 나쁜 순서로 되돌리는 것을 막는다.
-# `candidates` 는 `idx_products_notification_brand_created (brand_node_id, created_at DESC,
+# `candidates` 는 `idx_products_notification_brand_created (brand_node_id, first_seen_at DESC,
 # id DESC) WHERE brand_node_id IS NOT NULL` 을 타라고 만든 형태다.
 #
-# brand_first_seen 도 팔로우 브랜드로 좁힌다. min(created_at) 은 브랜드별 집계라 대상
+# brand_first_seen 도 팔로우 브랜드로 좁힌다. min(first_seen_at) 은 브랜드별 집계라 대상
 # 브랜드를 줄여도 값이 변하지 않는다 (전체 브랜드 집계는 브랜드 홈 요약 쪽
 # _BRAND_NEW_SUMMARY_SQL 이 따로 쓴다).
 #
@@ -716,28 +716,28 @@ _NEW_PRODUCT_SQL = f"""
         SELECT DISTINCT brand_id FROM picks
     ),
     brand_first_seen AS (
-        SELECT brand_node_id, min(created_at) AS first_seen_at
+        SELECT brand_node_id, min(first_seen_at) AS first_seen_at
         FROM public.products
         WHERE brand_node_id IN (SELECT brand_id FROM followed_brands)
         GROUP BY brand_node_id
     ),
     candidates AS MATERIALIZED (
-        SELECT p.id, p.brand_node_id, p.brand, p.name, p.price, p.gender, p.created_at
+        SELECT p.id, p.brand_node_id, p.brand, p.name, p.price, p.gender, p.first_seen_at
         FROM followed_brands fb
         JOIN public.products p ON p.brand_node_id = fb.brand_id
         JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
         {PRODUCT_FEATURES_JOIN}
-        WHERE p.created_at > %(since)s
-          AND p.created_at <= %(cutoff)s
+        WHERE p.first_seen_at > %(since)s
+          AND p.first_seen_at <= %(cutoff)s
           AND {_NOT_ONBOARDING_IMPORT}
           AND p.in_stock
           AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
     ),
     matched AS MATERIALIZED (
-        SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price, p.created_at,
+        SELECT k.user_id, p.id, p.brand_node_id, p.brand, p.name, p.price, p.first_seen_at,
                row_number() OVER (
                    PARTITION BY k.user_id, p.brand_node_id
-                   ORDER BY p.created_at DESC, p.id DESC
+                   ORDER BY p.first_seen_at DESC, p.id DESC
                ) AS brand_rank
         FROM candidates p
         JOIN picks k ON k.brand_id = p.brand_node_id
@@ -750,17 +750,17 @@ _NEW_PRODUCT_SQL = f"""
           )
     ),
     bucketed AS (
-        SELECT user_id, id, brand_node_id, brand, name, price, created_at,
+        SELECT user_id, id, brand_node_id, brand, name, price, first_seen_at,
                row_number() OVER (
                    PARTITION BY user_id, (brand_rank <= %(max_per_brand)s)
-                   ORDER BY created_at DESC, id DESC
+                   ORDER BY first_seen_at DESC, id DESC
                ) AS bucket_rank
         FROM matched
     )
     SELECT user_id, id, brand_node_id, brand, name, price
     FROM bucketed
     WHERE bucket_rank <= %(max_items)s
-    ORDER BY created_at DESC, id DESC
+    ORDER BY first_seen_at DESC, id DESC
 """
 
 
@@ -897,8 +897,8 @@ _BRAND_NEW_SUMMARY_SQL = f"""
     SELECT p.brand_node_id, max(p.brand) AS brand, count(*) AS new_count
     FROM public.products p
     JOIN brand_first_seen f ON f.brand_node_id = p.brand_node_id
-    WHERE p.created_at > %(since)s
-      AND p.created_at <= %(cutoff)s
+    WHERE p.first_seen_at > %(since)s
+      AND p.first_seen_at <= %(cutoff)s
       AND {_NOT_ONBOARDING_IMPORT}
       AND p.in_stock
       AND p.image_url IS NOT NULL AND btrim(p.image_url) <> ''
@@ -2236,9 +2236,9 @@ _PURGE_MESSAGES = """
 """
 # ai.notifications 를 지워도 brand_new_product 의 "평생 1회" 는 깨지지 않는다.
 #
-#   후보 조건은 `p.created_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 다 (_NEW_PRODUCT_SQL).
+#   후보 조건은 `p.first_seen_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 다 (_NEW_PRODUCT_SQL).
 #   brand_new 알림 행은 그 상품이 창 안에 있던 시점에만 만들어지므로
-#   `product.created_at >= notification.created_at - 창`. 보존 기간이 창보다 훨씬 길기
+#   `product.first_seen_at >= notification.created_at - 창`. 보존 기간이 창보다 훨씬 길기
 #   때문에(기본 180일 vs 14일), 지울 나이가 된 알림 행이 가리키는 상품은 이미 창 밖이라
 #   안티조인 행이 없어도 다시 후보가 되지 않는다. products 조인이 필요 없는 이유다.
 #
