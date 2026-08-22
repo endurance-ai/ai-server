@@ -59,7 +59,9 @@ async def _aged_brand(pool, name: str, *, anchor_gender: list[str] | None = None
     brand_id = await _insert_brand(pool, name)
     anchor = await _insert_product(pool, brand=name, brand_node_id=brand_id, gender=anchor_gender or ["women"])
     async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute("UPDATE public.products SET created_at = now() - interval '60 days' WHERE id = %s", (anchor,))
+        await cur.execute(
+            "UPDATE public.products SET first_seen_at = now() - interval '60 days' WHERE id = %s", (anchor,)
+        )
         await conn.commit()
     return brand_id
 
@@ -520,7 +522,7 @@ async def test_brand_new_summary_refreshes_count_then_closes(client: AsyncClient
     # 윈도우 밖으로 밀려나면 닫힌다 — 3주 전 신상을 계속 걸어두지 않는다.
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "UPDATE public.products SET created_at = now() - interval '30 days' WHERE brand_node_id = %s",
+            "UPDATE public.products SET first_seen_at = now() - interval '30 days' WHERE brand_node_id = %s",
             (brand_id,),
         )
         await conn.commit()
@@ -621,7 +623,7 @@ async def test_onboarding_import_is_not_treated_as_new_arrivals(client: AsyncCli
     # 유예시간이 지난 뒤 들어온 상품부터는 진짜 신상이다.
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
-            "UPDATE public.products SET created_at = now() - interval '3 days' WHERE brand_node_id = %s",
+            "UPDATE public.products SET first_seen_at = now() - interval '3 days' WHERE brand_node_id = %s",
             (brand_id,),
         )
         await conn.commit()
@@ -1146,7 +1148,7 @@ async def test_retention_cascades_to_deliveries_and_message_events(client: Async
 async def test_retention_does_not_resurrect_brand_new_notifications(client: AsyncClient, pool, monkeypatch):
     """brand_new_product 의 '평생 1회' 는 안티조인 행이 사라져도 유지된다.
 
-    후보 조건이 `products.created_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 라, 지울 나이가
+    후보 조건이 `products.first_seen_at > now - NOTIFY_NEW_PRODUCT_WINDOW_D` 라, 지울 나이가
     된 알림이 가리키는 상품은 이미 창 밖이다. 이 성질이 깨지면 보존 잡이 옛날 상품을
     전부 신상으로 재발송한다 — 이 테스트가 그 회귀 가드다.
     """
@@ -1173,7 +1175,7 @@ async def test_retention_does_not_resurrect_brand_new_notifications(client: Asyn
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute("UPDATE ai.notifications SET created_at = now() - interval '400 days'")
         await cur.execute(
-            "UPDATE public.products SET created_at = now() - interval '400 days' WHERE id = %s",
+            "UPDATE public.products SET first_seen_at = now() - interval '400 days' WHERE id = %s",
             (product_id,),
         )
         await conn.commit()
