@@ -313,7 +313,7 @@ async def preview_feed(
 ) -> PreviewResponse:
     """앱에 실제로 뜨는 구좌별 상품 수.
 
-    자동 구좌와는 중복을 허용하고, editorial 구좌끼리만 중복을 뺀다.
+    `display_type='trending'` 구좌끼리만 중복을 뺀다.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -326,14 +326,14 @@ async def preview_feed(
             (gender,),
         )
         rows = await cur.fetchall()
-        editorial_section_ids: set[int] = set()
+        trending_section_ids: set[int] = set()
         sections: list[PreviewSection] = []
         for section_id, slot_type, display_type, title, sort_order, product_ids in rows:
             candidates = [int(p) for p in (product_ids or [])]
-            is_editorial = slot_type == "editorial"
-            remaining = [pid for pid in candidates if not is_editorial or pid not in editorial_section_ids]
-            if is_editorial:
-                editorial_section_ids.update(remaining)
+            is_trending = display_type == "trending"
+            remaining = [pid for pid in candidates if not is_trending or pid not in trending_section_ids]
+            if is_trending:
+                trending_section_ids.update(remaining)
             sections.append(
                 PreviewSection(
                     section_id=section_id,

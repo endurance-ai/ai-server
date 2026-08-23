@@ -3,7 +3,7 @@
 핵심 계약 세 가지를 고정한다:
   1) 저장이 곧 반영이다 (GET /v1/curation 이 즉시 바뀐다)
   2) auto 구좌의 product_ids 는 어드민이 못 건드린다 (리프레셔 소유)
-  3) 자동 구좌와의 중복은 허용하고 editorial 구좌끼리만 중복을 제거한다
+  3) `display_type=trending` 구좌끼리만 중복을 제거한다
 """
 
 from __future__ import annotations
@@ -143,8 +143,8 @@ async def test_reorder_sections_rejects_stale_or_duplicate_lists(client: AsyncCl
     assert stale.status_code == 409
 
 
-async def test_auto_slots_allow_duplicates_but_editorial_sections_dedupe(client: AsyncClient, pool):
-    """자동 구좌와의 중복은 허용하고 editorial 구좌끼리는 중복을 제거한다."""
+async def test_only_trending_display_sections_dedupe(client: AsyncClient, pool):
+    """Default/editorial은 독립적이고 trending 렌더러끼리만 중복을 제거한다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)
     only_later = await _insert_product(pool, brand="Later", price=42000)
     await _insert_section(
@@ -169,6 +169,7 @@ async def test_auto_slots_allow_duplicates_but_editorial_sections_dedupe(client:
         gender="women",
         product_ids=[shared, only_later],
         slot_type="editorial",
+        display_type="trending",
         sort_order=20,
     )
     await _insert_section(
@@ -177,6 +178,7 @@ async def test_auto_slots_allow_duplicates_but_editorial_sections_dedupe(client:
         gender="women",
         product_ids=[shared],
         slot_type="editorial",
+        display_type="trending",
         sort_order=21,
     )
 
