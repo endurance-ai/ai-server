@@ -184,8 +184,7 @@ async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: Asyn
 
     feed = (await client.get("/v1/curation", params={"gender": "women"})).json()
     products_by_section = {
-        section["id"]: {product["product_id"] for product in section["products"]}
-        for section in feed["sections"]
+        section["id"]: {product["product_id"] for product in section["products"]} for section in feed["sections"]
     }
     assert shared in products_by_section["trending-search"]
     assert shared in products_by_section["editorial-brand-picks"]
