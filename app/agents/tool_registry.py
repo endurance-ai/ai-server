@@ -31,6 +31,7 @@ __all__ = [
     "UpdateTasteArgs",
     "AskUserClarificationArgs",
     "GetRecentHistoryArgs",
+    "WebSearchArgs",
     "RespondArgs",
     # SPEC-AGENT-V3-REACT Gap3 — 8th tool (flag-gated registration)
     "SuggestNextStepArgs",
@@ -41,6 +42,7 @@ __all__ = [
     "UpdateTasteResult",
     "AskUserClarificationResult",
     "GetRecentHistoryResult",
+    "WebSearchResult",
     "RespondResult",
     "SuggestNextStepResult",
     # Helpers
@@ -142,6 +144,10 @@ class GetRecentHistoryArgs(TypedDict, total=False):
     event_types: list[str]  # optional filter
 
 
+class WebSearchArgs(TypedDict, total=False):
+    query: str  # what to look up on the web (English or Korean)
+
+
 class SuggestNextStepArgs(TypedDict, total=False):
     # SPEC-AGENT-V3-REACT Gap3 — proactive follow-up options card.
     kind: Literal["similar", "fit_change", "different_mood", "broaden", "generic"]
@@ -205,6 +211,13 @@ class GetRecentHistoryResult(TypedDict, total=False):
     ok: bool
     error: str | None
     events: list[dict[str, Any]]
+
+
+class WebSearchResult(TypedDict, total=False):
+    ok: bool
+    error: str | None
+    answer: str | None  # provider's synthesized answer (may be None)
+    results: list[dict[str, Any]]  # [{title, url, content}] snippets
 
 
 class RespondResult(TypedDict, total=False):
@@ -433,6 +446,29 @@ REGISTRY: dict[str, ToolMetadata] = {
         "dispatch_fn_path": "app.agents.tools.get_recent_history:dispatch",
         "langfuse_span_tag": "tool.get_recent_history",
         "side_effect_doc": "Read-only SELECT on ai.log_conversation_event.",
+        "terminates_loop": False,
+    },
+    "web_search": {
+        "name": "web_search",
+        "description": (
+            "Look something up on the live web. Use ONLY when you cannot answer "
+            "from the catalog or your own knowledge — specifically to decode a "
+            "STYLE REFERENCE or an UNFAMILIAR brand the user named:\n"
+            "  - celebrity / influencer looks and 'OO st(st=스타일)' references "
+            "(e.g. '닝닝 공항패션st', '제니st') → search to learn what the look "
+            "actually IS (colors, silhouettes, garment types, mood).\n"
+            "  - a brand you don't recognize → search to learn its aesthetic.\n"
+            "After web_search, TRANSLATE what you learned into a concrete "
+            "`search_products` query (color/fit/garment/mood) — the web result "
+            "itself is NOT the answer; the catalog products are. Do NOT use "
+            "web_search for plain garment requests you can already search "
+            "('검정 니트'), for prices, or for stock. Returns short web snippets."
+        ),
+        "args_typeddict": WebSearchArgs,
+        "result_typeddict": WebSearchResult,
+        "dispatch_fn_path": "app.agents.tools.web_search:dispatch",
+        "langfuse_span_tag": "tool.web_search",
+        "side_effect_doc": "External HTTP call to the Tavily search API.",
         "terminates_loop": False,
     },
     "respond": {

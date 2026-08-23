@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     LITELLM_BASE_URL: str = "http://localhost:4000"
     LITELLM_MASTER_KEY: str = ""
 
+    # 웹검색 툴 (Tavily). 키가 비어 있으면 web_search 툴은 LLM 에 노출되지 않는다
+    # (llm_client._build_tools_schema 에서 gate). "닝닝 공항패션st" 같은 스타일
+    # 레퍼런스·미지 브랜드 의미를 해석하기 위한 커스텀 툴. Bedrock 경유라 Claude
+    # 내장 web_search 서버툴을 못 써서 외부 검색 API 를 직접 호출한다.
+    TAVILY_API_KEY: str = ""
+    TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_MAX_RESULTS: int = 5
+    WEB_SEARCH_TIMEOUT_MS: int = 8000
+
     # Langfuse — 관측성
     LANGFUSE_HOST: str = "http://localhost:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
