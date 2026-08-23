@@ -183,6 +183,42 @@ def resolve_brand_names(query: str | None) -> list[str] | None:
     return None
 
 
+# 스캔에서 제외할 흔한/모호한 1어절 별칭 — 브랜드명이지만 일상어로도 자주 쓰여
+# 자유 문장 스캔 시 오탐을 낸다(예: '키스하고 싶은 원피스' → Kith). 명시적
+# `brand` arg / resolve_brand_names 경로는 영향받지 않고, 자유 문장 스캔에서만
+# 이 토큰들을 무시한다.
+_SCAN_STOPWORDS: frozenset[str] = frozenset({"키스", "노아", "게스", "보드", "kiss", "guess", "noah"})
+
+
+def scan_text_for_brand(text: str | None) -> list[str] | None:
+    """자유 문장에서 알려진 브랜드를 찾아 canonical 리스트로 반환.
+
+    에이전트(LLM)가 낯선 국내 브랜드('글로니' 등)를 `brand` arg 로 안 채우는
+    경우를 결정론적으로 보정하기 위한 스캔. 1~3 어절 슬라이딩 윈도우로
+    `_filter_index` 를 조회하고 가장 긴(가장 구체적인) 매치를 채택한다. 흔한
+    1어절 별칭(_SCAN_STOPWORDS)은 오탐 방지로 제외. 미발견/미워밍이면 None."""
+    if not text or not isinstance(text, str):
+        return None
+    tokens = text.split()
+    n = len(tokens)
+    if n == 0:
+        return None
+    best_span = 0
+    best_names: list[str] | None = None
+    for i in range(n):
+        for span in (3, 2, 1):
+            if i + span > n:
+                continue
+            cand = " ".join(tokens[i : i + span])
+            if span == 1 and cand.strip().lower() in _SCAN_STOPWORDS:
+                continue
+            names = resolve_brand_names(cand)
+            if names and span > best_span:
+                best_span = span
+                best_names = names
+    return best_names
+
+
 def is_warmed() -> bool:
     return _warmed
 

@@ -85,5 +85,40 @@ def get_last_brand(chat_id: Any) -> list[str] | None:
     return _LAST_BRAND.get(cid)
 
 
+# chat_id -> 대화에서 감지된 sticky 브랜드 컨텍스트. `_LAST_BRAND`(직전 성공
+# 검색의 브랜드, 브랜드-없는 검색마다 지워짐)와 달리, 이건 사용자가 브랜드를
+# 언급하면 세팅되고 clarify 연속 턴('글로니 → (상의) → (바지)')에서 유지된다.
+# 새 화제(브랜드 없는 fresh 텍스트 쿼리)에서 지워진다. 수명/멀티워커 특성은
+# _LAST 와 동일(process-local, 재시작 시 소멸 — 무해).
+_PINNED_BRAND: dict[int, list[str]] = {}
+
+
+def set_pinned_brand(chat_id: Any, brands: list[str] | None) -> None:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return
+    clean = [str(b).strip() for b in (brands or []) if str(b).strip()]
+    if clean:
+        _PINNED_BRAND[cid] = clean[:8]
+    else:
+        _PINNED_BRAND.pop(cid, None)
+
+
+def get_pinned_brand(chat_id: Any) -> list[str] | None:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return None
+    return _PINNED_BRAND.get(cid)
+
+
+def clear_pinned_brand(chat_id: Any) -> None:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return
+    _PINNED_BRAND.pop(cid, None)
+
+
 def _reset_all_for_tests() -> None:
     _LAST.clear()
+    _LAST_BRAND.clear()
+    _PINNED_BRAND.clear()

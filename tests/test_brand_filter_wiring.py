@@ -11,7 +11,7 @@ from __future__ import annotations
 from app.agents.tools.search_products import _recover_pinned_brand, _resolve_brand_filter
 from app.infrastructure.memory.session import get_store
 from app.infrastructure.repositories import brand_node_cache
-from app.infrastructure.repositories.brand_node_cache import _surface_keys
+from app.infrastructure.repositories.brand_node_cache import _surface_keys, scan_text_for_brand
 
 
 def _seed_cache(monkeypatch, *names: str) -> None:
@@ -106,3 +106,44 @@ def test_pin_dominant_brand_over_80pct(monkeypatch):
 def test_pin_no_chat_id(monkeypatch):
     _seed_cache(monkeypatch, "GLOWNY")
     assert _recover_pinned_brand({}) is None
+
+
+# ── 자유 문장 브랜드 스캔 (scan_text_for_brand) ──────────────────────────────
+
+
+def _seed_alias_index(monkeypatch, mapping: dict[str, list[str]]) -> None:
+    """surface(별칭 포함) → canonical 명 리스트로 _filter_index 직접 구성.
+    한글 별칭('글로니' → GLOWNY)은 실제로 brand_aliases 에서 오지만, 스캔
+    테스트에선 표면형 키만 있으면 되므로 여기서 직접 심는다."""
+    filt: dict[str, list[str]] = {}
+    for surface, names in mapping.items():
+        for key in _surface_keys(surface):
+            filt.setdefault(key, []).extend(names)
+    monkeypatch.setattr(brand_node_cache, "_filter_index", filt)
+    monkeypatch.setattr(brand_node_cache, "_acronym_index", {})
+
+
+def test_scan_finds_brand_in_free_text(monkeypatch):
+    _seed_alias_index(monkeypatch, {"GLOWNY": ["GLOWNY"], "글로니": ["GLOWNY"]})
+    assert scan_text_for_brand("글로니 제품 찾아줘") == ["GLOWNY"]
+    assert scan_text_for_brand("글로니 상의 보여줘") == ["GLOWNY"]
+
+
+def test_scan_none_when_no_brand(monkeypatch):
+    _seed_alias_index(monkeypatch, {"GLOWNY": ["GLOWNY"], "글로니": ["GLOWNY"]})
+    assert scan_text_for_brand("상의") is None
+    assert scan_text_for_brand("여름 원피스 추천") is None
+    assert scan_text_for_brand("") is None
+    assert scan_text_for_brand(None) is None
+
+
+def test_scan_prefers_longest_multiword_match(monkeypatch):
+    _seed_cache(monkeypatch, "Acne Studios")
+    # 2-어절 브랜드명이 문장 안에 있으면 잡는다.
+    assert scan_text_for_brand("acne studios 니트 보여줘") == ["Acne Studios"]
+
+
+def test_scan_skips_common_word_aliases(monkeypatch):
+    # '키스'(Kith)처럼 일상어와 겹치는 1어절 별칭은 오탐 방지로 스캔 제외.
+    _seed_cache(monkeypatch, "키스")
+    assert scan_text_for_brand("키스 하고 싶은 원피스") is None
