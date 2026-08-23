@@ -357,25 +357,7 @@ async def refresh_auto_sections(
     requested = set(section_ids)
     ordered_section_ids = tuple(section_id for section_id in _AUTO_IDS if section_id in requested)
     for gender in _GENDERS:
-        excluded_ids: set[int] = set()
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT section_id, product_ids
-                FROM ai.curation_sections
-                WHERE gender = %s AND slot_type = 'auto' AND is_active
-                  AND section_id = ANY(%s)
-                """,
-                (gender, list(_AUTO_IDS)),
-            )
-            cached_ids = {str(row[0]): {int(pid) for pid in (row[1] or [])} for row in await cur.fetchall()}
-
-        processed: set[str] = set()
         for section_id in ordered_section_ids:
-            section_index = _AUTO_IDS.index(section_id)
-            for prior_section_id in _AUTO_IDS[:section_index]:
-                if prior_section_id not in processed:
-                    excluded_ids.update(cached_ids.get(prior_section_id, set()))
             try:
                 async with pool.connection() as conn, conn.cursor() as cur:
                     await cur.execute(_candidate_sql(section_id), _query_params(gender))
@@ -395,14 +377,12 @@ async def refresh_auto_sections(
                     selected = select_candidate_ids(
                         rows,
                         section_id=section_id,
-                        excluded_ids=excluded_ids,
+                        excluded_ids=set(),
                         seed=f"guest:{gender}:{section_id}:{generated_for}",
                         require_full=strict_quota,
                     )
                     if not selected:
                         logger.warning("🗂 [curation] no valid candidates %s/%s", section_id, gender)
-                        excluded_ids.update(cached_ids.get(section_id, set()))
-                        processed.add(section_id)
                         continue
                     await cur.execute(
                         "DELETE FROM ai.curation_candidates WHERE section_id = %s AND gender = %s",
@@ -438,13 +418,8 @@ async def refresh_auto_sections(
                         (selected, section_id, gender),
                     )
                     await conn.commit()
-                excluded_ids.update(selected)
-                cached_ids[section_id] = set(selected)
-                processed.add(section_id)
                 written += 1
             except Exception as exc:  # noqa: BLE001
-                excluded_ids.update(cached_ids.get(section_id, set()))
-                processed.add(section_id)
                 logger.warning("🗂 [curation] auto %s/%s failed: %r", section_id, gender, exc)
     return written
 

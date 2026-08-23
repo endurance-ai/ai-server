@@ -118,7 +118,7 @@ async def _load_sections(
         section_rows = await cur.fetchall()
 
         selected_by_section: dict[str, list[int]] = {}
-        excluded_ids: set[int] = set()
+        lower_section_ids: set[int] = set()
         taste_scores: dict[int, float] = {}
         feature_scores: dict[tuple[str, str], float] = {}
         if user_id is not None:
@@ -140,6 +140,10 @@ async def _load_sections(
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
         for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
+            # Trending is deliberately independent: a product can be both a
+            # trending item and part of a themed lower section. Below trending,
+            # retain one card per product across the regular feed sections.
+            is_trending = section_id == "trending-search"
             if section_id in PERSONALIZED_AUTO_SECTION_IDS:
                 selected = (
                     await personalized_product_ids(
@@ -160,7 +164,7 @@ async def _load_sections(
                 continue
 
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
-                selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
+                selected = [int(pid) for pid in (product_ids or []) if is_trending or int(pid) not in lower_section_ids]
             else:
                 await cur.execute(
                     """
@@ -188,16 +192,19 @@ async def _load_sections(
                 selected = select_candidate_ids(
                     candidate_rows,
                     section_id=section_id,
-                    excluded_ids=excluded_ids,
+                    excluded_ids=set() if is_trending else lower_section_ids,
                     taste_scores=taste_scores,
                     feature_scores=feature_scores,
                     seed=f"{user_id}:{gender}:{section_id}",
                 )
                 if not selected:
-                    selected = [int(pid) for pid in (product_ids or []) if int(pid) not in excluded_ids]
+                    selected = [
+                        int(pid) for pid in (product_ids or []) if is_trending or int(pid) not in lower_section_ids
+                    ]
             selected = selected[:CURATION_SECTION_PRODUCT_LIMIT]
             selected_by_section[section_id] = selected
-            excluded_ids.update(selected)
+            if not is_trending:
+                lower_section_ids.update(selected)
 
         # 구좌별 product_ids를 한 번에 하이드레이션 (results.py의 unnest 패턴).
         all_ids: list[int] = []

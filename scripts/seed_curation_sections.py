@@ -270,11 +270,6 @@ async def _expand_brands(cur: Any, brand_ids: list[int], gender: str, excluded: 
     + 4×아웃바운드 + ln(1+리뷰), curation_refresh.py:99). 인기 정의가 구좌마다
     갈리지 않게 하려는 것이다.
 
-    `excluded` 는 앞 구좌가 이미 차지한 상품이다. API 가 sort_order 순으로
-    `excluded_ids` 를 누적해 뒤 구좌에서 중복을 빼기 때문에(curation.py:173),
-    여기서 미리 피하지 않으면 인기 브랜드일수록 `trending-search`와 겹쳐
-    뒤 구좌가 반토막 난다.
-
     품질 게이트도 auto 구좌와 같은 `_quality_sql()` 을 쓴다 — 여기서 통과한
     상품만 하이드레이션(app/api/curation.py:183)도 통과한다.
     """
@@ -390,21 +385,10 @@ _UPSERT = """
 async def _build_rows(cur: Any) -> list[dict[str, Any]]:
     """DB 조회(브랜드 전개)까지 끝낸 최종 행 목록.
 
-    sort_order 순으로 훑으면서 앞 구좌가 차지한 상품을 `claimed` 에 모으고,
-    브랜드 구좌는 그걸 피해서 전개한다 — API 의 `excluded_ids` 누적과 같은
-    순서다(curation.py:173).
+    Trending과의 중복은 허용하고, 그 아래 구좌끼리만 중복을 피한다.
     """
     rows: list[dict[str, Any]] = []
     claimed: dict[str, set[int]] = {gender: set() for gender in GENDERS}
-
-    # auto 구좌의 상품은 리프레셔 소유다. upsert 가 보존하므로 DB 현재값을
-    # 그대로 claimed 에 반영한다 — 이게 브랜드 구좌를 가장 많이 먹는 쪽이다.
-    await cur.execute(
-        "SELECT gender, product_ids FROM ai.curation_sections WHERE slot_type = 'auto' AND is_active",
-    )
-    for gender, product_ids in await cur.fetchall():
-        if str(gender) in claimed:
-            claimed[str(gender)].update(int(p) for p in (product_ids or []))
 
     for spec in AUTO_SECTIONS:
         for gender in GENDERS:

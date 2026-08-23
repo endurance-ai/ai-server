@@ -3,7 +3,7 @@
 핵심 계약 세 가지를 고정한다:
   1) 저장이 곧 반영이다 (GET /v1/curation 이 즉시 바뀐다)
   2) auto 구좌의 product_ids 는 어드민이 못 건드린다 (리프레셔 소유)
-  3) preview 는 앞 구좌와 겹쳐 잘리는 분까지 반영한 실제 노출 수를 준다
+  3) trending은 중복을 허용하고 그 아래 구좌끼리만 중복을 제거한다
 """
 
 from __future__ import annotations
@@ -143,8 +143,8 @@ async def test_reorder_sections_rejects_stale_or_duplicate_lists(client: AsyncCl
     assert stale.status_code == 409
 
 
-async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
-    """구좌 단독 live_count 로는 설명 안 되는 '앞 구좌가 먼저 가져감' 을 드러낸다."""
+async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: AsyncClient, pool):
+    """Trending과의 중복은 허용하고 아래 구좌끼리는 중복을 제거한다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)
     only_later = await _insert_product(pool, brand="Later", price=42000)
     await _insert_section(
@@ -163,6 +163,14 @@ async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
         slot_type="editorial",
         sort_order=20,
     )
+    await _insert_section(
+        pool,
+        section_id="editorial-later",
+        gender="women",
+        product_ids=[shared],
+        slot_type="editorial",
+        sort_order=21,
+    )
 
     listing = (await client.get("/admin/curation/sections", params={"gender": "women"})).json()
     by_id = {s["section_id"]: s for s in listing["sections"]}
@@ -171,7 +179,17 @@ async def test_preview_reflects_cross_section_dedupe(client: AsyncClient, pool):
     preview = (await client.get("/admin/curation/preview", params={"gender": "women"})).json()
     shown = {s["section_id"]: s["shown"] for s in preview["sections"]}
     assert shown["trending-search"] == 1
-    assert shown["editorial-brand-picks"] == 1  # shared 를 trending-search 가 먼저 가져갔다
+    assert shown["editorial-brand-picks"] == 2
+    assert shown["editorial-later"] == 0
+
+    feed = (await client.get("/v1/curation", params={"gender": "women"})).json()
+    products_by_section = {
+        section["id"]: {product["product_id"] for product in section["products"]}
+        for section in feed["sections"]
+    }
+    assert shared in products_by_section["trending-search"]
+    assert shared in products_by_section["editorial-brand-picks"]
+    assert products_by_section["editorial-later"] == set()
 
 
 async def test_product_lookup_flags_ineligible_and_missing(client: AsyncClient, pool):

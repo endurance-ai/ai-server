@@ -66,9 +66,7 @@ class SectionRow(SectionPayload):
     """조회 응답. `live_count` 는 지금 이 구좌에서 실제 카드로 뜨는 상품 수다.
 
     저장한 product_ids 중 품절·이미지 없음·가격 미달·성별 불일치를 뺀 값이라
-    운영자가 "12개 넣었는데 3개만 보인다" 를 저장 즉시 알 수 있다. 단, 앞
-    구좌와 겹쳐 잘리는 분(curation.py 의 excluded_ids 누적)은 반영하지 않는다 —
-    그건 피드 전체 순서에 의존하므로 `GET /admin/curation/preview` 가 계산한다.
+    운영자가 저장 직후 실제 노출 수를 알 수 있다.
     """
 
     live_count: int = 0
@@ -315,9 +313,7 @@ async def preview_feed(
 ) -> PreviewResponse:
     """앱에 실제로 뜨는 구좌별 상품 수.
 
-    `GET /v1/curation` 은 sort_order 순으로 이미 쓴 상품을 뒤 구좌에서 뺀다
-    (curation.py 의 excluded_ids 누적). 그래서 구좌 단독 live_count 만 보면
-    "12개 넣었는데 3개만 보인다" 를 설명할 수 없다 — 여기서 그 누적을 재현한다.
+    Trending 상품은 다른 구좌에도 남기고, 그 아래 일반 구좌끼리만 중복을 뺀다.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -330,12 +326,14 @@ async def preview_feed(
             (gender,),
         )
         rows = await cur.fetchall()
-        seen: set[int] = set()
+        lower_section_ids: set[int] = set()
         sections: list[PreviewSection] = []
         for section_id, display_type, title, sort_order, product_ids in rows:
             candidates = [int(p) for p in (product_ids or [])]
-            remaining = [pid for pid in candidates if pid not in seen]
-            seen.update(remaining)
+            is_trending = section_id == "trending-search"
+            remaining = [pid for pid in candidates if is_trending or pid not in lower_section_ids]
+            if not is_trending:
+                lower_section_ids.update(remaining)
             sections.append(
                 PreviewSection(
                     section_id=section_id,
