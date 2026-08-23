@@ -1233,6 +1233,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 임베딩에 그대로 남아 soft 신호로 작동).
     brand_filter = _resolve_brand_filter(args.get("brand"))
 
+    # 브랜드 지정 검색은 "그 브랜드 상품을 최대한 다 보여줘"가 의도다. 기본
+    # top_k(15)로는 한 브랜드만 볼 때 너무 적으니, LLM 이 더 큰 값을 주지 않은
+    # 한 앨범 한 페이지(스트리밍 album_size=40)에 맞춰 상향한다. diversify 는
+    # brand_filter 활성 시 다양성 캡을 끄므로 이 만큼 실제로 채워진다.
+    if brand_filter:
+        top_k = max(top_k, 40)
+
     # Multi-turn image blending (Level 1 image-first refinement):
     # when no current image URL exists but an origin image URL is stored from
     # a prior Vision turn, blend the cached image vector with the text modifier

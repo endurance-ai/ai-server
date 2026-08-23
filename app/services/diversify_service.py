@@ -29,12 +29,24 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     req = state.request
     target = req.final_limit or tolerance_to_target_count(req.tolerance)
 
-    # brandFilter 활성 시 브랜드 캡 완화 (v4와 동일 정책)
-    brand_cap = settings.SEARCH_BRAND_CAP * 3 if req.brand_filter else settings.SEARCH_BRAND_CAP
-    platform_cap = settings.SEARCH_PLATFORM_CAP
-    # SPEC-DIVERSIFY-ATTR-CAP — vibe / silhouette diversity (0 disables).
-    vibe_cap = int(settings.SEARCH_VIBE_CAP or 0)
-    silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)
+    # brandFilter 활성 시 다양성 캡을 사실상 해제한다. 사용자가 특정 브랜드를
+    # 콕 집었으면(예: "글로니 상의") 그 브랜드 상품을 최대한 다 보여주는 게
+    # 의도다. 단일 브랜드 결과는 brand/platform/vibe/silhouette 의 first-token 이
+    # 전부 동일해서(예: GLOWNY vibe=quiet-luxury, platform=glowny) 이 캡들이
+    # 겹쳐 걸리면 target 보다 훨씬 적게(관측: 5개) 잘려 나갔다. brand 필터가
+    # 있을 때는 브랜드 다양성 개념이 무의미하므로 platform/vibe/silhouette 캡을
+    # 끄고 brand 캡만 target 까지 허용한다.
+    if req.brand_filter:
+        brand_cap = max(settings.SEARCH_BRAND_CAP * 3, target)
+        platform_cap = target
+        vibe_cap = 0
+        silhouette_cap = 0
+    else:
+        brand_cap = settings.SEARCH_BRAND_CAP
+        platform_cap = settings.SEARCH_PLATFORM_CAP
+        # SPEC-DIVERSIFY-ATTR-CAP — vibe / silhouette diversity (0 disables).
+        vibe_cap = int(settings.SEARCH_VIBE_CAP or 0)
+        silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)
 
     # 입력 / 캡 설정
     logger.info(
