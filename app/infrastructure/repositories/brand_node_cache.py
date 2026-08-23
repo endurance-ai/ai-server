@@ -252,7 +252,7 @@ async def warm_cache() -> None:
 
     alias_sql = """
         SELECT ba.brand_id, ba.alias
-        FROM public.brand_aliases ba
+        FROM ai.brand_aliases ba
         WHERE ba.approved AND ba.confidence = 'high'
     """
 
@@ -338,7 +338,7 @@ async def warm_cache() -> None:
             brandid_to_group[attrs.brand_id] = group_key
             brandid_to_attrs[attrs.brand_id] = attrs
 
-    # Curated Korean/alternate aliases (public.brand_aliases). Best-effort and
+    # Curated Korean/alternate aliases (ai.brand_aliases). Best-effort and
     # isolated: a missing table (pre-migration) or query error leaves node
     # warming intact. Only approved high-confidence rows become hard-filter
     # aliases; each alias's surface keys attach to its brand's group.

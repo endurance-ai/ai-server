@@ -1,4 +1,4 @@
-"""Load curated Korean/alternate brand aliases into public.brand_aliases.
+"""Load curated Korean/alternate brand aliases into ai.brand_aliases.
 
 96% of brand_nodes carry a Latin-only brand_name, so a Korean-language brand
 query ('글로니') cannot resolve without a curated alias ('글로니' → GLOWNY).
@@ -78,7 +78,7 @@ def emit_sql(rows: list[tuple[int, str, str, str]]) -> str:
     lines = ["BEGIN;"]
     for brand_id, alias, norm, confidence in rows:
         lines.append(
-            "INSERT INTO public.brand_aliases "
+            "INSERT INTO ai.brand_aliases "
             "(brand_id, alias, alias_normalized, lang, source, confidence, approved) VALUES "
             f"({brand_id}, {_sql_lit(alias)}, {_sql_lit(norm)}, 'ko', {_sql_lit(SOURCE)}, "
             f"{_sql_lit(confidence)}, true) "
@@ -96,7 +96,7 @@ def upsert(rows: list[tuple[int, str, str, str]], dsn: str) -> int:
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         cur.executemany(
             """
-            INSERT INTO public.brand_aliases
+            INSERT INTO ai.brand_aliases
                 (brand_id, alias, alias_normalized, lang, source, confidence, approved)
             VALUES (%s, %s, %s, 'ko', %s, %s, true)
             ON CONFLICT (brand_id, alias_normalized) DO UPDATE
