@@ -8,7 +8,8 @@ None(fail-open: text_query 임베딩의 soft 신호로만 작동)이어야 한�
 
 from __future__ import annotations
 
-from app.agents.tools.search_products import _resolve_brand_filter
+from app.agents.tools.search_products import _recover_pinned_brand, _resolve_brand_filter
+from app.infrastructure.memory.session import get_store
 from app.infrastructure.repositories import brand_node_cache
 from app.infrastructure.repositories.brand_node_cache import _surface_keys
 
@@ -64,3 +65,44 @@ def test_empty_and_non_string_fail_open(monkeypatch):
 def test_cold_cache_fails_open(monkeypatch):
     _seed_cache(monkeypatch)  # empty cache (워밍 실패 시나리오)
     assert _resolve_brand_filter("Acne Studios") is None
+
+
+# ── clarify 연속 턴 브랜드 핀 (_recover_pinned_brand) ────────────────────────
+
+
+def _seed_last_results(chat_id: int, brands: list[str]) -> None:
+    """세션 last_results 에 brand 텍스트만 가진 후보를 심는다."""
+    store = get_store()
+    sess = store.get_or_create(chat_id)
+    sess.last_results = [{"id": str(i), "brand": b} for i, b in enumerate(brands)]
+    store.update(sess)
+
+
+def test_pin_recovers_single_brand_from_last_results(monkeypatch):
+    _seed_cache(monkeypatch, "GLOWNY")
+    _seed_last_results(4101, ["GLOWNY", "GLOWNY", "GLOWNY", "GLOWNY"])
+    assert _recover_pinned_brand({"chat_id": 4101}) == ["GLOWNY"]
+
+
+def test_pin_skips_mixed_brands(monkeypatch):
+    _seed_cache(monkeypatch, "GLOWNY", "Acne Studios")
+    _seed_last_results(4102, ["GLOWNY", "Acne Studios", "GLOWNY", "Acne Studios"])
+    assert _recover_pinned_brand({"chat_id": 4102}) is None
+
+
+def test_pin_skips_when_too_few_results(monkeypatch):
+    _seed_cache(monkeypatch, "GLOWNY")
+    _seed_last_results(4103, ["GLOWNY", "GLOWNY"])  # < 3 → 추론 불가
+    assert _recover_pinned_brand({"chat_id": 4103}) is None
+
+
+def test_pin_dominant_brand_over_80pct(monkeypatch):
+    _seed_cache(monkeypatch, "GLOWNY", "Acne Studios")
+    # 9/10 GLOWNY → ≥80% → 핀.
+    _seed_last_results(4104, ["GLOWNY"] * 9 + ["Acne Studios"])
+    assert _recover_pinned_brand({"chat_id": 4104}) == ["GLOWNY"]
+
+
+def test_pin_no_chat_id(monkeypatch):
+    _seed_cache(monkeypatch, "GLOWNY")
+    assert _recover_pinned_brand({}) is None
