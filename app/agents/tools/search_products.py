@@ -170,6 +170,46 @@ def _resolve_brand_filter(raw: Any) -> list[str] | None:
     return None
 
 
+def _recover_pinned_brand(ctx: dict[str, Any]) -> list[str] | None:
+    """Clarify 연속 턴에서 LLM 이 `brand` 를 빠뜨렸을 때 직전 검색의 브랜드를 유지.
+
+    '글로니 제품 찾아줘 → (상의) → 다시 (바지)' 처럼 두 번째 clarify 답에서
+    작은 모델이 브랜드를 놓쳐 다른 브랜드가 뜨던 문제 대응(프롬프트로 "keep
+    brand" 지시해도 비결정적). 직전 턴 후보(`sess.last_results`)가 사실상 단일
+    브랜드면 그 브랜드를 canonical 화해 필터로 재적용한다. 혼합 브랜드(일반
+    검색 컨텍스트)면 None — 핀하지 않는다. best-effort, 절대 raise 안 함."""
+    try:
+        chat_id = ctx.get("chat_id")
+        if chat_id is None:
+            return None
+        from app.infrastructure.memory.session import get_store
+
+        sess = get_store().get_or_create(int(chat_id))
+        cands = list(getattr(sess, "last_results", None) or [])
+        brands: list[str] = []
+        for c in cands:
+            b = getattr(c, "brand", None)
+            if b is None and isinstance(c, dict):
+                b = c.get("brand")
+            b = (b or "").strip()
+            if b:
+                brands.append(b)
+        # 직전 검색 후보가 너무 적으면(무-검색 clarify 등) 추론 불가.
+        if len(brands) < 3:
+            return None
+        from collections import Counter
+
+        top_lower, top_n = Counter(b.lower() for b in brands).most_common(1)[0]
+        # 사실상 단일 브랜드일 때만(≥80%) 핀 — 혼합이면 일반 검색이므로 건드리지 않는다.
+        if top_n / len(brands) < 0.8:
+            return None
+        sample = next(b for b in brands if b.lower() == top_lower)
+        return _resolve_brand_filter(sample)
+    except Exception as exc:  # noqa: BLE001 — 핀은 부가 기능, 검색을 막지 않는다
+        logger.debug("[tool.search_products] brand pin recover failed: %r", exc)
+        return None
+
+
 def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
     """Render a `pipeline_failed:` suffix from an exception (review P1-C 260522).
 
@@ -1232,6 +1272,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 미인식 브랜드는 필터 없이 진행 (fail-open — 브랜드 토큰은 text_query
     # 임베딩에 그대로 남아 soft 신호로 작동).
     brand_filter = _resolve_brand_filter(args.get("brand"))
+
+    # Clarify 연속 턴 브랜드 유지: LLM 이 brand 를 안 줬는데 이번 턴이 clarify
+    # 답(예: '글로니 → (상의) → (바지)')이고 직전 검색이 단일 브랜드였다면 그
+    # 브랜드를 이어서 적용한다. 작은 모델이 두 번째 답에서 브랜드를 놓쳐 다른
+    # 브랜드가 뜨던 문제 대응.
+    if brand_filter is None and ctx.get("from_clarify_answer"):
+        pinned = _recover_pinned_brand(ctx)
+        if pinned:
+            brand_filter = pinned
+            logger.info("[tool.search_products] brand pin: reused %r on clarify answer", pinned)
 
     # 브랜드 지정 검색은 "그 브랜드 상품을 최대한 다 보여줘"가 의도다. 기본
     # top_k(15)로는 한 브랜드만 볼 때 너무 적으니, LLM 이 더 큰 값을 주지 않은
