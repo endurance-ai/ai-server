@@ -29,6 +29,10 @@ def _build_tools_schema() -> list[dict[str, Any]]:
     """
     tools: list[dict[str, Any]] = []
     for name, meta in REGISTRY.items():
+        # web_search is only advertised to the LLM when a search key is set —
+        # otherwise the model would call a dead tool. The dispatch also guards.
+        if name == "web_search" and not (settings.TAVILY_API_KEY or "").strip():
+            continue
         td = meta["args_typeddict"]
         annotations = getattr(td, "__annotations__", {})
         properties: dict[str, Any] = {}
