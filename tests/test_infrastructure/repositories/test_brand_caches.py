@@ -265,8 +265,9 @@ async def test_node_warm_success_builds_attrs(isolate_node_cache, monkeypatch):
     ]
 
     def _fake_run(coro):
+        name = coro.cr_code.co_name
         coro.close()
-        return rows
+        return [] if name == "_fetch_brand_aliases" else rows
 
     monkeypatch.setattr(db_pool, "run_in_pool_loop", _fake_run)
     await bnc.warm_cache()
@@ -304,13 +305,14 @@ def _node_row(brand_name: str, normalized: str, node_id: int) -> tuple:
     return (brand_name, normalized, None, None, None, None, None, None, None, None, None, node_id)
 
 
-async def _warm_with_rows(monkeypatch, rows: list[tuple]) -> None:
+async def _warm_with_rows(monkeypatch, rows: list[tuple], alias_rows: list[tuple] | None = None) -> None:
     monkeypatch.setattr(settings, "DB_DSN", "postgresql://x")
     monkeypatch.setattr(db_pool, "_pool", object())
 
     def _fake_run(coro):
+        name = coro.cr_code.co_name
         coro.close()
-        return rows
+        return (alias_rows or []) if name == "_fetch_brand_aliases" else rows
 
     monkeypatch.setattr(db_pool, "run_in_pool_loop", _fake_run)
     await bnc.warm_cache()
@@ -352,6 +354,33 @@ async def test_resolve_bilingual_and_acronym_and_duplicate_nodes(isolate_node_ca
     # rerank/diversity lookup path resolves the Korean surface too.
     assert bnc.lookup("먼데이에디션") is not None
     assert bnc.lookup("킨더살몬") is not None
+
+
+async def test_curated_korean_alias_resolves(isolate_node_cache, monkeypatch):
+    # Latin-only brand with NO Korean surface — resolvable only via a curated
+    # brand_aliases row ('글로니' → GLOWNY). Mirrors the real GLOWNY case.
+    await _warm_with_rows(
+        monkeypatch,
+        rows=[_node_row("GLOWNY", "glowny", 847)],
+        alias_rows=[(847, "글로니")],
+    )
+    assert bnc.resolve_brand_names("글로니") == ["GLOWNY"]
+    # English still resolves from the node surface.
+    assert bnc.resolve_brand_names("glowny") == ["GLOWNY"]
+    # rerank/diversity lookup resolves the alias to the brand's attrs.
+    assert bnc.lookup("글로니") is not None
+
+
+async def test_alias_for_unknown_brand_is_ignored(isolate_node_cache, monkeypatch):
+    # An alias whose brand_id has no node (shouldn't happen w/ FK, but be safe)
+    # is skipped, not crash.
+    await _warm_with_rows(
+        monkeypatch,
+        rows=[_node_row("GLOWNY", "glowny", 847)],
+        alias_rows=[(999999, "고스트")],
+    )
+    assert bnc.resolve_brand_names("고스트") is None
+    assert bnc.resolve_brand_names("glowny") == ["GLOWNY"]
 
 
 async def test_ambiguous_acronym_is_dropped(isolate_node_cache, monkeypatch):

@@ -250,6 +250,17 @@ async def warm_cache() -> None:
         WHERE brand_name_normalized IS NOT NULL AND brand_name_normalized <> ''
     """
 
+    alias_sql = """
+        SELECT ba.brand_id, ba.alias
+        FROM public.brand_aliases ba
+        WHERE ba.approved AND ba.confidence = 'high'
+    """
+
+    async def _fetch_brand_aliases() -> list[tuple[Any, ...]]:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(alias_sql)
+            return await cur.fetchall()
+
     try:
 
         async def _query() -> list[tuple[Any, ...]]:
@@ -274,6 +285,10 @@ async def warm_cache() -> None:
     groups: dict[str, list[str]] = {}
     alias_to_groups: dict[str, set[str]] = {}
     acro_to_groups: dict[str, set[str]] = {}
+    # brand_id → group / attrs, so curated brand_aliases rows (fetched below)
+    # attach to the right brand group and share its attrs in `_cache`.
+    brandid_to_group: dict[int, str] = {}
+    brandid_to_attrs: dict[int, BrandAttributes] = {}
     for r in rows:
         # The `brand_name_normalized` column in the DB matches our regex
         # most of the time but not always (curated edits). Use it verbatim
@@ -319,6 +334,35 @@ async def warm_cache() -> None:
         acro = _acronym(outer) or _acronym(brand_name)
         if acro:
             acro_to_groups.setdefault(acro, set()).add(group_key)
+        if attrs.brand_id is not None:
+            brandid_to_group[attrs.brand_id] = group_key
+            brandid_to_attrs[attrs.brand_id] = attrs
+
+    # Curated Korean/alternate aliases (public.brand_aliases). Best-effort and
+    # isolated: a missing table (pre-migration) or query error leaves node
+    # warming intact. Only approved high-confidence rows become hard-filter
+    # aliases; each alias's surface keys attach to its brand's group.
+    alias_count = 0
+    try:
+        alias_rows = db_pool.run_in_pool_loop(_fetch_brand_aliases())
+        for a in alias_rows:
+            brand_id = int(a[0]) if a[0] is not None else None
+            alias_txt = str(a[1] or "")
+            gk = brandid_to_group.get(brand_id) if brand_id is not None else None
+            if gk is None or not alias_txt:
+                continue
+            keys = _surface_keys(alias_txt)
+            if not keys:
+                continue
+            for key in keys:
+                alias_to_groups.setdefault(key, set()).add(gk)
+                # rerank/diversity lookup: alias resolves to the brand's attrs.
+                brand_attrs = brandid_to_attrs.get(brand_id)
+                if brand_attrs is not None and key not in built:
+                    built[key] = brand_attrs
+            alias_count += 1
+    except Exception as exc:  # noqa: BLE001 — aliases are additive; never break warm
+        logger.info("[BRAND_NODE_CACHE][startup] brand_aliases skipped (%s)", type(exc).__name__)
 
     # Dedup each group's canonical names (stable order).
     for gk in list(groups):
@@ -338,10 +382,12 @@ async def warm_cache() -> None:
     _acronym_index.update(acro_idx)
     _warmed = True
     logger.info(
-        "[BRAND_NODE_CACHE][startup] warmed brands=%d keys=%d filter_aliases=%d acronyms=%d sample_keys=%s",
+        "[BRAND_NODE_CACHE][startup] warmed brands=%d keys=%d filter_aliases=%d "
+        "acronyms=%d curated_aliases=%d sample_keys=%s",
         len({a.brand_name for a in built.values()}),
         len(built),
         len(filt),
         len(acro_idx),
+        alias_count,
         list(built.keys())[:3],
     )
