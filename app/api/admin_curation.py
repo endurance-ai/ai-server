@@ -313,12 +313,12 @@ async def preview_feed(
 ) -> PreviewResponse:
     """앱에 실제로 뜨는 구좌별 상품 수.
 
-    Trending 상품은 다른 구좌에도 남기고, 그 아래 일반 구좌끼리만 중복을 뺀다.
+    자동 구좌와는 중복을 허용하고, editorial 구좌끼리만 중복을 뺀다.
     """
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT section_id, display_type, title, sort_order, product_ids
+            SELECT section_id, slot_type, display_type, title, sort_order, product_ids
             FROM ai.curation_sections
             WHERE gender = %s AND is_active
             ORDER BY sort_order ASC, section_id ASC
@@ -326,14 +326,14 @@ async def preview_feed(
             (gender,),
         )
         rows = await cur.fetchall()
-        lower_section_ids: set[int] = set()
+        editorial_section_ids: set[int] = set()
         sections: list[PreviewSection] = []
-        for section_id, display_type, title, sort_order, product_ids in rows:
+        for section_id, slot_type, display_type, title, sort_order, product_ids in rows:
             candidates = [int(p) for p in (product_ids or [])]
-            is_trending = section_id == "trending-search"
-            remaining = [pid for pid in candidates if is_trending or pid not in lower_section_ids]
-            if not is_trending:
-                lower_section_ids.update(remaining)
+            is_editorial = slot_type == "editorial"
+            remaining = [pid for pid in candidates if not is_editorial or pid not in editorial_section_ids]
+            if is_editorial:
+                editorial_section_ids.update(remaining)
             sections.append(
                 PreviewSection(
                     section_id=section_id,

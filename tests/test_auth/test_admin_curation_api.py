@@ -3,7 +3,7 @@
 핵심 계약 세 가지를 고정한다:
   1) 저장이 곧 반영이다 (GET /v1/curation 이 즉시 바뀐다)
   2) auto 구좌의 product_ids 는 어드민이 못 건드린다 (리프레셔 소유)
-  3) trending은 중복을 허용하고 그 아래 구좌끼리만 중복을 제거한다
+  3) 자동 구좌와의 중복은 허용하고 editorial 구좌끼리만 중복을 제거한다
 """
 
 from __future__ import annotations
@@ -143,8 +143,8 @@ async def test_reorder_sections_rejects_stale_or_duplicate_lists(client: AsyncCl
     assert stale.status_code == 409
 
 
-async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: AsyncClient, pool):
-    """Trending과의 중복은 허용하고 아래 구좌끼리는 중복을 제거한다."""
+async def test_auto_slots_allow_duplicates_but_editorial_sections_dedupe(client: AsyncClient, pool):
+    """자동 구좌와의 중복은 허용하고 editorial 구좌끼리는 중복을 제거한다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)
     only_later = await _insert_product(pool, brand="Later", price=42000)
     await _insert_section(
@@ -154,6 +154,14 @@ async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: Asyn
         product_ids=[shared],
         slot_type="auto",
         sort_order=1,
+    )
+    await _insert_section(
+        pool,
+        section_id="under-100",
+        gender="women",
+        product_ids=[shared],
+        slot_type="auto",
+        sort_order=2,
     )
     await _insert_section(
         pool,
@@ -179,6 +187,7 @@ async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: Asyn
     preview = (await client.get("/admin/curation/preview", params={"gender": "women"})).json()
     shown = {s["section_id"]: s["shown"] for s in preview["sections"]}
     assert shown["trending-search"] == 1
+    assert shown["under-100"] == 1
     assert shown["editorial-brand-picks"] == 2
     assert shown["editorial-later"] == 0
 
@@ -187,6 +196,7 @@ async def test_trending_allows_duplicates_but_lower_sections_dedupe(client: Asyn
         section["id"]: {product["product_id"] for product in section["products"]} for section in feed["sections"]
     }
     assert shared in products_by_section["trending-search"]
+    assert shared in products_by_section["under-100"]
     assert shared in products_by_section["editorial-brand-picks"]
     assert products_by_section["editorial-later"] == set()
 
