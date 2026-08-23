@@ -3,7 +3,7 @@
 핵심 계약 세 가지를 고정한다:
   1) 저장이 곧 반영이다 (GET /v1/curation 이 즉시 바뀐다)
   2) auto 구좌의 product_ids 는 어드민이 못 건드린다 (리프레셔 소유)
-  3) `display_type=trending` 구좌끼리만 중복을 제거한다
+  3) 구좌 간 상품 중복을 허용한다
 """
 
 from __future__ import annotations
@@ -143,8 +143,8 @@ async def test_reorder_sections_rejects_stale_or_duplicate_lists(client: AsyncCl
     assert stale.status_code == 409
 
 
-async def test_only_trending_display_sections_dedupe(client: AsyncClient, pool):
-    """Default/editorial은 독립적이고 trending 렌더러끼리만 중복을 제거한다."""
+async def test_sections_allow_cross_section_product_duplicates(client: AsyncClient, pool):
+    """같은 상품은 여러 구좌에서 그대로 노출된다."""
     shared = await _insert_product(pool, brand="Shared", price=42000)
     only_later = await _insert_product(pool, brand="Later", price=42000)
     await _insert_section(
@@ -191,7 +191,7 @@ async def test_only_trending_display_sections_dedupe(client: AsyncClient, pool):
     assert shown["trending-search"] == 1
     assert shown["under-100"] == 1
     assert shown["editorial-brand-picks"] == 2
-    assert shown["editorial-later"] == 0
+    assert shown["editorial-later"] == 1
 
     feed = (await client.get("/v1/curation", params={"gender": "women"})).json()
     products_by_section = {
@@ -200,7 +200,7 @@ async def test_only_trending_display_sections_dedupe(client: AsyncClient, pool):
     assert shared in products_by_section["trending-search"]
     assert shared in products_by_section["under-100"]
     assert shared in products_by_section["editorial-brand-picks"]
-    assert products_by_section["editorial-later"] == set()
+    assert shared in products_by_section["editorial-later"]
 
 
 async def test_product_lookup_flags_ineligible_and_missing(client: AsyncClient, pool):

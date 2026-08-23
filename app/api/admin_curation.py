@@ -311,10 +311,7 @@ async def preview_feed(
     gender: Gender = Query(),
     pool: AsyncConnectionPool = Depends(provide_db_pool),
 ) -> PreviewResponse:
-    """앱에 실제로 뜨는 구좌별 상품 수.
-
-    `display_type='trending'` 구좌끼리만 중복을 뺀다.
-    """
+    """앱에 실제로 뜨는 구좌별 상품 수."""
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
@@ -326,14 +323,9 @@ async def preview_feed(
             (gender,),
         )
         rows = await cur.fetchall()
-        trending_section_ids: set[int] = set()
         sections: list[PreviewSection] = []
         for section_id, slot_type, display_type, title, sort_order, product_ids in rows:
             candidates = [int(p) for p in (product_ids or [])]
-            is_trending = display_type == "trending"
-            remaining = [pid for pid in candidates if not is_trending or pid not in trending_section_ids]
-            if is_trending:
-                trending_section_ids.update(remaining)
             sections.append(
                 PreviewSection(
                     section_id=section_id,
@@ -341,7 +333,7 @@ async def preview_feed(
                     display_type=display_type,
                     title=title,
                     sort_order=sort_order,
-                    shown=await _live_count(cur, remaining, gender),
+                    shown=await _live_count(cur, candidates, gender),
                 )
             )
     return PreviewResponse(gender=gender, sections=sections)
