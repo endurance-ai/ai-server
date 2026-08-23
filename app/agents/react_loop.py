@@ -466,6 +466,24 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     # 이번 턴이 clarify 답(clarify:<axis>:<value> 콜백)에서 시작됐는지 — 그렇다면
     # 2차 좁히기(subcategory 등)를 코드로 차단해 "큰 틀 한 번 → 상품" 을 강제한다.
     _cb = (state.message.callback_data or "") if state.message else ""
+
+    # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 search
+    # 의 `brand` arg 로 안 넣는 문제 보정. 원문에서 브랜드를 감지하면 핀을 세팅,
+    # clarify 답 같은 후속 턴('글로니 → (상의) → (바지)')에서 유지한다. 브랜드
+    # 없는 fresh 텍스트 쿼리(새 화제)면 핀을 지운다. 콜백 턴에 브랜드 없으면 유지.
+    try:
+        from app.agents.last_query import clear_pinned_brand, set_pinned_brand
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+
+        _raw_msg = (state.message.text or "") if state.message else ""
+        _detected = scan_text_for_brand(_raw_msg)
+        if _detected:
+            set_pinned_brand(state.chat_id, _detected)
+        elif not _cb and _raw_msg.strip():
+            clear_pinned_brand(state.chat_id)
+    except Exception:  # noqa: BLE001 — 핀은 부가 기능, ctx 빌드를 막지 않는다
+        logger.debug("[react_loop] brand pin update skipped", exc_info=True)
+
     return {
         "chat_id": state.chat_id,
         "from_clarify_answer": _cb.startswith("clarify:"),

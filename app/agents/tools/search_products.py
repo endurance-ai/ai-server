@@ -1273,15 +1273,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 임베딩에 그대로 남아 soft 신호로 작동).
     brand_filter = _resolve_brand_filter(args.get("brand"))
 
-    # Clarify 연속 턴 브랜드 유지: LLM 이 brand 를 안 줬는데 이번 턴이 clarify
-    # 답(예: '글로니 → (상의) → (바지)')이고 직전 검색이 단일 브랜드였다면 그
-    # 브랜드를 이어서 적용한다. 작은 모델이 두 번째 답에서 브랜드를 놓쳐 다른
-    # 브랜드가 뜨던 문제 대응.
-    if brand_filter is None and ctx.get("from_clarify_answer"):
-        pinned = _recover_pinned_brand(ctx)
+    # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 brand
+    # arg 로 안 넣는 문제 보정. react_loop._build_ctx 가 원문에서 브랜드를 감지해
+    # 세션 핀에 저장하므로, LLM 이 brand 를 빠뜨렸으면 그 핀을 적용한다
+    # ('글로니 → (상의) → (바지)' 전 구간 유지). 핀이 없고 clarify 답 턴이면
+    # 직전 검색 결과(단일 브랜드)에서 복구도 시도(보조).
+    if brand_filter is None:
+        from app.agents.last_query import get_pinned_brand
+
+        pinned = get_pinned_brand(ctx.get("chat_id"))
+        if not pinned and ctx.get("from_clarify_answer"):
+            pinned = _recover_pinned_brand(ctx)
         if pinned:
             brand_filter = pinned
-            logger.info("[tool.search_products] brand pin: reused %r on clarify answer", pinned)
+            logger.info("[tool.search_products] brand pin: applied %r (agent omitted brand)", pinned)
 
     # 브랜드 지정 검색은 "그 브랜드 상품을 최대한 다 보여줘"가 의도다. 기본
     # top_k(15)로는 한 브랜드만 볼 때 너무 적으니, LLM 이 더 큰 값을 주지 않은

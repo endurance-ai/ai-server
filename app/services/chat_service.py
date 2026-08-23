@@ -209,12 +209,18 @@ async def _sync_gender_to_taste_profile(
             )
             row = await cur.fetchone()
         db_gender = (row[0] or "").strip().lower() if row else None
-        # Default to unisex so the gender-pin gate never blocks REST API users.
-        gender_token = _GENDER_MAP.get(db_gender or "", "unisex")
+        # 온보딩 성별(ai.user_profiles = 정본, female/male)을 taste_profile 로
+        # 동기화한다. _GENDER_MAP 미스(무온보딩/other)면 None — 여기서 'unisex' 로
+        # 핀하지 않는다. (기존 버그: 온보딩 전 첫 챗에서 'unisex' 를 pin 하면
+        # `if not profile.gender` guard 때문에 이후 여성 온보딩을 해도 갱신되지
+        # 않아 여성 유저가 계속 unisex/남성 결과를 받았다.)
+        gender_token = _GENDER_MAP.get(db_gender or "", None)
         from app.infrastructure.memory.taste_profile import get_taste_store
 
         profile = _migrate_legacy_taste_profile(synthetic_chat_id)
-        if not profile.gender:
+        # 정본 성별이 있으면 빈값/스테일 'unisex' 를 덮어쓴다(자가 치유). 단
+        # 사용자가 챗 젠더카드에서 명시적으로 고른 women/men 은 보존.
+        if gender_token and (profile.gender in (None, "", "unisex")) and profile.gender != gender_token:
             profile.gender = gender_token
             get_taste_store().update(profile)
     except Exception:
