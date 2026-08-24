@@ -535,3 +535,15 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def model_supports_prompt_caching(model: str | None) -> bool:
+    """Prompt caching (``cache_control: ephemeral``) is Anthropic-only.
+
+    Non-Anthropic Bedrock models (Moonshot/Kimi, Qwen, Nova) reject any request
+    carrying a ``cache_control`` block — LiteLLM forwards the field unchanged and
+    Bedrock 500s with "You invoked an unsupported model or your request did not
+    allow prompt caching". Gate every cache_control we emit on this check so the
+    agent works regardless of which model AGENT_LLM_MODEL / VISION_MODEL points at.
+    """
+    return "claude" in (model or "").lower()

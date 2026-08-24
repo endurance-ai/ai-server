@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.channels.vision_prompt import ANALYZE_SYSTEM_PROMPT, ANALYZE_USER_PROMPT
-from app.core.config import settings
+from app.core.config import model_supports_prompt_caching, settings
 from app.observability.langfuse import observe
 from app.providers.llm import LLMProvider
 
@@ -247,12 +247,15 @@ def _build_messages(image_url_value: str, *, schema_v2: bool, multi_look_retry: 
             "Return valid JSON only, no commentary."
         )
 
+    # cache_control is Anthropic-only; gate on the vision model so non-Anthropic
+    # Bedrock models (Kimi/Moonshot, Qwen, Nova) don't 500 on the cache block.
+    _sys_block: dict[str, Any] = {"type": "text", "text": system_prompt}
+    if model_supports_prompt_caching(settings.VISION_MODEL):
+        _sys_block["cache_control"] = {"type": "ephemeral"}
     return [
         {
             "role": "system",
-            "content": [
-                {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}},
-            ],
+            "content": [_sys_block],
         },
         {
             "role": "user",

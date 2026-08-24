@@ -33,7 +33,7 @@ from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
 from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
-from app.core.config import settings
+from app.core.config import model_supports_prompt_caching, settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
@@ -1111,11 +1111,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         logger.info("🧠 [v3:memory] skip · build error")
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
+    # cache_control is Anthropic-only; non-Anthropic Bedrock models (Kimi/Moonshot,
+    # Qwen, Nova) 500 when it's present, so only mark the static prefix for Claude.
+    _sys_block: dict[str, Any] = {"type": "text", "text": system_content}
+    if model_supports_prompt_caching(settings.AGENT_LLM_MODEL):
+        _sys_block["cache_control"] = {"type": "ephemeral"}
     messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": system_content, "cache_control": {"type": "ephemeral"}}],
-        },
+        {"role": "system", "content": [_sys_block]},
         {"role": "user", "content": mem_prefix + _build_user_message(state, sess)},
     ]
 
