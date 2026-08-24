@@ -583,6 +583,43 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
 # the genuinely relevant rows on top, so the stopgap is obsolete by design.
 
 
+def _build_color_notice() -> str | None:
+    """검색 파이프라인이 색 정밀 필터를 재고 부족으로 relax 했으면(요청 색이
+    사실상 없어 유사상품으로 채운 경우), 에이전트가 사용자에게 정직하게 안내하도록
+    self-instructing 관찰 문자열을 만든다. relax 없으면 None. 이 문자열은 그대로
+    result.notice → react_loop result_summary 로 모델에 전달돼, "핑크로 바꿨어!"
+    같은 거짓 확답(2026-08-24 실트레이스)을 막는다."""
+    try:
+        from app.services.search_service import color_relax_ctx
+
+        meta = color_relax_ctx.get()
+    except Exception:  # noqa: BLE001
+        return None
+    if not meta:
+        return None
+    color = meta.get("requested_color")
+    if not color:
+        return None
+    exact = meta.get("exact_count")
+    if meta.get("subcategory_also_relaxed"):
+        return (
+            f"scarce_match: few items exactly match the requested {color} for this category; "
+            f"filled with close alternatives. Tell the user honestly that exact matches were "
+            f"limited and these are similar picks — do NOT claim they are all {color}."
+        )
+    if exact == 0:
+        return (
+            f"no_exact_color: ZERO items match color={color} for this query; the results are "
+            f"closest-style alternatives in OTHER colors. You MUST tell the user that {color} is "
+            f"essentially unavailable for this style and that these are similar look-alikes "
+            f"instead — do NOT claim the picks are {color}."
+        )
+    return (
+        f"low_exact_color: only {exact} item(s) actually match color={color}; the rest are close "
+        f"alternatives in other colors. Mention that exact-{color} stock is limited."
+    )
+
+
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
     try:
@@ -1603,4 +1640,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     )
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
-    return SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    result = SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    _notice = _build_color_notice()
+    if _notice:
+        result["notice"] = _notice
+    return result

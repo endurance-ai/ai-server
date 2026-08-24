@@ -15,6 +15,7 @@ SearchRepository).
 """
 
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from app.core.config import settings
@@ -34,6 +35,14 @@ from app.scoring.personalize_rerank import RerankWeights
 from app.scoring.personalize_rerank import rerank as _personalize_rerank
 
 logger = logging.getLogger(__name__)
+
+# 색(및 subcategory) 정밀 필터가 재고 부족으로 relax·drop 됐을 때의 신호를
+# 상위 에이전트 dispatch 로 전파하는 채널. 검색 파이프라인은 반환값이 후보
+# 리스트뿐이라 "요청 색이 사실상 없어서 유사상품으로 채웠다"는 사실이 사라졌고,
+# 에이전트는 그걸 모른 채 "핑크로 바꿨어!"라고 거짓 확답을 했다(2026-08-24 실
+# 트레이스). ContextVar 라 요청(async task)별로 격리된다. dispatch 가 검색 직후
+# 읽어 result.notice 로 실어 모델이 정직하게 안내하게 한다. None=relax 없음.
+color_relax_ctx: ContextVar[dict[str, Any] | None] = ContextVar("color_relax_ctx", default=None)
 
 # Back-compat re-export: app/pipeline/search.py shim re-exports this name and
 # tests reference _embedding_to_pgvector. The implementation now lives in the
@@ -188,6 +197,8 @@ async def search_service(state: PipelineState) -> PipelineState:
 
     req = state.request
     state.start("search")
+    # relax 신호 초기화 (이 요청에서 relax 없으면 None 유지).
+    color_relax_ctx.set(None)
 
     # v6 embedding-first → query_text/enhance_query RPC path retired (module
     # retained, dormant). search_products_v6 has no text param: query_embedding
@@ -305,13 +316,25 @@ async def search_service(state: PipelineState) -> PipelineState:
         # 상단에 유지한다(재고 부족 시 "요청 색 먼저 + 유사상품 채우기").
         relaxed_color_family = params.get("p_color_family")
         relaxed = dict(params, p_subcategory=None, p_color_family=None)
+        _strict_count = len(rows)
         logger.info(
             "[STEP 4.55][search] precision-filter relax retry — strict_count=%d (<%d) subcat=%r color=%r dropped",
-            len(rows),
+            _strict_count,
             settings.SEARCH_FILTER_RELAX_MIN,
             params.get("p_subcategory"),
             params.get("p_color_family"),
         )
+        # 색 필터가 relax 된 경우 신호를 전파 — 에이전트가 "요청 색 재고가 적어
+        # 유사상품으로 채웠다"고 정직하게 안내하도록. subcategory 만 relax(색 없음)
+        # 는 색 안내 대상이 아니므로 색이 있을 때만 채널을 세팅한다.
+        if relaxed_color_family:
+            color_relax_ctx.set(
+                {
+                    "requested_color": str(relaxed_color_family).strip().upper(),
+                    "exact_count": _strict_count,
+                    "subcategory_also_relaxed": params.get("p_subcategory") is not None,
+                }
+            )
         try:
             relaxed_rows = await _do_search(relaxed)
         except RpcContractError as exc:
