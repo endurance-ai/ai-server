@@ -1152,6 +1152,33 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         # infra error (5xx / throttle / timeout) we re-issue the SAME logical
         # step up to `llm_max_retries` times with short backoff. Non-transient
         # errors fall through to the existing exhaustion fallback unchanged.
+        # LLM-call heartbeat. The tool-dispatch heartbeat (below) covers slow
+        # tool calls, but the `ainvoke` itself is silent — on the FIRST turn a
+        # cold model call (Bedrock cross-region cold start, worse on Sonnet) can
+        # exceed the mobile's 10s stall window before ANY event, so the client
+        # cancels the stream and shows "응답이 늦어져 요청을 취소했어요 / 다시
+        # 시도" (retry then succeeds once warm — the exact reported bug). Fire a
+        # `progress` every 3s while the LLM call is in flight so the client keeps
+        # its stall-timer alive. Fire-and-forget, fail-open (mirrors _tool_heartbeat).
+        from app.graphs.nodes._adapter_ctx import _adapter_var as _llm_hb_var
+
+        _llm_hb_adapter = _llm_hb_var.get()
+        _llm_hb_chat_id = state.chat_id
+
+        async def _llm_heartbeat() -> None:
+            if _llm_hb_adapter is None or _llm_hb_chat_id is None:
+                return
+            try:
+                while True:
+                    await asyncio.sleep(3.0)
+                    try:
+                        await _llm_hb_adapter.send_progress(int(_llm_hb_chat_id), "thinking")
+                    except Exception:  # noqa: BLE001 — never block the LLM call
+                        return
+            except asyncio.CancelledError:
+                return
+
+        _llm_hb_task = asyncio.create_task(_llm_heartbeat())
         ai_msg = None
         last_exc: BaseException | None = None
         last_reason = "llm_timeout"
@@ -1194,6 +1221,9 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                     exc,
                 )
                 await asyncio.sleep(backoff)
+
+        # Stop the LLM-call heartbeat — the call has returned (or exhausted).
+        _llm_hb_task.cancel()
 
         if ai_msg is None:
             logger.warning("[agent_v2] LLM raised (retries exhausted): %r", last_exc)
