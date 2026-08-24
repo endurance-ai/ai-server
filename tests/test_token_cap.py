@@ -51,6 +51,7 @@ def _enable_cap(monkeypatch):
     monkeypatch.setattr(settings, "CAP_TIER_STANDARD", 500_000)
     monkeypatch.setattr(settings, "CAP_TIER_PRO", 1_000_000)
     monkeypatch.setattr(settings, "CAP_TIER_DEVELOPER", 0)
+    monkeypatch.setattr(settings, "CAP_TIER_GUEST", 2_000_000)
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +93,14 @@ def test_tier_cap_developer_is_zero():
     from app.infrastructure.cache.token_cap import _tier_cap
 
     assert _tier_cap("developer") == 0
+
+
+def test_tier_cap_guest():
+    """Web landing guest tier — site-wide daily total (single service account)."""
+    from app.infrastructure.cache.token_cap import _VALID_TIERS, _tier_cap
+
+    assert "guest" in _VALID_TIERS
+    assert _tier_cap("guest") == 2_000_000
 
 
 def test_tier_cap_unknown_falls_back_to_free():

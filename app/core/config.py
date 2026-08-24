@@ -497,6 +497,12 @@ class Settings(BaseSettings):
     CAP_TIER_STANDARD: int = 500_000
     CAP_TIER_PRO: int = 1_000_000
     CAP_TIER_DEVELOPER: int = 0  # unlimited — for devs and internal testing
+    # Web landing guests share ONE service account, so this cap is a *site-wide
+    # daily total* (all guest traffic aggregates on the single guest user_id's
+    # cap key), not per-visitor. It's the cost ceiling for the ad landing page;
+    # tune via env. Per-visitor abuse is handled by the landing proxy's IP rate
+    # limit, not here. See [[web-landing-guest-tier]].
+    CAP_TIER_GUEST: int = 2_000_000
 
     @property
     def effective_free_cap(self) -> int:

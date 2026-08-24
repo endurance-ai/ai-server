@@ -95,6 +95,8 @@ _APP_TO_CAP_TIER = {
     "pro": "pro",
     "premium": "pro",
     "developer": "developer",
+    # Web landing guest (single service account, site-wide total cap, taste off).
+    "guest": "guest",
 }
 
 
@@ -663,8 +665,10 @@ async def invoke(
     Returns (session_id, reply) where reply contains the AI response text + product cards.
     """
     resolved_session_id = await get_or_create_session(pool, user_id, session_id)
-    await _sync_gender_to_taste_profile(pool, user_id, _user_id_to_chat_id(user_id))
-    await _prime_feature_scores(pool, user_id, _user_id_to_chat_id(user_id))
+    # Guests (web landing) run taste OFF — see invoke_streaming / [[web-landing-guest-tier]].
+    if await _get_app_user_tier(pool, user_id) != "guest":
+        await _sync_gender_to_taste_profile(pool, user_id, _user_id_to_chat_id(user_id))
+        await _prime_feature_scores(pool, user_id, _user_id_to_chat_id(user_id))
 
     # Persist user message
     await append_message(pool, resolved_session_id, "user", text)
@@ -774,8 +778,13 @@ async def invoke_streaming(
         yield "done", {}
         return
 
-    await _sync_gender_to_taste_profile(pool, user_id, user_chat_id)
-    await _prime_feature_scores(pool, user_id, user_chat_id)
+    # Web landing guests run with taste OFF: all guests share one service account,
+    # so priming/persisting taste would pool every visitor's preferences into a
+    # single profile. Skipping the read keeps search taste-neutral; conversation
+    # stays isolated by session_id. See [[web-landing-guest-tier]].
+    if cap_status.user_tier != "guest":
+        await _sync_gender_to_taste_profile(pool, user_id, user_chat_id)
+        await _prime_feature_scores(pool, user_id, user_chat_id)
     await append_message(pool, resolved_session_id, "user", text)
     await set_session_title(pool, resolved_session_id, text)
 

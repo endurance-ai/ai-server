@@ -29,8 +29,8 @@ _KST = timezone(timedelta(hours=9))
 _CAP_KEY_PREFIX: Final[str] = "kiko:cap:"
 _TIER_KEY_PREFIX: Final[str] = "kiko:tier:"
 
-UserTier = Literal["free", "standard", "pro", "developer"]
-_VALID_TIERS: frozenset[str] = frozenset({"free", "standard", "pro", "developer"})
+UserTier = Literal["free", "standard", "pro", "developer", "guest"]
+_VALID_TIERS: frozenset[str] = frozenset({"free", "standard", "pro", "developer", "guest"})
 _DEFAULT_TIER: UserTier = "free"
 
 
@@ -67,6 +67,8 @@ def _tier_cap(tier: str) -> int:
         return settings.CAP_TIER_PRO
     if tier == "developer":
         return settings.CAP_TIER_DEVELOPER
+    if tier == "guest":
+        return settings.CAP_TIER_GUEST
     return settings.effective_free_cap  # free + unknown tiers
 
 

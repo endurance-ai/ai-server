@@ -1139,7 +1139,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 try:
                     from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                    await _cap_increment(state.chat_id, cumulative_tokens)
+                    await _cap_increment(state.from_user_id or state.chat_id, cumulative_tokens)
                 except Exception:  # noqa: BLE001
                     pass
             return {
@@ -1728,7 +1728,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             try:
                 from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                await _cap_increment(state.chat_id, cumulative_tokens)
+                await _cap_increment(state.from_user_id or state.chat_id, cumulative_tokens)
             except Exception:  # noqa: BLE001
                 pass
         return {
@@ -1749,7 +1749,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         try:
             from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-            await _cap_increment(state.chat_id, cumulative_tokens)
+            await _cap_increment(state.from_user_id or state.chat_id, cumulative_tokens)
         except Exception:  # noqa: BLE001 — fail-open, never block respond
             pass
 
