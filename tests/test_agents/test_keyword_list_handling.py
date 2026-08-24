@@ -117,3 +117,64 @@ def test_dedup_join_preserves_base_order():
 def test_dedup_join_all_empty_returns_empty_string():
     assert _dedup_join("", []) == ""
     assert _dedup_join("   ", []) == ""
+
+
+# ─── P1 (2026-08-24): tool-arg placeholder defense ────────────────────────
+# kimi-k2.5 emitted boost_keywords="list[3]" (schema type as value) → the token
+# 'list[3]' contaminated the embedded query. as_keyword_list now drops obvious
+# schema placeholders while keeping real keywords.
+
+from app.agents.tools._keyword_utils import (  # noqa: E402
+    COLOR_WORDS,
+    as_keyword_list,
+    strip_color_tokens,
+)
+
+
+def test_placeholder_list_annotation_dropped():
+    assert as_keyword_list("list[3]") == []
+    assert as_keyword_list(["list[3]"]) == []
+    assert as_keyword_list(["cropped", "list[3]", "wide-leg"]) == ["cropped", "wide-leg"]
+
+
+def test_placeholder_type_words_dropped():
+    for junk in ("str", "string", "dict", "array", "any", "None", "optional[str]"):
+        assert as_keyword_list(junk) == [], junk
+
+
+def test_placeholder_anglebracket_and_ellipsis_dropped():
+    assert as_keyword_list("<keyword>") == []
+    assert as_keyword_list("...") == []
+    assert as_keyword_list("keyword1") == []
+
+
+def test_real_keywords_survive_placeholder_filter():
+    # colour/style words that merely resemble nothing dangerous must survive
+    assert as_keyword_list(["cropped", "side-button", "off-shoulder"]) == [
+        "cropped",
+        "side-button",
+        "off-shoulder",
+    ]
+    assert as_keyword_list("relaxed-fit") == ["relaxed-fit"]
+
+
+# ─── P0-b (2026-08-24): colour-token stripping for color_swap ──────────────
+
+
+def test_strip_color_tokens_removes_known_colors():
+    assert strip_color_tokens("black cropped hoodie women slim-fit fitted") == ("cropped hoodie women slim-fit fitted")
+
+
+def test_strip_color_tokens_preserves_non_color_tokens():
+    # 'hoodie', 'slim-fit' etc. are never colours → untouched
+    assert strip_color_tokens("navy blue wide-leg jeans") == "wide-leg jeans"
+
+
+def test_strip_color_tokens_empty_and_no_color():
+    assert strip_color_tokens("") == ""
+    assert strip_color_tokens("cropped hoodie") == "cropped hoodie"
+
+
+def test_color_words_covers_common_families():
+    for c in ("black", "white", "pink", "navy", "beige", "khaki"):
+        assert c in COLOR_WORDS

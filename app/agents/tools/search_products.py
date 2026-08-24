@@ -146,6 +146,63 @@ def _query_gender(text_query: str) -> str | None:
     return None
 
 
+# 브랜드 pivot("스킴스로 보여줘") 감지용 필러. 브랜드 이름 + gender + 아래
+# 무의미 카테고리어만 남은 쿼리는 "스타일 서술이 없는" 브랜드 전환으로 본다.
+# 이런 턴에서 LLM 이 이전 스타일 맥락을 버리고 맨몸 브랜드 검색을 날리면
+# (닝닝 공항룩 → SKIMS → 언더웨어) 직전 성공검색의 스타일을 결정론적으로
+# 이어붙여 "같은 무드, 다른 브랜드"를 유지한다. (2026-08-24)
+_STYLELESS_FILLER: frozenset[str] = frozenset(
+    {
+        "top",
+        "tops",
+        "clothes",
+        "clothing",
+        "clothe",
+        "items",
+        "item",
+        "fashion",
+        "outfit",
+        "outfits",
+        "look",
+        "looks",
+        "style",
+        "styles",
+        "product",
+        "products",
+        "piece",
+        "pieces",
+        "thing",
+        "things",
+        "stuff",
+        "wear",
+        "apparel",
+        "collection",
+        "some",
+        "any",
+        "more",
+        "show",
+        "me",
+    }
+)
+
+
+def _is_styleless_brand_query(text_query: str, brand_arg: Any, brand_filter: list[str] | None) -> bool:
+    """`text_query` 가 브랜드/성별/무의미 필러만 담고 있으면 True.
+
+    True 면 사용자가 브랜드만 바꿨을 뿐 새 스타일 서술을 주지 않은 것이므로,
+    직전 검색의 스타일을 이어받아야 한다. 'nike running shoes women' 처럼
+    실 스타일 토큰이 있으면 False (그건 진짜 새 검색).
+    """
+    residual = set(text_query.lower().split())
+    residual -= set(_GENDER_TOKENS)
+    residual -= _STYLELESS_FILLER
+    # 브랜드 토큰 제거 (raw arg + resolve 된 canonical, 멀티워드 대응).
+    for src in (str(brand_arg or ""), *(brand_filter or [])):
+        for tok in src.lower().split():
+            residual.discard(tok)
+    return not residual
+
+
 def _resolve_brand_filter(raw: Any) -> list[str] | None:
     """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
 
@@ -1222,9 +1279,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         # base_query on subsequent legacy refines.
         if pinned_embedding is None:
             try:
-                from app.agents.last_query import set_last_query
+                from app.agents.last_query import push_recent_search, set_last_query
 
                 set_last_query(ctx.get("chat_id"), text_query)
+                # P2 (2026-08-24) — 링버퍼에도 기록해 "다시 <화제>" 되부름 앵커 확보.
+                # label 은 사용자 원문(raw_msg, 영어 번역 전). brand 는 아래에서
+                # 확정되므로 여기선 label+q 만; brand-pivot 병합 블록이 갱신한다.
+                push_recent_search(ctx.get("chat_id"), text_query, label=str(raw_msg or ""))
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1287,6 +1348,51 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         if pinned:
             brand_filter = pinned
             logger.info("[tool.search_products] brand pin: applied %r (agent omitted brand)", pinned)
+
+    # 브랜드 pivot style carry (2026-08-24): 브랜드는 지정됐는데 text_query 가
+    # 스타일 서술 없이 브랜드/성별/필러뿐이면("스킴스로 보여줘"), 직전 성공검색의
+    # 스타일을 이어붙인다. 없으면 SKIMS 처럼 카탈로그 기본이 언더웨어인 브랜드에서
+    # 맨몸 검색이 무드를 통째로 잃는다 (닝닝 공항룩 → 팬티/브라 실트레이스).
+    # anchor 턴(pinned_embedding)은 자체 이미지 앵커가 있으니 제외.
+    if (
+        brand_filter
+        and pinned_embedding is None
+        and _is_styleless_brand_query(text_query, args.get("brand"), brand_filter)
+    ):
+        try:
+            from app.agents.last_query import get_last_query
+
+            prior_style = get_last_query(ctx.get("chat_id")) or ""
+        except Exception:  # noqa: BLE001
+            prior_style = ""
+        if prior_style:
+            merged = dedup_join(text_query, [prior_style])
+            if merged and merged != text_query:
+                logger.info(
+                    "[tool.search_products] brand-pivot style carry: %r + prior %r → %r",
+                    text_query,
+                    prior_style,
+                    merged,
+                )
+                text_query = merged
+                structured_gender = _query_gender(text_query)
+                ctx["text_query"] = text_query
+                try:
+                    from app.agents.last_query import set_last_query
+
+                    set_last_query(ctx.get("chat_id"), text_query)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # P2 (2026-08-24) — 링버퍼 최종 갱신: brand 확정 + (pivot 시) 병합된 text_query 를
+    # 반영. label 이 같으므로 main persist 에서 만든 엔트리를 in-place 갱신한다.
+    if pinned_embedding is None and text_query:
+        try:
+            from app.agents.last_query import push_recent_search
+
+            push_recent_search(ctx.get("chat_id"), text_query, brand=brand_filter, label=str(raw_msg or ""))
+        except Exception:  # noqa: BLE001
+            pass
 
     # 브랜드 지정 검색은 "그 브랜드 상품을 최대한 다 보여줘"가 의도다. 기본
     # top_k(15)로는 한 브랜드만 볼 때 너무 적으니, LLM 이 더 큰 값을 주지 않은

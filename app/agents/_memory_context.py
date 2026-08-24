@@ -64,6 +64,41 @@ def _last_query_line(chat_id: Any) -> list[str]:
     ]
 
 
+def _recent_searches_lines(chat_id: Any) -> list[str]:
+    """P2 (2026-08-24) — 최근 성공 검색 링버퍼를 topic→query 맵으로 노출.
+
+    `last_search_query` 는 단일 슬롯이라 직전 검색만 담아, "다시 닝닝 스타일"
+    처럼 예전 화제를 되부르는 발화가 앵커를 잃었다(닝닝→스킴스 후 "다시 닝닝"
+    → web_search 재구글링 → 완전 다른 룩). 최근 N개 (사용자 원문 → 해석된 쿼리)
+    를 보여줘, 사용자가 명시적으로 과거 화제를 가리키면 재검색이 아니라 그 쿼리를
+    재사용하도록 한다.
+    """
+    try:
+        from app.agents.last_query import get_recent_searches
+
+        rows = get_recent_searches(chat_id)
+    except Exception as exc:  # noqa: BLE001 — fail-soft
+        logger.debug("[_memory_context] recent_searches read failed: %r", exc)
+        return []
+    if not rows:
+        return []
+    lines = [
+        "recent_searches (newest first — when the user explicitly recalls a PAST "
+        'topic ("다시 …", "아까 그", "again", "그거"), REUSE the matching '
+        "query below via `search_products` instead of `web_search`/re-deriving):"
+    ]
+    for r in rows:
+        label = (r.get("label") or "").strip()
+        q = (r.get("q") or "").strip()
+        brand = r.get("brand") or []
+        tail = f" [brand={', '.join(brand)}]" if brand else ""
+        if label:
+            lines.append(f'- "{label}" → {q}{tail}')
+        else:
+            lines.append(f"- {q}{tail}")
+    return lines
+
+
 def _taste_lines(user_key: str) -> list[str]:
     """Taste summary via existing TasteProfile boost/exclude helpers only."""
     try:
@@ -128,6 +163,7 @@ async def build_memory_context(state: Any, sess: Any, ctx: dict[str, Any], *, ma
 
     taste = _taste_lines(ctx.get("user_key") or "")
     last_q = _last_query_line(ctx.get("chat_id"))
+    recent_searches = _recent_searches_lines(ctx.get("chat_id"))
     recent = await _recent_lines(ctx)
 
     body_lines: list[str] = []
@@ -138,6 +174,9 @@ async def build_memory_context(state: Any, sess: Any, ctx: dict[str, Any], *, ma
         # Cross-turn anchor for refine_search. Surfaced ABOVE recent turns so
         # truncation (oldest-first) keeps it in the LLM's view.
         body_lines.extend(last_q)
+    if recent_searches:
+        # Topic→query recall map. Above the event digest so truncation keeps it.
+        body_lines.extend(recent_searches)
     if recent:
         body_lines.append("Recent turns (newest first):")
         body_lines.extend(recent)

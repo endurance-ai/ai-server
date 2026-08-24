@@ -17,6 +17,7 @@ after a restart just falls back to the current message).
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 # chat_id -> last successful search query (English, gender-pinned).
@@ -118,7 +119,45 @@ def clear_pinned_brand(chat_id: Any) -> None:
     _PINNED_BRAND.pop(cid, None)
 
 
+# chat_id -> 최근 성공 search_products 링버퍼 (newest last). `_LAST` 는 단일
+# 슬롯이라 매 검색마다 덮여, "다시 닝닝 스타일" 처럼 예전 화제를 되부르는 발화가
+# 앵커를 잃던 버그(2026-08-24 실트레이스: 닝닝→스킴스 후 "다시 닝닝" → 완전 다른
+# 룩) 대응. 각 원소 = {"label": 사용자 원문 발췌, "q": 해석된 영어 쿼리, "brand": [...]}.
+# _memory_context 가 digest 로 노출 → 모델이 "다시/그거/again" 발화에 재사용.
+# 수명/멀티워커 특성은 _LAST 와 동일(process-local, 재시작 시 소멸 — 무해).
+_RECENT_MAX = 5
+_RECENT: dict[int, deque[dict[str, Any]]] = {}
+
+
+def push_recent_search(chat_id: Any, query: str, *, brand: list[str] | None = None, label: str = "") -> None:
+    """성공 검색을 링버퍼에 기록. 같은 턴에서 두 번(원쿼리→brand-pivot 병합) 불려도
+    label 이 같으면 마지막 엔트리를 갱신(중복 방지)."""
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return
+    q = (query or "").strip()
+    if not q:
+        return
+    lbl = (label or "").strip()[:80]
+    entry = {"label": lbl, "q": q[:240], "brand": [str(b) for b in (brand or []) if str(b).strip()][:8] or None}
+    dq = _RECENT.setdefault(cid, deque(maxlen=_RECENT_MAX))
+    if dq and dq[-1].get("label") == lbl:
+        dq[-1] = entry  # 같은 턴 재-persist → 갱신
+        return
+    dq.append(entry)
+
+
+def get_recent_searches(chat_id: Any) -> list[dict[str, Any]]:
+    """최근 검색을 newest-first 로 반환."""
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return []
+    dq = _RECENT.get(cid)
+    return list(reversed(dq)) if dq else []
+
+
 def _reset_all_for_tests() -> None:
     _LAST.clear()
     _LAST_BRAND.clear()
     _PINNED_BRAND.clear()
+    _RECENT.clear()

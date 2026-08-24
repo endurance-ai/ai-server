@@ -19,6 +19,7 @@ from typing import Any
 from app.agents.tool_registry import RefineSearchResult
 from app.agents.tools._keyword_utils import as_keyword_list as _as_keyword_list
 from app.agents.tools._keyword_utils import dedup_join as _dedup_join
+from app.agents.tools._keyword_utils import strip_color_tokens as _strip_color_tokens
 from app.agents.tools.search_products import (
     _candidate_to_dict,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     _is_real_image_url,
@@ -104,6 +105,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
+
+    # P0-b (2026-08-24) — 색 변주 정상화. base_query 는 직전 검색의 상품 쿼리라
+    # 이전 색 단어("black cropped hoodie")를 그대로 물고 있다. color 를 새로 주면
+    # (color_swap) 그 색 토큰을 임베딩 쿼리에서 걷어내고 새 색을 boost 로 실어,
+    # color_family 하드필터(아래 color_family) + 임베딩 소프트신호가 같은 방향을
+    # 가리키게 한다. 이게 없으면 임베딩이 옛 색을 당기고 color 필터는 재고부족으로
+    # relax·drop 돼(strict_count=0) 색이 안 바뀌던 실트레이스(2026-08-24 닝닝→pink).
+    _new_color = str(args.get("color") or "").strip().lower()
+    if _new_color:
+        base_query = _strip_color_tokens(base_query)
+        if _new_color not in {b.lower() for b in boost}:
+            boost = [_new_color, *boost]
 
     # 260701 — Pinned-product anchor: when the user's CURRENT message text
     # carries a `#<id>` prefix (mobile pinned card → critique chip), refine
