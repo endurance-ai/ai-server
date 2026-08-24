@@ -185,6 +185,10 @@ class SearchProductsResult(TypedDict, total=False):
     error: str | None
     candidates_count: int
     top_candidates: list[dict[str, Any]]  # capped to 5 for LLM context
+    # 요청 속성(색 등)이 재고 부족으로 완화됐을 때의 정직 안내 신호. 에이전트가
+    # 사용자에게 "요청 색이 거의 없어 유사상품으로 채웠다"고 전달하도록 respond
+    # 에 반영. None/부재 = 완화 없음(정상 색 매치).
+    notice: str | None
 
 
 class RefineSearchResult(TypedDict, total=False):
@@ -192,6 +196,7 @@ class RefineSearchResult(TypedDict, total=False):
     error: str | None
     candidates_count: int
     top_candidates: list[dict[str, Any]]
+    notice: str | None
 
 
 class UpdateTasteResult(TypedDict, total=False):

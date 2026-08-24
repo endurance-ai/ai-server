@@ -386,4 +386,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         logger.debug("[refine_search] search_done emit best-effort skip", exc_info=True)
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
-    return RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    result = RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    from app.agents.tools.search_products import _build_color_notice
+
+    _notice = _build_color_notice()
+    if _notice:
+        result["notice"] = _notice
+    return result

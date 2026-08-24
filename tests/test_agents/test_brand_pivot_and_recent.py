@@ -83,3 +83,45 @@ def test_ring_survives_clear_last_query():
     last_query.push_recent_search(5, "black cropped hoodie women", label="닝닝")
     last_query.clear_last_query(5)
     assert last_query.get_recent_searches(5)[0]["label"] == "닝닝"
+
+
+# ─── 색 재고부족 정직 안내 (color-relax notice) ────────────────────────────
+# "핑크로 바꿨어!"라고 거짓 확답하던 버그: 색 필터가 재고부족으로 relax·drop돼도
+# 그 사실이 에이전트에 전파 안 됨. color_relax_ctx → _build_color_notice.
+
+from app.agents.tools.search_products import _build_color_notice  # noqa: E402
+from app.services.search_service import color_relax_ctx  # noqa: E402
+
+
+def test_color_notice_none_when_no_relax():
+    color_relax_ctx.set(None)
+    assert _build_color_notice() is None
+
+
+def test_color_notice_zero_exact_is_honest_unavailable():
+    color_relax_ctx.set({"requested_color": "PINK", "exact_count": 0, "subcategory_also_relaxed": False})
+    note = _build_color_notice()
+    assert note is not None
+    assert "PINK" in note
+    assert "no_exact_color" in note
+    assert "do NOT claim" in note
+
+
+def test_color_notice_low_exact_mentions_limited():
+    color_relax_ctx.set({"requested_color": "GREEN", "exact_count": 4, "subcategory_also_relaxed": False})
+    note = _build_color_notice()
+    assert note is not None
+    assert "low_exact_color" in note
+    assert "GREEN" in note
+
+
+def test_color_notice_subcat_relaxed_does_not_blame_color():
+    color_relax_ctx.set({"requested_color": "PINK", "exact_count": 0, "subcategory_also_relaxed": True})
+    note = _build_color_notice()
+    assert note is not None
+    assert "scarce_match" in note
+
+
+def test_color_notice_missing_color_returns_none():
+    color_relax_ctx.set({"exact_count": 0})
+    assert _build_color_notice() is None
