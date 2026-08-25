@@ -7,9 +7,11 @@ typing indicator(REQ-UX-003) 만으로는 "뭐가 진행 중인지" 인지가 �
 
 Firing sites (현 구현 기준):
 - `app/graphs/nodes/vision.py`        → key="vision"
-- `app/agents/tools/search_products.py` → key="search"
-- `app/agents/tools/refine_search.py`   → key="search" (같은 메시지)
 - `app/agents/tools/analyze_image.py`   → key="analyze_image"
+- `search`: 2026-08-26 발사 중단 — 스피너/typing 이 이미 검색 중임을 보여줘
+  "잠깐만, …찾아볼게" 멘트가 잉여였다(사용자 피드백). `pinterest` 와 동일하게
+  키/값은 dict 에 보존(재도입 대비)하되 search_products / refine_search 는 더 이상
+  발사하지 않는다.
 - `pinterest`: PRE_MESSAGES 에 키는 보존 (SPEC contract). 단 현재 코드베이스에는
   pinterest_ingest 그래프 노드가 존재하지 않아 (SPEC-ONBOARD-LITE-001 §4 에서
   제거됨) 런타임 firing site 가 없다. 추후 Pinterest 스크랩 경로 재도입 시
