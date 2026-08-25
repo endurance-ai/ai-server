@@ -387,9 +387,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
     result = RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
-    from app.agents.tools.search_products import _build_color_notice
+    from app.agents.tools.search_products import _build_color_notice, _build_result_digest
 
     _notice = _build_color_notice()
     if _notice:
         result["notice"] = _notice
+    _digest = await _build_result_digest(cands)
+    if _digest:
+        result["digest"] = _digest
     return result

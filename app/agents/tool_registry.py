@@ -189,6 +189,10 @@ class SearchProductsResult(TypedDict, total=False):
     # 사용자에게 "요청 색이 거의 없어 유사상품으로 채웠다"고 전달하도록 respond
     # 에 반영. None/부재 = 완화 없음(정상 색 매치).
     notice: str | None
+    # 결과셋 속성 분포 요약(주력 종류/핏/소재/색/가격대/브랜드믹스). respond 가
+    # 이걸 근거로 "대부분 미디에 린넨" 처럼 구체적으로 묘사(데이드림 벤치마크).
+    # 지어내기 방지 — 모델은 digest 에 있는 속성만 말해야 함.
+    digest: dict[str, Any] | None
 
 
 class RefineSearchResult(TypedDict, total=False):
@@ -197,6 +201,7 @@ class RefineSearchResult(TypedDict, total=False):
     candidates_count: int
     top_candidates: list[dict[str, Any]]
     notice: str | None
+    digest: dict[str, Any] | None
 
 
 class UpdateTasteResult(TypedDict, total=False):

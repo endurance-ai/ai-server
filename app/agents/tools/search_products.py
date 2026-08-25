@@ -620,6 +620,141 @@ def _build_color_notice() -> str | None:
     )
 
 
+def _cand_attr(c: Any, key: str) -> Any:
+    """dict 또는 Candidate 객체 양쪽에서 필드 읽기."""
+    if isinstance(c, dict):
+        return c.get(key)
+    return getattr(c, key, None)
+
+
+async def _build_result_digest(cands: list[Any], *, limit: int = 15) -> dict[str, Any] | None:
+    """결과셋의 속성 분포를 요약 — respond 가 "대부분 미디에 린넨" 처럼 구체적으로,
+    그러나 사실에 근거해 묘사하도록(데이드림 벤치마크). 상위 `limit` 개의 subcategory/
+    가격/브랜드(행에 직접 존재) + feature_metadata(fit/material/pattern/primary_color,
+    없으면 1회 배치조회)를 집계. 명확한 우세값만 싣는다(혼재 축은 생략 → 지어내기·
+    과일반화 방지). 아무 신호 없으면 None."""
+    if not cands:
+        return None
+    sample = cands[:limit]
+
+    # feature_metadata 확보 (색 relax 경로 등에서 이미 붙었으면 재사용, 없으면 배치).
+    metas: dict[int, dict[str, Any]] = {}
+    missing: list[int] = []
+    for c in sample:
+        try:
+            pid = int(_cand_attr(c, "id") or _cand_attr(c, "product_id"))
+        except (TypeError, ValueError):
+            continue
+        m = _cand_attr(c, "feature_metadata")
+        if isinstance(m, dict):
+            metas[pid] = m
+        else:
+            missing.append(pid)
+    if missing:
+        try:
+            from app.providers import db_pool
+
+            pool = db_pool._pool  # noqa: SLF001
+            if pool is not None:
+                async with pool.connection() as conn, conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT product_id, feature_metadata FROM public.product_features WHERE product_id = ANY(%s)",
+                        (missing,),
+                    )
+                    for pid, meta in await cur.fetchall():
+                        if isinstance(meta, dict):
+                            metas[int(pid)] = meta
+        except Exception:  # noqa: BLE001 — fail-open: digest degrades to row-only fields
+            pass
+
+    from collections import Counter
+
+    n = len(sample)
+
+    def _dominant(counter: Counter, *, min_share: float) -> str | None:
+        """최빈값이 min_share 이상 점유할 때만 반환(혼재 축은 None)."""
+        if not counter:
+            return None
+        val, cnt = counter.most_common(1)[0]
+        return val if (cnt / n) >= min_share else None
+
+    def _top_multi(counter: Counter, *, min_share: float, k: int) -> list[str]:
+        return [v for v, cnt in counter.most_common(k) if (cnt / n) >= min_share]
+
+    subcat_c: Counter = Counter()
+    fit_c: Counter = Counter()
+    pattern_c: Counter = Counter()
+    color_c: Counter = Counter()
+    material_c: Counter = Counter()
+    brand_c: Counter = Counter()
+    prices: list[int] = []
+
+    for c in sample:
+        sub = str(_cand_attr(c, "subcategory") or "").strip().lower()
+        brand = str(_cand_attr(c, "brand") or "").strip()
+        try:
+            p = int(_cand_attr(c, "price") or 0)
+        except (TypeError, ValueError):
+            p = 0
+        if brand:
+            brand_c[brand] += 1
+        if p > 0:
+            prices.append(p)
+        try:
+            pid = int(_cand_attr(c, "id") or _cand_attr(c, "product_id"))
+        except (TypeError, ValueError):
+            pid = None
+        meta = metas.get(pid) if pid is not None else None
+        # 종류: subcategory(행) 우선, 없으면 feature_metadata.item_type.
+        if sub and sub not in ("n/a", "none"):
+            subcat_c[sub] += 1
+        elif meta:
+            it = str(meta.get("item_type") or "").strip().lower()
+            if it and it not in ("n/a", "none"):
+                subcat_c[it] += 1
+        if meta:
+            fit = str(meta.get("fit") or "").strip().lower()
+            if fit and fit not in ("n/a", "none"):
+                fit_c[fit] += 1
+            pat = str(meta.get("pattern") or "").strip().lower()
+            if pat and pat not in ("n/a", "none"):
+                pattern_c[pat] += 1
+            col = str(meta.get("primary_color") or "").strip().lower()
+            if col and col not in ("n/a", "none"):
+                color_c[col] += 1
+            mats = meta.get("material")
+            for mt in mats if isinstance(mats, list) else [mats]:
+                mt = str(mt or "").strip().lower()
+                if mt and mt not in ("n/a", "none"):
+                    material_c[mt] += 1
+
+    digest: dict[str, Any] = {}
+    mostly = _dominant(subcat_c, min_share=0.34)
+    if mostly:
+        digest["mostly"] = mostly
+    fit = _dominant(fit_c, min_share=0.5)
+    if fit:
+        digest["fit"] = fit
+    mats = _top_multi(material_c, min_share=0.25, k=2)
+    if mats:
+        digest["materials"] = mats
+    cols = _top_multi(color_c, min_share=0.25, k=2)
+    if cols:
+        digest["colors"] = cols
+    pattern = _dominant(pattern_c, min_share=0.6)
+    if pattern and pattern != "solid":  # solid 은 무의미 신호라 생략
+        digest["pattern"] = pattern
+    if prices:
+        lo, hi = min(prices), max(prices)
+        digest["price_krw"] = f"{lo:,}" if lo == hi else f"{lo:,}–{hi:,}"
+    if brand_c:
+        top_brands = [b for b, _ in brand_c.most_common(3)]
+        extra = len(brand_c) - len(top_brands)
+        digest["brands"] = ", ".join(top_brands) + (f" +{extra}" if extra > 0 else "")
+
+    return digest or None
+
+
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
     try:
@@ -1644,4 +1779,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     _notice = _build_color_notice()
     if _notice:
         result["notice"] = _notice
+    _digest = await _build_result_digest(cands)
+    if _digest:
+        result["digest"] = _digest
     return result

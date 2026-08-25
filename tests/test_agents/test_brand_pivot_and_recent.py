@@ -125,3 +125,66 @@ def test_color_notice_subcat_relaxed_does_not_blame_color():
 def test_color_notice_missing_color_returns_none():
     color_relax_ctx.set({"exact_count": 0})
     assert _build_color_notice() is None
+
+
+# ─── 결과 속성분포 digest (데이드림 벤치마크) ──────────────────────────────
+# respond 가 "대부분 미디에 린넨" 처럼 사실 기반으로 묘사하도록 결과셋을 집계.
+
+from app.agents.tools.search_products import _build_result_digest  # noqa: E402
+
+
+def _cand(pid, brand, price, sub, meta):
+    return {"id": pid, "brand": brand, "price": price, "subcategory": sub, "feature_metadata": meta}
+
+
+async def test_digest_none_for_empty():
+    assert await _build_result_digest([]) is None
+
+
+async def test_digest_aggregates_dominant_attributes():
+    cands = [
+        _cand(
+            1,
+            "SKIMS",
+            29000,
+            "hoodie",
+            {"fit": "relaxed", "pattern": "solid", "primary_color": "BLACK", "material": ["cotton"]},
+        ),
+        _cand(
+            2,
+            "SKIMS",
+            49000,
+            "hoodie",
+            {"fit": "relaxed", "pattern": "solid", "primary_color": "BLACK", "material": ["cotton", "fleece"]},
+        ),
+        _cand(
+            3,
+            "Norba",
+            140000,
+            "hoodie",
+            {"fit": "relaxed", "pattern": "solid", "primary_color": "GREY", "material": ["cotton"]},
+        ),
+    ]
+    d = await _build_result_digest(cands)
+    assert d is not None
+    assert d["mostly"] == "hoodie"
+    assert d["fit"] == "relaxed"  # 3/3 dominant
+    assert "cotton" in d["materials"]  # top material
+    assert "black" in d["colors"]  # 2/3 ≥ 0.25
+    assert d["price_krw"] == "29,000–140,000"
+    assert d["brands"].startswith("SKIMS")
+    assert "pattern" not in d  # solid 은 생략
+
+
+async def test_digest_omits_mixed_axes():
+    # fit 이 제각각 → dominant 없음 → fit 키 생략(지어내기 방지)
+    cands = [
+        _cand(1, "A", 10000, "dress", {"fit": "slim", "primary_color": "RED", "material": ["silk"]}),
+        _cand(2, "B", 20000, "skirt", {"fit": "oversized", "primary_color": "BLUE", "material": ["denim"]}),
+        _cand(3, "C", 30000, "pants", {"fit": "relaxed", "primary_color": "GREEN", "material": ["linen"]}),
+    ]
+    d = await _build_result_digest(cands)
+    assert d is not None
+    assert "fit" not in d  # 1/3 each → below 0.5
+    assert "mostly" not in d  # subcats all distinct → below 0.34
+    assert d["price_krw"] == "10,000–30,000"

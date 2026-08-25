@@ -1630,7 +1630,9 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             "args": _args_summary(raw_args),
             "args_full": raw_args,
             "result_summary": {
-                k: result.get(k) for k in ("ok", "error", "candidates_count", "card_sent", "notice") if k in result
+                k: result.get(k)
+                for k in ("ok", "error", "candidates_count", "card_sent", "notice", "digest")
+                if k in result
             },
             "latency_ms": latency_ms,
             "error": dispatch_err,
