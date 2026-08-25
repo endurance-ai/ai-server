@@ -1299,25 +1299,10 @@ async def run_image_search(
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsResult:
-    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — 사전 안내 멘트 ("잠시만요, …찾아볼게요").
-    # 본 검색 (Modal embed / DB RPC) 직전, REQ-UX-003 typing 보다 먼저 1회.
-    # react_loop._fire_typing 은 dispatch 이후가 아닌 직전에 호출되므로 ordering
-    # 보장을 위해 이 await 가 typing 보다 먼저 일어나도록 react_loop 가 helper
-    # 분기를 통해 호출 — 여기서는 dispatch 진입 첫 줄로 await 한다.
-    try:
-        from app.channels.pre_messages import fire_pre_message
-        from app.graphs.nodes._adapter_ctx import _adapter_var
-
-        await fire_pre_message(
-            _adapter_var.get(),
-            ctx,
-            key="search",
-            lang=ctx.get("lang") or "en",
-            chat_id=ctx.get("chat_id"),
-        )
-    except Exception:  # noqa: BLE001 — never block search pipeline
-        logger.debug("[tool.search_products] pre-message skipped")
-
+    # 2026-08-26 — "search" pre-message ("잠깐만, 마음에 들 만한 거 찾아볼게") 제거.
+    # 스피너/typing 이 이미 검색 중임을 보여줘서 이 멘트는 잉여였다(사용자 피드백).
+    # PRE_MESSAGES["search"] 키는 pinterest 처럼 dict 에 보존(재도입 대비)하되 발사만
+    # 중단. vision / analyze_image pre-message 는 유지.
     text_query = (args.get("text_query") or "").strip()
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)

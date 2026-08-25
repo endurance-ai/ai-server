@@ -55,23 +55,8 @@ _PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
-    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — refine 도 같은 "search" 멘트
-    # ("잠시만요, …찾아볼게요"). search_products 와 동일 ctx marker 키
-    # (`_pre_msg_sent:search`) 라서 같은 턴에서 두 번 호출돼도 idempotent.
-    try:
-        from app.channels.pre_messages import fire_pre_message
-        from app.graphs.nodes._adapter_ctx import _adapter_var
-
-        await fire_pre_message(
-            _adapter_var.get(),
-            ctx,
-            key="search",
-            lang=ctx.get("lang") or "en",
-            chat_id=ctx.get("chat_id"),
-        )
-    except Exception:  # noqa: BLE001 — never block refine pipeline
-        logger.debug("[tool.refine_search] pre-message skipped")
-
+    # 2026-08-26 — "search" pre-message 제거 (search_products 와 동일). 스피너가
+    # 이미 검색 중임을 보여줘 잉여였다. dict 키는 보존, 발사만 중단.
     action = args.get("action") or "broaden"
     # image_url is sourced from ctx ONLY (never an LLM arg). When no real
     # resolved image is present we route to the text/sparse-only search —
