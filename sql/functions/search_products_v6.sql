@@ -169,7 +169,7 @@ BEGIN
           p_gender IS NULL
           OR p.gender && ARRAY[p_gender, 'unisex']
         )
-      ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
+      ORDER BY pe.embedding <=> query_embedding ASC, p.first_seen_at DESC
       LIMIT p_limit;
     RETURN;
   END IF;
@@ -227,7 +227,7 @@ BEGIN
           p_gender IS NULL
           OR p.gender && ARRAY[p_gender, 'unisex']
         )
-      ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
+      ORDER BY pe.embedding <=> query_embedding ASC, p.first_seen_at DESC
       LIMIT p_limit;
     RETURN;
   END IF;
@@ -252,7 +252,7 @@ BEGIN
         p_gender IS NULL
         OR p.gender && ARRAY[p_gender, 'unisex']
       )
-    ORDER BY pe.embedding <=> query_embedding ASC, p.created_at DESC
+    ORDER BY pe.embedding <=> query_embedding ASC, p.first_seen_at DESC
     LIMIT p_limit;
 END;
 $function$;
