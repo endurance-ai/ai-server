@@ -687,6 +687,8 @@ async def invoke(
         message=message,
         chat_id=session_chat_id,
         from_user_id=user_chat_id,
+        # 캡은 사람 기준 — 대화(session_chat_id)가 아니라 계정 파생 id 로 청구한다.
+        cap_subject_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
         req_gender=gender,
@@ -795,6 +797,8 @@ async def invoke_streaming(
         message=message,
         chat_id=session_chat_id,
         from_user_id=user_chat_id,
+        # 캡은 사람 기준 — 대화(session_chat_id)가 아니라 계정 파생 id 로 청구한다.
+        cap_subject_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
         req_gender=gender,
@@ -907,6 +911,8 @@ async def invoke_streaming_callback(
         message=message,
         chat_id=session_chat_id,
         from_user_id=user_chat_id,
+        # 캡은 사람 기준 — 대화(session_chat_id)가 아니라 계정 파생 id 로 청구한다.
+        cap_subject_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
     )

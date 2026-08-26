@@ -1056,6 +1056,17 @@ def _append_skipped_parallel_tool_results(messages: list[Any], tool_calls: list[
     return appended
 
 
+def _cap_subject_id(state: WorkingState) -> int:
+    """SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체(사람) id.
+
+    `state.chat_id` 를 쓰면 안 된다. 91a8c1a 이후 앱/웹 경로의 chat_id 는 '대화'
+    단위라 대화마다 값이 바뀌고, 그러면 카운터가 세션별로 흩어져 캡이 영구히
+    발동하지 않는다. chat_service 가 계정 파생 id 를 `cap_subject_id` 로 넣어준다.
+    Telegram(레거시)은 None 이라 chat_id 로 폴백 — 그 경로에선 chat_id 가 곧 사람이다.
+    """
+    return state.cap_subject_id or state.chat_id
+
+
 async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Run the ReAct loop. Returns a state delta dict for the LangGraph node."""
     llm = get_llm()
@@ -1139,7 +1150,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 try:
                     from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                    await _cap_increment(state.chat_id, cumulative_tokens)
+                    await _cap_increment(_cap_subject_id(state), cumulative_tokens)
                 except Exception:  # noqa: BLE001
                     pass
             return {
@@ -1730,7 +1741,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             try:
                 from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                await _cap_increment(state.chat_id, cumulative_tokens)
+                await _cap_increment(_cap_subject_id(state), cumulative_tokens)
             except Exception:  # noqa: BLE001
                 pass
         return {
@@ -1751,7 +1762,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         try:
             from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-            await _cap_increment(state.chat_id, cumulative_tokens)
+            await _cap_increment(_cap_subject_id(state), cumulative_tokens)
         except Exception:  # noqa: BLE001 — fail-open, never block respond
             pass
 

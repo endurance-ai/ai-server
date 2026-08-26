@@ -380,3 +380,64 @@ async def test_tier_isolated_per_user(fake_redis):
     assert await get_user_tier(111) == "developer"
     assert await get_user_tier(222) == "standard"
     assert await get_user_tier(333) == "free"  # untouched → default
+
+
+# ---------------------------------------------------------------------------
+# Tests: 캡 주체는 '사람'이지 '대화'가 아니다 (회귀 방지)
+#
+# 91a8c1a(앱 채팅 세션 격리) 이후 앱/웹 경로의 state.chat_id 는 대화 단위로 바뀌었다.
+# 증가분을 거기 얹으면 카운터가 세션마다 새 키로 흩어져 캡이 영구히 발동하지 않는다.
+# ---------------------------------------------------------------------------
+
+
+def _working_state(*, chat_id: int, cap_subject_id: int | None = None):
+    from datetime import UTC, datetime
+
+    from app.channels.schemas import ChannelMessage
+    from app.graphs.state import WorkingState
+
+    return WorkingState(
+        message=ChannelMessage(chat_id=chat_id, received_at=datetime.now(tz=UTC)),
+        chat_id=chat_id,
+        cap_subject_id=cap_subject_id,
+    )
+
+
+def test_cap_subject_is_the_user_not_the_conversation():
+    """같은 사용자의 서로 다른 대화 두 개는 같은 캡 주체로 청구돼야 한다."""
+    from app.agents.react_loop import _cap_subject_id
+
+    user = 900_001
+    convo_a = _working_state(chat_id=111_111, cap_subject_id=user)
+    convo_b = _working_state(chat_id=222_222, cap_subject_id=user)
+
+    assert _cap_subject_id(convo_a) == user
+    assert _cap_subject_id(convo_b) == user
+    # 대화 id 는 서로 다른데도 주체는 같다 — 이게 깨지면 캡이 다시 무력화된다.
+    assert convo_a.chat_id != convo_b.chat_id
+
+
+def test_cap_subject_falls_back_to_chat_id_for_telegram():
+    """Telegram(레거시)은 cap_subject_id 를 넣지 않는다 — 거기선 chat_id 가 곧 사람."""
+    from app.agents.react_loop import _cap_subject_id
+
+    assert _cap_subject_id(_working_state(chat_id=777)) == 777
+
+
+@pytest.mark.asyncio
+async def test_two_conversations_of_same_user_share_the_daily_counter(fake_redis):
+    """대화를 새로 파도 하루 한도는 이어져야 한다 (free = 200K)."""
+    from app.agents.react_loop import _cap_subject_id
+    from app.infrastructure.cache.token_cap import get_usage, increment, is_over_limit
+
+    user = 900_002
+    convo_a = _working_state(chat_id=111_111, cap_subject_id=user)
+    convo_b = _working_state(chat_id=222_222, cap_subject_id=user)
+
+    await increment(_cap_subject_id(convo_a), 120_000)
+    assert await is_over_limit(user) is False
+
+    # 새 대화를 시작해도 카운터는 리셋되지 않는다.
+    await increment(_cap_subject_id(convo_b), 120_000)
+    assert await get_usage(user) == 240_000
+    assert await is_over_limit(user) is True

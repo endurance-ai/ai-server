@@ -76,6 +76,15 @@ class InputState(BaseModel):
     req_gender: str | None = None
     req_price_max: int | None = None
 
+    # SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체.
+    #
+    # `chat_id` 를 쓰면 안 된다. 91a8c1a(앱 채팅 세션 격리) 이후 앱/웹 경로의
+    # `chat_id` 는 '사람' 이 아니라 '대화' 를 뜻한다 — 대화마다 값이 바뀌므로
+    # 거기 캡을 얹으면 카운터가 세션별로 흩어져 영구히 한도에 닿지 않는다.
+    # 앱/웹(chat_service)은 계정 파생 id 를 명시적으로 넣고, Telegram(레거시)은
+    # None 으로 두어 `chat_id` 폴백을 쓴다 — 그 경로에선 chat_id 가 곧 사람이다.
+    cap_subject_id: int | None = None
+
 
 class WorkingState(InputState):
     """REQ-STATE-001/REQ-STATE-002: per-turn scratchpad threaded through nodes.
