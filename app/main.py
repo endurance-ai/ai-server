@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -62,8 +61,10 @@ async def _modal_keep_warm_loop() -> None:
     근본 해결은 Modal 소스 (`embed_app.py`) 에 `min_containers=1` 을
     지정하는 것이지만, 소스가 hchsa77 개인 워크스페이스에만 존재하고
     org 이전 진행 중이라 우리 쪽에서는 접근 불가. 그동안의 실용 조치로
-    `check_connection` (`/health` GET) 를 주기적으로 호출해 Modal 의
-    `scaledown_window` (기본 5분) 를 리셋 → 컨테이너 계속 warm 유지.
+    `EmbedProvider.warm()` (POST `/embed/text` canary, 캐시 우회) 을 주기적으로
+    호출해 실제 GPU 임베딩 컨테이너의 `scaledown_window` (기본 5분) 를 리셋 →
+    warm 유지. (구 `check_connection`/GET `/health` 는 GPU 임베딩과 다른 경량
+    핸들러가 응답할 수 있어 정작 콜드스타트 경로를 못 데웠다.)
 
     Fail-open: 모든 예외는 조용히 삼킴 (Modal 다운은 별개 알람 채널로
     감지). 태스크 자체는 lifespan 종료 시 `cancel()` 로 정리.
@@ -82,14 +83,9 @@ async def _modal_keep_warm_loop() -> None:
             return
         try:
             with start_as_current_span("modal.keepwarm"):
-                _t0 = time.perf_counter()
-                ok = await asyncio.wait_for(EmbedProvider.check_connection(), timeout=timeout)
-                _ms = int((time.perf_counter() - _t0) * 1000)
-                update_current_span(metadata={"modal_ms": _ms, "ok": ok})
-            if ok:
-                log.info("🔥 [modal.keepwarm] ping ok · ⏱ modal=%dms", _ms)
-            else:
-                log.warning("🔥 [modal.keepwarm] ping returned ok=False · ⏱ modal=%dms", _ms)
+                _ms = await asyncio.wait_for(EmbedProvider.warm(), timeout=timeout)
+                update_current_span(metadata={"modal_ms": _ms, "ok": True})
+            log.info("🔥 [modal.keepwarm] ping ok · ⏱ modal=%dms", _ms)
         except asyncio.CancelledError:
             log.info("🔥 [modal.keepwarm] loop cancelled")
             return
