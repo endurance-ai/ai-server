@@ -75,7 +75,8 @@ class LLMProvider:
         try:
             from app.observability.turn_cost import accumulate_raw
 
-            accumulate_raw(model, data.get("usage") or {}, response=data, source=source)
+            billing_response = {**data, "headers": dict(resp.headers)}
+            accumulate_raw(model, data.get("usage") or {}, response=billing_response, source=source)
         except Exception:  # noqa: BLE001 — observability must never block
             pass
         return data

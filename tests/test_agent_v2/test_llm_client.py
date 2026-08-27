@@ -32,9 +32,9 @@ def test_get_llm_does_not_force_tool_choice(monkeypatch, _reset_singleton):
     fake_client.bind_tools.return_value = bound_sentinel
     fake_ctor = MagicMock(return_value=fake_client)
 
-    fake_module = MagicMock()
-    fake_module.ChatOpenAI = fake_ctor
-    monkeypatch.setitem(__import__("sys").modules, "langchain_openai", fake_module)
+    import app.providers.litellm_chat as litellm_chat
+
+    monkeypatch.setattr(litellm_chat, "LiteLLMChatOpenAI", fake_ctor)
 
     result = lc.get_llm()
 

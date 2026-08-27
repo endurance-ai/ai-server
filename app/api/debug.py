@@ -83,12 +83,12 @@ async def rewrite_query(req: RewriteRequest) -> RewriteResponse:
         raise HTTPException(status_code=500, detail=f"react_loop import: {e}") from e
 
     try:
-        from langchain_openai import ChatOpenAI
+        from app.providers.litellm_chat import LiteLLMChatOpenAI
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"langchain import: {e}") from e
 
     api_key = settings.LITELLM_MASTER_KEY or "missing-litellm-master-key"
-    client = ChatOpenAI(
+    client = LiteLLMChatOpenAI(
         model=chosen_model,
         base_url=settings.LITELLM_BASE_URL + "/v1",
         api_key=api_key,
@@ -111,7 +111,12 @@ async def rewrite_query(req: RewriteRequest) -> RewriteResponse:
 
             usage = getattr(ai_msg, "usage_metadata", None)
             if isinstance(usage, dict):
-                accumulate_lc(chosen_model, usage, source="debug_rewrite")
+                accumulate_lc(
+                    chosen_model,
+                    usage,
+                    response_metadata=getattr(ai_msg, "response_metadata", None),
+                    source="debug_rewrite",
+                )
         except Exception:  # noqa: BLE001
             pass
     except Exception as exc:  # noqa: BLE001
