@@ -127,6 +127,24 @@ def _expected_fit_values(fit_any: list[str]) -> set[str]:
     return vals
 
 
+def _expected_material_values(material_any: list[str]) -> set[str]:
+    """material_any 라벨(이미 canonical vocab) → 소문자 집합."""
+    return {t.strip().lower() for t in (material_any or []) if t.strip()}
+
+
+def _expected_pattern_values(pattern_any: list[str]) -> set[str]:
+    """pattern_any 라벨(이미 canonical vocab) → 소문자 집합."""
+    return {t.strip().lower() for t in (pattern_any or []) if t.strip()}
+
+
+def _cand_materials(fmeta: dict[str, Any]) -> set[str]:
+    """후보 feature_metadata.material(리스트/스칼라) → 소문자 집합."""
+    raw = fmeta.get("material")
+    if isinstance(raw, list):
+        return {str(m).strip().lower() for m in raw}
+    return {str(raw).strip().lower()} if raw else set()
+
+
 # --- Modal embedding -------------------------------------------------------
 
 
@@ -258,6 +276,8 @@ def _attach_feature_metadata(conn: psycopg.Connection, rows: list[dict[str, Any]
 
 _ATTR_FIT_W = 0.20
 _ATTR_COLOR_W = 0.12
+_ATTR_MATERIAL_W = 0.08
+_ATTR_PATTERN_W = 0.15
 
 
 def _attr_align_rerank(rows: list[dict[str, Any]], expected: dict[str, Any]) -> list[dict[str, Any]]:
@@ -267,7 +287,9 @@ def _attr_align_rerank(rows: list[dict[str, Any]], expected: dict[str, Any]) -> 
     실 파이프라인의 personalize_rerank 가산 항과 동일 원리."""
     exp_fams = _expected_color_families(expected.get("color_any") or [])
     exp_fit = _expected_fit_values(expected.get("fit_any") or [])
-    if not exp_fams and not exp_fit:
+    exp_mat = _expected_material_values(expected.get("material_any") or [])
+    exp_pat = _expected_pattern_values(expected.get("pattern_any") or [])
+    if not exp_fams and not exp_fit and not exp_mat and not exp_pat:
         return rows
 
     def _s(r: dict[str, Any]) -> float:
@@ -277,6 +299,10 @@ def _attr_align_rerank(rows: list[dict[str, Any]], expected: dict[str, Any]) -> 
             base += _ATTR_COLOR_W
         if exp_fit and str(fm.get("fit") or "").strip().lower() in exp_fit:
             base += _ATTR_FIT_W
+        if exp_mat and (exp_mat & _cand_materials(fm)):
+            base += _ATTR_MATERIAL_W
+        if exp_pat and str(fm.get("pattern") or "").strip().lower() in exp_pat:
+            base += _ATTR_PATTERN_W
         return base
 
     return sorted(rows, key=_s, reverse=True)
@@ -329,6 +355,8 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
             "fit_hit": None,
             "color_feat_hit": None,
             "fit_feat_hit": None,
+            "material_feat_hit": None,
+            "pattern_feat_hit": None,
             "feat_coverage": 0.0,
             "brand_hit": None,
             "brand_diversity": 0,
@@ -346,8 +374,12 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     fits = expected.get("fit_any") or []
     brand_hints = expected.get("brand_any") or []
     # feature-metadata ground truth (구조화 채점): color_any/fit_any → 실제 축 값
+    materials = expected.get("material_any") or []
+    patterns = expected.get("pattern_any") or []
     exp_color_fams = _expected_color_families(colors)
     exp_fit_vals = _expected_fit_values(fits)
+    exp_mat_vals = _expected_material_values(materials)
+    exp_pat_vals = _expected_pattern_values(patterns)
 
     subcat_hits = 0
     subcat_hits_tagged = 0
@@ -357,6 +389,8 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
     fit_hits = 0
     color_feat_hits = 0
     fit_feat_hits = 0
+    material_feat_hits = 0
+    pattern_feat_hits = 0
     feat_present = 0
     brand_hits = 0
     brands: set[str] = set()
@@ -413,10 +447,15 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
             feat_present += 1
         pcol = str(fmeta.get("primary_color") or "").strip().upper()
         pfit = str(fmeta.get("fit") or "").strip().lower()
+        ppat = str(fmeta.get("pattern") or "").strip().lower()
         if exp_color_fams and pcol in exp_color_fams:
             color_feat_hits += 1
         if exp_fit_vals and pfit in exp_fit_vals:
             fit_feat_hits += 1
+        if exp_mat_vals and (exp_mat_vals & _cand_materials(fmeta)):
+            material_feat_hits += 1
+        if exp_pat_vals and ppat in exp_pat_vals:
+            pattern_feat_hits += 1
 
         samples.append(
             {
@@ -448,6 +487,8 @@ def _score_case(rows: list[dict[str, Any]], expected: dict[str, Any]) -> dict[st
         # 구조화 속성 채점 (PRIMARY for "우와 비슷하다")
         "color_feat_hit": round(color_feat_hits / n, 3) if exp_color_fams else None,
         "fit_feat_hit": round(fit_feat_hits / n, 3) if exp_fit_vals else None,
+        "material_feat_hit": round(material_feat_hits / n, 3) if exp_mat_vals else None,
+        "pattern_feat_hit": round(pattern_feat_hits / n, 3) if exp_pat_vals else None,
         "feat_coverage": round(feat_present / n, 3),
         # legacy name-substring 채점 (진단용 — 상품명에 색·핏 적힌 경우만 잡음)
         "color_hit": round(color_hits / n, 3) if colors else None,
@@ -491,6 +532,8 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
             # 구조화 속성 (PRIMARY)
             "color_feat_hit_mean": _mean_optional([r["scores"]["color_feat_hit"] for r in rs]),
             "fit_feat_hit_mean": _mean_optional([r["scores"]["fit_feat_hit"] for r in rs]),
+            "material_feat_hit_mean": _mean_optional([r["scores"].get("material_feat_hit") for r in rs]),
+            "pattern_feat_hit_mean": _mean_optional([r["scores"].get("pattern_feat_hit") for r in rs]),
             "feat_coverage_mean": _mean_optional([r["scores"]["feat_coverage"] for r in rs]),
             # legacy name-substring (진단)
             "color_hit_mean": _mean_optional([r["scores"]["color_hit"] for r in rs]),
@@ -547,6 +590,11 @@ async def main() -> None:
         help="속성정렬 rerank(fit/color) 적용 후 top-K — pool 검색→재정렬→절단",
     )
     parser.add_argument("--pool", type=int, default=60, help="--attr-align 재정렬 풀 크기 (default 60)")
+    # 가중치 스윕용 오버라이드 (미지정 시 모듈 기본값 사용). --attr-align 재정렬에만 반영.
+    parser.add_argument("--fit-w", type=float, default=None, help="attr_fit 가중치 오버라이드")
+    parser.add_argument("--color-w", type=float, default=None, help="attr_color 가중치 오버라이드")
+    parser.add_argument("--material-w", type=float, default=None, help="attr_material 가중치 오버라이드")
+    parser.add_argument("--pattern-w", type=float, default=None, help="attr_pattern 가중치 오버라이드")
     parser.add_argument("--limit", type=int, default=None, help="처음 N개만 실행")
     parser.add_argument("--label", default=None, help="결과 파일 라벨 (예: 'raw_baseline' / 'prod_baseline')")
     parser.add_argument(
@@ -557,6 +605,26 @@ async def main() -> None:
     )
     parser.add_argument("--output", default=None, help="결과 저장 경로 (기본: results/search_quality_<sha>_<ts>.json)")
     args = parser.parse_args()
+
+    # 가중치 스윕 오버라이드 반영 (모듈 전역 → _attr_align_rerank 가 읽음).
+    global _ATTR_FIT_W, _ATTR_COLOR_W, _ATTR_MATERIAL_W, _ATTR_PATTERN_W
+    if args.fit_w is not None:
+        _ATTR_FIT_W = args.fit_w
+    if args.color_w is not None:
+        _ATTR_COLOR_W = args.color_w
+    if args.material_w is not None:
+        _ATTR_MATERIAL_W = args.material_w
+    if args.pattern_w is not None:
+        _ATTR_PATTERN_W = args.pattern_w
+    if args.attr_align:
+        logger.info(
+            "[attr-align] weights fit=%.3f color=%.3f material=%.3f pattern=%.3f pool=%d",
+            _ATTR_FIT_W,
+            _ATTR_COLOR_W,
+            _ATTR_MATERIAL_W,
+            _ATTR_PATTERN_W,
+            args.pool,
+        )
 
     modal_url = os.environ.get("MODAL_EMBED_URL")
     modal_token = os.environ.get("MODAL_EMBED_TOKEN")
@@ -634,8 +702,10 @@ async def main() -> None:
                     rewrite_note = f' → "{embed_input}"' if args.rewrite and embed_input != raw_input else ""
                     _cf = scores["color_feat_hit"]
                     _ff = scores["fit_feat_hit"]
+                    _mf = scores.get("material_feat_hit")
+                    _pf = scores.get("pattern_feat_hit")
                     logger.info(
-                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f cf=%s ff=%s cov=%.2f n=%d%s",
+                        "[%d/%d] %s [%s] Q=%.2f kw=%.2f cf=%s ff=%s mf=%s pf=%s cov=%.2f n=%d%s",
                         i,
                         len(cases),
                         case["id"],
@@ -644,6 +714,8 @@ async def main() -> None:
                         scores["keyword_hit"],
                         f"{_cf:.2f}" if _cf is not None else "—",
                         f"{_ff:.2f}" if _ff is not None else "—",
+                        f"{_mf:.2f}" if _mf is not None else "—",
+                        f"{_pf:.2f}" if _pf is not None else "—",
                         scores["feat_coverage"],
                         scores["result_count"],
                         rewrite_note,
