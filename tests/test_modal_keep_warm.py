@@ -1,7 +1,7 @@
 """SPEC-MODAL-KEEP-WARM-001 — Modal keep-warm background loop tests.
 
 Verifies that `_modal_keep_warm_loop`:
-- Calls `EmbedProvider.check_connection` on each iteration.
+- Calls `EmbedProvider.warm` on each iteration.
 - Sleeps for `MODAL_KEEP_WARM_INTERVAL_S` between iterations (clamped ≥30s at read).
 - Fails open: an exception in one ping does NOT crash the loop.
 - Exits cleanly on `CancelledError`.
@@ -16,16 +16,16 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_keep_warm_pings_check_connection(monkeypatch):
-    """Loop calls check_connection at least once when given time to run."""
+async def test_keep_warm_pings_warm(monkeypatch):
+    """Loop calls warm at least once when given time to run."""
     from app import main
     from app.providers.embedding import EmbedProvider
 
     # 30s clamp still holds — we can't make it fire faster. Instead,
     # intercept asyncio.sleep INSIDE the loop to return immediately, then
     # cancel after one iteration.
-    ping = AsyncMock(return_value=True)
-    monkeypatch.setattr(EmbedProvider, "check_connection", ping)
+    ping = AsyncMock(return_value=123)
+    monkeypatch.setattr(EmbedProvider, "warm", ping)
 
     slept = []
     real_sleep = asyncio.sleep
@@ -46,14 +46,14 @@ async def test_keep_warm_pings_check_connection(monkeypatch):
     except asyncio.CancelledError:
         pass
 
-    assert ping.await_count >= 1, "check_connection should have been awaited at least once"
+    assert ping.await_count >= 1, "warm should have been awaited at least once"
     # The clamp keeps the sleep at ≥30s regardless of config value.
     assert all(s >= 30 for s in slept), f"sleep intervals should respect the 30s clamp, got {slept}"
 
 
 @pytest.mark.asyncio
 async def test_keep_warm_survives_ping_failure(monkeypatch):
-    """A single `check_connection` raise must NOT crash the loop — the next
+    """A single `warm` raise must NOT crash the loop — the next
     tick should still fire. This is the whole point of the fail-open contract
     (Modal being down is a separate alerting concern).
     """
@@ -62,14 +62,14 @@ async def test_keep_warm_survives_ping_failure(monkeypatch):
 
     call_count = 0
 
-    async def flaky_ping() -> bool:
+    async def flaky_ping() -> int:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             raise RuntimeError("simulated modal outage")
-        return True
+        return 123
 
-    monkeypatch.setattr(EmbedProvider, "check_connection", flaky_ping)
+    monkeypatch.setattr(EmbedProvider, "warm", flaky_ping)
     real_sleep = asyncio.sleep
 
     async def fast_sleep(secs: float) -> None:
@@ -96,7 +96,7 @@ async def test_keep_warm_cancels_cleanly(monkeypatch):
     from app import main
     from app.providers.embedding import EmbedProvider
 
-    monkeypatch.setattr(EmbedProvider, "check_connection", AsyncMock(return_value=True))
+    monkeypatch.setattr(EmbedProvider, "warm", AsyncMock(return_value=123))
 
     task = asyncio.create_task(main._modal_keep_warm_loop())
     await asyncio.sleep(0)  # yield to let the loop start
