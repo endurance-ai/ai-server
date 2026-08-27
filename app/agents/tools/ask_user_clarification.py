@@ -28,6 +28,101 @@ _OPTION_SPLIT_RE = re.compile(r"\s*[,/·、|\n]\s*")
 _WRAP_CHARS = "\"'“”‘’「」『』()[]{}（）〔〕〈〉《》 \t"
 
 
+# clarify 남발 가드 (2026-08-28): 유저가 이미 검색 가능한 신호(특정 garment /
+# 브랜드 / 가격)를 줬는데도 모델이 되묻는 실패를 차단한다(실트레이스: "빈티지
+# 셔츠"→회피, "Zara"→되물음, "170cm 부츠컷 청바지"→핏 되물음). 색/핏/무드만
+# 있는 진짜 모호 쿼리("미니멀 무채색 옷")는 신호로 치지 않아 clarify 를 허용한다.
+# 한글 garment 어휘(영문은 category_family.to_canonical_family 재사용). 오탐 위험
+# 1음절/가격충돌 토큰(티·백)은 제외하고 2음절+ 명시 토큰만.
+_KO_GARMENTS: frozenset[str] = frozenset(
+    {
+        "후드",
+        "후디",
+        "후드티",
+        "맨투맨",
+        "티셔츠",
+        "반팔",
+        "긴팔",
+        "나시",
+        "셔츠",
+        "남방",
+        "블라우스",
+        "니트",
+        "스웨터",
+        "가디건",
+        "자켓",
+        "재킷",
+        "코트",
+        "패딩",
+        "점퍼",
+        "잠바",
+        "바지",
+        "팬츠",
+        "청바지",
+        "데님",
+        "슬랙스",
+        "조거",
+        "반바지",
+        "치마",
+        "스커트",
+        "원피스",
+        "드레스",
+        "운동화",
+        "스니커즈",
+        "부츠",
+        "로퍼",
+        "구두",
+        "샌들",
+        "슬리퍼",
+        "가방",
+        "백팩",
+        "블레이저",
+        "베스트",
+        "조끼",
+        "카고",
+        "점프수트",
+    }
+)
+# 가격 신호 — 금액/비교 표현. (req_price_max 가 이미 파싱됐으면 그걸 우선 사용.)
+_PRICE_RE = re.compile(
+    r"(\d[\d,]*\s*(원|만원|만|천원|k\b|won))|(under|over|이하|이상|저렴|싸게|비싸|cheaper)", re.IGNORECASE
+)
+
+
+def _has_search_signal(text: str, ctx: dict[str, Any]) -> str | None:
+    """유저 원문에 바로 검색/refine 가능한 신호가 있으면 그 종류를 반환(없으면 None).
+
+    garment(영/한) · brand · price 를 강한 신호로 본다. 색/핏/무드만으로는 None
+    (모호 쿼리라 clarify 정당). 반환값은 로깅/에러 메시지용.
+    """
+    if not text or not text.strip():
+        return None
+    # 가격
+    if ctx.get("req_price_max") or ctx.get("req_price_min") or _PRICE_RE.search(text):
+        return "price"
+    # 브랜드
+    try:
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+
+        if scan_text_for_brand(text):
+            return "brand"
+    except Exception:  # noqa: BLE001 — fail-open (신호 없다고 보고 clarify 허용)
+        pass
+    # garment (영문: 토큰→실 family, 한글: 부분일치)
+    try:
+        from app.infrastructure.repositories.category_family import to_canonical_family
+
+        for tok in re.findall(r"[a-z][a-z-]{2,}", text.lower()):
+            fam = to_canonical_family(tok)
+            if fam and fam != "other":
+                return f"garment:{tok}"
+    except Exception:  # noqa: BLE001
+        pass
+    if any(g in text for g in _KO_GARMENTS):
+        return "garment"
+    return None
+
+
 def _clean_option_label(s: str) -> str:
     """옵션 라벨에서 감싼 따옴표/괄호와 양끝 잔여 인용부호를 제거한다.
     `str.strip(set)` 은 양끝의 해당 문자를 모두 벗기므로 '"(니트)"' → '니트'."""
@@ -53,6 +148,19 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarific
         return AskUserClarificationResult(
             ok=False,
             error="already_clarified_search_now",
+            card_sent=False,
+            axis=str(axis),
+        )
+    # clarify 남발 가드: 유저가 이미 garment/brand/price 를 줬으면 되묻지 말고
+    # 바로 검색/refine. 에이전트는 이 에러를 받으면 search_products(신규) 또는
+    # refine_search(직전 결과 조정: '더 저렴한', 색 변경 등)로 진행한다.
+    _signal = _has_search_signal(str(ctx.get("text_query") or ""), ctx)
+    if _signal:
+        logger.info("🚦 [clarify] blocked — search signal=%s → search_now", _signal)
+        return AskUserClarificationResult(
+            ok=False,
+            error=f"has_search_signal_search_now ({_signal}): user already named a garment/brand/price — "
+            "call search_products (or refine_search if adjusting the previous results) now, do NOT clarify",
             card_sent=False,
             axis=str(axis),
         )

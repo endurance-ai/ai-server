@@ -425,6 +425,12 @@ REGISTRY: dict[str, ToolMetadata] = {
         "name": "ask_user_clarification",
         "description": (
             "Send the user an inline-keyboard card asking to clarify intent on one axis. "
+            "LAST RESORT ONLY. If the user already named a garment type (hoodie/jeans/"
+            "dress/셔츠/청바지…), a brand, or a price/budget, do NOT clarify — call "
+            "search_products (or refine_search when they are ADJUSTING the previous "
+            "results, e.g. '더 저렴한'). Clarify ONLY when the request is too vague to "
+            "form ANY search (e.g. 'recommend something', '미니멀한 옷' with no garment). "
+            "The system will REJECT a clarify that has enough signal to search.\n"
             "`axis` MUST be EXACTLY one of these 6 strings (case-sensitive, no variants):\n"
             "  - 'category_pick'              — when user didn't say what garment (top/bottom/outer/dress/shoes/bag)\n"
             "  - 'formality'                  — casual vs business vs formal\n"
