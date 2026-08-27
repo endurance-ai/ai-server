@@ -319,6 +319,30 @@ class CaptureAdapter(MessengerAdapter):
         )
 
 
+def _done_payload(reply: BotReply, graph_result: dict | None) -> dict[str, str]:
+    """Classify a completed turn using signals available only on the backend."""
+    text = "\n".join(part for part in (reply.text, reply.closing_text) if part).strip()
+    if reply.cards:
+        return {
+            "status": "success",
+            "ai_response_type": "mixed" if text else "product_grid",
+        }
+
+    result = graph_result if isinstance(graph_result, dict) else {}
+    history = result.get("tool_call_history") or []
+    for entry in reversed(history):
+        if entry.get("tool_name") not in {"search_products", "refine_search"}:
+            continue
+        summary = entry.get("result_summary") or {}
+        if summary.get("ok") is True and summary.get("candidates_count") == 0:
+            return {"status": "zero_results"}
+
+    payload = {"status": "conversational_fallback"}
+    if result.get("agent_status") == "exhausted":
+        payload["ai_response_type"] = "text_retry_prompt"
+    return payload
+
+
 def _infer_clarify_axis(callback_data: str) -> str:
     """Infer the UI axis from a callback_data prefix — pure string parsing so the
     6 hasattr-fallback call sites (pick_item, ask_clarify, intro, ask_user_clarification,
@@ -773,7 +797,7 @@ async def invoke_streaming(
         except Exception:
             logger.debug("[chat_service] cap_reached emit skipped", exc_info=True)
         yield "cap_reached", cap_status.cap_event_payload()
-        yield "done", {}
+        yield "done", {"status": "conversational_fallback"}
         return
 
     await _sync_gender_to_taste_profile(pool, user_id, user_chat_id)
@@ -808,10 +832,12 @@ async def invoke_streaming(
 
     streaming = StreamingAdapter()
     graph_exc: BaseException | None = None
+    graph_result: dict | None = None
+    persisted: tuple[str, int] | None = None
 
     @observe(name="app.chat", as_type="span")
     async def _run_graph() -> None:
-        nonlocal graph_exc
+        nonlocal graph_exc, graph_result, persisted
         # set_adapter/reset_adapter must run in the same context (task's own copy).
         # asyncio.create_task copies the context at creation time; the Token from the
         # parent context cannot be used to reset a ContextVar inside the task.
@@ -822,7 +848,17 @@ async def invoke_streaming(
         turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
         try:
             callbacks = _bind_chat_trace(resolved_session_id, user_id, text, turn_id=turn_id)
-            await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+            result = await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+            graph_result = result if isinstance(result, dict) else None
+            persisted = await _persist_search(
+                pool,
+                user_id,
+                resolved_session_id,
+                text,
+                taste_signal_type="image" if attached_image_url else "search",
+            )
+            if persisted is not None:
+                update_current_trace(metadata={"search_id": persisted[0]})
         except Exception as exc:
             logger.exception("[chat_service] graph invocation failed user=%s", user_id)
             graph_exc = exc
@@ -854,20 +890,13 @@ async def invoke_streaming(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    persisted = await _persist_search(
-        pool,
-        user_id,
-        resolved_session_id,
-        text,
-        taste_signal_type="image" if attached_image_url else "search",
-    )
     search_id = persisted[0] if persisted else None
     await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs, search_id)
 
     if persisted is not None:
         yield "search", {"search_id": persisted[0], "total": persisted[1]}
 
-    yield "done", {}
+    yield "done", _done_payload(reply, graph_result)
 
 
 async def invoke_streaming_callback(
@@ -919,15 +948,27 @@ async def invoke_streaming_callback(
 
     streaming = StreamingAdapter()
     graph_exc: BaseException | None = None
+    graph_result: dict | None = None
+    persisted: tuple[str, int] | None = None
 
     @observe(name="app.chat", as_type="span")
     async def _run_graph() -> None:
-        nonlocal graph_exc
+        nonlocal graph_exc, graph_result, persisted
         token = set_adapter(streaming)
         turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
         try:
             callbacks = _bind_chat_trace(session_id, user_id, trace_text, turn_id=turn_id)
-            await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+            result = await GRAPH.ainvoke(input_state, config={"callbacks": callbacks})
+            graph_result = result if isinstance(result, dict) else None
+            persisted = await _persist_search(
+                pool,
+                user_id,
+                session_id,
+                trace_text,
+                taste_signal_type="chip",
+            )
+            if persisted is not None:
+                update_current_trace(metadata={"search_id": persisted[0]})
         except Exception as exc:
             logger.exception("[chat_service] callback graph invocation failed user=%s", user_id)
             graph_exc = exc
@@ -959,13 +1000,6 @@ async def invoke_streaming_callback(
 
     # Persist the search first so its id can be stored on the assistant message row
     # (lets GET /messages rebuild the "더보기" button on history restore).
-    persisted = await _persist_search(
-        pool,
-        user_id,
-        session_id,
-        trace_text,
-        taste_signal_type="chip",
-    )
     search_id = persisted[0] if persisted else None
     if assistant_content:
         await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)
@@ -973,4 +1007,4 @@ async def invoke_streaming_callback(
     if persisted is not None:
         yield "search", {"search_id": persisted[0], "total": persisted[1]}
 
-    yield "done", {}
+    yield "done", _done_payload(reply, graph_result)

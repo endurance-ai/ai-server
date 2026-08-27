@@ -94,6 +94,7 @@ async def test_create_session_returns_reply(client: AsyncClient):
     assert turn_contexts[0]["chat_id"] is not None
     assert events["_text"] == "Here are some picks!"
     assert "done" in events
+    assert events["done"]["status"] == "conversational_fallback"
 
 
 @pytest.mark.asyncio
@@ -297,7 +298,10 @@ async def test_search_id_flows_to_sse_and_history(client: AsyncClient):
             BotCard(image_url="https://example.com/p.jpg", caption="오버핏 니트", product_id=12345),
         )
 
-    with patch("app.services.chat_service.GRAPH") as mock_graph:
+    with (
+        patch("app.services.chat_service.GRAPH") as mock_graph,
+        patch("app.services.chat_service.update_current_trace") as update_trace,
+    ):
         mock_graph.ainvoke = AsyncMock(side_effect=_send_card_with_results)
         create_resp = await client.post(
             "/v1/chat/sessions", json={"message": "니트 추천"}, headers={"Authorization": auth}
@@ -306,6 +310,8 @@ async def test_search_id_flows_to_sse_and_history(client: AsyncClient):
     events = _parse_sse(create_resp.text)
     search_id = events["search"]["search_id"]
     assert search_id
+    assert events["done"] == {"status": "success", "ai_response_type": "mixed"}
+    assert any(call.kwargs.get("metadata", {}).get("search_id") == search_id for call in update_trace.call_args_list)
 
     session_id = events["session"]["session_id"]
     resp = await client.get(f"/v1/chat/sessions/{session_id}/messages", headers={"Authorization": auth})
