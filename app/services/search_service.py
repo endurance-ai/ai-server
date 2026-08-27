@@ -218,6 +218,58 @@ _MATERIAL_NORM: dict[str, str] = {
 }
 
 
+# 영/한 pattern 표현 → feature_metadata.pattern canonical 토큰
+# (2026-08 dev 실측: solid/graphic/striped/checked/floral/logo/dot/animal/
+# colorblock/camo/heathered/abstract). solid 는 카탈로그 ~75% 라 target 에서
+# 제외(부스트 무의미) — 변별 패턴만 매핑한다.
+_PATTERN_NORM: dict[str, str] = {
+    # english
+    "striped": "striped",
+    "stripe": "striped",
+    "pinstripe": "striped",
+    "checked": "checked",
+    "check": "checked",
+    "plaid": "checked",
+    "gingham": "checked",
+    "tartan": "checked",
+    "floral": "floral",
+    "flower": "floral",
+    "dot": "dot",
+    "dotted": "dot",
+    "polka": "dot",
+    "camo": "camo",
+    "camouflage": "camo",
+    "animal": "animal",
+    "leopard": "animal",
+    "cheetah": "animal",
+    "zebra": "animal",
+    "snake": "animal",
+    "graphic": "graphic",
+    "logo": "logo",
+    "colorblock": "colorblock",
+    "color-block": "colorblock",
+    "colorblocked": "colorblock",
+    "abstract": "abstract",
+    # korean (다음절·비모호 토큰만)
+    "스트라이프": "striped",
+    "줄무늬": "striped",
+    "체크": "checked",
+    "격자": "checked",
+    "플로럴": "floral",
+    "꽃무늬": "floral",
+    "도트": "dot",
+    "땡땡이": "dot",
+    "물방울": "dot",
+    "카모": "camo",
+    "카무플라주": "camo",
+    "레오파드": "animal",
+    "호피": "animal",
+    "지브라": "animal",
+    "그래픽": "graphic",
+    "컬러블록": "colorblock",
+}
+
+
 def _ascii_word_re(key: str) -> re.Pattern[str]:
     r"""`\b`-경계 매칭 패턴 (하이픈은 공백/하이픈 허용). 영문 vocab 전용."""
     body = re.escape(key).replace(r"\-", r"[\s-]?")
@@ -228,8 +280,12 @@ _FIT_EN_PATTERNS: list[tuple[re.Pattern[str], set[str]]] = [(_ascii_word_re(k), 
 _MATERIAL_EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (_ascii_word_re(k), v) for k, v in _MATERIAL_NORM.items() if k.isascii()
 ]
+_PATTERN_EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_ascii_word_re(k), v) for k, v in _PATTERN_NORM.items() if k.isascii()
+]
 _FIT_KO_ITEMS = list(_FIT_KO.items())
 _MATERIAL_KO_ITEMS = [(k, v) for k, v in _MATERIAL_NORM.items() if not k.isascii()]
+_PATTERN_KO_ITEMS = [(k, v) for k, v in _PATTERN_NORM.items() if not k.isascii()]
 
 
 def _extract_fit_from_text(text: str) -> set[str]:
@@ -267,13 +323,32 @@ def _extract_material_from_text(text: str) -> set[str]:
     return out
 
 
+def _extract_pattern_from_text(text: str) -> set[str]:
+    """쿼리 텍스트에서 변별 pattern 토큰 추출 → feature_metadata.pattern canonical 집합.
+
+    solid 는 매핑에 없어 자동 제외(카탈로그 기본값이라 부스트 무의미).
+    """
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for pat, canon in _PATTERN_EN_PATTERNS:
+        if pat.search(low):
+            out.add(canon)
+    for ko, canon in _PATTERN_KO_ITEMS:
+        if ko in text:
+            out.add(canon)
+    return out
+
+
 def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
 
-    fit/material 두 축만 취한다(color/subcategory 는 RPC 하드게이트라 모든 후보가
-    이미 일치 → 정렬 제외). 구조화 인자(item.fit/fabric)를 우선하되, 에이전트가
-    보통 이를 안 채우고 free-text 쿼리에만 담으므로 `search_query`(+KO) 텍스트에서
-    결정론적으로 보완 추출한다. 값은 feature vocab 집합으로 정규화.
+    fit/material/pattern 축을 취한다(color/subcategory 는 RPC 하드게이트라 모든
+    후보가 이미 일치 → 정렬 제외). 구조화 인자(item.fit/fabric)를 우선하되,
+    에이전트가 보통 이를 안 채우고 free-text 쿼리에만 담으므로 `search_query`(+KO)
+    텍스트에서 결정론적으로 보완 추출한다(pattern 은 request 계약에 필드가 없어
+    텍스트 전용). 값은 feature vocab 집합으로 정규화.
     """
     out: dict[str, set[str]] = {}
     qtext = " ".join(s for s in (getattr(item, "search_query", None), getattr(item, "search_query_ko", None)) if s)
@@ -292,6 +367,11 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     mat_vals |= _extract_material_from_text(qtext)
     if mat_vals:
         out["material"] = mat_vals
+
+    # pattern — request 계약엔 구조화 필드가 없어 쿼리 텍스트에서만 추출(변별 패턴).
+    pat_vals = _extract_pattern_from_text(qtext)
+    if pat_vals:
+        out["pattern"] = pat_vals
 
     return {k: v for k, v in out.items() if v}
 
@@ -550,6 +630,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_fit=settings.ATTR_ALIGN_FIT_W if want_attr else 0.0,
                 attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
                 attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
+                attr_pattern=settings.ATTR_ALIGN_PATTERN_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from app.services.search_service import (
     _extract_fit_from_text,
     _extract_material_from_text,
+    _extract_pattern_from_text,
     _query_target_attrs,
 )
 
@@ -76,6 +77,29 @@ def test_extract_material_none_when_absent():
     assert _extract_material_from_text("elegant midi dress") == set()
 
 
+# ── pattern 추출 ────────────────────────────────────────────────────────────
+
+
+def test_extract_pattern_english():
+    assert _extract_pattern_from_text("striped shirt") == {"striped"}
+    assert _extract_pattern_from_text("plaid flannel") == {"checked"}
+    assert _extract_pattern_from_text("leopard print coat") == {"animal"}
+
+
+def test_extract_pattern_korean():
+    assert _extract_pattern_from_text("체크 셔츠") == {"checked"}
+    assert _extract_pattern_from_text("꽃무늬 원피스") == {"floral"}
+
+
+def test_extract_pattern_excludes_solid():
+    # solid 는 카탈로그 기본값이라 매핑에서 제외 → 추출 안 됨.
+    assert _extract_pattern_from_text("solid black tee") == set()
+
+
+def test_extract_pattern_none_when_absent():
+    assert _extract_pattern_from_text("elegant midi dress") == set()
+
+
 # ── _query_target_attrs 통합 ─────────────────────────────────────────────────
 
 
@@ -83,6 +107,12 @@ def test_target_attrs_from_free_text_fires_both_axes():
     out = _query_target_attrs(_item("oversized leather jacket"))
     assert out["fit"] == {"oversized"}
     assert out["material"] == {"leather"}
+
+
+def test_target_attrs_fires_pattern_axis():
+    out = _query_target_attrs(_item("striped cotton shirt"))
+    assert out["pattern"] == {"striped"}
+    assert out["material"] == {"cotton"}
 
 
 def test_target_attrs_structured_fit_takes_precedence():
