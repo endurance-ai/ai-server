@@ -138,10 +138,14 @@ curl -X POST http://<EIP>:8000/recommend \
 
 `accumulate_raw` / `accumulate_lc` 가 LLM 호출마다 `llm_call` 이벤트를 `ai.log_conversation_event` 에 기록한다.
 
-- **비용 SoT**: `event_type = 'llm_call'` 행의 `payload.cost_usd` 합계. Langfuse 글로벌 Total cost 는 `litellm-acomp` / `Unknown` trace 까지 합산하므로 높게 나오는 것이 정상.
+- **애플리케이션 비용 원장**: `event_type = 'llm_call'` 행의 `payload.cost_usd` 합계. 실제 청구 검증의 최종 기준은 AWS Cost Explorer의 Bedrock Usage(gross, credit 제외)다.
 - `payload.turn_id = '{thread_id}:{turn_no}'` — 한 턴의 모든 LLM 콜 join 키.
-- `payload.cost_source`: `'litellm'` = LiteLLM `response_cost` 직접 사용 / `'fallback_rates'` = 로컬 요율 추정.
+- `payload.cost_source`: `'litellm'` = LiteLLM의 `x-litellm-response-cost` 직접 사용 / `'fallback_rates'` = 로컬 요율 추정. 정상 운영 호출은 `litellm`이어야 한다.
+- `payload.litellm_call_id`: LiteLLM spend log와 개별 호출을 대조하는 키. 신규 호출부터 저장한다.
+- LangChain 호출은 원본 usage를 보존해 cache read/write 토큰을 모두 기록한다. 로컬 fallback 요율은 운영 cross-region Bedrock 요율이며, 응답 비용 헤더가 없을 때만 사용한다.
 - `turn_summary.cost_usd` 는 턴 단위 롤업 — `llm_call` 합계와 일치해야 함.
+
+AWS Cost Explorer는 반영 지연이 있으므로 완료된 UTC 날짜끼리 일별/모델별 합계를 대조한다. AWS account credit은 실제 사용량을 상쇄하는 결제 항목이므로 모델 사용비 비교에서는 제외한다.
 
 Langfuse trace 메타데이터: `turn_id`, `cost_usd`, `llm_call_count`, `conversation_flow` (대화 흐름 breadcrumb).
 

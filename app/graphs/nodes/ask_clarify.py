@@ -71,13 +71,13 @@ _llm: Any = None
 def _get_llm() -> Any:
     global _llm
     if _llm is None:
-        from langchain_openai import ChatOpenAI
+        from app.providers.litellm_chat import LiteLLMChatOpenAI
 
         api_key = settings.LITELLM_MASTER_KEY
         if not api_key:
             logger.warning("ask_clarify: LITELLM_MASTER_KEY is empty — using sentinel")
             api_key = "missing-litellm-master-key"
-        _llm = ChatOpenAI(
+        _llm = LiteLLMChatOpenAI(
             model=settings.RESPONSE_MODEL,
             base_url=settings.LITELLM_BASE_URL + "/v1",
             api_key=api_key,
@@ -190,7 +190,12 @@ async def _legacy_text_path(state: WorkingState) -> dict:
             from app.observability.turn_cost import accumulate_lc
 
             if getattr(result, "usage_metadata", None):
-                accumulate_lc(settings.RESPONSE_MODEL, result.usage_metadata, source="ask_clarify")
+                accumulate_lc(
+                    settings.RESPONSE_MODEL,
+                    result.usage_metadata,
+                    response_metadata=getattr(result, "response_metadata", None),
+                    source="ask_clarify",
+                )
         except Exception:  # noqa: BLE001
             pass
         content = getattr(result, "content", None)

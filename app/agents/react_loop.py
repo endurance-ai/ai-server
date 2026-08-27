@@ -1254,7 +1254,12 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             cumulative_tokens += int(um.get("total_tokens", 0) or 0)
             from app.observability.turn_cost import accumulate_lc
 
-            accumulate_lc(_agent_model, um, source="react_loop")
+            accumulate_lc(
+                _agent_model,
+                um,
+                response_metadata=getattr(ai_msg, "response_metadata", None),
+                source="react_loop",
+            )
         except Exception:  # noqa: BLE001
             pass
 
