@@ -203,6 +203,75 @@ def _is_styleless_brand_query(text_query: str, brand_arg: Any, brand_filter: lis
     return not residual
 
 
+# 상황/TPO 마커 — sub_queries(코디 확장)를 허용하는 유일 조건.
+# 프롬프트는 "situation query 에만 sub_queries" 라고 지시하지만 약한 모델이
+# 단품 요청("neutral minimal jacket")에도 sub_queries 를 채워 풀코디+엉뚱
+# 카테고리(예: 재킷 검색에 토트백)로 새는 실패가 관측됨(트레이스 79ea6c4d).
+# 상황 마커가 없으면 단품 의도로 보고 확장을 결정론적으로 해제한다.
+_OCCASION_MARKERS_KO: frozenset[str] = frozenset(
+    {
+        "하객",
+        "결혼식",
+        "웨딩",
+        "데이트",
+        "소개팅",
+        "면접",
+        "졸업",
+        "입학",
+        "파티",
+        "여행",
+        "휴가",
+        "출근",
+        "오피스",
+        "페스티벌",
+        "나들이",
+        "피크닉",
+        "장례",
+        "상견례",
+        "캠퍼스",
+        "코디",
+        "룩",
+    }
+)
+_OCCASION_MARKERS_EN: frozenset[str] = frozenset(
+    {
+        "wedding",
+        "guest",
+        "date",
+        "interview",
+        "graduation",
+        "prom",
+        "party",
+        "vacation",
+        "holiday",
+        "office",
+        "festival",
+        "brunch",
+        "dinner",
+        "funeral",
+        "cocktail",
+        "beach",
+        "travel",
+        "outfit",
+        "outfits",
+    }
+)
+
+
+def _is_situation_query(text: str) -> bool:
+    """`text` 가 상황/TPO 쿼리면 True → sub_queries(코디 확장) 허용.
+
+    한글 마커는 부분일치("하객룩"→"하객"·"룩"), 영문은 단어경계. 마커가 없으면
+    특정 단품 의도로 보고 호출부가 확장을 해제한다.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    if any(re.search(rf"\b{re.escape(m)}\b", low) for m in _OCCASION_MARKERS_EN):
+        return True
+    return any(m in text for m in _OCCASION_MARKERS_KO)
+
+
 def _resolve_brand_filter(raw: Any) -> list[str] | None:
     """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
 
@@ -1617,6 +1686,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 _mq.append(qs)
         if len(_mq) >= 2:
             multi_queries = _mq[:3]  # 레이턴시 상한 — 최대 3개 병렬 검색
+
+    # 과확장 가드 (2026-08-28): 상황 마커가 없는 단품 요청인데 LLM 이
+    # sub_queries 를 채운 경우 확장을 해제한다. 대표 쿼리(text_query)가
+    # 상황/TPO(하객룩·wedding·outfit…)가 아니면 단품 의도로 본다.
+    if multi_queries is not None and not _is_situation_query(text_query):
+        logger.info(
+            "🔍 [tool.search_products] 과확장 가드: text_query=%r 상황마커 없음 → 단품 의도, sub_queries 무시",
+            text_query[:60],
+        )
+        multi_queries = None
 
     try:
         if multi_queries is not None:
