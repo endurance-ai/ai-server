@@ -12,7 +12,8 @@ SSE event sequence for POST endpoints:
   event: clarify  data: {"axis": "pick_item|gender|...", "prompt": "...",
                          "options": [{"label": "...", "callback": "item:0"}, ...]}  # 0-N times
   event: cap_reached data: {"code": "daily_token_cap_reached", "user_tier": "...", ...}  # cap hit
-  event: done     data: {}
+  event: done     data: {"status": "success|conversational_fallback|zero_results",
+                         "ai_response_type": "product_grid|text_retry_prompt|mixed"}  # type optional
   event: error    data: {"detail": "..."}             # on failure
 
 POST /v1/chat/sessions/{session_id}/callback — send a button tap (`clarify` event's
