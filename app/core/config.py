@@ -287,17 +287,9 @@ class Settings(BaseSettings):
     BOT_LANGUAGE: str = "en"
     SESSION_TTL_SECONDS: int = 1800
 
-    # Routing-LLM (paraphrase/intent classification + critique parsing)
-    # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
-    ROUTER_MODEL: str = "claude-haiku-4-5"
-    # 1500ms 는 LiteLLM proxy + OpenAI roundtrip (300~2000ms) 에 너무 빡빡해서
-    # 거의 매 턴 timeout fallback 으로 빠짐. 3000ms 로 완화. fallback 자체는
-    # 안전망 역할로 유지 (REQ-LLM-004).
-    ROUTER_TIMEOUT_MS: int = 3000
-    ROUTER_MAX_TOKENS: int = 300
-    # When the deterministic prefilter cannot classify a text message, fall back
-    # to LLM routing. Disable to revert to pure SM behavior (router becomes no-op).
-    ROUTER_LLM_ENABLED: bool = True
+    # (2026-08-27 죽은코드 정리) ROUTER_MODEL/ROUTER_TIMEOUT_MS/ROUTER_MAX_TOKENS/
+    # ROUTER_LLM_ENABLED 제거 — V1 route_text/critique.parse_text 소비자였는데 둘
+    # 다 삭제됨(V2 ReAct 가 대체). 소비처 0 확인 후 제거.
 
     # Long-term taste profile — persistent (in-memory for now; Redis later).
     # When false, scenario behaves as before (no profile read/write).
@@ -338,8 +330,8 @@ class Settings(BaseSettings):
     # 아래를 채우게 한다. relax 안 됐으면(게이트 유지) color 는 부스트 대상 아님.
     ATTR_ALIGN_COLOR_W: float = 0.25
 
-    # Critique — tap-button refinement on result cards
-    CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
+    # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
+    # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.
 
     # SPEC-AGENT-001 — LangGraph respond/ask_clarify nodes (LiteLLM 경유 ChatOpenAI)
     RESPONSE_MODEL: str = "claude-haiku-4-5"
