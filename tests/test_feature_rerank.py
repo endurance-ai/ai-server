@@ -74,6 +74,16 @@ def test_attr_align_no_target_is_noop():
     assert out is cands
 
 
+def test_attr_align_pattern_lifts_matching_candidate():
+    # 쿼리 target pattern(striped) 과 맞는 후보를, 거리가 더 먼데도 위로.
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.08, "feature_metadata": {"pattern": "solid"}},
+        {"id": "2", "brand": "B", "distance": 0.18, "feature_metadata": {"pattern": "striped"}},
+    ]
+    out = rerank(cands, None, weights=RerankWeights(attr_pattern=0.15), target_attrs={"pattern": {"striped"}})
+    assert [c["id"] for c in out] == ["2", "1"]
+
+
 def test_attr_align_color_keeps_exact_color_on_top_when_relaxed():
     # 재고 부족으로 색 게이트 relax 됐을 때: 요청 색(BLACK) 이 거리가 더 먼데도 위로.
     cands = [

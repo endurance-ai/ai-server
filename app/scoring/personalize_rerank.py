@@ -50,10 +50,11 @@ class RerankWeights:
     price_fit: float = 0.05
     gender_mismatch: float = 0.10
     feature: float = 0.15
-    # 속성정렬 ("우와 비슷하다") — 쿼리 target fit/material/color ↔ 후보 feature_metadata.
+    # 속성정렬 ("우와 비슷하다") — 쿼리 target fit/material/color/pattern ↔ 후보 feature_metadata.
     attr_fit: float = 0.0
     attr_material: float = 0.0
     attr_color: float = 0.0
+    attr_pattern: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -142,6 +143,9 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
         cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
         if tmat & cand:
             bonus += w.attr_material
+    tpat = target_attrs.get("pattern")
+    if tpat and str(fmeta.get("pattern") or "").strip().lower() in tpat:
+        bonus += w.attr_pattern
     return bonus
 
 

@@ -325,6 +325,10 @@ class Settings(BaseSettings):
     ATTR_ALIGN_ENABLED: bool = True
     ATTR_ALIGN_FIT_W: float = 0.20
     ATTR_ALIGN_MATERIAL_W: float = 0.08
+    # 변별 패턴(striped/checked/floral/dot/camo/animal/…) 정렬 가산. solid 는
+    # 카탈로그 ~75% 라 target 에서 제외(부스트 무의미) — 변별 패턴만 쿼리에서
+    # 추출한다. color 다음으로 시각적으로 두드러지는 축이라 material 보다 높게.
+    ATTR_ALIGN_PATTERN_W: float = 0.15
     # 색 필터가 재고 부족으로 relax(하드게이트 해제)됐을 때, 요청 색을 소프트
     # 부스트로 돌려 exact-color(예: 아크네 블랙 진)를 상단에 유지하고 유사상품이
     # 아래를 채우게 한다. relax 안 됐으면(게이트 유지) color 는 부스트 대상 아님.
