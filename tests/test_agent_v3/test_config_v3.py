@@ -38,5 +38,5 @@ def test_v3_memory_max_tokens_override():
 def test_model_defaults_are_nova_lite():
     """SPEC-AGENT-V2-CLEANUP-001 — defaults work with no env override."""
     s = Settings(_env_file=None)
-    assert s.AGENT_LLM_MODEL == "nova-lite"
-    assert s.EVALUATOR_MODEL == "nova-lite"
+    assert s.AGENT_LLM_MODEL == "claude-haiku-4-5"  # 2026-08-26 Claude 통일
+    assert s.EVALUATOR_MODEL == "claude-haiku-4-5"

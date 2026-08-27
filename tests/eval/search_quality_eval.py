@@ -160,7 +160,7 @@ _REWRITE_SYSTEM_PROMPT = (
     "- Do not invent attributes that are not in the input."
 )
 
-_REWRITE_MODEL = "nova-lite"  # matches AGENT_LLM_MODEL default
+_REWRITE_MODEL = "claude-haiku-4-5"  # matches AGENT_LLM_MODEL default (2026-08-26 Claude 통일)
 
 
 async def _rewrite_query(

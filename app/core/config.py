@@ -118,7 +118,10 @@ class Settings(BaseSettings):
     # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
     # 안전 롤아웃: 기본 False. 운영 검증 후 .env 에서 true 로 전환.
     ENHANCE_QUERY_ENABLED: bool = False
-    ENHANCE_QUERY_MODEL: str = "gpt-4o-mini"
+    # 2026-08-26 청소: 보조 역할 모델 기본값을 Claude(haiku-4-5)로 통일. 기존
+    # gpt-4o-mini/nova-lite 는 레거시 기본값 — 실구동은 litellm(claude-haiku-4-5)
+    # 로 라우팅. (ENHANCE 는 위 플래그 off 라 사실상 dormant.)
+    ENHANCE_QUERY_MODEL: str = "claude-haiku-4-5"
     ENHANCE_QUERY_TIMEOUT_MS: int = 1500
     ENHANCE_QUERY_MAX_TOKENS: int = 200
     ENHANCE_QUERY_TEMPERATURE: float = 0.2
@@ -277,13 +280,16 @@ class Settings(BaseSettings):
     # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
     # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
     # 의 429 Too Many Requests 문제 회피 + Bedrock 별도 quota + 비용 절감.
-    VISION_MODEL: str = "nova-lite"
+    # 실구동 = 박스 ~/env/.env 오버라이드(현재 claude-haiku-4-5). 아래 기본값도
+    # Claude 로 통일 → config 만 봐도 실제 모델과 일치(과거 nova-lite 기본값이
+    # "nova 쓰냐" 오해 유발).
+    VISION_MODEL: str = "claude-haiku-4-5"
     BOT_LANGUAGE: str = "en"
     SESSION_TTL_SECONDS: int = 1800
 
     # Routing-LLM (paraphrase/intent classification + critique parsing)
     # Cheap fast model — separate from VISION/ENHANCE_QUERY to keep cost lines clear.
-    ROUTER_MODEL: str = "gpt-4o-mini"
+    ROUTER_MODEL: str = "claude-haiku-4-5"
     # 1500ms 는 LiteLLM proxy + OpenAI roundtrip (300~2000ms) 에 너무 빡빡해서
     # 거의 매 턴 timeout fallback 으로 빠짐. 3000ms 로 완화. fallback 자체는
     # 안전망 역할로 유지 (REQ-LLM-004).
@@ -336,7 +342,7 @@ class Settings(BaseSettings):
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
 
     # SPEC-AGENT-001 — LangGraph respond/ask_clarify nodes (LiteLLM 경유 ChatOpenAI)
-    RESPONSE_MODEL: str = "gpt-4o-mini"
+    RESPONSE_MODEL: str = "claude-haiku-4-5"
     RESPONSE_TIMEOUT_MS: int = 5000
     RESPONSE_MAX_TOKENS: int = 200
     # noscroll 벤치마크 — 1문장씩 끊어서 발화하면 대화감이 살아남.
@@ -375,7 +381,7 @@ class Settings(BaseSettings):
     SELF_CRITIQUE_THRESHOLD: float = 0.6
     SELF_CRITIQUE_TIMEOUT_S: float = 30.0
     SELF_CRITIQUE_FASTPATH_DROP_FILTERS: str = "min_price,max_price,exclude_keywords"
-    EVALUATOR_MODEL: str = "nova-lite"
+    EVALUATOR_MODEL: str = "claude-haiku-4-5"
     EVALUATOR_MAX_TOKENS: int = 400
     EVALUATOR_TEMPERATURE: float = 0.2
     EVALUATOR_TIMEOUT_S: float = 8.0
@@ -438,10 +444,12 @@ class Settings(BaseSettings):
     AGENT_TURN_TOKEN_BUDGET: int = 80000
     # Per-tool dispatch timeout in seconds (REQ-AGENT-FAILURE-TOOL-001).
     AGENT_TOOL_TIMEOUT_S: float = 5.0
-    # LLM model ID for the ReAct agent. Defaults to the production model so the
-    # system works with no env override. Empty string is still honored as a
-    # fail-closed safety net in llm_client (unreachable via this default).
-    AGENT_LLM_MODEL: str = "nova-lite"
+    # LLM model ID for the ReAct agent (툴콜링/인자추출/답변 = 이 시스템의 핵심
+    # 두뇌). 실구동은 박스 ~/env/.env 오버라이드(현재 claude-haiku-4-5). 기본값도
+    # Claude 로 맞춰 config 만 봐도 실제와 일치하게 함(과거 nova-lite 기본값이 "왜
+    # nova 쓰냐" 오해 유발 — 실제로는 nova 로 툴콜링한 적 없음). 빈 문자열은
+    # llm_client 에서 fail-closed 안전망(이 기본값으론 도달 불가).
+    AGENT_LLM_MODEL: str = "claude-haiku-4-5"
     # Per-LLM-call timeout in seconds.
     AGENT_LLM_TIMEOUT_S: float = 5.0
     # Transient-error retry knobs (SPEC-AGENT-V2-REACT runtime hardening).
