@@ -3,7 +3,7 @@
 Sends an inline-keyboard card. Callback shape `clarify:{axis}:{value}` mirrors
 SPEC-CLARIFY-CARDS-001.
 
-@MX:NOTE: [AUTO] Side effect: sends Telegram message with InlineKeyboard.
+@MX:NOTE: [AUTO] Side effect: sends a channel message with an inline keyboard.
 @MX:SPEC: SPEC-AGENT-V2-REACT
 """
 

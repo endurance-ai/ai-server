@@ -662,7 +662,7 @@ async def cleanup_card_impressions() -> tuple[int, int]:
         return (0, 0)
 
 
-# Length budget for crit:click:{suffix} — Telegram 64B limit minus "crit:click:" prefix (11)
+# Length budget for crit:click:{suffix} — 64B callback_data limit minus "crit:click:" prefix (11)
 _CLICK_SUFFIX_BUDGET = 53
 
 

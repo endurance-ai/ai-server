@@ -321,7 +321,7 @@ async def search_service(state: PipelineState) -> PipelineState:
 
             profile = get_taste_store().get_or_create(state.user_key)
             # Visual-feature taste (ai.user_feature_scores) is only primed for the
-            # app-auth'd search path; Telegram / internal /recommend read None here
+            # app-auth'd search path; internal /recommend reads None here
             # and stay unchanged. When present, attach each candidate's enriched
             # features (one batch query) so the rerank can score color/fit/material.
             feature_scores = feature_scores_cache.get(state.user_key)

@@ -323,7 +323,7 @@ class StreamingAdapter(MessengerAdapter):
     async def send_text_with_keyboard(
         self, chat_id: int, text: str, keyboard: list[list[tuple[str, str]]]
     ) -> int | None:
-        # Mobile renders options as a vertical list — row grouping (a Telegram
+        # Mobile renders options as a vertical list — row grouping (an inline-keyboard
         # inline-keyboard concern) doesn't matter here, so flatten.
         flat = [pair for row in keyboard for pair in row]
         return await self.send_text_with_buttons(chat_id, text, flat)
@@ -423,7 +423,7 @@ async def set_session_title(
 def _bind_chat_trace(session_id: UUID, user_id: UUID, text: str, *, turn_id: str) -> list:
     """Bind the current Langfuse trace to this chat turn + return graph callbacks.
 
-    Mirrors the telegram webhook trace setup (telegram.py) so native-app (chat)
+    Sets up the native-app (chat)
     turns produce the same unified conversation traces: a root trace bound to
     session/user + a CallbackHandler bridging nested LLM generations. `user_id`
     is hashed (pii.hash_id); `session_id` is the chat-session UUID (internal id,
@@ -764,15 +764,14 @@ async def invoke_streaming_callback(
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph for a button-tap (clarify/gender/pick_item callback)
     and yield (event_type, payload) tuples for SSE — the app-side counterpart of the
-    Telegram webhook's callback_query handling.
+    button-tap handling.
 
     `session_id` ownership is verified by the caller (route) before this runs.
-    Cap gating is skipped — matches the Telegram webhook, which lets callback taps
-    through even over-cap since they're cheap UI actions, not new generations
-    (app/api/webhooks/telegram.py `_invoke_graph`).
+    Cap gating is skipped — callback taps go through even over-cap since they're
+    cheap UI actions, not new generations.
 
-    thread_id/turn_no are freshly minted per callback (no card_sent DB correlation
-    like Telegram's `_resolve_thread_id`) — graph routing (`_route_after_ingest_v2`)
+    thread_id/turn_no are freshly minted per callback (no card_sent DB correlation)
+    — graph routing (`_route_after_ingest_v2`)
     decides purely from the `callback_data` string, so this only affects conversation-
     log thread grouping, not behavior.
     """

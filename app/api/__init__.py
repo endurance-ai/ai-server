@@ -25,7 +25,6 @@ from app.api.subscription import router as subscription_router
 from app.api.uploads import router as uploads_router
 from app.api.visual_search import router as visual_search_router
 from app.api.webhooks.apple_notifications import router as apple_webhook_router
-from app.api.webhooks.telegram import router as telegram_webhook_router
 
 router = APIRouter()
 router.include_router(health_router, tags=["system"])
@@ -50,7 +49,6 @@ router.include_router(subscription_router)
 router.include_router(uploads_router)
 router.include_router(visual_search_router)
 router.include_router(recommend_router, tags=["recommend"])
-router.include_router(telegram_webhook_router)
 router.include_router(apple_webhook_router)
 router.include_router(debug_router)
 router.include_router(redirect_router, tags=["redirect"])

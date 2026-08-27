@@ -44,7 +44,7 @@ PICK_INVALID_KO = "위 버튼 중 하나 골라줘 👆"
 
 NUMBER_EMOJI = ["1️⃣", "2️⃣", "3️⃣", "4️⃣"]
 
-# Picker button label cap — Telegram's hard limit is 256 chars but the
+# Picker button label cap — the wire limit is 256 chars but the
 # practical mobile-readable cap is ~40. Truncated labels get a trailing "…".
 _LABEL_CAP = 40
 
@@ -329,7 +329,7 @@ async def _send_picker(adapter, chat_id: int, items: list[dict], lang: str = "en
 
     New design: minimal header + each item rendered as its OWN button (label
     text in the button). One tap, no mapping. Label is truncated to 40 chars
-    to stay readable on mobile (Telegram's hard limit is 256 but practical UX
+    to stay readable on mobile (the wire limit is 256 but practical UX
     cap is ~40).
     """
     n = len(items)

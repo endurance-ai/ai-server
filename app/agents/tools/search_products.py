@@ -1190,7 +1190,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # react_loop._build_ctx from state.vision_selected_item / detected_items).
     # Previously this read `args.get("style_node_primary")` — a brand STYLE-NODE
     # letter (A–Z), NOT a garment category — which always normalized to `other`
-    # so the v6 family gate never engaged on the primary (Telegram bot) path.
+    # so the v6 family gate never engaged on the primary (conversational) path.
     # `style_node_primary` remains a separate concept used elsewhere; we no
     # longer mislabel it as the search category here. Text-only / no-Vision
     # turn → vision_category None → to_canonical_family → `other` → gate

@@ -64,7 +64,7 @@ class InputState(BaseModel):
 
     # Per-request search filters from the consumer mobile filter UI (chat API).
     # Threaded into the tool dispatch ctx by react_loop._build_ctx so
-    # search_products / refine_search can apply them. Telegram intake leaves
+    # search_products / refine_search can apply them. Non-app intake leaves
     # these None (defaults) → behavior unchanged on that path.
     # req_gender: normalized taste token (men/women/unisex) — per-request only,
     # never persisted to the taste profile (SPEC-GENDER-PIN-001).

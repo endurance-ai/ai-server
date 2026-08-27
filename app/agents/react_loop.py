@@ -1384,7 +1384,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         # tool error and continuing the loop. Non-transient → record now.
         #
         # EXCEPTION: the TERMINAL `respond` tool is NEVER retried. Its side
-        # effects (Telegram text + card carousel sends) are not idempotent —
+        # effects (channel text + card carousel sends) are not idempotent —
         # a partial send followed by a full dispatch retry double-sends the
         # text and duplicates every card the user already saw (the real
         # SPEC-AGENT-V2-REACT bug). A retry has no benefit here (the user

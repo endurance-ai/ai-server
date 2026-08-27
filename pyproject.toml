@@ -14,7 +14,7 @@ dependencies = [
     "supabase>=2.10",
     # SPEC-OBSERVABILITY-002 — v3 SDK. langchain integration bundled as `langfuse.langchain` (no separate dist).
     "langfuse>=3,<4",
-    # SPEC-AGENT-001: LangGraph + LangChain (Telegram 봇 conversational graph)
+    # SPEC-AGENT-001: LangGraph + LangChain (conversational graph)
     # langgraph 1.x 는 langchain-core 1.3+ 를 요구한다 (현행 PyPI 기준). SPEC plan.md 의 langchain-core>=0.3 은 이전 메이저
     # 기준으로 작성된 것이라 LangGraph 1.x 와 동시 만족이 불가능 — 핵심 아키텍처 요건(LangGraph 1.x)을 우선해서 langchain-core 를 1.x 로 둔다.
     "langgraph>=1.1.10,<2.0.0",

@@ -234,18 +234,10 @@ class Settings(BaseSettings):
     # SSRF 가드 — 콤마 구분 호스트 suffix 매칭. 비어있으면 검증 skip (dev).
     ALLOWED_IMAGE_HOSTS: str = ""
 
-    # Messenger channel (SPEC-MSG-001)
-    MESSENGER_BACKEND: str = "telegram"
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_BOT_USERNAME: str = ""
-    TELEGRAM_WEBHOOK_SECRET: str = ""
-    TELEGRAM_API_BASE: str = "https://api.telegram.org"
-
     # Discord signup notification webhook — empty = feature off (silent no-op).
     # Named specifically (not DISCORD_WEBHOOK_URL, which deploy.ai.sh reserves)
     # so multiple Discord webhooks can coexist.
     DISCORD_SIGNUP_WEBHOOK_URL: str = ""
-    TELEGRAM_PUBLIC_URL: str = ""
     # AWS Bedrock 의 Nova Lite — LiteLLM proxy 에서 `nova-lite` 로 별칭 매핑됨
     # (aws-infra/kikoai-dev-servers/ai/config/litellm.yaml). OpenAI gpt-4o-mini
     # 의 429 Too Many Requests 문제 회피 + Bedrock 별도 quota + 비용 절감.
@@ -410,7 +402,7 @@ class Settings(BaseSettings):
     AGENT_LLM_MAX_RETRIES: int = 2
     AGENT_TOOL_MAX_RETRIES: int = 1
     # Dedicated wall-clock budget for the TERMINAL `respond` dispatch. It sends
-    # the text + up to 12 product cards sequentially (~1-1.7s each via Telegram
+    # the text + up to 12 product cards sequentially (~1-1.7s each via the channel
     # send_card) → 12-20s, which structurally exceeds AGENT_TOOL_TIMEOUT_S (5s).
     # `respond` is never retried (side-effecting + terminal), so a generous
     # bound here just prevents a spurious mid-carousel TimeoutError from

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -11,9 +10,6 @@ from fastapi.responses import ORJSONResponse
 
 from app.api import router
 from app.channels import link_resolver
-from app.channels.factory import get_adapter, reset_adapter
-from app.channels.telegram.adapter import TelegramAdapter
-from app.channels.telegram.webhook import setup_webhook
 from app.core.config import settings
 from app.infrastructure.cache import chat_state
 from app.infrastructure.memory.session import (
@@ -143,16 +139,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     await warm_brand_emb_cache()
 
-    adapter = get_adapter()
-
-    public_url = os.getenv("TELEGRAM_PUBLIC_URL", "").strip()
-    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
-    if isinstance(adapter, TelegramAdapter) and public_url and secret:
-        try:
-            await setup_webhook(adapter, public_url, secret)
-        except Exception:
-            logging.getLogger(__name__).exception("setup_webhook failed")
-
     # SPEC-MODAL-KEEP-WARM-001 — start the Modal keep-warm background task.
     # `MODAL_KEEP_WARM_ENABLED=false` in dev/local when a live Modal endpoint
     # isn't configured. Task handle is stashed on app.state so shutdown can
@@ -187,7 +173,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     await shutdown_taste_store()
     await shutdown_store()
     await db_pool.close_pool()
-    await reset_adapter()
     await link_resolver.aclose()
     await DatabaseProvider.close()
     await EmbedProvider.close()

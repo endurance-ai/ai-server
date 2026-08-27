@@ -289,7 +289,7 @@ async def resolve(url: str) -> list[str]:
             logger.info("🔗 [LINK]   ↳ 🖼️  pinterest 풀해상도로 치환")
         og = og_orig
 
-    # 추출된 og:image도 SSRF 체크 — Telegram이 이걸 가져갈 거니까
+    # 추출된 og:image도 SSRF 체크 — 클라이언트가 이걸 가져갈 거니까
     try:
         _ssrf_guard_url(og)
     except ValueError as e:

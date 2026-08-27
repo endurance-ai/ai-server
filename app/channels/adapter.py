@@ -25,14 +25,14 @@ class MessengerAdapter(ABC):
         ...
 
     # SPEC-AGENT-UX-P0-001 / REQ-UX-003 — optional typing indicator.
-    # Default no-op so non-Telegram adapter implementations 자동 skip. 구현체는
+    # Default no-op so adapters without a typing surface 자동 skip. 구현체는
     # 성공 시 True, 실패/미구현 시 False 를 반환한다 (fail-open contract).
     async def send_chat_action(self, chat_id: int, action: str = "typing") -> bool:
         return False
 
     # Non-visible progress heartbeat for long-running steps (vision extract, etc).
     # StreamingAdapter forwards to the SSE queue so the mobile client can reset
-    # its stall-timeout. Telegram/other adapters no-op.
+    # its stall-timeout. Other adapters no-op.
     async def send_progress(self, chat_id: int, stage: str) -> bool:
         return False
 
@@ -60,10 +60,10 @@ class MessengerAdapter(ABC):
 
         `media` is a list of dicts, each `{"image_url": str, "caption": str|None,
         "parse_mode": str|None}`. Media groups do NOT support per-photo inline
-        keyboards (Telegram API limitation) — the caller pairs this with a
+        keyboards — the caller pairs this with a
         follow-up summary message that carries the keyboard.
 
-        The operation is ATOMIC on Telegram: one bad photo URL fails the whole
+        The operation is ATOMIC: one bad photo URL fails the whole
         group. Returns True only when the platform reports success; callers
         MUST fall back to per-card `send_card` on a False return so a search
         never yields zero cards.

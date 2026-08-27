@@ -29,7 +29,7 @@ __all__ = [
 class ChannelRecommendationRequest:
     """Channel-friendly recommendation input.
 
-    All channel adapters (Telegram, iMessage, ...) build this and hand it to a
+    All channel adapters (app SSE, ...) build this and hand it to a
     RecommendationPort implementation. The port owns the mapping to whatever
     backend is wired in (in-process pipeline today; HTTP call to a separate
     service tomorrow).
