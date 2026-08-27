@@ -3,7 +3,7 @@
 Regression guard for the family-gate plumbing bug: search_products used to
 read `ctx["style_node_primary"]` (a brand STYLE-NODE letter A–Z) as the
 search `category`, so the bot path ALWAYS normalized to `other` and the v6
-FILTER 2 family gate never engaged for the primary (Telegram bot) path.
+FILTER 2 family gate never engaged for the primary (conversational) path.
 
 The fix: react_loop._build_ctx now exposes the REAL Vision garment category
 as `ctx["vision_category"]` (from state.vision_selected_item /

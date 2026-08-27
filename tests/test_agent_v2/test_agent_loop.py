@@ -390,7 +390,7 @@ async def test_build_user_message_handles_out_of_range_index():
 
 
 def test_direct_photo_upload_surfaces_link_nudge_to_llm():
-    """REGRESSION 260612 — a user-uploaded photo (Telegram `photo_file_id`
+    """REGRESSION 260612 — a user-uploaded photo (`photo_file_id`
     without a `urls` link) used to vanish into thin air: `resolve_image`
     skipped the file path, leaving `state.image_url=None`, and the agent saw
     an empty user_text so it greeted as if nothing was sent. Now the LLM is

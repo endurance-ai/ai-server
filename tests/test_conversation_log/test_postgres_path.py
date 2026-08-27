@@ -94,7 +94,7 @@ async def test_log_event_postgres_path_executes_insert(monkeypatch):
     assert p[5] is not None
     assert p[6] == "trace-abc"
     assert p[7] == 15
-    assert p[8] is None  # user_id omitted → NULL (telegram-era caller)
+    assert p[8] is None  # user_id omitted → NULL (non-app caller)
 
 
 @pytest.mark.asyncio

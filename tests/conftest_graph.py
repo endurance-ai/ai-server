@@ -26,7 +26,7 @@ class FakeAdapter:
         self.callback_answers: list[tuple[str, str | None]] = []
         self.bytes_payload: bytes | None = None
         # SPEC-CONVERSATION-LOG-001 / LOG-T17 — send_card now returns
-        # ``int | None`` (Telegram message_id). Default mimics success with
+        # ``int | None`` (channel message_id). Default mimics success with
         # an incrementing message_id so tests that previously asserted on
         # truthy returns keep passing.
         self.send_card_returns: int | None = 1001
