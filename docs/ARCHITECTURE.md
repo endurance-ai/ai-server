@@ -1,11 +1,11 @@
 # kiko-ai-server — 아키텍처
 
 > kiko.ai 서비스의 검색/리파인 담당 FastAPI 서버.
-> 마지막 업데이트: 2026-05-22 (v1.5.0 — SPEC-GENDER-PIN-001: gender pin + pending_gender/last_query + search-first policy + diversify content-dedup + sendMediaGroup retry + CDN fastpath).
+> 마지막 업데이트: 2026-08-27 (v1.6.0 — Telegram 채널 제거, 앱/웹 `/v1/chat` SSE 단일 채널).
 
 ## 한 줄 요약
 
-**Telegram 사용자가 패션 이미지·링크를 봇(`@kiko_fashion_ai_bot`)에 보내면** — webhook → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v6` RPC (embedding-first, cosine distance ASC) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
+**앱/웹 사용자가 패션 이미지·링크를 kiko에 보내면** — `POST /v1/chat/sessions/{id}/messages` (SSE) → ReAct 에이전트 → **Modal FashionSigLIP 임베딩 → dev-app Postgres `search_products_v6` RPC (embedding-first, cosine distance ASC) → 다양성 캡 → 하이브리드 카드 응답** — 이것이 현재 운영 중인 유일한 메인 플로우다.
 
 `kikoai/app`(Next.js)은 현재 web UI + Postgres DB 역할로 축소되어 있다. 과거 IG 이미지 검색용으로 설계된 `POST /recommend` 경로는 코드상 존재하지만 **현재 운영에서 거의 호출되지 않는다.**
 
@@ -13,15 +13,15 @@
 
 | 레이어 | 담당 서비스 | 주요 책임 |
 |--------|------------|----------|
-| **Telegram 봇 채널** | Telegram Bot API | 메시지 수신·발신 transport (이 서버에서 블랙박스) |
-| **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, Telegram webhook, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
+| **클라이언트 채널** | kiko 앱 (iOS/Android) + 웹 | 메시지 입력·카드 렌더링. `/v1/auth` JWT + `/v1/chat` SSE 로 이 서버에 직접 연결 |
+| **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, `/v1/chat` SSE, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
 | 이미지 업로드 | S3 + CloudFront | `POST /v1/uploads` presigned PUT 발급, 클라이언트 직접 업로드, `ai.uploads` 메타 기록 |
 | 벡터 DB | dev-app Postgres 16 + pgvector | `search_products_v6` RPC, embedding-first (cosine distance ASC). pgroonga/product_search_text DROPPED. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
 | LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
 | web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
 
-> Telegram bot 플로우는 `kikoai/app`을 **전혀 거치지 않는다** — Vision 처리도 이 서버(`app/channels/vision.py`)가 독자적으로 수행하며, DB만 공유한다.
+> 앱/웹 채팅 플로우는 `kikoai/app`을 **전혀 거치지 않는다** — Vision 처리도 이 서버(`app/channels/vision.py`)가 독자적으로 수행하며, DB만 공유한다.
 
 > **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 환경변수 `DB_URL`/`DB_TOKEN` (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), PostgREST shim `http://172.31.59.31:3001` 경유. Qdrant 미사용.
 
@@ -29,17 +29,17 @@
 
 ## 시스템 토폴로지
 
-주 플로우(실선)는 Telegram 봇 경로다. `/recommend` 경로(점선·회색)는 코드상 존재하나 현재 운영에서 거의 호출되지 않는다.
+주 플로우(실선)는 앱/웹 채팅 경로다. `/recommend` 경로(점선·회색)는 코드상 존재하나 현재 운영에서 거의 호출되지 않는다.
 
 ```mermaid
 flowchart TB
-    subgraph TG["Telegram (주 채널)"]
+    subgraph TG["앱 / 웹 (주 채널)"]
         TG_USER["사용자"]
-        TG_API["Telegram Bot API"]
+        TG_API["kiko 앱 · 웹 클라이언트"]
     end
 
     subgraph AI["kikoai/ai (dev-ai EC2) — 주 서버"]
-        WH["POST /webhooks/telegram"]
+        WH["POST /v1/chat/... (SSE)"]
         GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
         PIPE["pipeline runner\nembed → search → diversify"]
         UPLOADS["POST /v1/uploads\nS3 presigned PUT"]
@@ -62,11 +62,11 @@ flowchart TB
     end
 
     TG_USER -->|메시지| TG_API
-    TG_API -->|webhook| WH
+    TG_API -->|POST + SSE| WH
     WH --> GRAPH
     GRAPH -.emit.-> CONVLOG
     GRAPH --> PIPE
-    PIPE -->|sendMediaGroup / sendMessage| TG_API
+    PIPE -->|SSE 이벤트 (텍스트 + 카드)| TG_API
     PIPE -->|embed| MODAL
     PIPE -->|search_products_v6 RPC| PG
     PIPE -.LLM.-> LITELLM
@@ -98,13 +98,13 @@ flowchart TB
 
 ## 플로우별 다이어그램
 
-### (a) Telegram 한 턴 플로우
+### (a) 앱/웹 한 턴 플로우
 
-webhook 수신부터 사용자 응답까지의 전체 라우팅 경로.
+메시지 수신부터 사용자 응답까지의 전체 라우팅 경로.
 
 ```mermaid
 flowchart TD
-    WH["POST /webhooks/telegram"] --> INGEST["ingest\nUpdate 파싱, 세션 로드\nclarify:/cards:/implicit_feedback: 콜백 인라인 처리\n신규 유저 actionable 메시지 → inline greeting + onboarded_at 마킹"]
+    WH["POST /v1/chat/sessions/{id}/messages"] --> INGEST["ingest\n메시지 파싱, 세션 로드\nclarify:/cards:/implicit_feedback: 콜백 인라인 처리\n신규 유저 actionable 메시지 → inline greeting + onboarded_at 마킹"]
 
     INGEST -->|"/start-only + onboarded_at IS NULL"| INTRO["intro\n1회성 서비스 안내 + onboarded_at 마킹"]
     INGEST -->|"/reset 키워드 → TasteProfile 초기화 ack"| END_TURN["__end__"]
@@ -119,7 +119,7 @@ flowchart TD
     RESOLVE --> VISION["vision_node\nGPT-4o-mini Vision v2 schema"]
     VISION --> AGENT
 
-    AGENT -->|"respond 툴 호출 → 하이브리드 카드 전송"| TG["Telegram Bot API\nsendMediaGroup + summary text"]
+    AGENT -->|"respond 툴 호출 → 하이브리드 카드 전송"| TG["StreamingAdapter → SSE\n카드 배치 + summary text"]
 
     classDef node fill:#1565c0,color:#fff
     classDef agent fill:#ef6c00,color:#fff
@@ -248,7 +248,7 @@ flowchart LR
 
 ### 보조 입구 — `POST /recommend` (현재 운영 미사용)
 
-`app/api/recommend.py`가 제공하는 REST 엔드포인트. `kikoai/app`의 IG 이미지 검색 기능(`/api/find/search`)이 `X-Internal-Token` 헤더를 붙여 AI 서버에 직접 POST하는 경로로 설계되었으나, 현재 `kikoai/app`은 web + DB 역할로 축소되어 **이 경로는 현재 운영에서 거의 호출되지 않는다.** 코드·엔드포인트·파이프라인은 그대로 존재하며, 호출되면 Telegram 봇 플로우와 동일한 `pipeline runner`(embed → search → diversify)를 실행하고 `RecommendResponse`를 JSON으로 반환한다.
+`app/api/recommend.py`가 제공하는 REST 엔드포인트. `kikoai/app`의 IG 이미지 검색 기능(`/api/find/search`)이 `X-Internal-Token` 헤더를 붙여 AI 서버에 직접 POST하는 경로로 설계되었으나, 현재 `kikoai/app`은 web + DB 역할로 축소되어 **이 경로는 현재 운영에서 거의 호출되지 않는다.** 코드·엔드포인트·파이프라인은 그대로 존재하며, 호출되면 앱/웹 채팅 플로우와 동일한 `pipeline runner`(embed → search → diversify)를 실행하고 `RecommendResponse`를 JSON으로 반환한다.
 
 ```
 kikoai/app → POST /recommend → pipeline runner → search_products_v6 RPC → RecommendResponse (JSON)
@@ -305,10 +305,10 @@ app/
 │   ├── health.py            # GET /health (liveness) / GET /health/ready (auth + 상태)
 │   ├── recommend.py         # POST /recommend (X-Internal-Token)
 │   ├── debug.py             # 어드민 디버그 엔드포인트 (INTERNAL_API_TOKEN 인증): /debug/vision-analyze, /debug/resolve-url, /debug/rewrite-query, /debug/list-models, /debug/v6-trace. SSRF 가드 포함 (NEW)
-│   └── webhooks/telegram.py # POST /webhooks/telegram (X-Telegram-Bot-Api-Secret-Token)
+│   ├── chat.py              # POST /v1/chat/... (앱 JWT, SSE 스트리밍)
+│   └── auth.py              # POST /v1/auth/... (소셜 로그인, JWT 발급/갱신)
 ├── channels/                # 채널 어댑터 레이어
 │   ├── adapter.py           # MessengerAdapter ABC
-│   ├── factory.py           # MESSENGER_BACKEND 기반 팩토리
 │   ├── persona.py           # kiko 페르소나 system prompt (단일 소스). language-override 공격 방어 + meta-announce 금지
 │   ├── lang.py              # detect_lang / remember_lang / session_lang (KO/EN sticky)
 │   ├── recommendation.py    # RecommendationPort Protocol + DTO + PipelineRecommendationPort
@@ -320,10 +320,7 @@ app/
 │   ├── clarify_values.py    # clarify axis별 옵션 값 + 한글 라벨
 │   ├── _jsonable.py         # 5-step JSON-serializable cascade 헬퍼
 │   ├── pre_messages.py      # 사전 안내 멘트 단일 소스 + fire_pre_message (NEW, SPEC-AGENT-UX-P0-001 REQ-UX-004)
-│   ├── instagram_apify.py   # Apify 경유 IG 포스트 이미지 fetch (NEW — IG direct URL 우회)
-│   └── telegram/
-│       ├── adapter.py       # TelegramAdapter (sendMessage/sendPhoto/sendMediaGroup/InlineKeyboard)
-│       └── webhook.py       # Telegram Update 파싱
+│   └── instagram_apify.py   # Apify 경유 IG 포스트 이미지 fetch (NEW — IG direct URL 우회)
 ├── graphs/                  # LangGraph StateGraph
 │   ├── fashion_bot.py       # build_graph() — 단일 영구 토폴로지 (SPEC-ONBOARD-LITE-001), _log_topology_banner
 │   ├── state.py             # InputState / WorkingState / OutputState (Pydantic v2)
@@ -408,7 +405,6 @@ app/
 | AI 서버 5xx / timeout | `kikoai/app`이 v4 폴백 (`/api/search-products`) 호출 |
 | Modal /embed 실패 | AI 서버 502 반환 → Next.js 폴백 트리거 |
 | PostgREST RPC 실패 | `RpcContractError` → fail-open 빈 결과 반환 + 구조화 ERROR 로그 |
-| sendMediaGroup 실패 (broken photo / WEBPAGE_CURL_FAILED) | `TelegramAdapter._post(return_error=True)` → 실패 항목 드롭 재시도 → 2개 미만 시 per-card fallback loop |
 | Gap2 Reflexion timeout | `asyncio.wait_for` 취소 → fail-open (score=1.0, LLM 자율 판단 스킵) |
 | LLM 호출 실패 (agent loop) | `_fallback_respond` 오류 안내 발송 후 루프 종료 |
 
@@ -419,7 +415,7 @@ app/
 | 항목 | 정책 |
 |------|------|
 | `/recommend` 인증 | `X-Internal-Token` (Next.js → AI 서버 shared secret) |
-| Telegram webhook 인증 | `X-Telegram-Bot-Api-Secret-Token` 헤더 일치 확인. 불일치 시 401. 파싱 오류 시 200 (재시도 방지) |
+| 앱/웹 엔드포인트 인증 | `/v1/auth` 발급 JWT (Bearer). 세션 소유권은 라우트에서 검증 |
 | SSRF | `RecommendRequest.image_url` — `ALLOWED_IMAGE_HOSTS` 화이트리스트 검증 |
 | Prompt injection 방어 | `persona.py` — 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 |
 | 에러 노출 | 고정 detail (`pipeline_failed`) 반환, 내부 오류는 Langfuse/로그에만 |
@@ -462,3 +458,4 @@ app/
 | 2026-05-19 | **v1.3.0** | **P0 암묵 피드백 → Langfuse v3 score retro-attach. `emit_feedback_score()` 신규 (observability/langfuse.py). `ai.card_impression.langfuse_trace` 컬럼 추가 (migration 0006). 호출처: implicit_feedback.py 3곳 (click/no_click/re_query). kill-switch: `LANGFUSE_FEEDBACK_SCORES`.** |
 | 2026-05-20 | **v1.4.0** | **SPEC-CHAT-STATE-REDIS-001 — pager cursor/impression dedupe dict를 Redis 외부화 (infrastructure/cache/chat_state.py, fail-open). SPEC-AGENT-UX-P0-001 — pre_messages 사전 안내 멘트, typing indicator, diversify dedup 가드, sticky lang directive. validate_args str/float 자동 캐스팅(top_k/n bad_type 제거). Reflexion 발동 조건 빈결과만으로 축소 + exhaust salvage. text_query canonical form 강제. PG 임베딩 캐시(embedding_cache.py, migration 0007). IG Apify 이미지 fetch(instagram_apify.py). pending_question 봇Q↔사용자A 상태. 어드민 디버그 엔드포인트 5개(debug.py) + SSRF 가드. persona language-override 방어.** |
 | 2026-05-22 | **v1.5.0** | **SPEC-GENDER-PIN-001 — TasteProfile.gender 크로스세션 핀 (migration 0008 `ai.user_taste_profile.gender TEXT`). search_products gender resolution (explicit > pinned > card ask). pending_gender / last_query 인메모리 스토어 신규. ingest._handle_gender_pick (clarify:gender 콜백 인라인 완결). fashion_bot clarify:gender:* → __end__ 라우팅. SEARCH-FIRST 정책 + REFINE-vs-SEARCH 시스템 프롬프트 강화. ask_user_clarification axis Literal 검증(validate_args). sendMediaGroup WEBPAGE_CURL_FAILED 드롭-재시도. diversify content-level dedup (brand+name+price). link_resolver CDN fastpath (_DIRECT_IMAGE_HOSTS). per-step 타이밍 로그 (embed/rpc/divers ms). evaluator_run + taste_update 이벤트 emit. pipeline_exc_detail 공유 헬퍼. pending_question 비텍스트 턴 자동 클리어.** |
+| 2026-08-27 | **v1.6.0** | **Telegram 채널 제거 — `/webhooks/telegram`, `app/channels/telegram/`, `app/channels/factory.py`, `MESSENGER_BACKEND`/`TELEGRAM_*` env 삭제. 앱/웹 `/v1/chat` SSE(`StreamingAdapter`)가 유일한 사용자 채널. 그래프·ReAct 루프·검색 파이프라인은 변경 없음.** |

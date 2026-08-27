@@ -1,10 +1,10 @@
 # Codex Guide: ai-server
 
-This repository is the product core: FastAPI service, Telegram webhook, LangGraph/ReAct conversation agent, recommendation/search orchestration, and observability.
+This repository is the product core: FastAPI service, `/chat` SSE endpoint, LangGraph/ReAct conversation agent, recommendation/search orchestration, and observability.
 
 ## Current Product Shape
 
-- Telegram bot `@kiko_fashion_ai_bot` is the primary user-facing product.
+- The kiko app and web clients are the user-facing product; they talk to this server over `/chat` SSE.
 - The server talks to FashionSigLIP embeddings, LiteLLM/Bedrock, Langfuse, Redis chat-state, and dev-app Postgres/PostgREST.
 - `kiko.ai-app` owns the main DB schema; this repo consumes the search RPC and AI schema.
 - Prefer `CLAUDE.md` over the older `README.md` when they conflict; the README contains some stale v5/v2 notes.
@@ -38,9 +38,9 @@ uv run pytest
 ## Key Directories
 
 - `app/main.py`: FastAPI app, lifespan, router registration
-- `app/api/`: recommend, health, Telegram webhook, debug endpoints
+- `app/api/`: chat SSE, auth, recommend, health, debug endpoints
 - `app/agents/`: ReAct loop, tool registry, memory/reflexion helpers, tools
-- `app/channels/`: messenger adapters, Telegram implementation, persona, language, vision, link resolving
+- `app/channels/`: channel adapters, persona, language, vision, link resolving
 - `app/graphs/`: LangGraph StateGraph, nodes, routing, state models
 - `app/services/`: business services for embed/search/diversify/database
 - `app/infrastructure/`: repositories, Redis chat state, memory persistence, RPC contract
@@ -51,7 +51,7 @@ uv run pytest
 ## Development Rules
 
 - Preserve the single permanent LangGraph topology unless the task explicitly changes architecture.
-- Treat Telegram transport as a black box; channel-specific behavior belongs under `app/channels/`.
+- Keep transport concerns out of the graph; channel-specific behavior belongs under `app/channels/`.
 - Keep channel-to-pipeline coupling through protocol/port boundaries such as `app/channels/recommendation.py`.
 - Keep ReAct tool definitions and validation centralized in `app/agents/tool_registry.py`.
 - Keep user input fenced or clearly separated from system-derived context in prompts.
@@ -66,7 +66,7 @@ Mirror the MoAI harness intent from `.moai/config/sections/`:
 - Development mode is DDD: analyze existing behavior, preserve it, then improve.
 - Add or update characterization tests before risky behavior changes when existing behavior is not already covered.
 - Keep transformations small; avoid broad rewrites unless explicitly requested or necessary.
-- Use minimal validation for docs/config/simple bugfixes, standard validation for features/refactors or multi-file changes, and thorough validation for auth, security, migrations, public APIs, Telegram webhook behavior, agent graph topology, or critical fixes.
+- Use minimal validation for docs/config/simple bugfixes, standard validation for features/refactors or multi-file changes, and thorough validation for auth, security, migrations, public APIs, chat/SSE behavior, agent graph topology, or critical fixes.
 - Escalate validation depth after any quality gate failure or critical review finding.
 - Maintain zero new lint/type/test regressions. If a pre-existing failure blocks verification, report it clearly.
 - Prefer behavior/spec tests with meaningful assertions over implementation-coupled tests.

@@ -2,7 +2,7 @@
 
 > `POST /recommend` 의 단일 진입점. Phase A(Qdrant) 폐기 후 v6 (Modal embed + dev-app Postgres RPC) 로 운영 중 (SPEC-SEARCH-V6-001).
 >
-> **SPEC-MSG-001 + SPEC-AGENT-001**: Telegram 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. `POST /recommend` 는 현재 운영 미사용 (kikoai/app이 자체 v6 경로로 이전) — 코드·파이프라인은 그대로 존재하며 동일 `search_products_v6` RPC 를 사용.
+> **SPEC-MSG-001 + SPEC-AGENT-001**: 앱/웹 채팅 채널도 동일 파이프라인(`app/pipeline/runner.py`)을 재사용. `POST /recommend` 는 현재 운영 미사용 (kikoai/app이 자체 v6 경로로 이전) — 코드·파이프라인은 그대로 존재하며 동일 `search_products_v6` RPC 를 사용.
 
 ## 데이터 흐름
 

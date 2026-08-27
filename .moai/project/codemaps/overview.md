@@ -7,7 +7,7 @@ kiko.ai는 패션 추천 파이프라인의 검색 오케스트레이션 레이�
 | 레이어 | 소속 | 책임 |
 |--------|------|------|
 | kikoai/app (Next.js) | 외부 Caller | Apify 크롤, Cloudflare R2 이미지 저장, GPT-4o-mini Vision 분석(웹), 세션·인증, v4 폴백 |
-| **kiko.ai AI 서버 (이 프로젝트)** | **이 레포** | **검색 오케스트레이션(웹) + LangGraph Telegram 봇(Vision/Clarify/Critique/Search)** |
+| **kiko.ai AI 서버 (이 프로젝트)** | **이 레포** | **검색 오케스트레이션(웹) + LangGraph 채팅 에이전트(Vision/Clarify/Critique/Search)** |
 | Modal | 외부 GPU 서비스 | FashionSigLIP 추론 (단건 `/embed`, 배치 `/embed/batch`) |
 | Supabase | 외부 DB | pgvector HNSW 인덱스 + pgroonga BM25 — `search_products_v5` RPC |
 | Langfuse | 외부 관측 | self-hosted trace 저장, 단계별 latency/score 기록 |
@@ -49,7 +49,7 @@ run_pipeline
   └─ diversify_step(state)  → state.final_candidates 채움
 ```
 
-Telegram 경로(`POST /webhooks/telegram`)는 LangGraph StateGraph(`WorkingState`)로 분기·루프·콜백을 처리한다. 12 노드 토폴로지:
+앱/웹 채팅 경로(`POST /v1/chat/...`)는 LangGraph StateGraph(`WorkingState`)로 분기·루프·콜백을 처리한다. 12 노드 토폴로지:
 
 ```
 ingest → resolve_image → vision → pick_item → ask_clarify? → apply_clarify? →
