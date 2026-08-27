@@ -68,10 +68,6 @@ def adapter():
     reset_adapter(token)
 
 
-@pytest.fixture(autouse=True)
-def disable_router_llm(monkeypatch):
-    monkeypatch.setattr("app.channels.router.settings.ROUTER_LLM_ENABLED", False)
-
 
 @pytest.mark.asyncio
 async def test_rich_search_query_ko_reaches_port(store, taste_store, stub_port, adapter, monkeypatch):
