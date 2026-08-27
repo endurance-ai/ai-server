@@ -277,7 +277,7 @@ REGISTRY: dict[str, ToolMetadata] = {
     "search_products": {
         "name": "search_products",
         "description": (
-            "Search the 78k-product catalog. Provide `text_query` plus optional "
+            "Search the 200k+ product catalog. Provide `text_query` plus optional "
             "filters (category, brand, style_node_primary, color_family, fit, price). Do "
             "NOT provide an image_url — the tool handles imagery internally "
             "from session state. Returns top candidates with brand/title/price.\n"

@@ -14,7 +14,8 @@
   "notes": [
     "Subcategory tokens should preferably match the Vision v2 enum (dashes, lowercase). Substring `token in subcategory` matching means `jean` will hit `jeans`, but `denim_jacket` will NOT hit `denim-jacket` — always use dashes.",
     "`expected.color_any`/`fit_any` are OPTIONAL — omit when the query doesn't imply them.",
-    "`gender` field is metadata only — the raw RPC harness does not use it (that logic lives in app-layer search_products tool)."
+    "`gender` field is metadata only — the raw RPC harness does not use it (that logic lives in app-layer search_products tool).",
+    "2026-08-28: material_any/pattern_any 축 라벨 추가(속성정렬 rerank fit/material/pattern 스윕용). vocab=dev feature_metadata canonical."
   ],
   "cases": [
     {
@@ -23,10 +24,25 @@
       "input": "검정 오버사이즈 후드",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["hoodie", "sweatshirt"],
-        "keywords_any": ["hoodie", "hood", "후드"],
-        "color_any": ["black", "블랙"],
-        "fit_any": ["oversized", "loose", "relaxed", "boxy"]
+        "subcategory_any": [
+          "hoodie",
+          "sweatshirt"
+        ],
+        "keywords_any": [
+          "hoodie",
+          "hood",
+          "후드"
+        ],
+        "color_any": [
+          "black",
+          "블랙"
+        ],
+        "fit_any": [
+          "oversized",
+          "loose",
+          "relaxed",
+          "boxy"
+        ]
       }
     },
     {
@@ -36,8 +52,17 @@
       "lang": "ko",
       "note": "No 'capri' enum exists — closest fit is trousers/shorts. Expected keywords carry the semantic weight.",
       "expected": {
-        "subcategory_any": ["trousers", "shorts", "chinos"],
-        "keywords_any": ["capri", "카프리", "cropped", "crop"]
+        "subcategory_any": [
+          "trousers",
+          "shorts",
+          "chinos"
+        ],
+        "keywords_any": [
+          "capri",
+          "카프리",
+          "cropped",
+          "crop"
+        ]
       }
     },
     {
@@ -47,8 +72,15 @@
       "lang": "ko",
       "note": "Enum has 'skirt' only (no length variant). Length matched via keywords.",
       "expected": {
-        "subcategory_any": ["skirt"],
-        "keywords_any": ["mini", "skirt", "스커트", "미니"]
+        "subcategory_any": [
+          "skirt"
+        ],
+        "keywords_any": [
+          "mini",
+          "skirt",
+          "스커트",
+          "미니"
+        ]
       }
     },
     {
@@ -57,9 +89,21 @@
       "input": "화이트 티셔츠",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["t-shirt"],
-        "keywords_any": ["t-shirt", "tee", "티셔츠", "티"],
-        "color_any": ["white", "화이트", "ivory", "cream"]
+        "subcategory_any": [
+          "t-shirt"
+        ],
+        "keywords_any": [
+          "t-shirt",
+          "tee",
+          "티셔츠",
+          "티"
+        ],
+        "color_any": [
+          "white",
+          "화이트",
+          "ivory",
+          "cream"
+        ]
       }
     },
     {
@@ -68,8 +112,16 @@
       "input": "데님 자켓",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["denim-jacket"],
-        "keywords_any": ["denim", "jean", "jacket", "데님", "자켓"]
+        "subcategory_any": [
+          "denim-jacket"
+        ],
+        "keywords_any": [
+          "denim",
+          "jean",
+          "jacket",
+          "데님",
+          "자켓"
+        ]
       }
     },
     {
@@ -79,8 +131,14 @@
       "lang": "ko",
       "note": "No 'ballet' enum — flats is closest.",
       "expected": {
-        "subcategory_any": ["flats"],
-        "keywords_any": ["ballet", "flat", "발레"]
+        "subcategory_any": [
+          "flats"
+        ],
+        "keywords_any": [
+          "ballet",
+          "flat",
+          "발레"
+        ]
       }
     },
     {
@@ -89,9 +147,23 @@
       "input": "블랙 레더 미니스커트",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["skirt"],
-        "keywords_any": ["leather", "mini", "skirt", "레더", "가죽"],
-        "color_any": ["black", "블랙"]
+        "subcategory_any": [
+          "skirt"
+        ],
+        "keywords_any": [
+          "leather",
+          "mini",
+          "skirt",
+          "레더",
+          "가죽"
+        ],
+        "color_any": [
+          "black",
+          "블랙"
+        ],
+        "material_any": [
+          "leather"
+        ]
       }
     },
     {
@@ -100,9 +172,26 @@
       "input": "와이드 데님 팬츠",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["jeans", "wide-pants"],
-        "keywords_any": ["denim", "jean", "wide", "와이드"],
-        "fit_any": ["wide", "wide-leg", "wideleg", "relaxed", "loose"]
+        "subcategory_any": [
+          "jeans",
+          "wide-pants"
+        ],
+        "keywords_any": [
+          "denim",
+          "jean",
+          "wide",
+          "와이드"
+        ],
+        "fit_any": [
+          "wide",
+          "wide-leg",
+          "wideleg",
+          "relaxed",
+          "loose"
+        ],
+        "material_any": [
+          "denim"
+        ]
       }
     },
     {
@@ -111,9 +200,27 @@
       "input": "미니멀한 베이지 니트",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["sweater", "knit-top", "cardigan"],
-        "keywords_any": ["knit", "sweater", "니트"],
-        "color_any": ["beige", "cream", "ivory", "베이지", "camel", "tan"]
+        "subcategory_any": [
+          "sweater",
+          "knit-top",
+          "cardigan"
+        ],
+        "keywords_any": [
+          "knit",
+          "sweater",
+          "니트"
+        ],
+        "color_any": [
+          "beige",
+          "cream",
+          "ivory",
+          "베이지",
+          "camel",
+          "tan"
+        ],
+        "material_any": [
+          "knit"
+        ]
       }
     },
     {
@@ -122,8 +229,15 @@
       "input": "스트릿한 그래픽 티",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["t-shirt"],
-        "keywords_any": ["graphic", "print", "logo", "티"]
+        "subcategory_any": [
+          "t-shirt"
+        ],
+        "keywords_any": [
+          "graphic",
+          "print",
+          "logo",
+          "티"
+        ]
       }
     },
     {
@@ -132,8 +246,14 @@
       "input": "러블리한 미니 원피스",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["mini-dress"],
-        "keywords_any": ["mini", "dress", "원피스"]
+        "subcategory_any": [
+          "mini-dress"
+        ],
+        "keywords_any": [
+          "mini",
+          "dress",
+          "원피스"
+        ]
       }
     },
     {
@@ -142,9 +262,19 @@
       "input": "자라 데님 셔츠",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["shirt", "blouse", "overshirt"],
-        "keywords_any": ["denim", "shirt", "chambray"],
-        "brand_any": ["zara"]
+        "subcategory_any": [
+          "shirt",
+          "blouse",
+          "overshirt"
+        ],
+        "keywords_any": [
+          "denim",
+          "shirt",
+          "chambray"
+        ],
+        "brand_any": [
+          "zara"
+        ]
       }
     },
     {
@@ -153,9 +283,16 @@
       "input": "코스 셔츠",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["shirt", "blouse"],
-        "keywords_any": ["shirt"],
-        "brand_any": ["cos"]
+        "subcategory_any": [
+          "shirt",
+          "blouse"
+        ],
+        "keywords_any": [
+          "shirt"
+        ],
+        "brand_any": [
+          "cos"
+        ]
       }
     },
     {
@@ -164,8 +301,13 @@
       "input": "leather loafers",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["loafers"],
-        "keywords_any": ["loafer", "leather"]
+        "subcategory_any": [
+          "loafers"
+        ],
+        "keywords_any": [
+          "loafer",
+          "leather"
+        ]
       }
     },
     {
@@ -174,10 +316,23 @@
       "input": "oversized black hoodie",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["hoodie", "sweatshirt"],
-        "keywords_any": ["hoodie", "hood"],
-        "color_any": ["black"],
-        "fit_any": ["oversized", "loose", "boxy", "relaxed"]
+        "subcategory_any": [
+          "hoodie",
+          "sweatshirt"
+        ],
+        "keywords_any": [
+          "hoodie",
+          "hood"
+        ],
+        "color_any": [
+          "black"
+        ],
+        "fit_any": [
+          "oversized",
+          "loose",
+          "boxy",
+          "relaxed"
+        ]
       }
     },
     {
@@ -186,9 +341,20 @@
       "input": "wide leg jeans",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["jeans", "wide-pants"],
-        "keywords_any": ["denim", "jean"],
-        "fit_any": ["wide", "wide-leg", "wideleg", "loose"]
+        "subcategory_any": [
+          "jeans",
+          "wide-pants"
+        ],
+        "keywords_any": [
+          "denim",
+          "jean"
+        ],
+        "fit_any": [
+          "wide",
+          "wide-leg",
+          "wideleg",
+          "loose"
+        ]
       }
     },
     {
@@ -197,9 +363,21 @@
       "input": "black satin mini dress",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["mini-dress", "slip-dress"],
-        "keywords_any": ["mini", "dress", "satin"],
-        "color_any": ["black"]
+        "subcategory_any": [
+          "mini-dress",
+          "slip-dress"
+        ],
+        "keywords_any": [
+          "mini",
+          "dress",
+          "satin"
+        ],
+        "color_any": [
+          "black"
+        ],
+        "material_any": [
+          "satin"
+        ]
       }
     },
     {
@@ -208,9 +386,21 @@
       "input": "beige trench coat",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["trench-coat", "overcoat"],
-        "keywords_any": ["trench", "coat"],
-        "color_any": ["beige", "camel", "tan", "khaki", "cream"]
+        "subcategory_any": [
+          "trench-coat",
+          "overcoat"
+        ],
+        "keywords_any": [
+          "trench",
+          "coat"
+        ],
+        "color_any": [
+          "beige",
+          "camel",
+          "tan",
+          "khaki",
+          "cream"
+        ]
       }
     },
     {
@@ -219,10 +409,31 @@
       "input": "cozy beige oversized knit",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["sweater", "knit-top", "cardigan"],
-        "keywords_any": ["knit", "sweater", "cardigan"],
-        "color_any": ["beige", "cream", "ivory", "camel", "tan"],
-        "fit_any": ["oversized", "loose", "relaxed"]
+        "subcategory_any": [
+          "sweater",
+          "knit-top",
+          "cardigan"
+        ],
+        "keywords_any": [
+          "knit",
+          "sweater",
+          "cardigan"
+        ],
+        "color_any": [
+          "beige",
+          "cream",
+          "ivory",
+          "camel",
+          "tan"
+        ],
+        "fit_any": [
+          "oversized",
+          "loose",
+          "relaxed"
+        ],
+        "material_any": [
+          "knit"
+        ]
       }
     },
     {
@@ -231,8 +442,16 @@
       "input": "streetwear graphic tee",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["t-shirt"],
-        "keywords_any": ["graphic", "print", "tee", "shirt", "logo"]
+        "subcategory_any": [
+          "t-shirt"
+        ],
+        "keywords_any": [
+          "graphic",
+          "print",
+          "tee",
+          "shirt",
+          "logo"
+        ]
       }
     },
     {
@@ -241,8 +460,16 @@
       "input": "office chic tailored trousers",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["trousers", "chinos"],
-        "keywords_any": ["trouser", "tailored", "pant", "slacks"]
+        "subcategory_any": [
+          "trousers",
+          "chinos"
+        ],
+        "keywords_any": [
+          "trouser",
+          "tailored",
+          "pant",
+          "slacks"
+        ]
       }
     },
     {
@@ -251,9 +478,20 @@
       "input": "coquette pastel mini skirt",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["skirt"],
-        "keywords_any": ["mini", "skirt"],
-        "color_any": ["pink", "pastel", "lavender", "cream", "baby blue"]
+        "subcategory_any": [
+          "skirt"
+        ],
+        "keywords_any": [
+          "mini",
+          "skirt"
+        ],
+        "color_any": [
+          "pink",
+          "pastel",
+          "lavender",
+          "cream",
+          "baby blue"
+        ]
       }
     },
     {
@@ -262,8 +500,17 @@
       "input": "athleisure track pants",
       "lang": "en",
       "expected": {
-        "subcategory_any": ["joggers", "sweatpants", "trousers"],
-        "keywords_any": ["track", "sweat", "jogger", "athletic"]
+        "subcategory_any": [
+          "joggers",
+          "sweatpants",
+          "trousers"
+        ],
+        "keywords_any": [
+          "track",
+          "sweat",
+          "jogger",
+          "athletic"
+        ]
       }
     },
     {
@@ -273,9 +520,16 @@
       "lang": "en",
       "gender": "men",
       "expected": {
-        "subcategory_any": ["jeans"],
-        "keywords_any": ["denim", "jean"],
-        "color_any": ["black"]
+        "subcategory_any": [
+          "jeans"
+        ],
+        "keywords_any": [
+          "denim",
+          "jean"
+        ],
+        "color_any": [
+          "black"
+        ]
       }
     },
     {
@@ -285,8 +539,18 @@
       "lang": "en",
       "gender": "women",
       "expected": {
-        "subcategory_any": ["mini-dress", "midi-dress", "maxi-dress", "shirt-dress", "wrap-dress"],
-        "keywords_any": ["floral", "print", "dress"]
+        "subcategory_any": [
+          "mini-dress",
+          "midi-dress",
+          "maxi-dress",
+          "shirt-dress",
+          "wrap-dress"
+        ],
+        "keywords_any": [
+          "floral",
+          "print",
+          "dress"
+        ]
       }
     },
     {
@@ -296,10 +560,30 @@
       "lang": "ko",
       "note": "QA trace 2026-07-06 — pin.it 6e2SeIyNn 픽 후 텍스트 검색 (Vision suggested_query 실사용 예시)",
       "expected": {
-        "subcategory_any": ["hoodie", "sweatshirt", "fleece"],
-        "keywords_any": ["hoodie", "hood", "fleece", "후드"],
-        "color_any": ["black", "블랙"],
-        "fit_any": ["oversized", "boxy", "drop-shoulder", "relaxed"]
+        "subcategory_any": [
+          "hoodie",
+          "sweatshirt",
+          "fleece"
+        ],
+        "keywords_any": [
+          "hoodie",
+          "hood",
+          "fleece",
+          "후드"
+        ],
+        "color_any": [
+          "black",
+          "블랙"
+        ],
+        "fit_any": [
+          "oversized",
+          "boxy",
+          "drop-shoulder",
+          "relaxed"
+        ],
+        "material_any": [
+          "fleece"
+        ]
       }
     },
     {
@@ -308,9 +592,23 @@
       "input": "브라운 레더 로퍼",
       "lang": "ko",
       "expected": {
-        "subcategory_any": ["loafers"],
-        "keywords_any": ["loafer", "leather"],
-        "color_any": ["brown", "tan", "cognac", "chocolate", "브라운"]
+        "subcategory_any": [
+          "loafers"
+        ],
+        "keywords_any": [
+          "loafer",
+          "leather"
+        ],
+        "color_any": [
+          "brown",
+          "tan",
+          "cognac",
+          "chocolate",
+          "브라운"
+        ],
+        "material_any": [
+          "leather"
+        ]
       }
     },
     {
@@ -320,8 +618,14 @@
       "lang": "ko",
       "gender": "men",
       "expected": {
-        "subcategory_any": ["cargo-pants", "trousers"],
-        "keywords_any": ["cargo", "utility"]
+        "subcategory_any": [
+          "cargo-pants",
+          "trousers"
+        ],
+        "keywords_any": [
+          "cargo",
+          "utility"
+        ]
       }
     },
     {
@@ -331,8 +635,15 @@
       "lang": "en",
       "note": "underspecified single-word query — checks whether retrieval degenerates to random distribution or clusters around shirts",
       "expected": {
-        "subcategory_any": ["shirt", "blouse", "polo", "overshirt"],
-        "keywords_any": ["shirt"]
+        "subcategory_any": [
+          "shirt",
+          "blouse",
+          "polo",
+          "overshirt"
+        ],
+        "keywords_any": [
+          "shirt"
+        ]
       }
     },
     {
@@ -353,7 +664,344 @@
           "bomber",
           "hoodie"
         ],
-        "keywords_any": ["knit", "sweater", "cardigan", "coat", "jacket"]
+        "keywords_any": [
+          "knit",
+          "sweater",
+          "cardigan",
+          "coat",
+          "jacket"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_corduroy_031",
+      "type": "text_ko_basic",
+      "input": "코듀로이 팬츠",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "pants",
+          "trousers"
+        ],
+        "keywords_any": [
+          "corduroy",
+          "코듀로이",
+          "골덴",
+          "pants"
+        ],
+        "material_any": [
+          "corduroy"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_suede_032",
+      "type": "text_en_basic",
+      "input": "brown suede jacket",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "jacket"
+        ],
+        "keywords_any": [
+          "suede",
+          "jacket"
+        ],
+        "color_any": [
+          "brown",
+          "tan",
+          "cognac"
+        ],
+        "material_any": [
+          "suede"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_cashmere_033",
+      "type": "text_ko_mood",
+      "input": "부드러운 캐시미어 니트 가디건",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "cardigan",
+          "sweater",
+          "knit-top"
+        ],
+        "keywords_any": [
+          "cashmere",
+          "cardigan",
+          "캐시미어",
+          "니트"
+        ],
+        "material_any": [
+          "cashmere",
+          "knit"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_tweed_034",
+      "type": "text_en_basic",
+      "input": "cropped tweed jacket",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "jacket",
+          "blazer"
+        ],
+        "keywords_any": [
+          "tweed",
+          "jacket"
+        ],
+        "fit_any": [
+          "cropped"
+        ],
+        "material_any": [
+          "tweed"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_silk_035",
+      "type": "text_ko_basic",
+      "input": "실크 블라우스",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "blouse",
+          "shirt"
+        ],
+        "keywords_any": [
+          "silk",
+          "blouse",
+          "실크"
+        ],
+        "material_any": [
+          "silk"
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_linen_036",
+      "type": "text_en_mood",
+      "input": "breezy linen summer shirt",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "shirt"
+        ],
+        "keywords_any": [
+          "linen",
+          "shirt"
+        ],
+        "material_any": [
+          "linen"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_velvet_037",
+      "type": "text_ko_basic",
+      "input": "벨벳 미니 드레스",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "mini-dress",
+          "dress"
+        ],
+        "keywords_any": [
+          "velvet",
+          "dress",
+          "벨벳"
+        ],
+        "material_any": [
+          "velvet"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_woolcoat_038",
+      "type": "text_en_basic",
+      "input": "grey wool coat",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "coat",
+          "overcoat"
+        ],
+        "keywords_any": [
+          "wool",
+          "coat"
+        ],
+        "color_any": [
+          "grey",
+          "gray",
+          "charcoal"
+        ],
+        "material_any": [
+          "wool"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_striped_041",
+      "type": "text_en_basic",
+      "input": "striped long sleeve shirt",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "shirt",
+          "t-shirt"
+        ],
+        "keywords_any": [
+          "stripe",
+          "striped",
+          "shirt"
+        ],
+        "pattern_any": [
+          "striped"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_check_042",
+      "type": "text_ko_basic",
+      "input": "체크 셔츠",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "shirt"
+        ],
+        "keywords_any": [
+          "check",
+          "plaid",
+          "체크",
+          "shirt"
+        ],
+        "pattern_any": [
+          "checked"
+        ]
+      }
+    },
+    {
+      "id": "text_en_mood_floral_043",
+      "type": "text_en_mood",
+      "input": "romantic floral midi dress",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "midi-dress",
+          "dress"
+        ],
+        "keywords_any": [
+          "floral",
+          "flower",
+          "dress"
+        ],
+        "pattern_any": [
+          "floral"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_mood_floral_044",
+      "type": "text_ko_mood",
+      "input": "플로럴 원피스",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "dress"
+        ],
+        "keywords_any": [
+          "floral",
+          "플로럴",
+          "꽃",
+          "원피스"
+        ],
+        "pattern_any": [
+          "floral"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_polkadot_045",
+      "type": "text_en_basic",
+      "input": "polka dot blouse",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "blouse",
+          "shirt"
+        ],
+        "keywords_any": [
+          "dot",
+          "polka",
+          "blouse"
+        ],
+        "pattern_any": [
+          "dot"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_leopard_046",
+      "type": "text_en_basic",
+      "input": "leopard print coat",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "coat"
+        ],
+        "keywords_any": [
+          "leopard",
+          "animal",
+          "print",
+          "coat"
+        ],
+        "pattern_any": [
+          "animal"
+        ]
+      }
+    },
+    {
+      "id": "text_ko_basic_camo_047",
+      "type": "text_ko_basic",
+      "input": "카모 카고 팬츠",
+      "lang": "ko",
+      "expected": {
+        "subcategory_any": [
+          "cargo-pants",
+          "pants"
+        ],
+        "keywords_any": [
+          "camo",
+          "cargo",
+          "카모",
+          "카고"
+        ],
+        "pattern_any": [
+          "camo"
+        ]
+      }
+    },
+    {
+      "id": "text_en_basic_gingham_048",
+      "type": "text_en_basic",
+      "input": "gingham summer dress",
+      "lang": "en",
+      "expected": {
+        "subcategory_any": [
+          "dress"
+        ],
+        "keywords_any": [
+          "gingham",
+          "check",
+          "dress"
+        ],
+        "pattern_any": [
+          "checked"
+        ]
       }
     }
   ]
