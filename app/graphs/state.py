@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.channels.critique import CritiqueDelta
 from app.channels.router import RoutedDecision
@@ -52,7 +52,10 @@ class InputState(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     message: ChannelMessage
-    chat_id: int
+    # Channel-neutral name for the integer key used by legacy graph/session
+    # helpers. ``chat_id`` remains an input/property alias for compatibility
+    # with existing nodes, tests, and persisted state adapters.
+    chat_id: int = Field(validation_alias=AliasChoices("chat_id", "session_key"))
     from_user_id: int | None = None
 
     # SPEC-CONVERSATION-LOG-001 / REQ-LOG-THREAD-001 / REQ-LOG-TURN-001 —
@@ -71,6 +74,12 @@ class InputState(BaseModel):
     # req_price_max: upper price bound in KRW integer 원 (None → no ceiling).
     req_gender: str | None = None
     req_price_max: int | None = None
+
+    @property
+    def session_key(self) -> int:
+        """Channel-neutral name for the legacy integer graph/session key."""
+
+        return self.chat_id
 
 
 class WorkingState(InputState):

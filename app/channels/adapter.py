@@ -4,8 +4,12 @@ from app.channels.schemas import BotCard, ChannelMessage
 
 
 class MessengerAdapter(ABC):
-    """Backend-neutral messenger interface. Concrete implementations live under
-    `app/channels/<backend>/adapter.py`. Selected at startup via MESSENGER_BACKEND env.
+    """Transport-neutral output interface used by the graph.
+
+    The native app/web path binds ``StreamingAdapter`` (or ``CaptureAdapter``
+    for batch calls) per invocation.  The integer recipient argument remains
+    named ``chat_id`` in this low-level protocol for graph compatibility; it is
+    a session key, not a Telegram/API identifier.
     """
 
     @abstractmethod
