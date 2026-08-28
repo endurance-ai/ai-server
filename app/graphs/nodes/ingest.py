@@ -51,7 +51,7 @@ def _emit_intent_routed(state: WorkingState) -> None:
 async def _send_callback_toast(state: WorkingState, sess, *, text: str | None) -> None:
     """Pop a tiny toast above the chat in response to an inline-button tap.
 
-    Without this the user only sees Telegram's faint button-press flash and
+    Without this the user only sees the client's faint button-press flash and
     assumes the button is broken. Lang-aware default copy when `text` is None.
     Best-effort: any failure is swallowed (we never block the webhook on UX).
     """

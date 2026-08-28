@@ -5,7 +5,7 @@ Thin wrapper mirroring `ask_user_clarification.py`: reuses the EXISTING
 options card (similar items / fit change / different mood). Defines NO new
 card-rendering algorithm. Callback shape `suggest:{kind}:{value}`.
 
-@MX:NOTE: [AUTO] Side effect: Telegram inline-keyboard send (reuses adapter,
+@MX:NOTE: [AUTO] Side effect: inline-keyboard send (reuses adapter,
   no new card renderer). terminates_loop=False.
 @MX:SPEC: SPEC-AGENT-V3-REACT
 """

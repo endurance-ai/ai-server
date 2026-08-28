@@ -6,9 +6,9 @@ Strategy: CaptureAdapter (batch) / StreamingAdapter (SSE)
   StreamingAdapter puts events into an asyncio.Queue for SSE streaming.
 
 User identity bridge:
-  The graph uses `chat_id: int` for session/taste-profile lookups.
-  Consumer users have `user_id: UUID`. We derive a stable int from the UUID bytes
-  so the same user always resolves to the same session key in the existing stores.
+  The graph keeps an integer compatibility key for its existing stores.
+  Consumer users have `user_id: UUID`; `app.core.identity` derives stable,
+  channel-neutral keys for user and conversation state.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.channels.adapter import MessengerAdapter
 from app.channels.schemas import BotCard, BotReply, ChannelMessage
+from app.core.identity import user_id_to_session_key, uuid_to_session_key
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
@@ -70,8 +71,8 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _user_id_to_chat_id(user_id: UUID) -> int:
-    """Derive a stable positive int from a UUID for graph session key compatibility."""
-    return abs(int.from_bytes(user_id.bytes[:8], "big")) % (2**62)
+    """Deprecated compatibility alias for older callers/tests."""
+    return user_id_to_session_key(user_id)
 
 
 def _session_id_to_chat_id(session_id: UUID) -> int:
@@ -83,7 +84,7 @@ def _session_id_to_chat_id(session_id: UUID) -> int:
     A UUID-derived positive int keeps those existing int-keyed stores isolated
     without changing the Telegram transport contract.
     """
-    return abs(int.from_bytes(session_id.bytes[:8], "big")) % (2**62)
+    return uuid_to_session_key(session_id)
 
 
 # user_profiles uses ('male','female','other'); taste_profile uses ('men','women','unisex')
@@ -277,7 +278,7 @@ async def get_app_cap_status(pool: AsyncConnectionPool, user_id: UUID) -> AppCap
     user_tier = await _get_app_user_tier(pool, user_id)
     cap_tier = _APP_TO_CAP_TIER.get(user_tier, "free")
     daily_cap = int(token_cap._tier_cap(cap_tier))  # noqa: SLF001 - shared cap SoT
-    cap_used = int(await token_cap.get_usage(_user_id_to_chat_id(user_id)))
+    cap_used = int(await token_cap.get_usage(user_id_to_session_key(user_id)))
     cap_remaining = None if daily_cap == 0 else max(0, daily_cap - cap_used)
     cap_reached = bool(settings.DAILY_TOKEN_CAP_ENABLED and daily_cap > 0 and cap_used >= daily_cap)
     return AppCapStatus(

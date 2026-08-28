@@ -95,65 +95,6 @@ def _adapter(group_ok: bool = True) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_send_media_group_success():
-    from app.channels.telegram.adapter import TelegramAdapter
-
-    adapter = TelegramAdapter(bot_token="x:y")
-    posted: list = []
-
-    async def _fake_post(method, payload, **kw):
-        posted.append((method, payload))
-        return {"ok": True, "result": [{"message_id": 1}, {"message_id": 2}]}
-
-    adapter._post = _fake_post  # type: ignore[assignment]
-
-    media = [
-        {"image_url": "https://img/1.jpg", "caption": None},
-        {"image_url": "https://img/2.jpg", "caption": None},
-    ]
-    ok = await adapter.send_media_group(7, media)
-    assert ok is True
-    assert posted[0][0] == "sendMediaGroup"
-    assert len(posted[0][1]["media"]) == 2
-    assert posted[0][1]["media"][0]["type"] == "photo"
-
-
-@pytest.mark.asyncio
-async def test_send_media_group_atomic_fail_returns_false():
-    from app.channels.telegram.adapter import TelegramAdapter
-
-    adapter = TelegramAdapter(bot_token="x:y")
-
-    async def _fake_post(method, payload, **kw):
-        # Telegram rejects the whole group when one URL is bad → _post None.
-        return None
-
-    adapter._post = _fake_post  # type: ignore[assignment]
-
-    ok = await adapter.send_media_group(7, [{"image_url": "https://bad"}, {"image_url": "https://x"}])
-    assert ok is False
-
-
-@pytest.mark.asyncio
-async def test_send_media_group_bounds_guard():
-    from app.channels.telegram.adapter import TelegramAdapter
-
-    adapter = TelegramAdapter(bot_token="x:y")
-    called = {"n": 0}
-
-    async def _fake_post(method, payload, **kw):
-        called["n"] += 1
-        return {"ok": True}
-
-    adapter._post = _fake_post  # type: ignore[assignment]
-
-    # < 2 and > 10 are rejected client-side (Telegram requires 2..10).
-    assert await adapter.send_media_group(7, [{"image_url": "https://x"}]) is False
-    assert await adapter.send_media_group(7, [{"image_url": f"https://x/{i}"} for i in range(11)]) is False
-    assert called["n"] == 0  # no Telegram call for out-of-range
-
-
-@pytest.mark.asyncio
 async def test_abc_default_send_media_group_returns_false():
     from app.channels.adapter import MessengerAdapter
 

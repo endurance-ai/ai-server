@@ -116,7 +116,7 @@ async def test_pick_item_send_failure_does_not_propagate(store, taste_store, ada
     """If the adapter raises, pick_item logs and returns a delta — no propagation."""
 
     async def _boom(*a, **k):
-        raise RuntimeError("telegram 5xx")
+        raise RuntimeError("channel 5xx")
 
     monkeypatch.setattr(adapter, "send_text_with_buttons", _boom)
     monkeypatch.setattr(adapter, "send_text", _boom)

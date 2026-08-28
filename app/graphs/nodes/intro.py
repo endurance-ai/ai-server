@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from app.channels.factory import get_adapter
+from app.graphs.nodes._adapter_ctx import get_adapter
 from app.graphs.nodes._trace import node_done, node_enter
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.session import get_store

@@ -105,7 +105,7 @@ def test_critique_buttons_callback_within_64_bytes():
 
     long_id = "x" * 100
     rows = _critique_buttons_for(0, lang="en", product_id=long_id)
-    # Flatten across rows — every callback in every row must fit Telegram's 64-byte cap.
+    # Flatten across rows — every callback in every row must fit the 64-byte cap.
     for row in rows:
         for _label, cb in row:
             assert len(cb.encode("utf-8")) <= 64

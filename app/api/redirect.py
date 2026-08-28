@@ -4,14 +4,14 @@
 when a card is shown), emits a `card_clicked` conversation-log event bound to
 the original recommendation trace, and 302-redirects to the real product URL.
 
-Why this exists: Telegram opens external URLs directly from user's device,
+Why this exists: the client opens external URLs directly from the user's device,
 bypassing the AI server. Wrapping URLs through this proxy is the only way to
 measure click-through rate on cards. Without it, `card_impression.click_status`
 relies on expired-attribution heuristics only (`attribute_expired_impressions`).
 
 No auth — tokens are unguessable (96-bit entropy). On miss/expiry the user
 sees a friendly 404, never a stack trace. Public endpoint by design (lives
-on the same host as Telegram webhook).
+on the same host as the API).
 """
 
 from __future__ import annotations
@@ -72,8 +72,8 @@ async def outbound_redirect(token: str):
 
 # 260611 — cap fake-door membership click → kikoai.me landing page.
 # Bound at the cap-message URL button (see `_invoke_graph` in
-# `app/api/webhooks/telegram.py`). Each tap emits a `membership_click` event
-# with the optional `c` query parameter (Telegram bots can pass a per-user
+# the chat channel). Each tap emits a `membership_click` event
+# with the optional `c` query parameter (callers can pass a per-user
 # tracking string via the button URL) so beta analytics can correlate clicks
 # to chat_id. No token / no Redis lookup — the destination is a single fixed
 # landing page configured via `settings.MEMBERSHIP_LANDING_URL`.

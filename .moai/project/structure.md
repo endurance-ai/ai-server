@@ -15,7 +15,7 @@ kiko-ai-server/
 │   │   ├── recommend.py        # POST /recommend (X-Internal-Token 인증)
 │   │   ├── health.py           # GET /health, GET /health/ready
 │   │   └── webhooks/
-│   │       └── telegram.py     # POST /webhooks/telegram (X-Telegram-Bot-Api-Secret-Token 인증)
+│   │       └── apple_notifications.py  # POST /webhooks/apple (App Store Server Notifications)
 │   ├── channels/               # 채널 어댑터 레이어 (SPEC-MSG-001)
 │   │   ├── adapter.py          # MessengerAdapter ABC
 │   │   ├── factory.py          # MESSENGER_BACKEND 기반 어댑터 팩토리
@@ -29,9 +29,6 @@ kiko-ai-server/
 │   │   ├── router.py           # text routing LLM 헬퍼
 │   │   ├── session.py          # SessionStore Protocol + InMemorySessionStore
 │   │   ├── taste_profile.py    # 장기 취향 프로파일 업데이트
-│   │   └── telegram/
-│   │       ├── adapter.py      # TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard)
-│   │       └── webhook.py      # Telegram Update 파싱
 │   ├── graphs/                 # LangGraph StateGraph (SPEC-AGENT-001)
 │   │   ├── fashion_bot.py      # StateGraph 빌드 + 모듈 수준 컴파일 캐시
 │   │   ├── state.py            # InputState, WorkingState, OutputState Pydantic v2 모델
@@ -105,8 +102,8 @@ kiko-ai-server/
 | 디렉토리 | 책임 |
 |---------|------|
 | `app/` | FastAPI 애플리케이션 전체 |
-| `app/api/` | HTTP 라우터. recommend(인증 있음) + health(liveness/readiness) + webhooks/telegram |
-| `app/channels/` | 채널 어댑터 레이어(SPEC-MSG-001). MessengerAdapter ABC, TelegramAdapter, Vision, Clarify, Session, LinkResolver |
+| `app/api/` | HTTP 라우터. chat(SSE, 앱 JWT) + auth + recommend(인증 있음) + health(liveness/readiness) |
+| `app/channels/` | 채널 어댑터 레이어(SPEC-MSG-001). MessengerAdapter ABC, StreamingAdapter(SSE), Vision, Clarify, Session, LinkResolver |
 | `app/graphs/` | LangGraph StateGraph (SPEC-AGENT-001). fashion_bot + state + routing + 12 nodes |
 | `app/core/` | 환경변수 로딩(`config.py`) + 인증 dependency(`auth.py`) |
 | `app/models/` | Pydantic v2 request/response 스키마. camelCase ↔ snake_case alias |
@@ -129,7 +126,7 @@ app.main:app
 
 `app/main.py` 가 FastAPI 인스턴스를 생성하고 다음을 설정한다:
 
-- **lifespan**: startup 시 `SupabaseProvider.get_client()` 워밍업 + messenger adapter 초기화 + Telegram setWebhook → shutdown 시 모든 Provider close
+- **lifespan**: startup 시 `SupabaseProvider.get_client()` 워밍업 + 메모리/Redis/캐시 워밍업 → shutdown 시 모든 Provider close
 - **CORS**: `allow_origins=["*"]`, `allow_credentials=False` (stateless)
 - **default_response_class**: `ORJSONResponse` (orjson 직렬화)
 
@@ -140,7 +137,7 @@ app/api/__init__.py
   ├── /recommend          (POST)   → recommend.py    → run_pipeline()
   ├── /health             (GET)    → health.py        → {"status": "ok"}
   ├── /health/ready       (GET)    → health.py        → SupabaseProvider.check_connection()
-  └── /webhooks/telegram  (POST)   → webhooks/telegram.py → graph.ainvoke()
+  └── /v1/chat/...        (POST)   → api/chat.py → chat_service → graph.ainvoke()
 ```
 
 ### 파이프라인 진입점 (웹 경로)
@@ -156,13 +153,13 @@ async def run_pipeline(req: RecommendRequest) -> RecommendResponse:
     return RecommendResponse.from_state(state)
 ```
 
-### LangGraph 진입점 (Telegram 경로)
+### LangGraph 진입점 (앱/웹 채팅 경로)
 
 ```python
 # app/graphs/fashion_bot.py
 graph = build_graph()  # StateGraph 컴파일, 모듈 수준 캐시
 
-# app/api/webhooks/telegram.py
+# app/services/chat_service.py
 await graph.ainvoke(InputState(...), config={"callbacks": [build_callback_handler()]})
 ```
 
@@ -182,7 +179,7 @@ ingest → resolve_image → vision → pick_item → ask_clarify? → apply_cla
 
 ### 1. 이중 진입 경로
 
-웹 경로(`POST /recommend`)는 plain async state machine(`PipelineState`)으로 직선 파이프라인을 실행한다. Telegram 경로(`POST /webhooks/telegram`)는 LangGraph StateGraph(`WorkingState`)로 분기/루프/콜백을 처리한다. 두 경로는 `RecommendationPort` Protocol 인터페이스를 통해 동일한 검색 파이프라인을 공유한다.
+웹 경로(`POST /recommend`)는 plain async state machine(`PipelineState`)으로 직선 파이프라인을 실행한다. 앱/웹 채팅 경로(`POST /v1/chat/...`)는 LangGraph StateGraph(`WorkingState`)로 분기/루프/콜백을 처리한다. 두 경로는 `RecommendationPort` Protocol 인터페이스를 통해 동일한 검색 파이프라인을 공유한다.
 
 ### 2. Provider singleton
 
@@ -210,7 +207,7 @@ ingest → resolve_image → vision → pick_item → ask_clarify? → apply_cla
 | `app/main.py` | FastAPI 엔트리포인트 + lifespan + CORS + ORJSONResponse + messenger adapter 워밍업 |
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
 | `app/api/health.py` | `/health` (liveness) + `/health/ready` (readiness + messenger 상태) |
-| `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
+| `app/api/chat.py` | `POST /v1/chat/...` (앱 JWT 인증, SSE 스트리밍) |
 | `app/channels/adapter.py` | `MessengerAdapter` ABC |
 | `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO |
@@ -219,8 +216,6 @@ ingest → resolve_image → vision → pick_item → ask_clarify? → apply_cla
 | `app/channels/clarify.py` | `ClarifyAxis`, `ClarifyDelta`, `parse_callback`, `pick_clarify_axis` |
 | `app/channels/clarify_values.py` | 축별 enum 값 + keywords/subcategory_override/searchQueryKo_augment 매핑 표 |
 | `app/channels/session.py` | `SessionStore` Protocol + `InMemorySessionStore` 구현체 |
-| `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / InlineKeyboard) |
-| `app/channels/telegram/webhook.py` | Telegram Update 파싱 |
 | `app/graphs/fashion_bot.py` | LangGraph StateGraph 빌드 + 모듈 수준 컴파일 캐시 |
 | `app/graphs/state.py` | `InputState`, `WorkingState`, `OutputState` Pydantic v2 모델 |
 | `app/graphs/routing.py` | 조건부 엣지 함수 (after_ingest, after_resolve_image, after_vision, after_pick, after_critique, after_search, after_evaluator) |

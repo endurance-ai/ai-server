@@ -198,7 +198,7 @@ async def test_dispatch_send_raises_returns_send_failed(monkeypatch):
 
     class _BoomAdapter:
         async def send_text_with_buttons(self, chat_id, text, buttons):
-            raise RuntimeError("telegram down")
+            raise RuntimeError("channel down")
 
     monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: _BoomAdapter())
     r = await sns.dispatch({"kind": "fit_change", "options": ["a"], "prompt": "p"}, {"chat_id": 9})

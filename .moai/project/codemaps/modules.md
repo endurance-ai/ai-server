@@ -34,7 +34,7 @@
 
 - `PipelineState` dataclass: `request`, `embedding`, `raw_candidates`, `final_candidates`, `counts`, `latency_ms` 필드.
 - `start(step)` / `end(step)`: `perf_counter` 기반 단계별 latency 측정.
-- 웹 경로 전용. Telegram 경로는 `app/graphs/state.py::WorkingState`(Pydantic v2)를 사용한다.
+- 웹 `/recommend` 경로 전용. 앱/웹 채팅 경로는 `app/graphs/state.py::WorkingState`(Pydantic v2)를 사용한다.
 
 ### app.core.config
 

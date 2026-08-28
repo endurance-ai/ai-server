@@ -6,7 +6,7 @@
   생존). 빈 리스트 가능.
 - `subcategory_override` — `vision_selected_item.subcategory` 강제 적용용. None 가능.
 - `searchQueryKo_augment` — `searchQueryKo` 에 공백 결합. None 가능.
-- `label_ko` — Telegram 인라인 버튼에 표시되는 한국어 라벨(REQ-CLARIFY-CARD-003,
+- `label_ko` — 인라인 버튼에 표시되는 한국어 라벨(REQ-CLARIFY-CARD-003,
   16자 권장 / 50자 하드 한도). 이모지/특수문자 금지.
 
 매핑 표는 결정론적이며 LLM 호출이 없다(REQ-CLARIFY-CARD-001).

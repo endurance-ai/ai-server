@@ -9,7 +9,7 @@ button rows.
 
 SPEC-CONVERSATION-LOG-001 / LOG-T17 — emits `diversify_done` (turn_no=8) before
 card dispatch and `card_sent` (turn_no=9) per successfully-sent card.
-`card_sent.payload.source_message_id` carries the Telegram `message_id` returned
+`card_sent.payload.source_message_id` carries the channel `message_id` returned
 by `adapter.send_card(...)` so that LOG-T09's callback `_resolve_thread_id`
 can correlate inline-button taps back to this thread.
 """
@@ -78,7 +78,7 @@ def _critique_buttons_for(
     (resolved by index against `sess.last_results` — same fallback the legacy
     summary keyboard used).
     """
-    # Telegram callback_data budget is 64 bytes. The "card:like:" prefix is 10
+    # callback_data budget is 64 bytes. The "card:like:" prefix is 10
     # bytes, so we tail-truncate long product_ids to 53 chars (matches the
     # legacy `_like_callback_for` budget in respond.py so suffix-matching in
     # ingest._handle_card_like keeps resolving). Fallback to idx when no pid.
@@ -133,7 +133,7 @@ def _candidate_to_card(c: Any, idx: int, lang: str = "en") -> BotCard | None:
     # 260610 v2 — explicit Shop URL button row REMOVED (user request: fewer
     # buttons). Navigation moves into the caption: the brand text (or "Shop"
     # fallback when brand is missing) is wrapped in an `<a href="…">` tag
-    # pointing at the product URL. Telegram does not allow the photo itself
+    # pointing at the product URL. The card contract does not allow the photo itself
     # to be tappable as a URL, but a hyperlinked caption text is, so this is
     # the closest UX to "tap the card to go to the shop".
     lines: list[str] = []
@@ -264,13 +264,13 @@ async def send_results(state: WorkingState) -> dict:
     except Exception:  # noqa: BLE001 — emit must never break the node
         logger.debug("[send_results] diversify_done emit best-effort")
 
-    # Each successful send_card produces a `card_sent` row with the Telegram
+    # Each successful send_card produces a `card_sent` row with the channel
     # message_id. (c, card, position, message_id, send_elapsed_ms) tuples are
     # collected here for unified post-loop emission.
     sent_records: list[tuple[Any, int, int | None, int]] = []
     sent_candidates: list = []
     # DEMO_MODE — fire cards in parallel to cut wall-clock from ~13s to ~4s.
-    # Telegram may display them slightly out of arrival order; acceptable for demo.
+    # the client may display them slightly out of arrival order; acceptable for demo.
     from app.core.config import settings as _settings
 
     if _settings.DEMO_MODE and pairs:

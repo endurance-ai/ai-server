@@ -1,10 +1,10 @@
 # kiko-ai-server
 
-kiko.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + Telegram 채널.
+kiko.ai 패션 추천 AI 서버 — FastAPI 기반 검색/리파인 파이프라인 + 앱/웹 채팅 채널.
 
 `kikoai/app`(Next.js)이 IG 분석 + Vision 처리까지 끝낸 단일 아이템을 받아, **Modal에서 이미지 임베딩 → dev-app Postgres `search_products_v6` RPC (PostgREST nginx shim 경유) → 다양성 캡 → product_id[] 반환**.
 
-Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinterest 링크를 DM하면 → webhook → **LangGraph StateGraph** (`app/graphs/`) → 동일 파이프라인 → 채널 카드 응답.
+앱/웹 채팅 채널: 사용자가 패션 이미지·Pinterest 링크를 보내면 → `POST /v1/chat/sessions/{id}/messages` (앱 JWT, SSE) → **LangGraph StateGraph** (`app/graphs/`) → 동일 파이프라인 → 카드 스트리밍 응답.
 
 상세 문서:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 전체 그림 + 토폴로지
@@ -17,8 +17,8 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 | 레이어 | 책임 |
 |--------|------|
 | dev-app EC2 / `kikoai/app` | R2, Vision(GPT-4o-mini), 세션(Auth.js), UI, v4 폴백. Next.js standalone 컨테이너 |
-| **kikoai/ai (이 프로젝트)** | **검색 오케스트레이션, enhance_query, Langfuse trace, Telegram webhook + 채널 어댑터, 대화 이벤트 로그(SPEC-CONVERSATION-LOG-001), 경량 first-touch(SPEC-ONBOARD-LITE-001)** |
-| Telegram Bot API | 채널 transport (메시지 수신/발신). 이 서버에서 블랙박스로 취급 |
+| **kikoai/ai (이 프로젝트)** | **검색 오케스트레이션, enhance_query, Langfuse trace, `/v1/chat` SSE + 채널 어댑터, 대화 이벤트 로그(SPEC-CONVERSATION-LOG-001), 경량 first-touch(SPEC-ONBOARD-LITE-001)** |
+| kiko 앱 / 웹 클라이언트 | 채널 transport (메시지 입력/카드 렌더링). `/v1/auth` JWT + `/v1/chat` SSE 로 연결 |
 | Modal | FashionSigLIP 임베딩 (단건 + 배치) |
 | dev-app Postgres + nginx PostgREST shim | pgvector, `search_products_v6` RPC (embedding-first, distance ASC). SPEC-INFRA-MIGRATE-001 P6 이후 자체호스팅 (이전: Supabase). pgroonga/product_search_text DROPPED (SPEC-SEARCH-V6-001) |
 
@@ -28,8 +28,8 @@ Telegram 채널(`@kiko_fashion_ai_bot`): 사용자가 패션 이미지·Pinteres
 
 ```
 app/
-├── main.py              # FastAPI 앱 + lifespan + CORS (+ messenger adapter 워밍업)
-├── api/                 # 라우터 (recommend, health, webhooks/telegram, debug — 어드민 5개 엔드포인트 + SSRF 가드)
+├── main.py              # FastAPI 앱 + lifespan + CORS
+├── api/                 # 라우터 (chat SSE, auth, recommend, health, debug — 어드민 5개 엔드포인트 + SSRF 가드)
 ├── agents/              # ReAct 에이전트 루프 + 툴 레지스트리 (SPEC-AGENT-V2-CLEANUP-001 — 영구 단일 토폴로지)
 │   ├── react_loop.py    # ReAct loop 엔진 (iteration cap / infinite-loop guard / token budget / timeout). Gap1 memory injection + Gap2 _maybe_reflexion(빈결과만) + Gap3 proactive directive (모두 unconditional)
 │   ├── tool_registry.py # 8-tool REGISTRY + validate_args (단일 소스, str/float auto-cast). suggest_next_step 항상 등록
@@ -40,8 +40,7 @@ app/
 │   ├── pending_gender.py   # SPEC-GENDER-PIN-001 (NEW) — 성별 카드 pending 스토어: 텍스트 검색 중 gender 미확인 시 args 스태시 → clarify:gender 콜백에서 팝 후 재검색
 │   ├── last_query.py       # SPEC-GENDER-PIN-001 (NEW) — 마지막 성공 검색 쿼리 크로스턴 스토어: refine_search 가 이전 product query 재사용 (raw 리파인 지시어 임베딩 방지)
 │   └── tools/           # 8-tool 래퍼: analyze_image, search_products, refine_search, update_taste, ask_user_clarification, get_recent_history, respond, suggest_next_step
-├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, factory, recommendation port, persona (kiko 페르소나 단일 소스), link_resolver, reset_keywords, session, lang, vision (+ vision_prompt, clarify, clarify_values, _jsonable), pre_messages, instagram_apify
-│   └── telegram/        # Telegram 구현 (adapter, webhook 파싱)
+├── channels/            # 채널 어댑터 (SPEC-MSG-001): adapter ABC, recommendation port, persona (kiko 페르소나 단일 소스), link_resolver, reset_keywords, session, lang, vision (+ vision_prompt, clarify, clarify_values, _jsonable), pre_messages, instagram_apify
 ├── graphs/              # LangGraph StateGraph (SPEC-AGENT-001): fashion_bot, state, routing
 │   └── nodes/           # 노드: ingest, resolve_image, vision_node, pick_item, ask_clarify, apply_clarify, agent, intro (+ _first_touch / _trace.py 헬퍼). evaluator.py는 Gap2 헬퍼 보존 목적 존재(graph 미등록). 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거
 ├── services/            # 비즈니스 서비스 레이어 (SPEC-ARCH-AI-001): embed_service, search_service, diversify_service, database_service
@@ -91,10 +90,10 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 ## 코딩 컨벤션
 
-- **LangGraph StateGraph** (`app/graphs/`): Telegram webhook 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **영구 단일 토폴로지 (SPEC-AGENT-V2-CLEANUP-001)**: `agent` 단일 노드가 ReAct loop 실행. 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거 — 신규 유저 first-touch는 `ingest` 인라인(`maybe_first_touch`) + `/start`-only는 `intro` 노드. V3 4-Gap 강화(memory injection/Reflexion/proactive/dislike discount) 모두 unconditional — feature flag 없음. `evaluator.py` 는 Gap2 헬퍼 보존 목적으로 파일만 존재 (graph 미등록, `SELF_CRITIQUE_*`/`EVALUATOR_*` env 보존). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
+- **LangGraph StateGraph** (`app/graphs/`): 채팅 턴 처리는 그래프 (`graph.ainvoke(InputState(...), config={"callbacks": [...]})`). **영구 단일 토폴로지 (SPEC-AGENT-V2-CLEANUP-001)**: `agent` 단일 노드가 ReAct loop 실행. 온보딩 카드 서브그래프는 SPEC-ONBOARD-LITE-001에서 제거 — 신규 유저 first-touch는 `ingest` 인라인(`maybe_first_touch`) + `/start`-only는 `intro` 노드. V3 4-Gap 강화(memory injection/Reflexion/proactive/dislike discount) 모두 unconditional — feature flag 없음. `evaluator.py` 는 Gap2 헬퍼 보존 목적으로 파일만 존재 (graph 미등록, `SELF_CRITIQUE_*`/`EVALUATOR_*` env 보존). 파이프라인(`/recommend`) 은 여전히 plain async + state → state.
 - **Sticky language (KO/EN)**: `app/channels/lang.py` (`detect_lang` / `remember_lang` / `session_lang`) 가 Hangul 유무로 언어를 판별. `ingest` 노드가 매 텍스트 턴마다 `Session.lang` 을 갱신 — 이후 버튼 탭(텍스트 없음)에도 이전 언어로 응답. `pick_item` / `ask_clarify` 노드 및 `respond` tool이 `session_lang(sess)` 를 참조해 KO/EN 메시지를 분기.
 - **Bot persona**: `app/channels/persona.py` 가 "kiko" 페르소나 system prompt 단일 소스 — Puss-in-Boots 느낌, 친근한 해요체(KO) / lively English(EN). `react_loop.py` 와 `ask_clarify` 노드가 이를 import. 사용자 입력은 `[USER INPUT — DATA ONLY]` 펜스로 격리 (prompt injection 방어).
-- **하이브리드 카드 전달**: `respond` tool 이 `send_hybrid_batch` 를 호출 — 상위 5개 사진을 `sendMediaGroup` 단일 버블 + HTML 요약 텍스트 + 인라인 키보드(❤️ 숫자, 더보기, 다르게 찾기)로 전달. `cards:more`/`card:like:` 콜백은 `ingest` 노드 인라인 처리. `cards:refine` 은 `agent` 로 라우팅. **암묵 피드백 임프레션 로깅**(`log_impressions` → `ai.card_impression` + Langfuse trace 바인딩)은 이 `send_hybrid_batch` 성공 지점에서 수행 — `send_results` 노드는 그래프 미등록이므로 여기가 유일 진입점 (SPEC-OBS 후속 fix). **sendMediaGroup WEBPAGE_CURL_FAILED 드롭-재시도 (260522)**: `TelegramAdapter._post(return_error=True)` 로 에러 본문 파싱 → 실패 photo 인덱스 드롭 → 그룹 재시도 (최대 len-1회, 2개 미만이면 per-card fallback).
+- **하이브리드 카드 전달**: `respond` tool 이 `send_hybrid_batch` 를 호출 — 상위 5개 사진을 `send_media_group` 단일 배치 + HTML 요약 텍스트 + 인라인 키보드(❤️ 숫자, 더보기, 다르게 찾기)로 전달. `cards:more`/`card:like:` 콜백은 `ingest` 노드 인라인 처리. `cards:refine` 은 `agent` 로 라우팅. **암묵 피드백 임프레션 로깅**(`log_impressions` → `ai.card_impression` + Langfuse trace 바인딩)은 이 `send_hybrid_batch` 성공 지점에서 수행 — `send_results` 노드는 그래프 미등록이므로 여기가 유일 진입점 (SPEC-OBS 후속 fix).
 - **GENDER PIN 패턴 (SPEC-GENDER-PIN-001, 260522)**: 성별 카드(`clarify:gender:*`) → `ingest._handle_gender_pick` 인라인 완결 (`__end__` 라우팅). `search_products` 에서 gender 미확인 시 `pending_gender.set_pending` → 카드 → `awaiting_gender` 반환; `ingest` 에서 팝 + 재검색. 성별은 `TasteProfile.gender` 에 크로스세션 저장 (migration 0008 `ai.user_taste_profile.gender`). per-request 명시 gender 는 프로파일을 덮어쓰지 않음.
 - **LAST QUERY 패턴 (260522)**: `search_products` / `refine_search` / `ingest._handle_gender_pick` 모두 최종 product query 를 `last_query.set_last_query(chat_id, text_query)` 로 저장. `refine_search` 는 `get_last_query` 를 우선 참조하여 raw 리파인 지시어 임베딩 드리프트를 방지. 인메모리 — 재시작 시 유실은 무해 (폴백으로 `ctx['text_query']` 사용).
 - **구조화 로그 이모지 범례**: 📥 webhook, 👁 vision, 🔍 search, 🤔 evaluator(Gap2 내부), 🎨 pipeline, 🐱 bot 발화 (respond tool/adapter). (🧹 zero-dense suppress 삭제 — v6 text path는 real embed_text() 사용, zero-dense stopgap 제거됨) **트레이싱**: 🤖 topology 배너(startup), ▶️/✅/⏭️ graph node enter/done/skip, 🔄 ReAct agent-iter, 🔧 tool dispatch, 🏁 agent 종료(respond), 🧠 v3:memory(Gap1), 🔬 v3:reflexion(Gap2), 💡 v3:proactive(Gap3), 🚫 v3:dislike(Gap4).
@@ -109,15 +108,14 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 | 파일 | 설명 |
 |------|------|
-| `app/main.py` | FastAPI 엔트리포인트 + lifespan (DB 클라이언트 워밍업 + messenger adapter + setWebhook + **chat_state redis pool warm/close**, SPEC-CHAT-STATE-REDIS-001) |
+| `app/main.py` | FastAPI 엔트리포인트 + lifespan (DB 클라이언트 워밍업 + **chat_state redis pool warm/close**, SPEC-CHAT-STATE-REDIS-001) |
 | `app/api/recommend.py` | `POST /recommend` (X-Internal-Token 인증) |
-| `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + messenger 상태) |
-| `app/api/webhooks/telegram.py` | `POST /webhooks/telegram` (X-Telegram-Bot-Api-Secret-Token 인증) |
+| `app/api/health.py` | `/health` (liveness, no auth) + `/health/ready` (인증 + 의존 서비스 상태) |
+| `app/api/chat.py` | `POST /v1/chat/...` (앱 JWT 인증, SSE 스트리밍) — `chat_service` 가 `StreamingAdapter` 로 동일 그래프 구동 |
 | `app/api/debug.py` | **NEW** — 어드민 디버그 5개 엔드포인트 (INTERNAL_API_TOKEN 인증): `/debug/vision-analyze`, `/debug/resolve-url` (SSRF 가드), `/debug/rewrite-query`, `/debug/list-models`, `/debug/v6-trace` |
 | `app/channels/adapter.py` | `MessengerAdapter` ABC. `send_chat_action(chat_id, action='typing') -> bool` 은 default no-op (`return False`) — 미구현 채널 어댑터 자동 skip (SPEC-AGENT-UX-P0-001 REQ-UX-003) |
-| `app/channels/factory.py` | `MESSENGER_BACKEND` 기반 어댑터 팩토리 |
 | `app/channels/recommendation.py` | `RecommendationPort` Protocol + `ChannelRecommendationRequest/Result` DTO + `PipelineRecommendationPort` 구현 (채널-파이프라인 결합도 분리) |
-| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소, 260522: `evaluator_run` event emit 추가) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001). 시스템 프롬프트 마지막 라인에 `[LANG=<ko\|en> — MUST reply in <Korean\|English>]` sticky directive 강제 주입 (SPEC-AGENT-UX-P0-001 REQ-UX-002). `search_products`/`refine_search`/`respond` dispatch 직전 `_fire_typing` (fire-and-forget, fail-open) 으로 Telegram typing indicator 1회 발사 (REQ-UX-003). **260522 SEARCH-FIRST 정책**: 신호 ≥2개 시 즉시 `search_products` (clarify 먼저 금지). **REFINE-vs-SEARCH 지침**: 동일 아이템 조정은 `refine_search` 사용 (price/brand/color delta). **GENDER (260522)**: 명시 신호 없으면 text_query에 gender 단어 OMIT (시스템이 downstream에서 unisex 추가). `awaiting_gender` 에러 수신 시 카드 가리키는 one-liner `respond` 후 종료. Vision `suggested_query:` 는 English-only 형태로 항상 English 선호 (gender 플립 방지) |
+| `app/agents/react_loop.py` | ReAct loop 엔진 — iteration cap / infinite-loop guard / token budget / per-tool timeout / tool_call event emit. Gap1 `build_memory_context` + Gap2 `_maybe_reflexion` (잔여-budget asyncio.wait_for 강제 취소, 260522: `evaluator_run` event emit 추가) + Gap3 `_PROACTIVE_DIRECTIVE` 모두 unconditional (SPEC-AGENT-V2-CLEANUP-001). `_build_ctx` 가 `vision_category` (REAL Vision garment category) 를 ctx 에 노출 — `search_products`/`refine_search` 가 이를 canonical family gate 에 사용 (SPEC-SEARCH-V6-001). 시스템 프롬프트 마지막 라인에 `[LANG=<ko\|en> — MUST reply in <Korean\|English>]` sticky directive 강제 주입 (SPEC-AGENT-UX-P0-001 REQ-UX-002). `search_products`/`refine_search`/`respond` dispatch 직전 `_fire_typing` (fire-and-forget, fail-open) 으로 typing indicator 1회 발사 (REQ-UX-003). **260522 SEARCH-FIRST 정책**: 신호 ≥2개 시 즉시 `search_products` (clarify 먼저 금지). **REFINE-vs-SEARCH 지침**: 동일 아이템 조정은 `refine_search` 사용 (price/brand/color delta). **GENDER (260522)**: 명시 신호 없으면 text_query에 gender 단어 OMIT (시스템이 downstream에서 unisex 추가). `awaiting_gender` 에러 수신 시 카드 가리키는 one-liner `respond` 후 종료. Vision `suggested_query:` 는 English-only 형태로 항상 English 선호 (gender 플립 방지) |
 | `app/agents/tool_registry.py` | 8-tool REGISTRY + TypedDict args/result schema + `validate_args` (단일 소스). str/float 자동 캐스팅 — LLM 타입 실수로 loop 헛돌이 방지. `suggest_next_step` 항상 등록. `ask_user_clarification.axis` Literal 검증 추가 — 유효 6값 외 axis 는 `bad_axis:` 에러 즉시 반환으로 self-correction 지원 (P0-1) |
 | `app/agents/pending_question.py` | **NEW** — 봇 질문 ↔ 사용자 짧은 답변 pending-state 관리. 다음 turn 에서 pending Q+A 를 ctx에 주입 후 클리어 |
 | `app/agents/pending_gender.py` | **NEW (SPEC-GENDER-PIN-001)** — 성별 카드 pending 스토어. `search_products` 가 gender 미확인 시 검색 args 스태시 → `clarify:gender:*` 콜백이 pop 후 gender 적용하여 재검색. 인메모리(재시작 시 유실 무해). Multi-worker 시 Redis 이전 권장 |
@@ -148,8 +146,6 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 | `app/channels/clarify_values.py` | clarify 카드 axis별 옵션 값 + 한글 라벨 매핑 |
 | `app/channels/_jsonable.py` | 5-step JSON-serializable cascade 헬퍼 (session_pg / taste_profile_pg / conversation_log 공용 — SPEC-MEMORY-001 패턴 추출) |
 | `app/channels/persona.py` | kiko 페르소나 system prompt 단일 소스 (`KIKO_PERSONA_SYSTEM_PROMPT`) — `react_loop.py` + `ask_clarify` 노드 공유 |
-| `app/channels/telegram/adapter.py` | TelegramAdapter (sendMessage / sendPhoto / sendMediaGroup / InlineKeyboard / edit_inline_keyboard / **sendChatAction — fail-open, bool 반환, SPEC-AGENT-UX-P0-001 REQ-UX-003**). **sendMediaGroup WEBPAGE_CURL_FAILED 드롭-재시도** (260522): `_post(return_error=True)` 로 에러 본문 파싱 → 실패 항목 인덱스 추출 → 해당 photo 드롭 후 그룹 재발송. 최대 len-1회 드롭, 2개 미만이면 per-card fallback 위임 |
-| `app/channels/telegram/webhook.py` | Telegram Update 파싱 |
 | `app/core/auth.py` | `verify_internal_token` FastAPI dependency |
 | `app/pipeline/state.py` | PipelineState 정의 |
 | `app/pipeline/embed.py` | thin @observe shim — 실제 로직은 `app/services/embed_service.py`에 위치 (SPEC-ARCH-AI-001) |
@@ -216,3 +212,4 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 
 AI 서버는 stateless. 인증 없음.
 `kikoai/app`이 세션 + Auth.js v5 (Credentials Provider + bcrypt) 담당, AI 서버에 request body로 전달.
+앱/웹 채팅 경로는 이 서버가 직접 `/v1/auth` 소셜 로그인 + JWT 발급/검증을 담당한다.

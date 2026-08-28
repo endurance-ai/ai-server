@@ -2,7 +2,7 @@
 
 The Langfuse LLM-as-judge (`recommendation_quality`) reads a trace's
 top-level `input`/`output`. The app only created `@observe` spans, so a real
-`webhook.telegram` trace had `input=null`/`output=null` and the judge had
+the root trace had `input=null`/`output=null` and the judge had
 nothing to score.
 
 These tests assert the `respond` tool — the ReAct recommendation

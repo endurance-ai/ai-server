@@ -4,7 +4,7 @@
 only ever sees the derived ``user_key`` (``c:{synthetic_chat_id}``).
 ``chat_service`` — the one place that holds the UUID — loads the decayed scores
 once per app turn and stashes them here; ``search_service`` reads them back by
-``user_key``. The Telegram bot and the internal ``/recommend`` path never populate
+``user_key``. The internal ``/recommend`` path never populates
 this cache, so their search stays byte-for-byte unchanged.
 
 In-memory + TTL, mirroring the existing in-process ``TasteProfileStore``. A miss

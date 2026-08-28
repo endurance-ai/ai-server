@@ -2,7 +2,7 @@ import ipaddress
 from datetime import datetime
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import AliasChoices, BaseModel, Field, HttpUrl, field_validator
 
 
 class ChannelParseError(Exception):
@@ -33,9 +33,18 @@ def _ssrf_guard_url(url: str) -> str:
 
 
 class ChannelMessage(BaseModel):
-    """Normalized inbound from any messenger backend."""
+    """Normalized inbound message from the app/web conversation pipeline.
 
-    chat_id: int
+    ``chat_id`` is accepted as a compatibility input for graph-era callers,
+    but the channel-neutral name is ``session_key``.  The property below keeps
+    older graph nodes and third-party adapters behavior-compatible while the
+    native app path no longer treats this value as a Telegram identifier.
+    """
+
+    # Keep ``chat_id`` as the serialized/model field for graph and persistence
+    # compatibility. New callers may provide the channel-neutral ``session_key``
+    # alias and should use the property below.
+    chat_id: int = Field(validation_alias=AliasChoices("chat_id", "session_key"))
     from_user_id: int | None = None
     from_username: str | None = None
     text: str | None = None
@@ -46,6 +55,12 @@ class ChannelMessage(BaseModel):
     received_at: datetime
 
     model_config = {"strict": False}
+
+    @property
+    def session_key(self) -> int:
+        """Channel-neutral name for the legacy integer graph/session key."""
+
+        return self.chat_id
 
     @field_validator("urls", mode="before")
     @classmethod
