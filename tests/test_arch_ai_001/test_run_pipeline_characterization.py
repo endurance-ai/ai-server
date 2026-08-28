@@ -98,7 +98,13 @@ def _tuples(resp):
 # Expected diversify trace (2026-06-17 relaxed caps v2: brand_cap=5, platform_cap=8):
 # All 14 raw rows survive — no brand or platform cap bites at these levels.
 # tolerance only drives where we break (target=10 stops at p9; target=15+ runs through).
-_EXPECTED_T0_10 = [
+# 2026-08-27 — 속성정렬 rerank 활성화(#241) 반영: "beige knit sweater" 쿼리가
+# material=knit 를 target 으로 잡아 personalize_rerank 가 돈다. mock 행엔
+# feature_metadata 가 없어 attr 보너스는 0 이지만, rerank 가 score(=1-distance)
+# 로 안정 정렬하면서 distance 미지정(score=0.0)인 p7 만 꼬리로 이동한다(나머지는
+# RPC 순서 그대로). 프로덕션은 RPC 가 항상 distance 를 실어 무보너스 재정렬은
+# 무변화이며, feature_metadata 가 붙는 실경로에서만 실제 속성 boost 가 걸린다.
+_EXPECTED_FULL_14 = [
     ("p0", "uniqlo", 0.95, None, None),
     ("p1", "uniqlo", 0.94, None, None),
     ("p2", "uniqlo", 0.93, None, None),
@@ -106,19 +112,19 @@ _EXPECTED_T0_10 = [
     ("p4", "cos", 0.91, None, None),
     ("p5", "zara", 0.90, None, None),
     ("p6", "zara", 0.89, None, None),
-    ("p7", "musinsa", 0.0, None, None),
     ("p8", "musinsa", 0.87, None, None),
     ("p9", "", 0.86, None, None),
-]
-_EXPECTED_T0_COUNTS = {"raw": 14, "after_diversify": 10, "final": 10}
-
-_EXPECTED_FULL_14 = _EXPECTED_T0_10 + [
     ("p10", "cos", 0.85, None, None),
     ("p11", "zara", 0.84, None, None),
     ("p12", "uniqlo", 0.83, None, None),
     ("p13", "musinsa", 0.82, None, None),
+    ("p7", "musinsa", 0.0, None, None),
 ]
 _EXPECTED_FULL_COUNTS = {"raw": 14, "after_diversify": 14, "final": 14}
+
+# tolerance=0.0 → target=10: 재정렬된 순서의 상위 10 (p7 은 꼬리라 탈락, p10 진입).
+_EXPECTED_T0_10 = _EXPECTED_FULL_14[:10]
+_EXPECTED_T0_COUNTS = {"raw": 14, "after_diversify": 10, "final": 10}
 
 
 _TOLERANCE_EXPECTATIONS = {
@@ -167,7 +173,8 @@ async def test_characterize_run_pipeline_brand_filter(fixed_embed, patch_rpc, br
         # in the 14-row input → all survive.
         tuples = _tuples(resp)
         ids = [t[0] for t in tuples]
-        assert ids == [f"p{i}" for i in range(14)]
+        # 속성정렬 rerank 활성화(#241)로 score=0.0 인 p7 이 꼬리로 이동 → 재정렬 순서.
+        assert ids == [t[0] for t in _EXPECTED_FULL_14]
         assert resp.counts == {"raw": 14, "after_diversify": 14, "final": 14}
 
 

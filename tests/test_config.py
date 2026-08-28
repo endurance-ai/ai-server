@@ -30,7 +30,7 @@ def test_settings_overrides():
 def test_agent_response_settings_defaults():
     """REQ-LLM-003: respond/ask_clarify 노드가 사용할 env 기본값."""
     s = Settings(_env_file=None)
-    assert s.RESPONSE_MODEL == "gpt-4o-mini"
+    assert s.RESPONSE_MODEL == "claude-haiku-4-5"  # 2026-08-26 Claude 통일
     assert s.RESPONSE_TIMEOUT_MS == 5000
     assert s.RESPONSE_MAX_TOKENS == 200
     assert s.ASK_CLARIFY_MIN_DESC_TOKENS == 3

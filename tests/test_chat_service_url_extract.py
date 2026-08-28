@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.channels.schemas import ChannelMessage
-from app.services.chat_service import _URL_RE, _extract_urls
+from app.channels.schemas import BotCard, BotReply, ChannelMessage
+from app.services.chat_service import _URL_RE, _done_payload, _extract_urls
 
 
 @pytest.mark.parametrize(
@@ -73,3 +73,49 @@ def test_ssrf_guard_blocks_internal_url() -> None:
         received_at=datetime.now(UTC),
     )
     assert msg.urls == []
+
+
+def test_done_payload_classifies_product_response_as_success() -> None:
+    reply = BotReply(
+        text="찾아봤어!",
+        cards=[BotCard(image_url="https://example.com/p.jpg", caption="니트", product_id=1)],
+    )
+
+    assert _done_payload(reply, None) == {"status": "success", "ai_response_type": "mixed"}
+
+
+def test_done_payload_classifies_successful_empty_search_as_zero_results() -> None:
+    graph_result = {
+        "agent_status": "done",
+        "tool_call_history": [
+            {
+                "tool_name": "search_products",
+                "result_summary": {"ok": True, "error": None, "candidates_count": 0},
+            }
+        ],
+    }
+
+    assert _done_payload(BotReply(text="조건에 맞는 상품이 없어요."), graph_result) == {"status": "zero_results"}
+
+
+def test_done_payload_classifies_exhaustion_text_as_retry_prompt() -> None:
+    graph_result = {"agent_status": "exhausted", "tool_call_history": []}
+
+    assert _done_payload(BotReply(text="생각이 좀 꼬였어. 다시 말해줄래?"), graph_result) == {
+        "status": "conversational_fallback",
+        "ai_response_type": "text_retry_prompt",
+    }
+
+
+def test_done_payload_does_not_call_failed_search_zero_results() -> None:
+    graph_result = {
+        "agent_status": "done",
+        "tool_call_history": [
+            {
+                "tool_name": "search_products",
+                "result_summary": {"ok": False, "error": "pipeline_failed", "candidates_count": 0},
+            }
+        ],
+    }
+
+    assert _done_payload(BotReply(text="다시 시도해줘."), graph_result) == {"status": "conversational_fallback"}

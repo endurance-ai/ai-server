@@ -10,6 +10,9 @@ from app.providers import embedding_cache
 
 logger = logging.getLogger(__name__)
 
+# keepwarm 전용 고정 canary — 캐시 우회 임베드로 Modal GPU 를 warm 유지(warm()).
+_WARM_CANARY = "keepwarm ping"
+
 
 class EmbedProvider:
     """Modal /embed 엔드포인트 클라이언트 (FashionSigLIP)."""
@@ -37,6 +40,26 @@ class EmbedProvider:
             return resp.status_code == 200
         except Exception:
             return False
+
+    @classmethod
+    async def warm(cls) -> int:
+        """keepwarm 전용 — 실제 GPU 임베딩 경로(`/embed/text`)를 직접 호출해 Modal
+        컨테이너를 warm 유지한다.
+
+        `check_connection`(GET /health)은 GPU 임베딩 함수와 **다른 경량 핸들러**가
+        응답할 수 있어, 정작 콜드 스타트하는 임베딩 경로를 못 데운다. `embed_text`
+        는 PG 캐시 hit 시 Modal 을 스킵하므로 워밍에 부적합하다. 이 메서드는 고정
+        canary 를 캐시 **우회**로 임베드해 매 ping 이 실제 Modal GPU 를 타게 하고,
+        결과 벡터는 버린다. 반환: Modal 왕복 ms. 실패 시 예외 전파(keepwarm 루프가
+        fail-open 으로 로깅)."""
+        client = cls.get_client()
+        _t0 = time.perf_counter()
+        resp = await client.post("/embed/text", json={"text": _WARM_CANARY})
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data.get("embedding"), list) or not data["embedding"]:
+            raise ValueError(f"Modal /embed/text warm unexpected response keys={list(data.keys())}")
+        return int((time.perf_counter() - _t0) * 1000)
 
     @classmethod
     async def embed_image_url(cls, image_url: str) -> list[float]:

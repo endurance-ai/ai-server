@@ -54,8 +54,9 @@ def test_accumulate_lc_records_fallback_cost_and_metadata():
     )
 
     totals = turn_cost.get_turn_totals()
-    assert round(totals["cost_usd"], 7) == 0.001075
+    assert round(totals["cost_usd"], 7) == 0.0011825
     assert totals["cache_read_tokens"] == 500
+    assert totals["cache_creation_tokens"] == 100
     assert totals["calls"][0]["source"] == "langchain"
     assert totals["calls"][0]["cost_source"] == "fallback_rates"
     assert turn_cost.langfuse_metadata() == {"turn_id": "turn-1"}
@@ -81,3 +82,45 @@ def test_unframed_raw_call_still_emits_llm_call(monkeypatch):
     assert emitted[0]["chat_id"] == 0
     assert emitted[0]["payload"]["source"] == "enhance_query"
     assert emitted[0]["payload"]["framed"] is False
+
+
+def test_accumulate_lc_prefers_litellm_header_and_raw_usage():
+    turn_cost.reset_turn(turn_id="turn-header")
+
+    turn_cost.accumulate_lc(
+        "claude-haiku-4-5",
+        {"input_tokens": 900, "output_tokens": 90, "total_tokens": 990},
+        response_metadata={
+            "headers": {
+                "X-LiteLLM-Response-Cost": "0.456789",
+                "x-litellm-call-id": "call-123",
+            },
+            "raw_usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 100,
+                "total_tokens": 1100,
+                "cache_read_input_tokens": 600,
+                "cache_creation_input_tokens": 200,
+            },
+        },
+        source="react_loop",
+    )
+
+    totals = turn_cost.get_turn_totals()
+    call = totals["calls"][0]
+    assert totals["cost_usd"] == 0.456789
+    assert totals["total_tokens"] == 1100
+    assert totals["cache_read_tokens"] == 600
+    assert totals["cache_creation_tokens"] == 200
+    assert call["cost_source"] == "litellm"
+    assert call["litellm_call_id"] == "call-123"
+
+
+def test_bedrock_fallback_rates_match_cost_explorer_rates():
+    turn_cost.reset_turn()
+    turn_cost.accumulate_lc("kimi-k2.5", {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+    turn_cost.accumulate_lc("nova-2-lite", {"input_tokens": 1_000_000, "output_tokens": 1_000_000})
+
+    calls = turn_cost.get_turn_totals()["calls"]
+    assert calls[0]["cost_usd"] == 4.32
+    assert calls[1]["cost_usd"] == 3.08

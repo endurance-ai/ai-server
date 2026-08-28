@@ -139,8 +139,8 @@ _SYSTEM_PROMPT = (
     "    (no gender word; system makes it unisex).\n"
     "  - If `search_products` returns error 'awaiting_gender', the system ALREADY sent the user a "
     "    gender-pick card (buttons). Do NOT re-ask gender in your own words. Just `respond` with a "
-    "    SHORT one-liner pointing at the card (KO: '위에서 한 번만 골라줘! 🐱' / EN: 'Just tap one "
-    "    above 🐱') and end.\n"
+    "    SHORT one-liner pointing at the card (KO: '위에서 한 번만 골라줘' / EN: 'Just tap one "
+    "    above') and end.\n"
     "Silent gender inference (do NOT ask, treat as EXPLICIT) when context clearly implies it:\n"
     "  - KO: '사장님 선물' / '아빠가 입을' / '남편한테' / '남친 옷' → men\n"
     "  - KO: '여친 옷' / '엄마 옷' / '내가 입을' (사용자 본인이 여성 페르소나) → women\n"
@@ -832,10 +832,10 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
             "or image links as the path that lets you read the details more "
             "accurately — do NOT say you cannot see the photo. KO example "
             "wording (paraphrase, don't copy verbatim): "
-            "'오 사진 보내준 거 봤어 😻 핀터레스트나 이미지 링크로 보내주면 "
-            "더 정확히 분석해서 찾아줄 수 있어!' EN example: 'Got your photo "
-            "😻 Sharing it as a Pinterest / image link lets me read the "
-            "details more clearly — wanna try?' Then end the turn."
+            "'사진 보내준 거 봤어. 핀터레스트나 이미지 링크로 보내주면 "
+            "더 정확히 분석해서 찾아줄 수 있어.' EN example: 'Got your photo. "
+            "Sharing it as a Pinterest / image link lets me read the "
+            "details more clearly. Want to try?' Then end the turn."
         )
     return "\n".join(parts)
 
@@ -982,9 +982,9 @@ async def _fallback_respond(
     has_salvage = ctx is not None and bool(ctx.get(CARDS_READY_KEY))
     if has_salvage:
         if lang == "ko":
-            text = "이런 거 찾아봤어! 🐱 마음에 들면 더 보여줄게, 아니면 어떤 느낌이 좋을지 말해줘"
+            text = "이런 거 찾아봤어. 마음에 들면 더 보여줄게, 아니면 어떤 느낌이 좋을지 말해줘."
         else:
-            text = "Here's what I found! 🐱 Let me know if any catch your eye, or describe what you'd prefer."
+            text = "Here's what I found. Let me know if any catch your eye, or describe what you'd prefer."
         try:
             await respond_dispatch({"text": text}, ctx)
             logger.info("[agent_v2] exhausted=%s SALVAGED last results", reason)
@@ -994,9 +994,9 @@ async def _fallback_respond(
             # fall through to standard fallback
 
     if lang == "ko":
-        text = "잠깐만, 생각이 좀 꼬였어 🙈 다시 한 번 말해줄래?"
+        text = "잠깐만, 생각이 좀 꼬였어. 다시 한 번 말해줄래?"
     else:
-        text = "Sorry, I got a little tangled up 🙈 Could you try that again?"
+        text = "Sorry, I got a little tangled up. Could you try that again?"
     try:
         await respond_dispatch({"text": text}, ctx if ctx is not None else _build_ctx(state, sess))
     except Exception as exc:  # noqa: BLE001
@@ -1254,7 +1254,12 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             cumulative_tokens += int(um.get("total_tokens", 0) or 0)
             from app.observability.turn_cost import accumulate_lc
 
-            accumulate_lc(_agent_model, um, source="react_loop")
+            accumulate_lc(
+                _agent_model,
+                um,
+                response_metadata=getattr(ai_msg, "response_metadata", None),
+                source="react_loop",
+            )
         except Exception:  # noqa: BLE001
             pass
 

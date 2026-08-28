@@ -34,6 +34,7 @@ _ZERO: _TurnState = {
     "input_tokens": 0,
     "output_tokens": 0,
     "cache_read_tokens": 0,
+    "cache_creation_tokens": 0,
     "total_tokens": 0,
     "cost_usd": 0.0,
     "calls": [],
@@ -46,13 +47,19 @@ _ZERO: _TurnState = {
     "framed": True,
 }
 
-# Cost per million tokens (USD).  First substring match wins — order matters.
-# Sources: AWS Bedrock / Anthropic / OpenAI pricing (2025-06).
+# Cost per million tokens (USD). First substring match wins — order matters.
+# AWS Bedrock entries use the effective cross-region rates observed in Cost
+# Explorer for the production inference profiles on 2026-08-27. The LiteLLM
+# response-cost header remains authoritative; these rates are only fallback.
 _MODEL_COSTS: list[tuple[str, dict[str, float]]] = [
     ("nova-micro", {"input": 0.035, "output": 0.140, "cache_read": 0.0035, "cache_creation": 0.035}),
-    ("nova-lite", {"input": 0.060, "output": 0.240, "cache_read": 0.0060, "cache_creation": 0.060}),
+    ("nova-2-lite", {"input": 0.330, "output": 2.750, "cache_read": 0.330, "cache_creation": 0.330}),
+    ("nova-lite", {"input": 0.330, "output": 2.750, "cache_read": 0.330, "cache_creation": 0.330}),
     ("nova-pro", {"input": 0.800, "output": 3.200, "cache_read": 0.0800, "cache_creation": 0.800}),
-    ("claude-haiku-4-5", {"input": 1.000, "output": 5.000, "cache_read": 0.1000, "cache_creation": 1.250}),
+    ("kimi-k2.5", {"input": 0.720, "output": 3.600, "cache_read": 0.720, "cache_creation": 0.720}),
+    ("claude-haiku-4-5", {"input": 1.100, "output": 5.500, "cache_read": 0.1100, "cache_creation": 1.375}),
+    ("claude-sonnet-4-5", {"input": 3.300, "output": 16.500, "cache_read": 0.3300, "cache_creation": 4.125}),
+    ("claude-opus-4-5", {"input": 5.500, "output": 27.500, "cache_read": 0.5500, "cache_creation": 6.875}),
     ("claude-3-5-haiku", {"input": 0.800, "output": 4.000, "cache_read": 0.0800, "cache_creation": 1.000}),
     ("claude-haiku", {"input": 0.800, "output": 4.000, "cache_read": 0.0800, "cache_creation": 1.000}),
     ("claude-3-5-sonnet", {"input": 3.000, "output": 15.000, "cache_read": 0.3000, "cache_creation": 3.750}),
@@ -79,11 +86,18 @@ def _calc(inp: int, out: int, cr: int, cc: int, r: dict[str, float]) -> float:
 
 def _extract_response_cost(data: Mapping[str, Any]) -> float | None:
     """Return provider/proxy supplied USD cost when LiteLLM includes it."""
+    hidden = data.get("_hidden_params")
+    hidden = hidden if isinstance(hidden, Mapping) else {}
+    headers = data.get("headers")
+    headers = headers if isinstance(headers, Mapping) else {}
+    normalized_headers = {str(k).lower(): v for k, v in headers.items()}
     candidates = [
         data.get("response_cost"),
         data.get("cost"),
-        (data.get("_hidden_params") or {}).get("response_cost"),
-        (data.get("_hidden_params") or {}).get("cost"),
+        hidden.get("response_cost"),
+        hidden.get("cost"),
+        normalized_headers.get("x-litellm-response-cost"),
+        normalized_headers.get("x-litellm-response-cost-original"),
     ]
     for value in candidates:
         try:
@@ -91,6 +105,16 @@ def _extract_response_cost(data: Mapping[str, Any]) -> float | None:
                 return float(value)
         except (TypeError, ValueError):
             continue
+    return None
+
+
+def _extract_litellm_call_id(data: Mapping[str, Any]) -> str | None:
+    headers = data.get("headers")
+    if not isinstance(headers, Mapping):
+        return None
+    for key, value in headers.items():
+        if str(key).lower() == "x-litellm-call-id" and value:
+            return str(value)
     return None
 
 
@@ -107,6 +131,7 @@ def _record_call(
     total_tokens: int,
     cost_usd: float,
     cost_source: str,
+    litellm_call_id: str | None = None,
 ) -> None:
     call = {
         "turn_id": state.get("turn_id"),
@@ -125,6 +150,8 @@ def _record_call(
         "cost_usd": round(cost_usd, 10),
         "cost_source": cost_source,
     }
+    if litellm_call_id:
+        call["litellm_call_id"] = litellm_call_id
     state["calls"].append(call)
 
     if not state.get("user_key") or state.get("chat_id") is None:
@@ -267,6 +294,7 @@ def accumulate_raw(
     s["input_tokens"] += inp
     s["output_tokens"] += out
     s["cache_read_tokens"] += cr
+    s["cache_creation_tokens"] += cc
     s["total_tokens"] += inp + out
 
     response_cost = _extract_response_cost(response or {})
@@ -290,10 +318,17 @@ def accumulate_raw(
         total_tokens=inp + out,
         cost_usd=cost,
         cost_source=cost_source,
+        litellm_call_id=_extract_litellm_call_id(response or {}),
     )
 
 
-def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "langchain") -> None:
+def accumulate_lc(
+    model: str,
+    usage_metadata: dict[str, Any],
+    *,
+    response_metadata: Mapping[str, Any] | None = None,
+    source: str = "langchain",
+) -> None:
     """Accumulate cost from a LangChain ``AIMessage.usage_metadata`` dict.
 
     LangChain normalises Bedrock/Anthropic responses to use
@@ -306,21 +341,43 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "
     ``source`` labels the call-site (e.g. "react_loop", "ask_clarify").
     """
     s = _state_or_unframed()
+    metadata = response_metadata or {}
+    raw_usage = metadata.get("raw_usage")
+    raw_usage = raw_usage if isinstance(raw_usage, Mapping) else {}
+    details = raw_usage.get("prompt_tokens_details") or usage_metadata.get("input_token_details") or {}
+    details = details if isinstance(details, Mapping) else {}
 
-    inp = int(usage_metadata.get("input_tokens") or 0)
-    out = int(usage_metadata.get("output_tokens") or 0)
-    details: dict = usage_metadata.get("input_token_details") or {}
-    cr = int(usage_metadata.get("cache_read_input_tokens") or details.get("cache_read") or 0)
-    cc = int(usage_metadata.get("cache_creation_input_tokens") or details.get("cache_creation") or 0)
-    total = int(usage_metadata.get("total_tokens") or inp + out)
+    inp = int(
+        raw_usage.get("input_tokens") or raw_usage.get("prompt_tokens") or usage_metadata.get("input_tokens") or 0
+    )
+    out = int(
+        raw_usage.get("output_tokens") or raw_usage.get("completion_tokens") or usage_metadata.get("output_tokens") or 0
+    )
+    cr = int(
+        raw_usage.get("cache_read_input_tokens")
+        or details.get("cached_tokens")
+        or usage_metadata.get("cache_read_input_tokens")
+        or details.get("cache_read")
+        or 0
+    )
+    cc = int(
+        raw_usage.get("cache_creation_input_tokens")
+        or usage_metadata.get("cache_creation_input_tokens")
+        or details.get("cache_creation")
+        or 0
+    )
+    total = int(raw_usage.get("total_tokens") or usage_metadata.get("total_tokens") or inp + out)
 
     s["input_tokens"] += inp
     s["output_tokens"] += out
     s["cache_read_tokens"] += cr
+    s["cache_creation_tokens"] += cc
     s["total_tokens"] += total
 
+    response_cost = _extract_response_cost(metadata)
     r = _rates(model)
-    cost = _calc(inp, out, cr, cc, r) if r else 0.0
+    cost = response_cost if response_cost is not None else (_calc(inp, out, cr, cc, r) if r else 0.0)
+    cost_source = "litellm" if response_cost is not None else ("fallback_rates" if r else "unknown_model")
     s["cost_usd"] += cost
     _record_call(
         state=s,
@@ -333,5 +390,6 @@ def accumulate_lc(model: str, usage_metadata: dict[str, Any], *, source: str = "
         cache_creation_tokens=cc,
         total_tokens=total,
         cost_usd=cost,
-        cost_source="fallback_rates" if r else "unknown_model",
+        cost_source=cost_source,
+        litellm_call_id=_extract_litellm_call_id(metadata),
     )

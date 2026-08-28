@@ -73,10 +73,10 @@ def get_llm() -> Any:
         logger.warning("[agent_v2] AGENT_LLM_MODEL not configured — fail-closed")
         return None
     try:
-        from langchain_openai import ChatOpenAI
+        from app.providers.litellm_chat import LiteLLMChatOpenAI
 
         api_key = settings.LITELLM_MASTER_KEY or "missing-litellm-master-key"
-        client = ChatOpenAI(
+        client = LiteLLMChatOpenAI(
             model=model,
             base_url=settings.LITELLM_BASE_URL + "/v1",
             api_key=api_key,

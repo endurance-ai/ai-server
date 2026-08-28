@@ -15,6 +15,7 @@ SearchRepository).
 """
 
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any
 
@@ -124,13 +125,13 @@ def _query_pinned_axes(item: Any) -> frozenset[str]:
 
 
 # 입력 fit 표현 → product_features.feature_metadata.fit vocab
-# (regular/relaxed/slim/longline/oversized/cropped/skinny) 정규화 맵.
+# (regular/relaxed/slim/longline/oversized/cropped/skinny/boxy) 정규화 맵.
 _FIT_NORM: dict[str, set[str]] = {
     "oversized": {"oversized"},
     "oversize": {"oversized"},
     "loose": {"relaxed", "oversized"},
     "relaxed": {"relaxed"},
-    "boxy": {"oversized", "relaxed"},
+    "boxy": {"oversized", "relaxed", "boxy"},
     "drop-shoulder": {"oversized"},
     "wide": {"relaxed"},
     "wide-leg": {"relaxed"},
@@ -144,22 +145,234 @@ _FIT_NORM: dict[str, set[str]] = {
     "longline": {"longline"},
 }
 
+# 한글 fit 표현 (검색어가 한글로 남는 경우 — searchQueryKo/미보강 쿼리).
+_FIT_KO: dict[str, set[str]] = {
+    "오버핏": {"oversized"},
+    "오버사이즈": {"oversized"},
+    "루즈": {"relaxed", "oversized"},
+    "릴렉스": {"relaxed"},
+    "와이드": {"relaxed"},
+    "박시": {"oversized", "relaxed", "boxy"},
+    "슬림": {"slim", "skinny"},
+    "스키니": {"skinny"},
+    "크롭": {"cropped"},
+    "레귤러": {"regular"},
+}
+
+# 영/한 material 표현 → feature_metadata.material[] canonical 토큰
+# (2026-08 dev 실측 분포 기준). 오탐 위험 단일음절 한글(면/청/울/마)은 제외.
+_MATERIAL_NORM: dict[str, str] = {
+    # english (canonical self-map + 흔한 변형)
+    "cotton": "cotton",
+    "leather": "leather",
+    "polyester": "polyester",
+    "poly": "polyester",
+    "metal": "metal",
+    "silk": "silk",
+    "knit": "knit",
+    "knitted": "knit",
+    "wool": "wool",
+    "nylon": "nylon",
+    "denim": "denim",
+    "suede": "suede",
+    "linen": "linen",
+    "mesh": "mesh",
+    "canvas": "canvas",
+    "satin": "satin",
+    "cashmere": "cashmere",
+    "fleece": "fleece",
+    "tweed": "tweed",
+    "jersey": "jersey",
+    "velvet": "velvet",
+    "corduroy": "corduroy",
+    "ripstop": "ripstop",
+    "chiffon": "chiffon",
+    "goretex": "gore-tex",
+    "gore-tex": "gore-tex",
+    # korean (다음절·비모호 토큰만)
+    "코튼": "cotton",
+    "가죽": "leather",
+    "레더": "leather",
+    "데님": "denim",
+    "니트": "knit",
+    "실크": "silk",
+    "린넨": "linen",
+    "리넨": "linen",
+    "스웨이드": "suede",
+    "캐시미어": "cashmere",
+    "코듀로이": "corduroy",
+    "골덴": "corduroy",
+    "트위드": "tweed",
+    "벨벳": "velvet",
+    "새틴": "satin",
+    "사틴": "satin",
+    "플리스": "fleece",
+    "후리스": "fleece",
+    "나일론": "nylon",
+    "폴리에스터": "polyester",
+    "시폰": "chiffon",
+    "고어텍스": "gore-tex",
+    "저지": "jersey",
+    "메쉬": "mesh",
+    "캔버스": "canvas",
+}
+
+
+# 영/한 pattern 표현 → feature_metadata.pattern canonical 토큰
+# (2026-08 dev 실측: solid/graphic/striped/checked/floral/logo/dot/animal/
+# colorblock/camo/heathered/abstract). solid 는 카탈로그 ~75% 라 target 에서
+# 제외(부스트 무의미) — 변별 패턴만 매핑한다.
+_PATTERN_NORM: dict[str, str] = {
+    # english
+    "striped": "striped",
+    "stripe": "striped",
+    "pinstripe": "striped",
+    "checked": "checked",
+    "check": "checked",
+    "plaid": "checked",
+    "gingham": "checked",
+    "tartan": "checked",
+    "floral": "floral",
+    "flower": "floral",
+    "dot": "dot",
+    "dotted": "dot",
+    "polka": "dot",
+    "camo": "camo",
+    "camouflage": "camo",
+    "animal": "animal",
+    "leopard": "animal",
+    "cheetah": "animal",
+    "zebra": "animal",
+    "snake": "animal",
+    "graphic": "graphic",
+    "logo": "logo",
+    "colorblock": "colorblock",
+    "color-block": "colorblock",
+    "colorblocked": "colorblock",
+    "abstract": "abstract",
+    # korean (다음절·비모호 토큰만)
+    "스트라이프": "striped",
+    "줄무늬": "striped",
+    "체크": "checked",
+    "격자": "checked",
+    "플로럴": "floral",
+    "꽃무늬": "floral",
+    "도트": "dot",
+    "땡땡이": "dot",
+    "물방울": "dot",
+    "카모": "camo",
+    "카무플라주": "camo",
+    "레오파드": "animal",
+    "호피": "animal",
+    "지브라": "animal",
+    "그래픽": "graphic",
+    "컬러블록": "colorblock",
+}
+
+
+def _ascii_word_re(key: str) -> re.Pattern[str]:
+    r"""`\b`-경계 매칭 패턴 (하이픈은 공백/하이픈 허용). 영문 vocab 전용."""
+    body = re.escape(key).replace(r"\-", r"[\s-]?")
+    return re.compile(rf"\b{body}\b")
+
+
+_FIT_EN_PATTERNS: list[tuple[re.Pattern[str], set[str]]] = [(_ascii_word_re(k), v) for k, v in _FIT_NORM.items()]
+_MATERIAL_EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_ascii_word_re(k), v) for k, v in _MATERIAL_NORM.items() if k.isascii()
+]
+_PATTERN_EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_ascii_word_re(k), v) for k, v in _PATTERN_NORM.items() if k.isascii()
+]
+_FIT_KO_ITEMS = list(_FIT_KO.items())
+_MATERIAL_KO_ITEMS = [(k, v) for k, v in _MATERIAL_NORM.items() if not k.isascii()]
+_PATTERN_KO_ITEMS = [(k, v) for k, v in _PATTERN_NORM.items() if not k.isascii()]
+
+
+def _extract_fit_from_text(text: str) -> set[str]:
+    """쿼리 텍스트에서 fit 토큰 추출 → canonical fit vocab 집합.
+
+    에이전트가 fit 을 구조화 인자로 안 넘기고 free-text(text_query)에만 담는
+    실측 패턴("oversized hoodie" → fit 인자 없음) 을 보완한다. 영문은 `\b`
+    경계, 한글은 부분일치.
+    """
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for pat, vals in _FIT_EN_PATTERNS:
+        if pat.search(low):
+            out |= vals
+    for ko, vals in _FIT_KO_ITEMS:
+        if ko in text:
+            out |= vals
+    return out
+
+
+def _extract_material_from_text(text: str) -> set[str]:
+    """쿼리 텍스트에서 material 토큰 추출 → feature_metadata.material canonical 집합."""
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for pat, canon in _MATERIAL_EN_PATTERNS:
+        if pat.search(low):
+            out.add(canon)
+    for ko, canon in _MATERIAL_KO_ITEMS:
+        if ko in text:
+            out.add(canon)
+    return out
+
+
+def _extract_pattern_from_text(text: str) -> set[str]:
+    """쿼리 텍스트에서 변별 pattern 토큰 추출 → feature_metadata.pattern canonical 집합.
+
+    solid 는 매핑에 없어 자동 제외(카탈로그 기본값이라 부스트 무의미).
+    """
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for pat, canon in _PATTERN_EN_PATTERNS:
+        if pat.search(low):
+            out.add(canon)
+    for ko, canon in _PATTERN_KO_ITEMS:
+        if ko in text:
+            out.add(canon)
+    return out
+
 
 def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
 
-    request 계약에 존재하는 fit/fabric 만 취한다. color/subcategory 는 이미 RPC
-    하드게이트라(모든 후보가 이미 일치) 정렬에서 제외. 값은 feature vocab 집합으로
-    정규화 — fit 은 동의어 맵, material 은 소문자 토큰.
+    fit/material/pattern 축을 취한다(color/subcategory 는 RPC 하드게이트라 모든
+    후보가 이미 일치 → 정렬 제외). 구조화 인자(item.fit/fabric)를 우선하되,
+    에이전트가 보통 이를 안 채우고 free-text 쿼리에만 담으므로 `search_query`(+KO)
+    텍스트에서 결정론적으로 보완 추출한다(pattern 은 request 계약에 필드가 없어
+    텍스트 전용). 값은 feature vocab 집합으로 정규화.
     """
     out: dict[str, set[str]] = {}
+    qtext = " ".join(s for s in (getattr(item, "search_query", None), getattr(item, "search_query_ko", None)) if s)
+
+    # fit — 구조화 인자 우선, 없으면 쿼리 텍스트에서 추출.
     fit = str(getattr(item, "fit", None) or "").strip().lower()
-    if fit:
-        vals = _FIT_NORM.get(fit)
-        out["fit"] = vals if vals else {fit}
+    fit_vals = (_FIT_NORM.get(fit) or ({fit} if fit else set())) or _extract_fit_from_text(qtext)
+    if fit_vals:
+        out["fit"] = set(fit_vals)
+
+    # material — 구조화 fabric + 쿼리 텍스트 추출(합집합).
+    mat_vals: set[str] = set()
     fab = str(getattr(item, "fabric", None) or "").strip().lower()
     if fab:
-        out["material"] = {fab}
+        mat_vals.add(_MATERIAL_NORM.get(fab, fab))
+    mat_vals |= _extract_material_from_text(qtext)
+    if mat_vals:
+        out["material"] = mat_vals
+
+    # pattern — request 계약엔 구조화 필드가 없어 쿼리 텍스트에서만 추출(변별 패턴).
+    pat_vals = _extract_pattern_from_text(qtext)
+    if pat_vals:
+        out["pattern"] = pat_vals
+
     return {k: v for k, v in out.items() if v}
 
 
@@ -417,6 +630,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_fit=settings.ATTR_ALIGN_FIT_W if want_attr else 0.0,
                 attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
                 attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
+                attr_pattern=settings.ATTR_ALIGN_PATTERN_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

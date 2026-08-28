@@ -41,20 +41,20 @@ logger = logging.getLogger(__name__)
 # 키 셋트: vision / search / pinterest / analyze_image. 변경은 SPEC version bump.
 PRE_MESSAGES: dict[str, dict[str, str]] = {
     "vision": {
-        "ko": "사진 잘 봤어, 잠깐 들여다볼게 👀",
-        "en": "Got it! Let me take a closer look 👀",
+        "ko": "사진 잘 봤어, 잠깐 들여다볼게.",
+        "en": "Got it. Let me take a closer look.",
     },
     "search": {
-        "ko": "잠깐만, 마음에 들 만한 거 찾아볼게 🔍",
-        "en": "One sec — let me find something you'll love 🔍",
+        "ko": "잠깐만, 마음에 들 만한 거 찾아볼게.",
+        "en": "One sec, let me find something you'll love.",
     },
     "pinterest": {
-        "ko": "보드 살펴볼게, 잠깐만 📌",
-        "en": "Checking out your board, hang tight 📌",
+        "ko": "보드 살펴볼게, 잠깐만.",
+        "en": "Checking out your board, hang tight.",
     },
     "analyze_image": {
-        "ko": "이미지 들여다볼게 👀",
-        "en": "Looking at this image 👀",
+        "ko": "이미지 들여다볼게.",
+        "en": "Looking at this image.",
     },
 }
 
