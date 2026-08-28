@@ -3,8 +3,9 @@
 GET /v1/curation?gender=women|men — 메인 큐레이션 구좌 + 유도 칩 (auth optional)
 
 server-driven: 구좌 개수·순서·타이틀·상품 전부 이 응답으로 결정 — 앱 배포 불필요.
-구좌 데이터는 ai.curation_sections 캐시 테이블(백그라운드 refresher가 채움)만 읽고,
-요청 경로에서는 집계하지 않는다. 칩은 서버 상수(app/services/curation_chips.py).
+공용 auto/editorial 구좌는 ai.curation_sections 캐시를 읽고, 사용자별 auto
+구좌는 요청 시 조회·찜·취향·관심 브랜드 신호로 계산한다.
+칩은 서버 상수(app/services/curation_chips.py).
 
 gender 해석: 로그인 + 프로필 gender 확정이면 프로필 우선, 아니면 query param
 (비로그인은 온보딩 로컬값을 param으로 전달), 둘 다 없으면 422.
@@ -12,6 +13,7 @@ gender 해석: 로그인 + 프로필 gender 확정이면 프로필 우선, 아�
 
 from __future__ import annotations
 
+from random import shuffle
 from typing import Literal
 from uuid import UUID
 
@@ -23,16 +25,19 @@ from app.api.deps import get_current_user_id, get_optional_user_id
 from app.core.di import provide_db_pool
 from app.core.gender import db_to_app
 from app.services.curation_chips import Chip, chips_for
+from app.services.curation_personalized import personalized_product_ids
 from app.services.curation_refresh import (
     GENDER_MATCH_SQL,
     PRODUCT_FEATURES_JOIN,
     select_candidate_ids,
 )
+from app.services.curation_sections import CURATION_SECTION_PRODUCT_LIMIT, PERSONALIZED_AUTO_SECTION_IDS
 from app.services.curation_taste import record_impressions
 
 router = APIRouter(prefix="/v1", tags=["curation"])
 
-_PRODUCTS_PER_SECTION = 20
+# 모바일은 홈에서 구좌당 10개만 렌더한다. 개인화 구좌가 수만 개 상품을 반환해
+# 캐시 교체가 늦어지지 않도록 모든 구좌의 API 응답을 공통으로 제한한다.
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -54,6 +59,10 @@ class CurationProduct(BaseModel):
 class CurationSection(BaseModel):
     id: str
     slot_type: Literal["auto", "editorial"]
+    # slot_type 은 데이터 출처(auto=리프레셔 계산 / editorial=사람이 고른 목록),
+    # display_type 은 앱 렌더러 선택. 트렌딩 구좌가 전부 editorial 이라 두 축을
+    # 분리해야 구분이 된다 (migration 0030).
+    display_type: Literal["default", "trending"] = "default"
     title: str
     subtitle: str | None
     products: list[CurationProduct]
@@ -68,11 +77,13 @@ class CurationResponse(BaseModel):
 class CurationImpression(BaseModel):
     section_id: str = Field(min_length=1, max_length=100)
     product_id: int
-    position: int | None = Field(default=None, ge=0, le=100)
+    position: int | None = Field(default=None, ge=0, le=200)
 
 
 class CurationImpressionRequest(BaseModel):
-    items: list[CurationImpression] = Field(min_length=1, max_length=50)
+    # 구좌 저장 상한(200)과 맞춘다 — 한 구좌가 통째로 보이면 클라가 그만큼
+    # 올리는데, 여기서 422 가 나면 개인화 학습이 조용히 끊긴다.
+    items: list[CurationImpression] = Field(min_length=1, max_length=200)
 
 
 class CurationImpressionResponse(BaseModel):
@@ -97,7 +108,7 @@ async def _load_sections(
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT section_id, slot_type, title, subtitle, product_ids
+            SELECT section_id, slot_type, title, subtitle, product_ids, display_type
             FROM ai.curation_sections
             WHERE gender = %s AND is_active
             ORDER BY sort_order ASC, section_id ASC
@@ -107,7 +118,6 @@ async def _load_sections(
         section_rows = await cur.fetchall()
 
         selected_by_section: dict[str, list[int]] = {}
-        excluded_ids: set[int] = set()
         taste_scores: dict[int, float] = {}
         feature_scores: dict[tuple[str, str], float] = {}
         if user_id is not None:
@@ -128,11 +138,30 @@ async def _load_sections(
             )
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
-        for section_id, slot_type, _title, _subtitle, product_ids in section_rows:
+        for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
+            # Sections are independent: a product may intentionally appear in
+            # more than one row, including multiple trending displays.
+            if section_id in PERSONALIZED_AUTO_SECTION_IDS:
+                selected = (
+                    await personalized_product_ids(
+                        cur,
+                        section_id=section_id,
+                        user_id=user_id,
+                        gender=gender,
+                        # 각 개인화 구좌의 조건을 독립적으로 보장한다. 같은 상품이
+                        # "최근 본 상품"이자 "할인된 찜"이어도 두 구좌 모두 노출된다.
+                        excluded_ids=set(),
+                        taste_scores=taste_scores,
+                        feature_scores=feature_scores,
+                    )
+                    if user_id is not None
+                    else []
+                )
+                selected_by_section[section_id] = selected[:CURATION_SECTION_PRODUCT_LIMIT]
+                continue
+
             if slot_type != "auto" or user_id is None or not (taste_scores or feature_scores):
-                selected = [
-                    int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
-                ]
+                selected = [int(pid) for pid in (product_ids or [])]
             else:
                 await cur.execute(
                     """
@@ -160,17 +189,15 @@ async def _load_sections(
                 selected = select_candidate_ids(
                     candidate_rows,
                     section_id=section_id,
-                    excluded_ids=excluded_ids,
+                    excluded_ids=set(),
                     taste_scores=taste_scores,
                     feature_scores=feature_scores,
                     seed=f"{user_id}:{gender}:{section_id}",
                 )
                 if not selected:
-                    selected = [
-                        int(pid) for pid in (product_ids or [])[:_PRODUCTS_PER_SECTION] if int(pid) not in excluded_ids
-                    ]
+                    selected = [int(pid) for pid in (product_ids or [])]
+            selected = selected[:CURATION_SECTION_PRODUCT_LIMIT]
             selected_by_section[section_id] = selected
-            excluded_ids.update(selected)
 
         # 구좌별 product_ids를 한 번에 하이드레이션 (results.py의 unnest 패턴).
         all_ids: list[int] = []
@@ -208,11 +235,22 @@ async def _load_sections(
                 )
 
     sections: list[CurationSection] = []
-    for section_id, slot_type, title, subtitle, product_ids in section_rows:
-        selected = selected_by_section.get(section_id, (product_ids or [])[:_PRODUCTS_PER_SECTION])
+    for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
+        selected = selected_by_section.get(section_id, product_ids or [])
         hydrated = [products[pid] for pid in selected if pid in products]
+        if section_id in PERSONALIZED_AUTO_SECTION_IDS and not hydrated:
+            continue
+        if section_id != "recently-viewed":
+            shuffle(hydrated)
         sections.append(
-            CurationSection(id=section_id, slot_type=slot_type, title=title, subtitle=subtitle, products=hydrated)
+            CurationSection(
+                id=section_id,
+                slot_type=slot_type,
+                display_type=display_type,
+                title=title,
+                subtitle=subtitle,
+                products=hydrated,
+            )
         )
     return sections
 

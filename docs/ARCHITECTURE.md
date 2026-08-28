@@ -17,6 +17,7 @@
 | **AI 오케스트레이션 (주 서버)** | **kikoai/ai (이 프로젝트, dev-ai EC2)** | **ReAct 에이전트, `/v1/chat` SSE, Vision (`app/channels/vision.py`, LiteLLM nova-lite), 검색 파이프라인, 온보딩, 이벤트 로그** |
 | 임베딩 | Modal (FashionSigLIP) | 이미지/텍스트 → 벡터 변환, scale-to-zero T4 |
 | 이미지 업로드 | S3 + CloudFront | `POST /v1/uploads` presigned PUT 발급, 클라이언트 직접 업로드, `ai.uploads` 메타 기록 |
+| 앱 이미지 분석 | kikoai/ai | `POST /v1/image/analyze` 사용자 인증 후 업로드 이미지를 기존 Vision 추출기로 분석 |
 | 벡터 DB | dev-app Postgres 16 + pgvector | `search_products_v6` RPC, embedding-first (cosine distance ASC). pgroonga/product_search_text DROPPED. **AI 서버와 app이 공유하는 유일한 접점은 이 DB 뿐** |
 | LLM 게이트웨이 | LiteLLM proxy (dev-ai EC2) | nova-lite (Bedrock) 라우팅 |
 | web + DB 역할 (현재 축소) | `kikoai/app` (Next.js, dev-app EC2) | Auth.js 세션, R2 이미지, Postgres 관리. `/recommend` 경로 한정·현재 미사용: GPT-4o-mini Vision, v4 폴백 검색 |
@@ -24,6 +25,19 @@
 > 앱/웹 채팅 플로우는 `kikoai/app`을 **전혀 거치지 않는다** — Vision 처리도 이 서버(`app/channels/vision.py`)가 독자적으로 수행하며, DB만 공유한다.
 
 > **2026-05-10 컷오버**: Supabase + Vercel pause. dev-app EC2 단독 운영. 환경변수 `DB_URL`/`DB_TOKEN` (구 `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`), PostgREST shim `http://172.31.59.31:3001` 경유. Qdrant 미사용.
+
+### 앱 채팅 상태 범위
+
+앱의 `ai.chat_sessions.session_id`는 대화 상태의 경계다. 앱 경로는 이 UUID에서
+파생한 내부 `chat_id`를 LangGraph `SessionStore`, pending 질문/성별, last-query,
+카드 cursor·impression 상태에 사용하고, `thread_id`도 같은 `session_id`로 기록한다.
+반면 TasteProfile·feature score는 안정적인 앱 사용자 식별자로 키잉하므로 새 채팅에도
+유지된다. Telegram transport의 `chat_id` 의미와는 별개로, 앱의 새 채팅은 이전 검색
+기억을 절대 상속하지 않는다.
+
+세션 격리 도입 전 앱 TasteProfile은 유저 파생 `chat_id`의 `c:<id>` 키로 저장됐다.
+첫 앱 요청에서 비어 있는 표준 `u:<id>` 프로필에만 해당 값을 복사해 기존 취향을 보존한다.
+원본 행은 롤백 호환을 위해 유지하며, 이후 읽기·쓰기는 `u:<id>`만 사용한다.
 
 ---
 
@@ -43,6 +57,7 @@ flowchart TB
         GRAPH["LangGraph StateGraph\nReAct 에이전트 (영구 단일 토폴로지)\nVision: app/channels/vision.py"]
         PIPE["pipeline runner\nembed → search → diversify"]
         UPLOADS["POST /v1/uploads\nS3 presigned PUT"]
+        IMAGE_ANALYZE["POST /v1/image/analyze\nuser-auth Vision adapter"]
         LITELLM["LiteLLM proxy\nnova-lite via Bedrock"]
         LFW["Langfuse self-host"]
         REC["POST /recommend\n(현재 미사용)"]
@@ -57,6 +72,7 @@ flowchart TB
     end
 
     subgraph App["kikoai/app (dev-app EC2) — web + DB 역할"]
+        IMAGE_INPUT["앱 이미지 인풋"]
         FIND["/api/find/search\n(현재 미사용)"]
         V4["/api/search-products\n(v4 폴백, 현재 미사용)"]
     end
@@ -74,6 +90,8 @@ flowchart TB
     PIPE -.score.-> LFW
     UPLOADS -->|presigned PUT target| S3
     UPLOADS -->|insert pending row| UPLOADDB
+    IMAGE_INPUT -->|Bearer + image_url| IMAGE_ANALYZE
+    IMAGE_ANALYZE -->|shared vision_extract| LITELLM
 
     FIND -. "현재 미사용" .-> REC
     FIND -. "v4 fallback" .-> V4
@@ -87,10 +105,11 @@ flowchart TB
     classDef muted fill:#757575,color:#fff
 
     class TG_USER,TG_API primary
-    class WH,GRAPH,PIPE,UPLOADS,LITELLM,LFW ai
+    class WH,GRAPH,PIPE,UPLOADS,IMAGE_ANALYZE,LITELLM,LFW ai
     class REC muted
     class MODAL,S3 ext
     class PG,CONVLOG,UPLOADDB data
+    class IMAGE_INPUT primary
     class FIND,V4 muted
 ```
 

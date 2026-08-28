@@ -1,6 +1,6 @@
 """FashionSigLIP 로컬 배치 임베딩.
 
-DB의 products 중 product_embeddings row 가 없는 항목을 모아 로컬 머신에서
+DB의 활성 products 중 product_embeddings row 가 없고 대표 image_url 이 있는 항목을 모아 로컬 머신에서
 FashionSigLIP 으로 인코딩한 뒤 `bulk_update_product_embeddings` RPC 로 일괄 upsert.
 (v6: product_embeddings 별도 테이블 — products.embedding 컬럼 없음)
 
@@ -80,16 +80,17 @@ def fetch_pending(sb, limit: int | None = None) -> list[dict]:
     while True:
         q = (
             sb.table("products")
-            .select("id, images, product_embeddings!left(product_id)")
+            .select("id, image_url, product_embeddings!left(product_id)")
             .is_("product_embeddings.product_id", "null")
-            .not_.is_("images", "null")
+            .eq("in_stock", True)
+            .not_.is_("image_url", "null")
             .range(offset, offset + PAGE_SIZE - 1)
         )
         res = q.execute()
         page = res.data or []
         if not page:
             break
-        # product_embeddings 키 제거 — 이후 로직은 id/images 만 사용
+        # product_embeddings 키 제거 — 이후 로직은 id/image_url 만 사용
         for row in page:
             row.pop("product_embeddings", None)
         rows.extend(page)
@@ -113,10 +114,10 @@ def download_batch(rows: list[dict], workers: int) -> dict[str, Image.Image]:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures: dict = {}
             for r in rows:
-                imgs = r.get("images") or []
-                if not imgs:
+                image_url = r.get("image_url")
+                if not image_url:
                     continue
-                fut = ex.submit(download_image, client, imgs[0])
+                fut = ex.submit(download_image, client, image_url)
                 futures[fut] = r["id"]
             for fut in as_completed(futures):
                 pid = futures[fut]

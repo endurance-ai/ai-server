@@ -107,7 +107,7 @@ def test_parse_review_scores_clamps_values_and_ignores_malformed_rows() -> None:
     }
 
 
-def test_select_final_candidates_enforces_quality_and_brand_caps() -> None:
+def test_select_final_candidates_uses_brand_cap_as_soft_diversity_target() -> None:
     recall = []
     for product_id, brand, query in [
         (1, "A", "crop top"),
@@ -134,7 +134,7 @@ def test_select_final_candidates_enforces_quality_and_brand_caps() -> None:
 
     selected = _select_final_candidates(recall, scores, limit=10, brand_cap=3)
 
-    assert [candidate.id for candidate in selected] == [1, 2, 3, 5, 6]
+    assert [candidate.id for candidate in selected] == [1, 2, 3, 4, 5, 6]
     assert all(candidate.editorial_score == 83.5 for candidate in selected)
     assert all(candidate.id != 7 for candidate in selected)
 

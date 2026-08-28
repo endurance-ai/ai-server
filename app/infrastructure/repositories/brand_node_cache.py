@@ -34,12 +34,76 @@ logger = logging.getLogger(__name__)
 # cache-key generation never drift.
 _NORM_RE: Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
 
+# Hangul-syllable key. brand_name is frequently BILINGUAL — 'MONDAY EDITION
+# (먼데이에디션)', '오베르 (AUBER)' — or purely Korean ('킨더살몬'). The Latin
+# normalizer above deletes every Hangul codepoint, so a Korean-language brand
+# query ('먼데이에디션만 보여줘') collapsed to '' and never matched. This keeps
+# only Hangul syllables (drops spaces / punctuation / Latin), giving Korean
+# surface forms their own stable key alongside the Latin one.
+_HANGUL_RE: Final[re.Pattern[str]] = re.compile(r"[^가-힣]+")
+
+# Parenthetical splitter — 'MONDAY EDITION (먼데이에디션)' → outer 'MONDAY
+# EDITION' + inner '먼데이에디션'. Both half-width and full-width parens appear
+# in the curated data.
+_PAREN_RE: Final[re.Pattern[str]] = re.compile(r"[（(][^）)]*[）)]")
+_PAREN_INNER_RE: Final[re.Pattern[str]] = re.compile(r"[（(]\s*([^）)]*?)\s*[）)]")
+
+# Latin word tokens (for the initials-acronym fallback: 'Post Archive Faction'
+# → 'paf').
+_LATIN_WORD_RE: Final[re.Pattern[str]] = re.compile(r"[a-z0-9]+")
+
 
 def normalize_brand(brand: str | None) -> str:
-    """Canonical brand key — '1017 ALYX 9SM' / '1017 Alyx 9SM' → '1017alyx9sm'."""
+    """Latin canonical key — '1017 ALYX 9SM' / '1017 Alyx 9SM' → '1017alyx9sm'.
+
+    Hangul-destroying by design (kept for the rerank / diversity lookup path
+    and the /brands/search prefix match). Korean surfaces are handled by
+    ``normalize_brand_ko`` and the multi-key alias index below.
+    """
     if not brand:
         return ""
     return _NORM_RE.sub("", brand.lower())
+
+
+def normalize_brand_ko(brand: str | None) -> str:
+    """Hangul-only key — 'MONDAY EDITION (먼데이에디션)' / '먼데이 에디션' →
+    '먼데이에디션'. Empty when the input carries no Hangul."""
+    if not brand:
+        return ""
+    return _HANGUL_RE.sub("", brand)
+
+
+def _strip_parens(brand: str) -> str:
+    """Drop parenthetical spans — the 'outer' surface of a bilingual name."""
+    return _PAREN_RE.sub(" ", brand).strip()
+
+
+def _acronym(latin_source: str) -> str:
+    """Initials acronym of a multi-word Latin surface — 'Post Archive Faction'
+    → 'paf'. Empty for single-word names (acronym == the word, useless)."""
+    words = _LATIN_WORD_RE.findall(latin_source.lower())
+    return "".join(w[0] for w in words) if len(words) >= 2 else ""
+
+
+def _surface_keys(brand_name: str) -> set[str]:
+    """All exact-match alias keys derivable from one raw `brand_name`.
+
+    Covers Latin + Hangul forms of the whole string, the paren-stripped outer
+    surface, and each parenthetical inner surface — so any single language the
+    curator kept in `brand_name` (and the one they dropped from
+    `brand_name_normalized`) is reachable from either language of query.
+    """
+    surfaces = [brand_name, _strip_parens(brand_name)]
+    surfaces.extend(m.strip() for m in _PAREN_INNER_RE.findall(brand_name))
+    keys: set[str] = set()
+    for s in surfaces:
+        lk = normalize_brand(s)
+        if lk:
+            keys.add(lk)
+        kk = normalize_brand_ko(s)
+        if kk:
+            keys.add(kk)
+    return keys
 
 
 @dataclass(frozen=True)
@@ -67,18 +131,92 @@ class BrandAttributes:
 
 
 _cache: dict[str, BrandAttributes] = {}
+
+# Brand-FILTER resolution index (distinct from `_cache`, which is single-attrs
+# per key for the rerank/diversity lookup path). Maps every alias key — Latin
+# or Hangul surface, paren inner, unambiguous acronym — to the list of
+# canonical `brand_name`s that share a base identity. Duplicate nodes for the
+# same real brand ('Post Archive Faction' #3922 + 'Post Archive Faction (PAF)'
+# #95) group together so ONE alias ('paf' / '포스트아카이브팩션' / 'post archive
+# faction') resolves to BOTH names — the v6 RPC's `bn.brand_name = ANY(...)`
+# then matches products hung off either node (products split across the twins).
+_filter_index: dict[str, list[str]] = {}
+# Initials-acronym fallback, consulted only after an exact-alias miss and only
+# when the acronym is unambiguous (maps to a single brand group).
+_acronym_index: dict[str, list[str]] = {}
 _warmed: bool = False
 
 
 def lookup(brand: str | None) -> BrandAttributes | None:
     """Return cached attributes for `brand` or None when unknown.
 
-    `brand` is the verbatim string from v6 RPC rows (`brand` column).
-    Normalization is applied here so callers stay simple.
+    `brand` is the verbatim string from v6 RPC rows (`brand` column) — Latin,
+    Korean, or bilingual. Tries the Latin key first, then the Hangul key, so a
+    Korean-language product brand resolves for rerank/diversity too.
     """
     if not brand:
         return None
-    return _cache.get(normalize_brand(brand))
+    hit = _cache.get(normalize_brand(brand))
+    if hit is not None:
+        return hit
+    ko = normalize_brand_ko(brand)
+    return _cache.get(ko) if ko else None
+
+
+def resolve_brand_names(query: str | None) -> list[str] | None:
+    """Resolve a free-form brand mention → canonical `brand_name`s for filtering.
+
+    Accepts Korean ('포스트아카이브팩션'), English ('post archive faction'),
+    parenthetical acronyms carried in the data ('paf' from '… (PAF)'), or an
+    initials acronym as a last resort. Returns every canonical name in the
+    matched brand group (dedup, stable order), or None when unrecognized
+    (caller fails open — no filter). Never raises."""
+    if not query or not isinstance(query, str) or not query.strip():
+        return None
+    for key in (normalize_brand(query), normalize_brand_ko(query)):
+        if key and key in _filter_index:
+            return list(_filter_index[key])
+    # Acronym fallback (Latin only, unambiguous groups only).
+    lk = normalize_brand(query)
+    if lk and lk in _acronym_index and lk not in _filter_index:
+        return list(_acronym_index[lk])
+    return None
+
+
+# 스캔에서 제외할 흔한/모호한 1어절 별칭 — 브랜드명이지만 일상어로도 자주 쓰여
+# 자유 문장 스캔 시 오탐을 낸다(예: '키스하고 싶은 원피스' → Kith). 명시적
+# `brand` arg / resolve_brand_names 경로는 영향받지 않고, 자유 문장 스캔에서만
+# 이 토큰들을 무시한다.
+_SCAN_STOPWORDS: frozenset[str] = frozenset({"키스", "노아", "게스", "보드", "kiss", "guess", "noah"})
+
+
+def scan_text_for_brand(text: str | None) -> list[str] | None:
+    """자유 문장에서 알려진 브랜드를 찾아 canonical 리스트로 반환.
+
+    에이전트(LLM)가 낯선 국내 브랜드('글로니' 등)를 `brand` arg 로 안 채우는
+    경우를 결정론적으로 보정하기 위한 스캔. 1~3 어절 슬라이딩 윈도우로
+    `_filter_index` 를 조회하고 가장 긴(가장 구체적인) 매치를 채택한다. 흔한
+    1어절 별칭(_SCAN_STOPWORDS)은 오탐 방지로 제외. 미발견/미워밍이면 None."""
+    if not text or not isinstance(text, str):
+        return None
+    tokens = text.split()
+    n = len(tokens)
+    if n == 0:
+        return None
+    best_span = 0
+    best_names: list[str] | None = None
+    for i in range(n):
+        for span in (3, 2, 1):
+            if i + span > n:
+                continue
+            cand = " ".join(tokens[i : i + span])
+            if span == 1 and cand.strip().lower() in _SCAN_STOPWORDS:
+                continue
+            names = resolve_brand_names(cand)
+            if names and span > best_span:
+                best_span = span
+                best_names = names
+    return best_names
 
 
 def is_warmed() -> bool:
@@ -148,6 +286,17 @@ async def warm_cache() -> None:
         WHERE brand_name_normalized IS NOT NULL AND brand_name_normalized <> ''
     """
 
+    alias_sql = """
+        SELECT ba.brand_id, ba.alias
+        FROM ai.brand_aliases ba
+        WHERE ba.approved AND ba.confidence = 'high'
+    """
+
+    async def _fetch_brand_aliases() -> list[tuple[Any, ...]]:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(alias_sql)
+            return await cur.fetchall()
+
     try:
 
         async def _query() -> list[tuple[Any, ...]]:
@@ -165,6 +314,17 @@ async def warm_cache() -> None:
         return
 
     built: dict[str, BrandAttributes] = {}
+    # Filter-resolution scaffolding: group duplicate/bilingual nodes by a base
+    # identity so one alias → every canonical name in the group. Aliases /
+    # acronyms mapping to >1 distinct group are ambiguous and dropped (the
+    # caller fails open rather than filter on the wrong brand).
+    groups: dict[str, list[str]] = {}
+    alias_to_groups: dict[str, set[str]] = {}
+    acro_to_groups: dict[str, set[str]] = {}
+    # brand_id → group / attrs, so curated brand_aliases rows (fetched below)
+    # attach to the right brand group and share its attrs in `_cache`.
+    brandid_to_group: dict[int, str] = {}
+    brandid_to_attrs: dict[int, BrandAttributes] = {}
     for r in rows:
         # The `brand_name_normalized` column in the DB matches our regex
         # most of the time but not always (curated edits). Use it verbatim
@@ -186,17 +346,84 @@ async def warm_cache() -> None:
             price_min_usd=float(r[9]) if r[9] is not None else None,
             price_max_usd=float(r[10]) if r[10] is not None else None,
         )
-        if db_norm:
-            built[db_norm] = attrs
-        if regex_norm and regex_norm not in built:
-            built[regex_norm] = attrs
+        # `_cache` (rerank/diversity single-attrs lookup): DB-norm + regex-norm
+        # plus every Latin/Hangul surface key. First-writer-wins so a later
+        # duplicate node never clobbers an earlier attrs entry.
+        for key in {db_norm, regex_norm, *_surface_keys(brand_name)}:
+            if key and key not in built:
+                built[key] = attrs
+
+        # Filter grouping — base identity is the paren-stripped surface
+        # ('Post Archive Faction (PAF)' & 'Post Archive Faction' → same group).
+        outer = _strip_parens(brand_name)
+        group_key = (
+            normalize_brand(outer)
+            or normalize_brand_ko(outer)
+            or normalize_brand(brand_name)
+            or normalize_brand_ko(brand_name)
+        )
+        if not group_key:
+            continue
+        groups.setdefault(group_key, []).append(brand_name)
+        for key in _surface_keys(brand_name):
+            alias_to_groups.setdefault(key, set()).add(group_key)
+        acro = _acronym(outer) or _acronym(brand_name)
+        if acro:
+            acro_to_groups.setdefault(acro, set()).add(group_key)
+        if attrs.brand_id is not None:
+            brandid_to_group[attrs.brand_id] = group_key
+            brandid_to_attrs[attrs.brand_id] = attrs
+
+    # Curated Korean/alternate aliases (ai.brand_aliases). Best-effort and
+    # isolated: a missing table (pre-migration) or query error leaves node
+    # warming intact. Only approved high-confidence rows become hard-filter
+    # aliases; each alias's surface keys attach to its brand's group.
+    alias_count = 0
+    try:
+        alias_rows = db_pool.run_in_pool_loop(_fetch_brand_aliases())
+        for a in alias_rows:
+            brand_id = int(a[0]) if a[0] is not None else None
+            alias_txt = str(a[1] or "")
+            gk = brandid_to_group.get(brand_id) if brand_id is not None else None
+            if gk is None or not alias_txt:
+                continue
+            keys = _surface_keys(alias_txt)
+            if not keys:
+                continue
+            for key in keys:
+                alias_to_groups.setdefault(key, set()).add(gk)
+                # rerank/diversity lookup: alias resolves to the brand's attrs.
+                brand_attrs = brandid_to_attrs.get(brand_id)
+                if brand_attrs is not None and key not in built:
+                    built[key] = brand_attrs
+            alias_count += 1
+    except Exception as exc:  # noqa: BLE001 — aliases are additive; never break warm
+        logger.info("[BRAND_NODE_CACHE][startup] brand_aliases skipped (%s)", type(exc).__name__)
+
+    # Dedup each group's canonical names (stable order).
+    for gk in list(groups):
+        groups[gk] = list(dict.fromkeys(groups[gk]))
+    # Exact-alias index — keep unambiguous aliases only.
+    filt: dict[str, list[str]] = {key: groups[next(iter(gks))] for key, gks in alias_to_groups.items() if len(gks) == 1}
+    # Acronym fallback — unambiguous AND not already an exact alias.
+    acro_idx: dict[str, list[str]] = {
+        key: groups[next(iter(gks))] for key, gks in acro_to_groups.items() if len(gks) == 1 and key not in filt
+    }
 
     _cache.clear()
     _cache.update(built)
+    _filter_index.clear()
+    _filter_index.update(filt)
+    _acronym_index.clear()
+    _acronym_index.update(acro_idx)
     _warmed = True
     logger.info(
-        "[BRAND_NODE_CACHE][startup] warmed brands=%d keys=%d sample_keys=%s",
+        "[BRAND_NODE_CACHE][startup] warmed brands=%d keys=%d filter_aliases=%d "
+        "acronyms=%d curated_aliases=%d sample_keys=%s",
         len({a.brand_name for a in built.values()}),
         len(built),
+        len(filt),
+        len(acro_idx),
+        alias_count,
         list(built.keys())[:3],
     )

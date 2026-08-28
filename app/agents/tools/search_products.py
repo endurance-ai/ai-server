@@ -146,26 +146,125 @@ def _query_gender(text_query: str) -> str | None:
     return None
 
 
+# 브랜드 pivot("스킴스로 보여줘") 감지용 필러. 브랜드 이름 + gender + 아래
+# 무의미 카테고리어만 남은 쿼리는 "스타일 서술이 없는" 브랜드 전환으로 본다.
+# 이런 턴에서 LLM 이 이전 스타일 맥락을 버리고 맨몸 브랜드 검색을 날리면
+# (닝닝 공항룩 → SKIMS → 언더웨어) 직전 성공검색의 스타일을 결정론적으로
+# 이어붙여 "같은 무드, 다른 브랜드"를 유지한다. (2026-08-24)
+_STYLELESS_FILLER: frozenset[str] = frozenset(
+    {
+        "top",
+        "tops",
+        "clothes",
+        "clothing",
+        "clothe",
+        "items",
+        "item",
+        "fashion",
+        "outfit",
+        "outfits",
+        "look",
+        "looks",
+        "style",
+        "styles",
+        "product",
+        "products",
+        "piece",
+        "pieces",
+        "thing",
+        "things",
+        "stuff",
+        "wear",
+        "apparel",
+        "collection",
+        "some",
+        "any",
+        "more",
+        "show",
+        "me",
+    }
+)
+
+
+def _is_styleless_brand_query(text_query: str, brand_arg: Any, brand_filter: list[str] | None) -> bool:
+    """`text_query` 가 브랜드/성별/무의미 필러만 담고 있으면 True.
+
+    True 면 사용자가 브랜드만 바꿨을 뿐 새 스타일 서술을 주지 않은 것이므로,
+    직전 검색의 스타일을 이어받아야 한다. 'nike running shoes women' 처럼
+    실 스타일 토큰이 있으면 False (그건 진짜 새 검색).
+    """
+    residual = set(text_query.lower().split())
+    residual -= set(_GENDER_TOKENS)
+    residual -= _STYLELESS_FILLER
+    # 브랜드 토큰 제거 (raw arg + resolve 된 canonical, 멀티워드 대응).
+    for src in (str(brand_arg or ""), *(brand_filter or [])):
+        for tok in src.lower().split():
+            residual.discard(tok)
+    return not residual
+
+
 def _resolve_brand_filter(raw: Any) -> list[str] | None:
     """LLM `brand` arg → v6 `p_brand_names` 용 canonical 리스트 (2026-07-16).
 
     RPC 는 `brand_nodes.brand_name = ANY(p_brand_names)` EXACT 매치라 LLM
-    표기("acne studios", "ACNE")를 그대로 보내면 미스난다 —
-    `brand_node_cache.lookup` (lifespan 워밍, ~2.9k 브랜드)으로 canonical
-    `brand_name` 을 resolve. 미인식/캐시 미워밍이면 None (fail-open: 필터
-    없이 진행, 브랜드 토큰은 text_query 임베딩에 남아 soft 신호로 작동)."""
+    표기("acne studios", "ACNE", "paf", "포스트아카이브팩션")를 그대로 보내면
+    미스난다 — `brand_node_cache.resolve_brand_names` 로 canonical `brand_name`
+    (들)을 resolve 한다. 한/영 표면형·괄호 약칭·이니셜 약칭을 모두 흡수하고,
+    같은 브랜드의 중복 노드(예: 'Post Archive Faction' + '… (PAF)')는 모든
+    canonical 명을 함께 반환해 RPC 가 두 노드에 걸린 상품을 다 잡는다.
+    미인식/캐시 미워밍이면 None (fail-open: 필터 없이 진행)."""
     if not raw or not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        from app.infrastructure.repositories.brand_node_cache import lookup
+        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names
 
-        attrs = lookup(raw)
-        if attrs is not None and attrs.brand_name:
-            return [attrs.brand_name]
+        names = resolve_brand_names(raw)
+        if names:
+            return names
         logger.info("[tool.search_products] brand %r not in brand_node_cache — filter skipped (fail-open)", raw)
     except Exception as exc:  # noqa: BLE001 — 브랜드 필터는 부가 기능, 검색을 막지 않는다
         logger.warning("[tool.search_products] brand resolve failed: %r", exc)
     return None
+
+
+def _recover_pinned_brand(ctx: dict[str, Any]) -> list[str] | None:
+    """Clarify 연속 턴에서 LLM 이 `brand` 를 빠뜨렸을 때 직전 검색의 브랜드를 유지.
+
+    '글로니 제품 찾아줘 → (상의) → 다시 (바지)' 처럼 두 번째 clarify 답에서
+    작은 모델이 브랜드를 놓쳐 다른 브랜드가 뜨던 문제 대응(프롬프트로 "keep
+    brand" 지시해도 비결정적). 직전 턴 후보(`sess.last_results`)가 사실상 단일
+    브랜드면 그 브랜드를 canonical 화해 필터로 재적용한다. 혼합 브랜드(일반
+    검색 컨텍스트)면 None — 핀하지 않는다. best-effort, 절대 raise 안 함."""
+    try:
+        chat_id = ctx.get("chat_id")
+        if chat_id is None:
+            return None
+        from app.infrastructure.memory.session import get_store
+
+        sess = get_store().get_or_create(int(chat_id))
+        cands = list(getattr(sess, "last_results", None) or [])
+        brands: list[str] = []
+        for c in cands:
+            b = getattr(c, "brand", None)
+            if b is None and isinstance(c, dict):
+                b = c.get("brand")
+            b = (b or "").strip()
+            if b:
+                brands.append(b)
+        # 직전 검색 후보가 너무 적으면(무-검색 clarify 등) 추론 불가.
+        if len(brands) < 3:
+            return None
+        from collections import Counter
+
+        top_lower, top_n = Counter(b.lower() for b in brands).most_common(1)[0]
+        # 사실상 단일 브랜드일 때만(≥80%) 핀 — 혼합이면 일반 검색이므로 건드리지 않는다.
+        if top_n / len(brands) < 0.8:
+            return None
+        sample = next(b for b in brands if b.lower() == top_lower)
+        return _resolve_brand_filter(sample)
+    except Exception as exc:  # noqa: BLE001 — 핀은 부가 기능, 검색을 막지 않는다
+        logger.debug("[tool.search_products] brand pin recover failed: %r", exc)
+        return None
 
 
 def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
@@ -484,6 +583,178 @@ def apply_dislike_discount(ctx: dict[str, Any], cands: list[Any]) -> list[Any]:
 # the genuinely relevant rows on top, so the stopgap is obsolete by design.
 
 
+def _build_color_notice() -> str | None:
+    """검색 파이프라인이 색 정밀 필터를 재고 부족으로 relax 했으면(요청 색이
+    사실상 없어 유사상품으로 채운 경우), 에이전트가 사용자에게 정직하게 안내하도록
+    self-instructing 관찰 문자열을 만든다. relax 없으면 None. 이 문자열은 그대로
+    result.notice → react_loop result_summary 로 모델에 전달돼, "핑크로 바꿨어!"
+    같은 거짓 확답(2026-08-24 실트레이스)을 막는다."""
+    try:
+        from app.services.search_service import color_relax_ctx
+
+        meta = color_relax_ctx.get()
+    except Exception:  # noqa: BLE001
+        return None
+    if not meta:
+        return None
+    color = meta.get("requested_color")
+    if not color:
+        return None
+    exact = meta.get("exact_count")
+    if meta.get("subcategory_also_relaxed"):
+        return (
+            f"scarce_match: few items exactly match the requested {color} for this category; "
+            f"filled with close alternatives. Tell the user honestly that exact matches were "
+            f"limited and these are similar picks — do NOT claim they are all {color}."
+        )
+    if exact == 0:
+        return (
+            f"no_exact_color: ZERO items match color={color} for this query; the results are "
+            f"closest-style alternatives in OTHER colors. You MUST tell the user that {color} is "
+            f"essentially unavailable for this style and that these are similar look-alikes "
+            f"instead — do NOT claim the picks are {color}."
+        )
+    return (
+        f"low_exact_color: only {exact} item(s) actually match color={color}; the rest are close "
+        f"alternatives in other colors. Mention that exact-{color} stock is limited."
+    )
+
+
+def _cand_attr(c: Any, key: str) -> Any:
+    """dict 또는 Candidate 객체 양쪽에서 필드 읽기."""
+    if isinstance(c, dict):
+        return c.get(key)
+    return getattr(c, key, None)
+
+
+async def _build_result_digest(cands: list[Any], *, limit: int = 15) -> dict[str, Any] | None:
+    """결과셋의 속성 분포를 요약 — respond 가 "대부분 미디에 린넨" 처럼 구체적으로,
+    그러나 사실에 근거해 묘사하도록(데이드림 벤치마크). 상위 `limit` 개의 subcategory/
+    가격/브랜드(행에 직접 존재) + feature_metadata(fit/material/pattern/primary_color,
+    없으면 1회 배치조회)를 집계. 명확한 우세값만 싣는다(혼재 축은 생략 → 지어내기·
+    과일반화 방지). 아무 신호 없으면 None."""
+    if not cands:
+        return None
+    sample = cands[:limit]
+
+    # feature_metadata 확보 (색 relax 경로 등에서 이미 붙었으면 재사용, 없으면 배치).
+    metas: dict[int, dict[str, Any]] = {}
+    missing: list[int] = []
+    for c in sample:
+        try:
+            pid = int(_cand_attr(c, "id") or _cand_attr(c, "product_id"))
+        except (TypeError, ValueError):
+            continue
+        m = _cand_attr(c, "feature_metadata")
+        if isinstance(m, dict):
+            metas[pid] = m
+        else:
+            missing.append(pid)
+    if missing:
+        try:
+            from app.providers import db_pool
+
+            pool = db_pool._pool  # noqa: SLF001
+            if pool is not None:
+                async with pool.connection() as conn, conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT product_id, feature_metadata FROM public.product_features WHERE product_id = ANY(%s)",
+                        (missing,),
+                    )
+                    for pid, meta in await cur.fetchall():
+                        if isinstance(meta, dict):
+                            metas[int(pid)] = meta
+        except Exception:  # noqa: BLE001 — fail-open: digest degrades to row-only fields
+            pass
+
+    from collections import Counter
+
+    n = len(sample)
+
+    def _dominant(counter: Counter, *, min_share: float) -> str | None:
+        """최빈값이 min_share 이상 점유할 때만 반환(혼재 축은 None)."""
+        if not counter:
+            return None
+        val, cnt = counter.most_common(1)[0]
+        return val if (cnt / n) >= min_share else None
+
+    def _top_multi(counter: Counter, *, min_share: float, k: int) -> list[str]:
+        return [v for v, cnt in counter.most_common(k) if (cnt / n) >= min_share]
+
+    subcat_c: Counter = Counter()
+    fit_c: Counter = Counter()
+    pattern_c: Counter = Counter()
+    color_c: Counter = Counter()
+    material_c: Counter = Counter()
+    brand_c: Counter = Counter()
+    prices: list[int] = []
+
+    for c in sample:
+        sub = str(_cand_attr(c, "subcategory") or "").strip().lower()
+        brand = str(_cand_attr(c, "brand") or "").strip()
+        try:
+            p = int(_cand_attr(c, "price") or 0)
+        except (TypeError, ValueError):
+            p = 0
+        if brand:
+            brand_c[brand] += 1
+        if p > 0:
+            prices.append(p)
+        try:
+            pid = int(_cand_attr(c, "id") or _cand_attr(c, "product_id"))
+        except (TypeError, ValueError):
+            pid = None
+        meta = metas.get(pid) if pid is not None else None
+        # 종류: subcategory(행) 우선, 없으면 feature_metadata.item_type.
+        if sub and sub not in ("n/a", "none"):
+            subcat_c[sub] += 1
+        elif meta:
+            it = str(meta.get("item_type") or "").strip().lower()
+            if it and it not in ("n/a", "none"):
+                subcat_c[it] += 1
+        if meta:
+            fit = str(meta.get("fit") or "").strip().lower()
+            if fit and fit not in ("n/a", "none"):
+                fit_c[fit] += 1
+            pat = str(meta.get("pattern") or "").strip().lower()
+            if pat and pat not in ("n/a", "none"):
+                pattern_c[pat] += 1
+            col = str(meta.get("primary_color") or "").strip().lower()
+            if col and col not in ("n/a", "none"):
+                color_c[col] += 1
+            mats = meta.get("material")
+            for mt in mats if isinstance(mats, list) else [mats]:
+                mt = str(mt or "").strip().lower()
+                if mt and mt not in ("n/a", "none"):
+                    material_c[mt] += 1
+
+    digest: dict[str, Any] = {}
+    mostly = _dominant(subcat_c, min_share=0.34)
+    if mostly:
+        digest["mostly"] = mostly
+    fit = _dominant(fit_c, min_share=0.5)
+    if fit:
+        digest["fit"] = fit
+    mats = _top_multi(material_c, min_share=0.25, k=2)
+    if mats:
+        digest["materials"] = mats
+    cols = _top_multi(color_c, min_share=0.25, k=2)
+    if cols:
+        digest["colors"] = cols
+    pattern = _dominant(pattern_c, min_share=0.6)
+    if pattern and pattern != "solid":  # solid 은 무의미 신호라 생략
+        digest["pattern"] = pattern
+    if prices:
+        lo, hi = min(prices), max(prices)
+        digest["price_krw"] = f"{lo:,}" if lo == hi else f"{lo:,}–{hi:,}"
+    if brand_c:
+        top_brands = [b for b, _ in brand_c.most_common(3)]
+        extra = len(brand_c) - len(top_brands)
+        digest["brands"] = ", ".join(top_brands) + (f" +{extra}" if extra > 0 else "")
+
+    return digest or None
+
+
 def _candidate_to_dict(cand: Any) -> dict[str, Any]:
     """Best-effort serialization of a Candidate to a small LLM-consumable dict."""
     try:
@@ -515,7 +786,8 @@ async def run_text_only_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    name_query: str | None = None,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
     override_embedding: list[float] | None = None,
@@ -555,6 +827,7 @@ async def run_text_only_search(
         subcategory=subcategory,
         fit=fit,
         color_family=color_family,
+        name_query=name_query,
         search_query=text_query,
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
@@ -640,7 +913,7 @@ async def run_multi_query_search(
     queries: list[str],
     gender: str | None = None,
     brand_filter: list[str] | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -713,7 +986,7 @@ async def run_blended_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -842,7 +1115,7 @@ async def run_smart_blended_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -987,7 +1260,7 @@ async def run_image_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
-    top_k: int = 15,
+    top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
 ) -> list[Any]:
@@ -1026,25 +1299,10 @@ async def run_image_search(
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsResult:
-    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — 사전 안내 멘트 ("잠시만요, …찾아볼게요").
-    # 본 검색 (Modal embed / DB RPC) 직전, REQ-UX-003 typing 보다 먼저 1회.
-    # react_loop._fire_typing 은 dispatch 이후가 아닌 직전에 호출되므로 ordering
-    # 보장을 위해 이 await 가 typing 보다 먼저 일어나도록 react_loop 가 helper
-    # 분기를 통해 호출 — 여기서는 dispatch 진입 첫 줄로 await 한다.
-    try:
-        from app.channels.pre_messages import fire_pre_message
-        from app.graphs.nodes._adapter_ctx import _adapter_var
-
-        await fire_pre_message(
-            _adapter_var.get(),
-            ctx,
-            key="search",
-            lang=ctx.get("lang") or "en",
-            chat_id=ctx.get("chat_id"),
-        )
-    except Exception:  # noqa: BLE001 — never block search pipeline
-        logger.debug("[tool.search_products] pre-message skipped")
-
+    # 2026-08-26 — "search" pre-message ("잠깐만, 마음에 들 만한 거 찾아볼게") 제거.
+    # 스피너/typing 이 이미 검색 중임을 보여줘서 이 멘트는 잉여였다(사용자 피드백).
+    # PRE_MESSAGES["search"] 키는 pinterest 처럼 dict 에 보존(재도입 대비)하되 발사만
+    # 중단. vision / analyze_image pre-message 는 유지.
     text_query = (args.get("text_query") or "").strip()
     ctx_image = ctx.get("image_url")
     has_image = _is_real_image_url(ctx_image)
@@ -1178,9 +1436,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         # base_query on subsequent legacy refines.
         if pinned_embedding is None:
             try:
-                from app.agents.last_query import set_last_query
+                from app.agents.last_query import push_recent_search, set_last_query
 
                 set_last_query(ctx.get("chat_id"), text_query)
+                # P2 (2026-08-24) — 링버퍼에도 기록해 "다시 <화제>" 되부름 앵커 확보.
+                # label 은 사용자 원문(raw_msg, 영어 번역 전). brand 는 아래에서
+                # 확정되므로 여기선 label+q 만; brand-pivot 병합 블록이 갱신한다.
+                push_recent_search(ctx.get("chat_id"), text_query, label=str(raw_msg or ""))
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1214,6 +1476,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         subcategory = ctx.get("vision_subcategory")
     fit = args.get("fit")
     color_family = args.get("color_family")
+    # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
+    name_query = str(args.get("name_query") or "").strip() or None
 
     # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
     # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
@@ -1226,6 +1490,73 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 미인식 브랜드는 필터 없이 진행 (fail-open — 브랜드 토큰은 text_query
     # 임베딩에 그대로 남아 soft 신호로 작동).
     brand_filter = _resolve_brand_filter(args.get("brand"))
+
+    # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 brand
+    # arg 로 안 넣는 문제 보정. react_loop._build_ctx 가 원문에서 브랜드를 감지해
+    # 세션 핀에 저장하므로, LLM 이 brand 를 빠뜨렸으면 그 핀을 적용한다
+    # ('글로니 → (상의) → (바지)' 전 구간 유지). 핀이 없고 clarify 답 턴이면
+    # 직전 검색 결과(단일 브랜드)에서 복구도 시도(보조).
+    if brand_filter is None:
+        from app.agents.last_query import get_pinned_brand
+
+        pinned = get_pinned_brand(ctx.get("chat_id"))
+        if not pinned and ctx.get("from_clarify_answer"):
+            pinned = _recover_pinned_brand(ctx)
+        if pinned:
+            brand_filter = pinned
+            logger.info("[tool.search_products] brand pin: applied %r (agent omitted brand)", pinned)
+
+    # 브랜드 pivot style carry (2026-08-24): 브랜드는 지정됐는데 text_query 가
+    # 스타일 서술 없이 브랜드/성별/필러뿐이면("스킴스로 보여줘"), 직전 성공검색의
+    # 스타일을 이어붙인다. 없으면 SKIMS 처럼 카탈로그 기본이 언더웨어인 브랜드에서
+    # 맨몸 검색이 무드를 통째로 잃는다 (닝닝 공항룩 → 팬티/브라 실트레이스).
+    # anchor 턴(pinned_embedding)은 자체 이미지 앵커가 있으니 제외.
+    if (
+        brand_filter
+        and pinned_embedding is None
+        and _is_styleless_brand_query(text_query, args.get("brand"), brand_filter)
+    ):
+        try:
+            from app.agents.last_query import get_last_query
+
+            prior_style = get_last_query(ctx.get("chat_id")) or ""
+        except Exception:  # noqa: BLE001
+            prior_style = ""
+        if prior_style:
+            merged = dedup_join(text_query, [prior_style])
+            if merged and merged != text_query:
+                logger.info(
+                    "[tool.search_products] brand-pivot style carry: %r + prior %r → %r",
+                    text_query,
+                    prior_style,
+                    merged,
+                )
+                text_query = merged
+                structured_gender = _query_gender(text_query)
+                ctx["text_query"] = text_query
+                try:
+                    from app.agents.last_query import set_last_query
+
+                    set_last_query(ctx.get("chat_id"), text_query)
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # P2 (2026-08-24) — 링버퍼 최종 갱신: brand 확정 + (pivot 시) 병합된 text_query 를
+    # 반영. label 이 같으므로 main persist 에서 만든 엔트리를 in-place 갱신한다.
+    if pinned_embedding is None and text_query:
+        try:
+            from app.agents.last_query import push_recent_search
+
+            push_recent_search(ctx.get("chat_id"), text_query, brand=brand_filter, label=str(raw_msg or ""))
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 브랜드 지정 검색은 "그 브랜드 상품을 최대한 다 보여줘"가 의도다. 기본
+    # top_k(15)로는 한 브랜드만 볼 때 너무 적으니, LLM 이 더 큰 값을 주지 않은
+    # 한 앨범 한 페이지(스트리밍 album_size=40)에 맞춰 상향한다. diversify 는
+    # brand_filter 활성 시 다양성 캡을 끄므로 이 만큼 실제로 채워진다.
+    if brand_filter:
+        top_k = max(top_k, 40)
 
     # Multi-turn image blending (Level 1 image-first refinement):
     # when no current image URL exists but an origin image URL is stored from
@@ -1355,6 +1686,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 brand_filter=brand_filter,
                 fit=fit,
                 color_family=color_family,
+                name_query=name_query,
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
@@ -1405,6 +1737,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # only the small `top_candidates` summary below.
     persist_last_results(ctx, cands)
 
+    # 2026-08-19 — 직전 브랜드 필터 보관 → refine("다른 색상으로")이 브랜드를
+    # 유지한다. 브랜드 없는 검색이면 set_last_brand(None) 이 이전 값을 지워 stale
+    # 브랜드가 새지 않게 한다. pinned anchor 턴은 last_query 와 동일하게 제외.
+    if pinned_embedding is None:
+        try:
+            from app.agents.last_query import set_last_brand
+
+            set_last_brand(ctx.get("chat_id"), brand_filter)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 260611 — emit `search_done` so subsequent turns' memory context surfaces
     # the prior query (drives the LLM toward `refine_search` instead of a fresh
     # `search_products` or a confused `get_recent_history`).
@@ -1417,4 +1760,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     )
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
-    return SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    result = SearchProductsResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    _notice = _build_color_notice()
+    if _notice:
+        result["notice"] = _notice
+    _digest = await _build_result_digest(cands)
+    if _digest:
+        result["digest"] = _digest
+    return result

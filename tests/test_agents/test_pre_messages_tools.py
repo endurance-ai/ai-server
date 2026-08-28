@@ -1,11 +1,11 @@
 """SPEC-AGENT-UX-P0-001 v0.2.0 / REQ-UX-004 — tool dispatch pre-message firing.
 
 검증:
-- search_products / refine_search dispatch 진입부 → PRE_MESSAGES["search"][lang]
-  1회 발사. 같은 ctx 안에서 두 dispatch 가 연속 호출돼도 같은 key 라 idempotent.
+- search_products / refine_search dispatch → "search" pre-message 를 **발사하지
+  않는다** (2026-08-26 제거: 스피너가 이미 검색 중임을 보여줘 잉여).
 - analyze_image dispatch → PRE_MESSAGES["analyze_image"][lang] 1회.
 - KO/EN 둘 다 ctx["lang"] 따라 분기.
-- send_text 가 raise 해도 본 작업 (search / vision) 은 그대로 실행.
+- send_text 가 raise 해도 본 작업 (vision) 은 그대로 실행.
 """
 
 from __future__ import annotations
@@ -87,11 +87,12 @@ def _make_ctx(lang: str = "ko", chat_id: int = 42, image_url: str | None = None)
     }
 
 
-# ── search_products / refine_search fire "search" pre-message ─────────────
+# ── search_products / refine_search 는 pre-message 를 발사하지 않는다 ──────
+# (2026-08-26 제거: 스피너/typing 이 이미 검색 중임을 보여줘 잉여였다.)
 
 
 @pytest.mark.asyncio
-async def test_search_products_dispatch_fires_search_message_ko(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_search_products_dispatch_sends_no_pre_message(monkeypatch: pytest.MonkeyPatch) -> None:
     spy = _SpyAdapter()
     _bind_adapter(monkeypatch, spy)
     # search_step / diversify 경로 우회 — run_text_only_search 스텁.
@@ -104,27 +105,11 @@ async def test_search_products_dispatch_fires_search_message_ko(monkeypatch: pyt
 
     ctx = _make_ctx(lang="ko")
     await dispatch({"text_query": "leather loafers"}, ctx)
-    assert spy.texts == [(42, PRE_MESSAGES["search"]["ko"])]
-    assert ctx["_pre_msg_sent:search"] is True
+    assert spy.texts == []
 
 
 @pytest.mark.asyncio
-async def test_search_products_dispatch_fires_search_message_en(monkeypatch: pytest.MonkeyPatch) -> None:
-    spy = _SpyAdapter()
-    _bind_adapter(monkeypatch, spy)
-    monkeypatch.setattr(
-        "app.agents.tools.search_products.run_text_only_search",
-        AsyncMock(return_value=[]),
-    )
-
-    from app.agents.tools.search_products import dispatch
-
-    await dispatch({"text_query": "loafers"}, _make_ctx(lang="en"))
-    assert spy.texts == [(42, PRE_MESSAGES["search"]["en"])]
-
-
-@pytest.mark.asyncio
-async def test_refine_search_dispatch_fires_same_search_message(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_refine_search_dispatch_sends_no_pre_message(monkeypatch: pytest.MonkeyPatch) -> None:
     spy = _SpyAdapter()
     _bind_adapter(monkeypatch, spy)
     monkeypatch.setattr(
@@ -135,31 +120,7 @@ async def test_refine_search_dispatch_fires_same_search_message(monkeypatch: pyt
     from app.agents.tools.refine_search import dispatch as refine_dispatch
 
     await refine_dispatch({"action": "broaden"}, _make_ctx(lang="ko"))
-    assert spy.texts == [(42, PRE_MESSAGES["search"]["ko"])]
-
-
-@pytest.mark.asyncio
-async def test_search_and_refine_share_marker_within_same_ctx(monkeypatch: pytest.MonkeyPatch) -> None:
-    """search_products → refine_search 연속 호출 시 같은 "search" 멘트는 1회만."""
-    spy = _SpyAdapter()
-    _bind_adapter(monkeypatch, spy)
-    monkeypatch.setattr(
-        "app.agents.tools.search_products.run_text_only_search",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        "app.agents.tools.refine_search.run_text_only_search",
-        AsyncMock(return_value=[]),
-    )
-
-    from app.agents.tools.refine_search import dispatch as refine_dispatch
-    from app.agents.tools.search_products import dispatch as search_dispatch
-
-    ctx = _make_ctx(lang="ko")
-    await search_dispatch({"text_query": "loafers"}, ctx)
-    await refine_dispatch({"action": "broaden"}, ctx)
-    # 두 dispatch 모두 같은 "search" 키 → marker 차단으로 send_text 1번만.
-    assert len(spy.texts) == 1
+    assert spy.texts == []
 
 
 # ── analyze_image fires its own pre-message ───────────────────────────────
@@ -217,22 +178,7 @@ async def test_analyze_image_skips_pre_message_when_missing_image(monkeypatch: p
     assert spy.texts == []
 
 
-# ── Fail-open: send_text raise → tool body still runs ─────────────────────
-
-
-@pytest.mark.asyncio
-async def test_search_dispatch_send_text_failure_does_not_block_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    raising = _RaisingTextAdapter()
-    _bind_adapter(monkeypatch, raising)
-    search_stub = AsyncMock(return_value=[])
-    monkeypatch.setattr("app.agents.tools.search_products.run_text_only_search", search_stub)
-
-    from app.agents.tools.search_products import dispatch
-
-    result = await dispatch({"text_query": "loafers"}, _make_ctx(lang="ko"))
-    assert raising.send_text_called == 1
-    assert search_stub.await_count == 1  # 본 검색 그대로 실행
-    assert result["ok"] is True
+# ── Fail-open: send_text raise → tool body still runs (analyze_image) ─────
 
 
 @pytest.mark.asyncio

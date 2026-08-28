@@ -52,9 +52,8 @@ class InputState(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     message: ChannelMessage
-    # Channel-neutral name for the integer key used by legacy graph/session
-    # helpers. ``chat_id`` remains an input/property alias for compatibility
-    # with existing nodes, tests, and persisted state adapters.
+    # Keep the serialized field for graph/persistence compatibility. New
+    # callers may use the channel-neutral ``session_key`` input/property.
     chat_id: int = Field(validation_alias=AliasChoices("chat_id", "session_key"))
     from_user_id: int | None = None
 
@@ -65,9 +64,13 @@ class InputState(BaseModel):
     thread_id: UUID = Field(default_factory=uuid4)
     turn_no: int = 0
 
+    # 앱 이미지 인풋(스테이징)에서 사용자가 이미 항목을 골랐을 때 True — 이미지가
+    # 첨부돼도 pick_item(1,2,3,4) 재선택을 건너뛰고 바로 검색으로 간다.
+    skip_item_pick: bool = False
+
     # Per-request search filters from the consumer mobile filter UI (chat API).
     # Threaded into the tool dispatch ctx by react_loop._build_ctx so
-    # search_products / refine_search can apply them. Non-app intake leaves
+    # search_products / refine_search can apply them. Telegram intake leaves
     # these None (defaults) → behavior unchanged on that path.
     # req_gender: normalized taste token (men/women/unisex) — per-request only,
     # never persisted to the taste profile (SPEC-GENDER-PIN-001).
@@ -75,9 +78,18 @@ class InputState(BaseModel):
     req_gender: str | None = None
     req_price_max: int | None = None
 
+    # SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체.
+    #
+    # `chat_id` 를 쓰면 안 된다. 91a8c1a(앱 채팅 세션 격리) 이후 앱/웹 경로의
+    # `chat_id` 는 '사람' 이 아니라 '대화' 를 뜻한다 — 대화마다 값이 바뀌므로
+    # 거기 캡을 얹으면 카운터가 세션별로 흩어져 영구히 한도에 닿지 않는다.
+    # 앱/웹(chat_service)은 계정 파생 id 를 명시적으로 넣고, Telegram(레거시)은
+    # None 으로 두어 `chat_id` 폴백을 쓴다 — 그 경로에선 chat_id 가 곧 사람이다.
+    cap_subject_id: int | None = None
+
     @property
     def session_key(self) -> int:
-        """Channel-neutral name for the legacy integer graph/session key."""
+        """Channel-neutral alias for the legacy integer graph key."""
 
         return self.chat_id
 

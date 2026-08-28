@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.admin_curation import router as admin_curation_router
 from app.api.app_config import router as app_config_router
 from app.api.auth import router as auth_router
 from app.api.brands import router as brands_router
@@ -11,6 +12,7 @@ from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.history import router as history_router
 from app.api.iap import router as iap_router
+from app.api.image import router as image_router
 from app.api.legal import router as legal_router
 from app.api.me import router as me_router
 from app.api.notifications import router as notifications_router
@@ -29,6 +31,7 @@ from app.api.webhooks.apple_notifications import router as apple_webhook_router
 router = APIRouter()
 router.include_router(health_router, tags=["system"])
 router.include_router(app_config_router)
+router.include_router(admin_curation_router)
 router.include_router(auth_router)
 router.include_router(chat_router)
 router.include_router(me_router)
@@ -41,6 +44,7 @@ router.include_router(products_router)
 router.include_router(results_router)
 router.include_router(history_router)
 router.include_router(feedback_router)
+router.include_router(image_router)
 router.include_router(devices_router)
 router.include_router(notifications_router)
 router.include_router(legal_router)

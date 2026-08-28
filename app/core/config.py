@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     LITELLM_BASE_URL: str = "http://localhost:4000"
     LITELLM_MASTER_KEY: str = ""
 
+    # 웹검색 툴 (Tavily). 키가 비어 있으면 web_search 툴은 LLM 에 노출되지 않는다
+    # (llm_client._build_tools_schema 에서 gate). "닝닝 공항패션st" 같은 스타일
+    # 레퍼런스·미지 브랜드 의미를 해석하기 위한 커스텀 툴. Bedrock 경유라 Claude
+    # 내장 web_search 서버툴을 못 써서 외부 검색 API 를 직접 호출한다.
+    TAVILY_API_KEY: str = ""
+    TAVILY_BASE_URL: str = "https://api.tavily.com"
+    WEB_SEARCH_MAX_RESULTS: int = 5
+    WEB_SEARCH_TIMEOUT_MS: int = 8000
+
     # Langfuse — 관측성
     LANGFUSE_HOST: str = "http://localhost:3000"
     LANGFUSE_PUBLIC_KEY: str = ""
@@ -61,7 +70,10 @@ class Settings(BaseSettings):
     # 즉시 회귀 가능하도록 개별 플래그. RELAX_MIN 미만이면 필터 제거 재시도.
     SEARCH_SUBCATEGORY_FILTER_ENABLED: bool = True
     SEARCH_COLOR_FILTER_ENABLED: bool = True
-    SEARCH_FILTER_RELAX_MIN: int = 5
+    # 2026-08-16 — 5 → 20. 결과가 20개 미만이면 subcat/color 를 풀어 유사도로
+    # 채운다(정밀매치 먼저, 완화분 뒤 dedup). 2열 그리드가 빈약해 보이지 않게
+    # 리콜 보강 — 상한은 SEARCH_DEFAULT_K(50).
+    SEARCH_FILTER_RELAX_MIN: int = 20
     # 2026-07-16 — p_gender 상품 레벨 하드 필터 (gender[] && [g,'unisex']).
     # 시맨틱 제약이라 완화 재시도 대상 아님. kill-switch.
     SEARCH_GENDER_FILTER_ENABLED: bool = True
@@ -124,13 +136,11 @@ class Settings(BaseSettings):
     MEMORY_FALLBACK_ON_PROBE_FAIL: bool = True
     SESSION_CLEANUP_INTERVAL_S: int = 300
 
-    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher + 노션 editorial 동기화.
-    # NOTION_* 미설정 시 editorial 동기화만 skip (auto 구좌는 자체 DB 신호로 동작).
+    # 메인 큐레이션 (GET /v1/curation) — auto 구좌 refresher.
+    # 구좌 메타데이터와 editorial 상품 목록은 어드민 페이지가 소유한다.
     CURATION_REFRESH_ENABLED: bool = True
     CURATION_REFRESH_INTERVAL_S: int = 900
     CURATION_SEASON: Literal["summer", "winter"] = "summer"
-    NOTION_TOKEN: str = ""
-    NOTION_CURATION_DB_ID: str = ""  # 노션 "큐레이션 구좌 (어드민)" DB id
 
     # 알림 1차 — 재입고 / 가격 하락 / 관심 브랜드 신규 상품 (scripts/notify_batch.py)
     # 가격 하락 임계치. 찜한 시점(또는 마지막 알림 시점) 기준가 대비 비율.
@@ -187,6 +197,24 @@ class Settings(BaseSettings):
     NOTIFY_DELIVERY_BATCH_SIZE: int = 100
     NOTIFY_APNS_CONCURRENCY: int = 20
     NOTIFY_MAX_DELIVERY_ATTEMPTS: int = 5
+    # 한 사이클에서 아웃박스를 비울 때까지 deliver_pending 을 반복하되 이 상한에서 멈춘다.
+    # 상한이 없으면 재시도가 계속 due 로 돌아오는 상황에서 사이클이 끝나지 않는다.
+    # BATCH_SIZE(=클레임 단위)와 다르다 — 이쪽은 사이클 전체 예산이다.
+    NOTIFY_DELIVERY_MAX_PER_CYCLE: int = 5000
+    # 아웃박스 적재를 유저 N명씩 끊어 커밋한다. 전체를 한 트랜잭션으로 묶으면
+    # 유저·카테고리마다 잡는 pg_advisory_xact_lock 이 커밋까지 누적돼
+    # 공유 락 테이블(max_locks_per_transaction × max_connections)을 고갈시킨다.
+    NOTIFY_OUTBOX_CHUNK_USERS: int = 200
+
+    # 보존 정책. 되돌릴 수 없는 삭제라 **기본 비활성**이다 — 운영에서 먼저
+    # `scripts/notify_retention.py --dry-run` 으로 삭제 대상 규모를 확인한 뒤 켠다.
+    NOTIFY_RETENTION_ENABLED: bool = False
+    # 알림함이 보여주는 기간. 피드 쿼리(app/api/notifications.py)에는 날짜 창이 없어
+    # keyset 으로 무한히 거슬러 올라갈 수 있으므로, 이 값이 사실상 그 상한이 된다.
+    NOTIFY_RETENTION_FEED_D: int = 180
+    NOTIFY_RETENTION_SCAN_TIME: str = "04:00"
+    # 한 트랜잭션에서 지울 행 수. 아웃박스 청킹과 같은 이유로 끊는다.
+    NOTIFY_RETENTION_BATCH: int = 5000
 
     # APNs — environment-specific topic keys. Base64 avoids multiline .env
     # parsing mistakes. Legacy APNS_* values remain a production fallback.
@@ -283,6 +311,18 @@ class Settings(BaseSettings):
     PERSONALIZE_PRICE_FIT_W: float = 0.05
     PERSONALIZE_GENDER_MISMATCH_W: float = 0.10
     PERSONALIZE_FEATURE_W: float = 0.06
+
+    # 속성정렬 rerank ("우와 비슷하다") — 쿼리가 명시한 fit/material 을 후보
+    # product_features.feature_metadata 와 정렬해 가산. color/subcategory 는 이미
+    # 하드게이트라 제외. 개인화와 달리 쿼리 의도라 익명/콜드 유저에도 적용된다.
+    # 골든셋 실측(pool60→top20): fit_feat 0.38→0.83, color_feat 0.52→0.70.
+    ATTR_ALIGN_ENABLED: bool = True
+    ATTR_ALIGN_FIT_W: float = 0.20
+    ATTR_ALIGN_MATERIAL_W: float = 0.08
+    # 색 필터가 재고 부족으로 relax(하드게이트 해제)됐을 때, 요청 색을 소프트
+    # 부스트로 돌려 exact-color(예: 아크네 블랙 진)를 상단에 유지하고 유사상품이
+    # 아래를 채우게 한다. relax 안 됐으면(게이트 유지) color 는 부스트 대상 아님.
+    ATTR_ALIGN_COLOR_W: float = 0.25
 
     # Critique — tap-button refinement on result cards
     CRITIQUE_CHEAPER_RATIO: float = 0.7  # "cheaper" = max_price = anchor * 0.7
@@ -487,3 +527,15 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def model_supports_prompt_caching(model: str | None) -> bool:
+    """Prompt caching (``cache_control: ephemeral``) is Anthropic-only.
+
+    Non-Anthropic Bedrock models (Moonshot/Kimi, Qwen, Nova) reject any request
+    carrying a ``cache_control`` block — LiteLLM forwards the field unchanged and
+    Bedrock 500s with "You invoked an unsupported model or your request did not
+    allow prompt caching". Gate every cache_control we emit on this check so the
+    agent works regardless of which model AGENT_LLM_MODEL / VISION_MODEL points at.
+    """
+    return "claude" in (model or "").lower()

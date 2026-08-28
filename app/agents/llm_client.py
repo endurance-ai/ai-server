@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from app.agents.tool_registry import REGISTRY
-from app.core.config import settings
+from app.core.config import model_supports_prompt_caching, settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,10 @@ def _build_tools_schema() -> list[dict[str, Any]]:
     """
     tools: list[dict[str, Any]] = []
     for name, meta in REGISTRY.items():
+        # web_search is only advertised to the LLM when a search key is set —
+        # otherwise the model would call a dead tool. The dispatch also guards.
+        if name == "web_search" and not (settings.TAVILY_API_KEY or "").strip():
+            continue
         td = meta["args_typeddict"]
         annotations = getattr(td, "__annotations__", {})
         properties: dict[str, Any] = {}
@@ -52,8 +56,9 @@ def _build_tools_schema() -> list[dict[str, Any]]:
         )
     # cache_control on the last tool signals Anthropic to cache the entire tools
     # block (all definitions are stable across iterations). LiteLLM forwards this
-    # field to the Anthropic API unchanged.
-    if tools:
+    # field unchanged — Anthropic caches, but non-Anthropic Bedrock models
+    # (Kimi/Moonshot, Qwen, Nova) 500 on it, so only emit it for Claude.
+    if tools and model_supports_prompt_caching(settings.AGENT_LLM_MODEL):
         tools[-1]["cache_control"] = {"type": "ephemeral"}
     return tools
 

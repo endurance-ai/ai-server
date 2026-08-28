@@ -86,6 +86,22 @@ async def test_byte_identical_on_unique_ids() -> None:
     assert ids == ["r0", "r1", "r2", "r3", "r4"]
 
 
+async def test_brand_filter_relaxes_caps_single_brand() -> None:
+    """브랜드 지정 검색은 단일 브랜드/플랫폼이라도 캡에 안 걸리고 다 통과.
+
+    관측 버그: '글로니 상의' 처럼 brand_filter 가 있으면 결과가 전부 같은
+    브랜드(=같은 platform, 같은 vibe/silhouette first-token)라 brand/platform
+    캡이 겹쳐 5개로 잘렸다. brand_filter 활성 시 캡을 풀어 target 까지 채운다.
+    """
+    raw = [{"id": f"g{i}", "brand": "GLOWNY", "platform": "glowny"} for i in range(12)]
+    # brand_filter 없음 → brand_cap=5 로 5개만.
+    capped = await diversify_service(_state(raw, final_limit=40))
+    assert len(capped.final_candidates) == 5
+    # brand_filter 있음 → 캡 완화, target(40)까지 = 12개 전부.
+    relaxed = await diversify_service(_state(raw, final_limit=40, brand_filter=["GLOWNY"]))
+    assert len(relaxed.final_candidates) == 12
+
+
 async def test_drops_dup_in_log_line(caplog: pytest.LogCaptureFixture) -> None:
     """`drops_dup=N` 이 [STEP 4.8] 로그 라인에 포함."""
     raw = [

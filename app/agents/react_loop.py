@@ -33,7 +33,7 @@ from app.agents.llm_client import get_llm
 from app.agents.tool_registry import REGISTRY, validate_args
 from app.channels.lang import session_lang
 from app.channels.persona import KIKO_PERSONA_SYSTEM_PROMPT
-from app.core.config import settings
+from app.core.config import model_supports_prompt_caching, settings
 from app.graphs.state import WorkingState
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.conversation_log import emit
@@ -105,9 +105,29 @@ _SYSTEM_PROMPT = (
     "When the user gives you ANY two of {category, color, fit, brand, style, garment_name}, your "
     "FIRST action MUST be `search_products`, not `ask_user_clarification`. Clarify is for AFTER a "
     "weak result, not before a never-tried search. Example: '검정 오버사이즈 후드 추천해줘' → "
-    "search_products immediately (3 signals — enough). Only with ≤1 signal (bare '셔츠 추천해줘' / "
-    "'something nice') do you ask, and even then prefer "
-    "`ask_user_clarification(axis='category_pick' or 'subcategory_disambiguation')`.\n"
+    "search_products immediately (3 signals — enough).\n"
+    "BRAND + GARMENT = ALWAYS SEARCH (2026-08-19): a named brand + ANY garment word — even a broad "
+    "bucket like '상의'/'바지'/'아우터', and regardless of the Korean possessive '의' — is ALWAYS "
+    "enough. `search_products` immediately with `brand` + the garment in `text_query`; NEVER "
+    "ask_user_clarification. Examples: '마리떼의 바지 추천해줘' → search_products(brand='marithe', "
+    "text_query='pants'); '아크네 상의 보여줘' → search_products(brand='acne studios', text_query='top'); "
+    "'COS 니트' → search_products(brand='cos', text_query='knit'). If the user names a SPECIFIC product "
+    "(e.g. '아크네 뮤지엄 셔츠'), keep the descriptive word in text_query ('museum shirt') so the closest "
+    "matches surface. Show the products — do NOT narrow further.\n"
+    "STYLE REFERENCE → WEB FIRST: if the request hinges on a look/reference you can't concretely "
+    "picture — celebrity/influencer fashion, an 'OO st(스타일)' tag ('닝닝 공항패션st', '제니st'), or a "
+    "brand whose aesthetic you don't know — call `web_search` FIRST to learn what it is, THEN turn that "
+    "into a concrete `search_products` query (color/fit/garment/mood). Don't ask the user to explain the "
+    "reference and don't guess blindly; look it up. (Skip web_search for plain garment/brand requests you "
+    "can already search.)\n"
+    "ONE COARSE CLARIFY MAX (2026-08-19): with ≤1 signal (bare '셔츠 추천해줘' / 'something nice') you "
+    "may ask AT MOST ONE coarse `ask_user_clarification(axis='category_pick')` — the BIG bucket only "
+    "(top/bottom/outer/dress/shoes/bag). The moment the user picks a bucket, OR whenever the incoming "
+    "message is a `clarify:*` answer, your NEXT action MUST be `search_products` and show the FULL "
+    "result set — NEVER chain a second, narrower clarify. Do NOT use `subcategory_disambiguation` to "
+    "drill down (top → shirt vs knit vs cardigan): double-narrowing tires users and kills engagement. "
+    "Showing MANY products lets people browse and tap — that is the goal. Prefer broad results over "
+    "another question.\n"
     "GENDER (260522 fix) — gender is NEVER a blocker (do NOT ask just for gender). Rule:\n"
     "  - Add a gender word to text_query ONLY when there is an EXPLICIT signal. Sources:\n"
     "    (a) user text ('men shirt', '남자 후드'); (b) the `suggested_query:` line from a picked "
@@ -175,8 +195,10 @@ _PROACTIVE_DIRECTIVE = (
     "broaden). This 'rescue once, then escalate' rule prevents dead-end turns where the "
     "catalog just doesn't have anything at the exact price/style slice the user asked "
     "for — one broadened retry almost always yields something usable.\n"
-    "When the user's intent is ambiguous, prefer calling `ask_user_clarification` "
-    "BEFORE searching rather than guessing. Always end the turn with `respond`."
+    "When intent is genuinely too thin to search (≤1 signal AND no garment bucket), ONE coarse "
+    "`ask_user_clarification(axis='category_pick')` is fine — but never more than one per request, and "
+    "never to narrow within a bucket (see ONE COARSE CLARIFY MAX). Otherwise just search and show "
+    "products. Always end the turn with `respond`."
 )
 
 
@@ -447,8 +469,30 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         ctx_image_url = state.image_url
         ctx_text_query = (state.message.text or "") if state.message else ""
 
+    # 이번 턴이 clarify 답(clarify:<axis>:<value> 콜백)에서 시작됐는지 — 그렇다면
+    # 2차 좁히기(subcategory 등)를 코드로 차단해 "큰 틀 한 번 → 상품" 을 강제한다.
+    _cb = (state.message.callback_data or "") if state.message else ""
+
+    # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 search
+    # 의 `brand` arg 로 안 넣는 문제 보정. 원문에서 브랜드를 감지하면 핀을 세팅,
+    # clarify 답 같은 후속 턴('글로니 → (상의) → (바지)')에서 유지한다. 브랜드
+    # 없는 fresh 텍스트 쿼리(새 화제)면 핀을 지운다. 콜백 턴에 브랜드 없으면 유지.
+    try:
+        from app.agents.last_query import clear_pinned_brand, set_pinned_brand
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+
+        _raw_msg = (state.message.text or "") if state.message else ""
+        _detected = scan_text_for_brand(_raw_msg)
+        if _detected:
+            set_pinned_brand(state.chat_id, _detected)
+        elif not _cb and _raw_msg.strip():
+            clear_pinned_brand(state.chat_id)
+    except Exception:  # noqa: BLE001 — 핀은 부가 기능, ctx 빌드를 막지 않는다
+        logger.debug("[react_loop] brand pin update skipped", exc_info=True)
+
     return {
         "chat_id": state.chat_id,
+        "from_clarify_answer": _cb.startswith("clarify:"),
         "from_user_id": state.from_user_id,
         "user_key": user_key_for(state.from_user_id, state.chat_id),
         "image_url": ctx_image_url,
@@ -761,6 +805,20 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
             anchor_line = _anchor_card_line(msg.callback_data, sess)
             if anchor_line:
                 parts.append(anchor_line)
+        # 2026-08-19 — clarify 답(clarify:<axis>:<value>) 은 "큰 틀 골랐으니 바로 상품"
+        # 신호다. 값을 명시하고 검색을 강제(응답/재질문 금지) — 프롬프트 정책만으론
+        # 에이전트가 clarify 답 후 검색을 건너뛰고 그냥 respond 하던 버그 대응.
+        _cd = msg.callback_data or ""
+        if _cd.startswith("clarify:"):
+            _cv = _cd.split(":", 2)
+            _clarify_val = _cv[2].strip() if len(_cv) >= 3 else ""
+            if _clarify_val and _clarify_val.lower() != "skip":
+                parts.append(
+                    f"clarify_answered: the user just picked '{_clarify_val}'. Your VERY FIRST action "
+                    f"MUST be `search_products` for '{_clarify_val}' (keep any brand / color / gender "
+                    f"already in context). Do NOT call ask_user_clarification again, and do NOT "
+                    f"`respond` before searching — just show the products."
+                )
     # 260612 — direct photo upload (`photo_file_id` without a `urls` link).
     # `resolve_image` skips the file path (we can't pull bytes through Vision
     # right now). Without surfacing this, the LLM sees an empty user_text and
@@ -998,6 +1056,17 @@ def _append_skipped_parallel_tool_results(messages: list[Any], tool_calls: list[
     return appended
 
 
+def _cap_subject_id(state: WorkingState) -> int:
+    """SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체(사람) id.
+
+    `state.chat_id` 를 쓰면 안 된다. 91a8c1a 이후 앱/웹 경로의 chat_id 는 '대화'
+    단위라 대화마다 값이 바뀌고, 그러면 카운터가 세션별로 흩어져 캡이 영구히
+    발동하지 않는다. chat_service 가 계정 파생 id 를 `cap_subject_id` 로 넣어준다.
+    Telegram(레거시)은 None 이라 chat_id 로 폴백 — 그 경로에선 chat_id 가 곧 사람이다.
+    """
+    return state.cap_subject_id or state.chat_id
+
+
 async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Run the ReAct loop. Returns a state delta dict for the LangGraph node."""
     llm = get_llm()
@@ -1053,11 +1122,13 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         logger.info("🧠 [v3:memory] skip · build error")
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
+    # cache_control is Anthropic-only; non-Anthropic Bedrock models (Kimi/Moonshot,
+    # Qwen, Nova) 500 when it's present, so only mark the static prefix for Claude.
+    _sys_block: dict[str, Any] = {"type": "text", "text": system_content}
+    if model_supports_prompt_caching(settings.AGENT_LLM_MODEL):
+        _sys_block["cache_control"] = {"type": "ephemeral"}
     messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": [{"type": "text", "text": system_content, "cache_control": {"type": "ephemeral"}}],
-        },
+        {"role": "system", "content": [_sys_block]},
         {"role": "user", "content": mem_prefix + _build_user_message(state, sess)},
     ]
 
@@ -1079,7 +1150,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 try:
                     from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                    await _cap_increment(state.chat_id, cumulative_tokens)
+                    await _cap_increment(_cap_subject_id(state), cumulative_tokens)
                 except Exception:  # noqa: BLE001
                     pass
             return {
@@ -1094,6 +1165,33 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         # infra error (5xx / throttle / timeout) we re-issue the SAME logical
         # step up to `llm_max_retries` times with short backoff. Non-transient
         # errors fall through to the existing exhaustion fallback unchanged.
+        # LLM-call heartbeat. The tool-dispatch heartbeat (below) covers slow
+        # tool calls, but the `ainvoke` itself is silent — on the FIRST turn a
+        # cold model call (Bedrock cross-region cold start, worse on Sonnet) can
+        # exceed the mobile's 10s stall window before ANY event, so the client
+        # cancels the stream and shows "응답이 늦어져 요청을 취소했어요 / 다시
+        # 시도" (retry then succeeds once warm — the exact reported bug). Fire a
+        # `progress` every 3s while the LLM call is in flight so the client keeps
+        # its stall-timer alive. Fire-and-forget, fail-open (mirrors _tool_heartbeat).
+        from app.graphs.nodes._adapter_ctx import _adapter_var as _llm_hb_var
+
+        _llm_hb_adapter = _llm_hb_var.get()
+        _llm_hb_chat_id = state.chat_id
+
+        async def _llm_heartbeat() -> None:
+            if _llm_hb_adapter is None or _llm_hb_chat_id is None:
+                return
+            try:
+                while True:
+                    await asyncio.sleep(3.0)
+                    try:
+                        await _llm_hb_adapter.send_progress(int(_llm_hb_chat_id), "thinking")
+                    except Exception:  # noqa: BLE001 — never block the LLM call
+                        return
+            except asyncio.CancelledError:
+                return
+
+        _llm_hb_task = asyncio.create_task(_llm_heartbeat())
         ai_msg = None
         last_exc: BaseException | None = None
         last_reason = "llm_timeout"
@@ -1136,6 +1234,9 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                     exc,
                 )
                 await asyncio.sleep(backoff)
+
+        # Stop the LLM-call heartbeat — the call has returned (or exhausted).
+        _llm_hb_task.cancel()
 
         if ai_msg is None:
             logger.warning("[agent_v2] LLM raised (retries exhausted): %r", last_exc)
@@ -1540,7 +1641,9 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             "args": _args_summary(raw_args),
             "args_full": raw_args,
             "result_summary": {
-                k: result.get(k) for k in ("ok", "error", "candidates_count", "card_sent") if k in result
+                k: result.get(k)
+                for k in ("ok", "error", "candidates_count", "card_sent", "notice", "digest")
+                if k in result
             },
             "latency_ms": latency_ms,
             "error": dispatch_err,
@@ -1638,7 +1741,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             try:
                 from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-                await _cap_increment(state.chat_id, cumulative_tokens)
+                await _cap_increment(_cap_subject_id(state), cumulative_tokens)
             except Exception:  # noqa: BLE001
                 pass
         return {
@@ -1659,7 +1762,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         try:
             from app.infrastructure.cache.token_cap import increment as _cap_increment
 
-            await _cap_increment(state.chat_id, cumulative_tokens)
+            await _cap_increment(_cap_subject_id(state), cumulative_tokens)
         except Exception:  # noqa: BLE001 — fail-open, never block respond
             pass
 

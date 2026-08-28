@@ -19,6 +19,7 @@ from typing import Any
 from app.agents.tool_registry import RefineSearchResult
 from app.agents.tools._keyword_utils import as_keyword_list as _as_keyword_list
 from app.agents.tools._keyword_utils import dedup_join as _dedup_join
+from app.agents.tools._keyword_utils import strip_color_tokens as _strip_color_tokens
 from app.agents.tools.search_products import (
     _candidate_to_dict,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     _is_real_image_url,
@@ -54,23 +55,8 @@ _PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
-    # SPEC-AGENT-UX-P0-001 / REQ-UX-004 — refine 도 같은 "search" 멘트
-    # ("잠시만요, …찾아볼게요"). search_products 와 동일 ctx marker 키
-    # (`_pre_msg_sent:search`) 라서 같은 턴에서 두 번 호출돼도 idempotent.
-    try:
-        from app.channels.pre_messages import fire_pre_message
-        from app.graphs.nodes._adapter_ctx import _adapter_var
-
-        await fire_pre_message(
-            _adapter_var.get(),
-            ctx,
-            key="search",
-            lang=ctx.get("lang") or "en",
-            chat_id=ctx.get("chat_id"),
-        )
-    except Exception:  # noqa: BLE001 — never block refine pipeline
-        logger.debug("[tool.refine_search] pre-message skipped")
-
+    # 2026-08-26 — "search" pre-message 제거 (search_products 와 동일). 스피너가
+    # 이미 검색 중임을 보여줘 잉여였다. dict 키는 보존, 발사만 중단.
     action = args.get("action") or "broaden"
     # image_url is sourced from ctx ONLY (never an LLM arg). When no real
     # resolved image is present we route to the text/sparse-only search —
@@ -87,10 +73,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # The stored query is the actual product query ('grey floral lace dress
     # women'); a "cheaper" refine then just re-applies the price clamp on it.
     base_query = ""
+    refine_brand: list[str] | None = None
     try:
-        from app.agents.last_query import get_last_query
+        from app.agents.last_query import get_last_brand, get_last_query
 
         base_query = get_last_query(ctx.get("chat_id")) or ""
+        # 2026-08-19 — 직전 검색 브랜드를 이어받는다. '다른 색상으로' 같은 refine 이
+        # 브랜드를 잃고 다른 브랜드 상품을 뽑던 버그 대응. exclude_brands refine 은
+        # 브랜드를 좁히는 게 아니라 배제하는 것이므로 이어받지 않는다.
+        if args.get("action") != "exclude_brands":
+            refine_brand = get_last_brand(ctx.get("chat_id"))
     except Exception:  # noqa: BLE001
         base_query = ""
     if not base_query:
@@ -98,6 +90,18 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
+
+    # P0-b (2026-08-24) — 색 변주 정상화. base_query 는 직전 검색의 상품 쿼리라
+    # 이전 색 단어("black cropped hoodie")를 그대로 물고 있다. color 를 새로 주면
+    # (color_swap) 그 색 토큰을 임베딩 쿼리에서 걷어내고 새 색을 boost 로 실어,
+    # color_family 하드필터(아래 color_family) + 임베딩 소프트신호가 같은 방향을
+    # 가리키게 한다. 이게 없으면 임베딩이 옛 색을 당기고 color 필터는 재고부족으로
+    # relax·drop 돼(strict_count=0) 색이 안 바뀌던 실트레이스(2026-08-24 닝닝→pink).
+    _new_color = str(args.get("color") or "").strip().lower()
+    if _new_color:
+        base_query = _strip_color_tokens(base_query)
+        if _new_color not in {b.lower() for b in boost}:
+            boost = [_new_color, *boost]
 
     # 260701 — Pinned-product anchor: when the user's CURRENT message text
     # carries a `#<id>` prefix (mobile pinned card → critique chip), refine
@@ -154,9 +158,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     if text_query and text_query != "fashion" and pinned_embedding is None:
         ctx["text_query"] = text_query
         try:
-            from app.agents.last_query import set_last_query
+            from app.agents.last_query import set_last_brand, set_last_query
 
             set_last_query(ctx.get("chat_id"), text_query)
+            # 이어받은 브랜드를 다시 저장 → 체인 refine("다른 색상으로" → "더 슬림하게")
+            # 도 브랜드를 계속 유지한다.
+            set_last_brand(ctx.get("chat_id"), refine_brand)
         except Exception:  # noqa: BLE001
             pass
 
@@ -271,6 +278,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 text_query=text_query,
                 category=category,
                 gender=refine_gender,
+                brand_filter=refine_brand,
                 fit=fit,
                 color_family=color_family,
                 top_k=15,
@@ -363,4 +371,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         logger.debug("[refine_search] search_done emit best-effort skip", exc_info=True)
 
     top = [_candidate_to_dict(c) for c in cands[:5]]
-    return RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    result = RefineSearchResult(ok=True, error=None, candidates_count=len(cands), top_candidates=top)
+    from app.agents.tools.search_products import _build_color_notice, _build_result_digest
+
+    _notice = _build_color_notice()
+    if _notice:
+        result["notice"] = _notice
+    _digest = await _build_result_digest(cands)
+    if _digest:
+        result["digest"] = _digest
+    return result

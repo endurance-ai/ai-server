@@ -64,10 +64,10 @@ def _proactive_on():
     yield
 
 
-def test_ac_3_1_registry_eight_tool(_proactive_on):
-    """SPEC-AGENT-V2-CLEANUP-001 — TOOL_NAMES length 8, suggest_next_step
-    present, validate_args works (unconditional)."""
-    assert len(tr.TOOL_NAMES) == 8
+def test_ac_3_1_registry_nine_tool(_proactive_on):
+    """SPEC-AGENT-V2-CLEANUP-001 — TOOL_NAMES length 9 (web_search added 2026-08),
+    suggest_next_step present, validate_args works (unconditional)."""
+    assert len(tr.TOOL_NAMES) == 9
     assert "suggest_next_step" in tr.TOOL_NAMES
     ok, err = tr.validate_args("suggest_next_step", {"kind": "similar", "options": ["a"], "prompt": "p"})
     assert ok and err is None
@@ -116,9 +116,10 @@ async def test_ac_3_2_directive_in_system_prompt(_proactive_on, _adapter, monkey
     assert "You are kiko" in sys_msg
 
 
-def test_registry_is_unconditionally_eight_tool():
-    """SPEC-AGENT-V2-CLEANUP-001 — the 8-tool registry is permanent;
-    suggest_next_step is always the 8th tool."""
+def test_registry_is_unconditionally_nine_tool():
+    """SPEC-AGENT-V2-CLEANUP-001 — the registry is permanent; suggest_next_step
+    is always last. web_search (2026-08) sits between get_recent_history and
+    respond."""
     assert tr.TOOL_NAMES == (
         "analyze_image",
         "search_products",
@@ -126,6 +127,7 @@ def test_registry_is_unconditionally_eight_tool():
         "update_taste",
         "ask_user_clarification",
         "get_recent_history",
+        "web_search",
         "respond",
         "suggest_next_step",
     )

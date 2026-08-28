@@ -15,6 +15,7 @@ SearchRepository).
 """
 
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from app.core.config import settings
@@ -34,6 +35,14 @@ from app.scoring.personalize_rerank import RerankWeights
 from app.scoring.personalize_rerank import rerank as _personalize_rerank
 
 logger = logging.getLogger(__name__)
+
+# 색(및 subcategory) 정밀 필터가 재고 부족으로 relax·drop 됐을 때의 신호를
+# 상위 에이전트 dispatch 로 전파하는 채널. 검색 파이프라인은 반환값이 후보
+# 리스트뿐이라 "요청 색이 사실상 없어서 유사상품으로 채웠다"는 사실이 사라졌고,
+# 에이전트는 그걸 모른 채 "핑크로 바꿨어!"라고 거짓 확답을 했다(2026-08-24 실
+# 트레이스). ContextVar 라 요청(async task)별로 격리된다. dispatch 가 검색 직후
+# 읽어 result.notice 로 실어 모델이 정직하게 안내하게 한다. None=relax 없음.
+color_relax_ctx: ContextVar[dict[str, Any] | None] = ContextVar("color_relax_ctx", default=None)
 
 # Back-compat re-export: app/pipeline/search.py shim re-exports this name and
 # tests reference _embedding_to_pgvector. The implementation now lives in the
@@ -114,6 +123,46 @@ def _query_pinned_axes(item: Any) -> frozenset[str]:
     return frozenset(pinned)
 
 
+# 입력 fit 표현 → product_features.feature_metadata.fit vocab
+# (regular/relaxed/slim/longline/oversized/cropped/skinny) 정규화 맵.
+_FIT_NORM: dict[str, set[str]] = {
+    "oversized": {"oversized"},
+    "oversize": {"oversized"},
+    "loose": {"relaxed", "oversized"},
+    "relaxed": {"relaxed"},
+    "boxy": {"oversized", "relaxed"},
+    "drop-shoulder": {"oversized"},
+    "wide": {"relaxed"},
+    "wide-leg": {"relaxed"},
+    "wideleg": {"relaxed"},
+    "regular": {"regular"},
+    "slim": {"slim", "skinny"},
+    "skinny": {"skinny"},
+    "fitted": {"slim", "skinny"},
+    "cropped": {"cropped"},
+    "crop": {"cropped"},
+    "longline": {"longline"},
+}
+
+
+def _query_target_attrs(item: Any) -> dict[str, set[str]]:
+    """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
+
+    request 계약에 존재하는 fit/fabric 만 취한다. color/subcategory 는 이미 RPC
+    하드게이트라(모든 후보가 이미 일치) 정렬에서 제외. 값은 feature vocab 집합으로
+    정규화 — fit 은 동의어 맵, material 은 소문자 토큰.
+    """
+    out: dict[str, set[str]] = {}
+    fit = str(getattr(item, "fit", None) or "").strip().lower()
+    if fit:
+        vals = _FIT_NORM.get(fit)
+        out["fit"] = vals if vals else {fit}
+    fab = str(getattr(item, "fabric", None) or "").strip().lower()
+    if fab:
+        out["material"] = {fab}
+    return {k: v for k, v in out.items() if v}
+
+
 async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
     """Attach `public.product_features.feature_metadata` to candidate rows in place.
 
@@ -148,6 +197,8 @@ async def search_service(state: PipelineState) -> PipelineState:
 
     req = state.request
     state.start("search")
+    # relax 신호 초기화 (이 요청에서 relax 없으면 None 유지).
+    color_relax_ctx.set(None)
 
     # v6 embedding-first → query_text/enhance_query RPC path retired (module
     # retained, dormant). search_products_v6 has no text param: query_embedding
@@ -189,6 +240,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             gender=gender_norm,
             w_text=settings.SEARCH_HYBRID_W_TEXT,
             pool=settings.SEARCH_HYBRID_POOL,
+            name_query=(str(getattr(req.item, "name_query", None) or "").strip() or None),
         )
         _do_search = SearchRepository.search_hybrid
         rpc_name = "search_products_hybrid_v1"
@@ -256,17 +308,33 @@ async def search_service(state: PipelineState) -> PipelineState:
     # 매치에서 무조건 탈락) + color 크롤러 원본값 특성상 정밀 필터가 풀을
     # 과도하게 조일 수 있다. 결과가 부족하면 두 필터를 빼고 1회 재시도,
     # 정밀 매치(1차)를 앞에 두고 id dedup 병합 — 정확도는 지키고 리콜만 보강.
+    relaxed_color_family: str | None = None
     if len(rows) < settings.SEARCH_FILTER_RELAX_MIN and (
         params.get("p_subcategory") is not None or params.get("p_color_family") is not None
     ):
+        # 색 게이트가 relax 되면 그 색을 rerank 소프트 부스트로 되살려 exact-color 를
+        # 상단에 유지한다(재고 부족 시 "요청 색 먼저 + 유사상품 채우기").
+        relaxed_color_family = params.get("p_color_family")
         relaxed = dict(params, p_subcategory=None, p_color_family=None)
+        _strict_count = len(rows)
         logger.info(
             "[STEP 4.55][search] precision-filter relax retry — strict_count=%d (<%d) subcat=%r color=%r dropped",
-            len(rows),
+            _strict_count,
             settings.SEARCH_FILTER_RELAX_MIN,
             params.get("p_subcategory"),
             params.get("p_color_family"),
         )
+        # 색 필터가 relax 된 경우 신호를 전파 — 에이전트가 "요청 색 재고가 적어
+        # 유사상품으로 채웠다"고 정직하게 안내하도록. subcategory 만 relax(색 없음)
+        # 는 색 안내 대상이 아니므로 색이 있을 때만 채널을 세팅한다.
+        if relaxed_color_family:
+            color_relax_ctx.set(
+                {
+                    "requested_color": str(relaxed_color_family).strip().upper(),
+                    "exact_count": _strict_count,
+                    "subcategory_also_relaxed": params.get("p_subcategory") is not None,
+                }
+            )
         try:
             relaxed_rows = await _do_search(relaxed)
         except RpcContractError as exc:
@@ -314,19 +382,30 @@ async def search_service(state: PipelineState) -> PipelineState:
     # the personalized order. Skipped when (a) flag off, (b) no user_key
     # (e.g., public /recommend), (c) no signal in the profile, (d) any
     # unexpected error (fail-open: keep RPC order).
-    if settings.PERSONALIZE_RERANK_ENABLED and rows and state.user_key:
+    # 속성정렬 ("우와 비슷하다") 은 쿼리 의도라 익명/콜드 유저에도 적용.
+    target_attrs = _query_target_attrs(req.item) if settings.ATTR_ALIGN_ENABLED else {}
+    # 색 게이트가 relax 됐다면 요청 색을 소프트 부스트 축으로 추가 → exact-color 상단.
+    if settings.ATTR_ALIGN_ENABLED and relaxed_color_family:
+        target_attrs = {**target_attrs, "color": {str(relaxed_color_family).strip().upper()}}
+    want_personalize = settings.PERSONALIZE_RERANK_ENABLED and bool(state.user_key)
+    want_attr = bool(target_attrs)
+    if rows and (want_personalize or want_attr):
         try:
-            from app.infrastructure.memory.taste_profile import get_taste_store
-            from app.scoring import feature_scores_cache
+            profile = None
+            feature_scores = None
+            exclude_axes = None
+            if want_personalize:
+                from app.infrastructure.memory.taste_profile import get_taste_store
+                from app.scoring import feature_scores_cache
 
-            profile = get_taste_store().get_or_create(state.user_key)
-            # Visual-feature taste (ai.user_feature_scores) is only primed for the
-            # app-auth'd search path; internal /recommend reads None here
-            # and stay unchanged. When present, attach each candidate's enriched
-            # features (one batch query) so the rerank can score color/fit/material.
-            feature_scores = feature_scores_cache.get(state.user_key)
-            exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
-            if feature_scores:
+                profile = get_taste_store().get_or_create(state.user_key)
+                # Visual-feature taste (ai.user_feature_scores) is only primed for the
+                # app-auth'd search path; Telegram / internal /recommend read None.
+                feature_scores = feature_scores_cache.get(state.user_key)
+                exclude_axes = _query_pinned_axes(req.item) if feature_scores else None
+            # 후보 feature_metadata 는 개인화(feature_scores) 또는 속성정렬 둘 중
+            # 하나라도 필요하면 한 번에 붙인다(1 batch query).
+            if feature_scores or want_attr:
                 await _attach_feature_metadata(rows)
             weights = RerankWeights(
                 liked_brand=settings.PERSONALIZE_LIKED_BRAND_W,
@@ -335,15 +414,25 @@ async def search_service(state: PipelineState) -> PipelineState:
                 price_fit=settings.PERSONALIZE_PRICE_FIT_W,
                 gender_mismatch=settings.PERSONALIZE_GENDER_MISMATCH_W,
                 feature=settings.PERSONALIZE_FEATURE_W,
+                attr_fit=settings.ATTR_ALIGN_FIT_W if want_attr else 0.0,
+                attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
+                attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(
                     "[STEP 4.65][rerank] adaptive-α: query pinned axes=%s → excluded from feature match",
                     sorted(exclude_axes),
                 )
+            if want_attr:
+                logger.info("[STEP 4.65][rerank] 속성정렬 target=%s", {k: sorted(v) for k, v in target_attrs.items()})
             before_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in rows[:3]]
             state.raw_candidates = _personalize_rerank(
-                rows, profile, weights=weights, feature_scores=feature_scores, exclude_axes=exclude_axes
+                rows,
+                profile,
+                weights=weights,
+                feature_scores=feature_scores,
+                exclude_axes=exclude_axes,
+                target_attrs=target_attrs,
             )
             after_top3 = [(r.get("brand"), float(r.get("distance", 1.0))) for r in state.raw_candidates[:3]]
             if before_top3 != after_top3:

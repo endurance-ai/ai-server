@@ -60,7 +60,7 @@ def _bootstrap(dsn: str) -> None:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS public.products (
                 id             BIGSERIAL PRIMARY KEY,
-                created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                first_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                 brand          TEXT NOT NULL,
                 name           TEXT NOT NULL,
                 category       TEXT,

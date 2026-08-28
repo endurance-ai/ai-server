@@ -169,6 +169,7 @@ def user_key_for(from_user_id: int | None, chat_id: int) -> str:
 
 
 class TasteProfileStore(Protocol):
+    def get(self, user_key: str) -> TasteProfile | None: ...
     def get_or_create(self, user_key: str) -> TasteProfile: ...
     def update(self, profile: TasteProfile) -> None: ...
     def delete(self, user_key: str) -> None: ...
@@ -182,6 +183,9 @@ class InMemoryTasteProfileStore:
         self._profiles: dict[str, TasteProfile] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._evict_task: asyncio.Task | None = None
+
+    def get(self, user_key: str) -> TasteProfile | None:
+        return self._profiles.get(user_key)
 
     def get_or_create(self, user_key: str) -> TasteProfile:
         p = self._profiles.get(user_key)

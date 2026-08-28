@@ -31,6 +31,7 @@ __all__ = [
     "UpdateTasteArgs",
     "AskUserClarificationArgs",
     "GetRecentHistoryArgs",
+    "WebSearchArgs",
     "RespondArgs",
     # SPEC-AGENT-V3-REACT Gap3 — 8th tool (flag-gated registration)
     "SuggestNextStepArgs",
@@ -41,6 +42,7 @@ __all__ = [
     "UpdateTasteResult",
     "AskUserClarificationResult",
     "GetRecentHistoryResult",
+    "WebSearchResult",
     "RespondResult",
     "SuggestNextStepResult",
     # Helpers
@@ -89,6 +91,10 @@ class SearchProductsArgs(TypedDict, total=False):
     # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
     # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
     brand: str | None
+    # 2026-08-19 — 특정 상품/모델을 지목한 경우 상품명 매칭어. 상품명에 나올
+    # 법한 고유 서술어/모델 토큰만 (예: '2021M', 'trompe l’oeil', 'museum').
+    # products.name 을 word-trigram 매칭해 그 상품을 상단으로 부스트한다.
+    name_query: str | None
     # 2026-07-16 — 상황/TPO 쿼리("결혼식 하객룩")를 구성 아이템으로 확장.
     # 특정 옷 이름이 없는 상황 쿼리에서만 2~3개 아이템 쿼리를 채운다.
     # dispatch 가 각각 병렬 검색 후 인터리브 병합. gender 는 시스템이
@@ -138,6 +144,10 @@ class GetRecentHistoryArgs(TypedDict, total=False):
     event_types: list[str]  # optional filter
 
 
+class WebSearchArgs(TypedDict, total=False):
+    query: str  # what to look up on the web (English or Korean)
+
+
 class SuggestNextStepArgs(TypedDict, total=False):
     # SPEC-AGENT-V3-REACT Gap3 — proactive follow-up options card.
     kind: Literal["similar", "fit_change", "different_mood", "broaden", "generic"]
@@ -175,6 +185,14 @@ class SearchProductsResult(TypedDict, total=False):
     error: str | None
     candidates_count: int
     top_candidates: list[dict[str, Any]]  # capped to 5 for LLM context
+    # 요청 속성(색 등)이 재고 부족으로 완화됐을 때의 정직 안내 신호. 에이전트가
+    # 사용자에게 "요청 색이 거의 없어 유사상품으로 채웠다"고 전달하도록 respond
+    # 에 반영. None/부재 = 완화 없음(정상 색 매치).
+    notice: str | None
+    # 결과셋 속성 분포 요약(주력 종류/핏/소재/색/가격대/브랜드믹스). respond 가
+    # 이걸 근거로 "대부분 미디에 린넨" 처럼 구체적으로 묘사(데이드림 벤치마크).
+    # 지어내기 방지 — 모델은 digest 에 있는 속성만 말해야 함.
+    digest: dict[str, Any] | None
 
 
 class RefineSearchResult(TypedDict, total=False):
@@ -182,6 +200,8 @@ class RefineSearchResult(TypedDict, total=False):
     error: str | None
     candidates_count: int
     top_candidates: list[dict[str, Any]]
+    notice: str | None
+    digest: dict[str, Any] | None
 
 
 class UpdateTasteResult(TypedDict, total=False):
@@ -201,6 +221,13 @@ class GetRecentHistoryResult(TypedDict, total=False):
     ok: bool
     error: str | None
     events: list[dict[str, Any]]
+
+
+class WebSearchResult(TypedDict, total=False):
+    ok: bool
+    error: str | None
+    answer: str | None  # provider's synthesized answer (may be None)
+    results: list[dict[str, Any]]  # [{title, url, content}] snippets
 
 
 class RespondResult(TypedDict, total=False):
@@ -260,8 +287,20 @@ REGISTRY: dict[str, ToolMetadata] = {
             "'midi-dress', 'cargo-pants'). ALWAYS set it when the user asks for a "
             "specific garment type; it powers a precise catalog filter.\n"
             "  - `brand`: ONLY when the user explicitly names a brand "
-            "(e.g. '아크네 가디건' → brand='acne studios'). English brand name. "
-            "NEVER invent a brand the user didn't mention.\n"
+            "(e.g. '아크네 가디건' → brand='acne studios'). Prefer the English "
+            "brand name; if you are not sure of the English spelling (Korean "
+            "indie labels, abbreviations like 'paf'), pass the brand exactly as "
+            "the user wrote it — the resolver matches Korean, English, and "
+            "acronyms. NEVER invent a brand the user didn't mention. When the "
+            "user explicitly LABELS a word a brand — 'X 브랜드', '브랜드 X', "
+            "'X 브랜드 제품/옷' — set brand=X EVEN IF X is also a common "
+            "material/color word. e.g. '스웨이드 브랜드 제품 추천' → brand='스웨이드' "
+            "(the brand SUADE), NOT color_family/material 'suede'.\n"
+            "  - `name_query`: ONLY when the user names a SPECIFIC product / model / "
+            "line (e.g. '아크네 2021M 진', 'the museum shirt', 'trompe l’oeil 진'). Put "
+            "the distinctive descriptor here in ENGLISH ('2021M', 'museum', 'trompe "
+            "l’oeil'); it word-matches products.name and boosts that exact item to the "
+            "top. Leave empty for generic garment requests ('바지 추천').\n"
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"
@@ -393,7 +432,11 @@ REGISTRY: dict[str, ToolMetadata] = {
             "  - 'occasion'                   — daily/date/work/party/wedding/etc\n"
             "  - 'subcategory_disambiguation' — narrowing within a category (e.g. shirt: oxford vs linen vs flannel)\n"
             "  - 'generic_fallback'           — when none of the above fit (last resort)\n"
-            "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected."
+            "DO NOT invent axes like 'gender', 'wearer', 'mood', 'occasion & vibe', etc — they will be rejected.\n"
+            "`options` MUST be an ARRAY of 2-6 SHORT, mutually-exclusive choice labels — one label per "
+            'array element, each 1-3 words (e.g. ["니트", "가디건", "코트", "셔츠"]). Each becomes its own '
+            'tappable button. NEVER put several choices into a single string like ["니트, 가디건, 코트"] — that '
+            "renders as one useless button."
         ),
         "args_typeddict": AskUserClarificationArgs,
         "result_typeddict": AskUserClarificationResult,
@@ -413,6 +456,29 @@ REGISTRY: dict[str, ToolMetadata] = {
         "dispatch_fn_path": "app.agents.tools.get_recent_history:dispatch",
         "langfuse_span_tag": "tool.get_recent_history",
         "side_effect_doc": "Read-only SELECT on ai.log_conversation_event.",
+        "terminates_loop": False,
+    },
+    "web_search": {
+        "name": "web_search",
+        "description": (
+            "Look something up on the live web. Use ONLY when you cannot answer "
+            "from the catalog or your own knowledge — specifically to decode a "
+            "STYLE REFERENCE or an UNFAMILIAR brand the user named:\n"
+            "  - celebrity / influencer looks and 'OO st(st=스타일)' references "
+            "(e.g. '닝닝 공항패션st', '제니st') → search to learn what the look "
+            "actually IS (colors, silhouettes, garment types, mood).\n"
+            "  - a brand you don't recognize → search to learn its aesthetic.\n"
+            "After web_search, TRANSLATE what you learned into a concrete "
+            "`search_products` query (color/fit/garment/mood) — the web result "
+            "itself is NOT the answer; the catalog products are. Do NOT use "
+            "web_search for plain garment requests you can already search "
+            "('검정 니트'), for prices, or for stock. Returns short web snippets."
+        ),
+        "args_typeddict": WebSearchArgs,
+        "result_typeddict": WebSearchResult,
+        "dispatch_fn_path": "app.agents.tools.web_search:dispatch",
+        "langfuse_span_tag": "tool.web_search",
+        "side_effect_doc": "External HTTP call to the Tavily search API.",
         "terminates_loop": False,
     },
     "respond": {
