@@ -55,6 +55,7 @@ class RerankWeights:
     attr_material: float = 0.0
     attr_color: float = 0.0
     attr_pattern: float = 0.0
+    attr_neckline: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -146,6 +147,9 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tpat = target_attrs.get("pattern")
     if tpat and str(fmeta.get("pattern") or "").strip().lower() in tpat:
         bonus += w.attr_pattern
+    tneck = target_attrs.get("neckline")
+    if tneck and str(fmeta.get("neckline") or "").strip().lower() in tneck:
+        bonus += w.attr_neckline
     return bonus
 
 

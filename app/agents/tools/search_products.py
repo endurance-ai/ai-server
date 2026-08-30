@@ -854,6 +854,9 @@ async def run_text_only_search(
     gender: str | None = None,
     brand_filter: list[str] | None = None,
     fit: str | None = None,
+    material: str | None = None,
+    pattern: str | None = None,
+    neckline: str | None = None,
     color_family: str | None = None,
     name_query: str | None = None,
     top_k: int = 40,
@@ -895,6 +898,9 @@ async def run_text_only_search(
         # vocab 매칭)는 search_service._resolve_precision_filters 단일 지점.
         subcategory=subcategory,
         fit=fit,
+        fabric=material,
+        pattern=pattern,
+        neckline=neckline,
         color_family=color_family,
         name_query=name_query,
         search_query=text_query,
@@ -1546,6 +1552,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         subcategory = ctx.get("vision_subcategory")
     fit = args.get("fit")
     color_family = args.get("color_family")
+    material = args.get("material")
+    pattern = args.get("pattern")
+    neckline = args.get("neckline")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query = str(args.get("name_query") or "").strip() or None
 
@@ -1765,6 +1774,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 gender=structured_gender,
                 brand_filter=brand_filter,
                 fit=fit,
+                material=material,
+                pattern=pattern,
+                neckline=neckline,
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,

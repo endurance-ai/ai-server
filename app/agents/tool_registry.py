@@ -84,6 +84,13 @@ class SearchProductsArgs(TypedDict, total=False):
     style_node_primary: str | None
     color_family: str | None
     fit: str | None
+    # 2026-08-31 — 명시 속성 필터(rerank "우와 비슷하다" 디테일 축). 풀커버리지 223k.
+    #   material: 소재(linen/cotton/knit/wool/denim/leather/suede/corduroy/…)
+    #   pattern: 무늬(striped/checked/floral/dot/camo/graphic/… ; solid 은 제외)
+    #   neckline: 넥라인(v-neck/crew-neck/turtleneck/off-shoulder/…)
+    material: str | None
+    pattern: str | None
+    neckline: str | None
     # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
     # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
     # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
@@ -313,6 +320,11 @@ REGISTRY: dict[str, ToolMetadata] = {
             "검정 재킷' → exclude_brands=['Zara'], text_query='black jacket'). Use when a "
             "NEW request names a brand to AVOID. Prefer the English brand name. (To exclude "
             "from results ALREADY shown, use refine_search action='exclude'.)\n"
+            "  - `material` / `pattern` / `neckline`: query DETAIL attributes, set ONLY when "
+            "the user names them. ENGLISH lowercase (hyphen-join multiword). material "
+            "('린넨'→'linen', 코튼/니트/울/데님/가죽/스웨이드/코듀로이), pattern ('스트라이프'→"
+            "'striped', 체크/플로럴/도트/카모/그래픽 — NOT solid), neckline ('브이넥'→'v-neck', "
+            "터틀넥/크루넥/오프숄더). These sharpen the similarity rerank; omit when unmentioned.\n"
             "\n"
             "[WHEN search_products vs refine_search — DELTA vs PIVOT]\n"
             "Once a search has run this conversation, decide by ONE question: does the new "
