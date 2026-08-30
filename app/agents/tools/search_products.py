@@ -857,6 +857,9 @@ async def run_text_only_search(
     material: str | None = None,
     pattern: str | None = None,
     neckline: str | None = None,
+    length: str | None = None,
+    sleeve_length: str | None = None,
+    leg_shape: str | None = None,
     color_family: str | None = None,
     name_query: str | None = None,
     top_k: int = 40,
@@ -901,6 +904,9 @@ async def run_text_only_search(
         fabric=material,
         pattern=pattern,
         neckline=neckline,
+        length=length,
+        sleeve_length=sleeve_length,
+        leg_shape=leg_shape,
         color_family=color_family,
         name_query=name_query,
         search_query=text_query,
@@ -1555,6 +1561,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     material = args.get("material")
     pattern = args.get("pattern")
     neckline = args.get("neckline")
+    length = args.get("length")
+    sleeve_length = args.get("sleeve_length")
+    leg_shape = args.get("leg_shape")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query = str(args.get("name_query") or "").strip() or None
 
@@ -1777,6 +1786,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 material=material,
                 pattern=pattern,
                 neckline=neckline,
+                length=length,
+                sleeve_length=sleeve_length,
+                leg_shape=leg_shape,
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,

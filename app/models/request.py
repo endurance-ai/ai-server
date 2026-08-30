@@ -23,6 +23,10 @@ class AnalyzedItem(BaseModel):
     # 과 정렬. fit/fabric 과 함께 "우와 비슷하다" 디테일 축.
     pattern: str | None = None
     neckline: str | None = None
+    # 2026-08-31 — v2.6 enrichment 축(product_features_v26.attr). 하의/길이 디테일.
+    length: str | None = None
+    sleeve_length: str | None = None
+    leg_shape: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query: str | None = None
