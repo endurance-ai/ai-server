@@ -281,3 +281,39 @@ async def test_legacy_refine_still_persists_last_query(monkeypatch, _mock_embed_
 
     assert res["ok"] is True
     set_lq.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_exclude_brands_drops_matching_candidates(monkeypatch, _mock_embed_text):
+    """Regression (2026-08-30) — refine_search `exclude_brands` was a TOTAL no-op:
+    the list was never applied anywhere, and the brand-inheritance guard compared
+    action to the string 'exclude_brands' which is not a real enum value
+    (enum: broaden/refine/exclude/cheaper/color_swap), so '자라 빼고' on a refine
+    turn silently kept Zara. Fix: drop candidates whose brand matches the excluded
+    brand (case-insensitive exact OR substring), parity with search_products (D2)."""
+
+    async def fake_search_step(state):
+        state.raw_candidates = [
+            {"id": "keep1", "name": "Black Jacket", "brand": "COS"},
+            {"id": "drop1", "name": "Black Jacket", "brand": "Zara"},
+            {"id": "keep2", "name": "Wool Coat", "brand": "Acne Studios"},
+            {"id": "drop2", "name": "Denim Jacket", "brand": "ZARA Home"},
+        ]
+        return state
+
+    async def fake_diversify_step(state):
+        state.final_candidates = list(state.raw_candidates)
+        return state
+
+    monkeypatch.setattr("app.pipeline.search.search_step", fake_search_step)
+    monkeypatch.setattr("app.pipeline.diversify.diversify_step", fake_diversify_step)
+
+    ctx = {"chat_id": 1, "image_url": "", "text_query": "자라 빼고"}
+    res = await rs.dispatch({"action": "exclude", "exclude_brands": ["Zara"]}, ctx)
+
+    assert res["ok"] is True
+    ids = {c.get("product_id") for c in res["top_candidates"]}
+    assert "keep1" in ids
+    assert "keep2" in ids
+    assert "drop1" not in ids  # brand 'Zara' exact (case-insensitive)
+    assert "drop2" not in ids  # 'ZARA Home' — 'zara' substring match

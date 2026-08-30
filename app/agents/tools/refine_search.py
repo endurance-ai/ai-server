@@ -79,10 +79,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
         base_query = get_last_query(ctx.get("chat_id")) or ""
         # 2026-08-19 — 직전 검색 브랜드를 이어받는다. '다른 색상으로' 같은 refine 이
-        # 브랜드를 잃고 다른 브랜드 상품을 뽑던 버그 대응. exclude_brands refine 은
-        # 브랜드를 좁히는 게 아니라 배제하는 것이므로 이어받지 않는다.
-        if args.get("action") != "exclude_brands":
-            refine_brand = get_last_brand(ctx.get("chat_id"))
+        # 브랜드를 잃고 다른 브랜드 상품을 뽑던 버그 대응. exclude 턴은 아래에서 배제
+        # 대상을 이 상속 목록에서 빼고(0건 방지) 결과도 client-side 로 드롭한다.
+        # 2026-08-30 — 종전 `action != "exclude_brands"` 가드는 enum 실제값 'exclude'
+        # 와 안 맞아 항상 True(죽은 코드)였고, exclude_brands 리스트도 어디서도 적용
+        # 안 돼 완전 no-op 였다. 가드를 걷고 항상 상속 → 아래 exclude 처리로 일원화.
+        refine_brand = get_last_brand(ctx.get("chat_id"))
     except Exception:  # noqa: BLE001
         base_query = ""
     if not base_query:
@@ -90,6 +92,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
 
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
+    exclude_brands = _as_keyword_list(args.get("exclude_brands"))
+    # 이어받은 positive 브랜드 필터에서 배제 대상 제거 — 그 브랜드로 검색하며 동시에
+    # 배제하면 0건이 되므로(예: 직전 'Zara 재킷' → '자라 빼고').
+    if refine_brand and exclude_brands:
+        _ebl = {x.lower() for x in exclude_brands}
+        refine_brand = [b for b in refine_brand if b.lower() not in _ebl] or None
 
     # P0-b (2026-08-24) — 색 변주 정상화. base_query 는 직전 검색의 상품 쿼리라
     # 이전 색 단어("black cropped hoodie")를 그대로 물고 있다. color 를 새로 주면
@@ -305,6 +313,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     if exclude_kw:
         ek = {k.lower() for k in exclude_kw}
         cands = [c for c in cands if not any(k in (getattr(c, "title", "") or "").lower() for k in ek)]
+
+    # exclude_brands client-side drop (parity with search_products D2). Fixes the
+    # prior no-op: the LLM passes action='exclude' + exclude_brands=['Zara'] but
+    # the list was never applied anywhere. Drop candidates whose brand matches an
+    # excluded brand (case-insensitive exact OR substring).
+    if exclude_brands:
+        _ebset = {b.lower() for b in exclude_brands}
+
+        def _brand_excluded(c: Any) -> bool:
+            b = (c.get("brand") if isinstance(c, dict) else getattr(c, "brand", "")) or ""
+            b = str(b).lower()
+            return bool(b) and any(x == b or x in b for x in _ebset)
+
+        cands = [c for c in cands if not _brand_excluded(c)]
 
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike (flag-gated; OFF →
     # unchanged → V2 byte-identical). Reuses the search_products helper.
