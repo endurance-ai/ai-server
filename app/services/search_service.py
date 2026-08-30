@@ -368,10 +368,19 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if mat_vals:
         out["material"] = mat_vals
 
-    # pattern — request 계약엔 구조화 필드가 없어 쿼리 텍스트에서만 추출(변별 패턴).
-    pat_vals = _extract_pattern_from_text(qtext)
+    # pattern — 구조화 인자(item.pattern) 우선 + 쿼리 텍스트 추출(합집합).
+    pat_vals: set[str] = set()
+    pat = str(getattr(item, "pattern", None) or "").strip().lower()
+    if pat:
+        pat_vals.add(_PATTERN_NORM.get(pat, pat))
+    pat_vals |= _extract_pattern_from_text(qtext)
     if pat_vals:
         out["pattern"] = pat_vals
+
+    # neckline — 구조화 인자(item.neckline)만(텍스트 추출기 없음). feature_metadata.neckline 정렬.
+    neck = str(getattr(item, "neckline", None) or "").strip().lower()
+    if neck:
+        out["neckline"] = {neck}
 
     return {k: v for k, v in out.items() if v}
 
@@ -631,6 +640,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_material=settings.ATTR_ALIGN_MATERIAL_W if want_attr else 0.0,
                 attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
                 attr_pattern=settings.ATTR_ALIGN_PATTERN_W if want_attr else 0.0,
+                attr_neckline=settings.ATTR_ALIGN_NECKLINE_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

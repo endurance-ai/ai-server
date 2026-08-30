@@ -17,12 +17,16 @@ from app.services.search_service import (
 )
 
 
-def _item(search_query: str = "", *, fit=None, fabric=None, search_query_ko=None) -> SimpleNamespace:
+def _item(
+    search_query: str = "", *, fit=None, fabric=None, pattern=None, neckline=None, search_query_ko=None
+) -> SimpleNamespace:
     return SimpleNamespace(
         search_query=search_query,
         search_query_ko=search_query_ko,
         fit=fit,
         fabric=fabric,
+        pattern=pattern,
+        neckline=neckline,
     )
 
 
@@ -134,3 +138,22 @@ def test_target_attrs_reads_korean_query_field():
     out = _query_target_attrs(_item("", search_query_ko="오버핏 니트"))
     assert out["fit"] == {"oversized"}
     assert out["material"] == {"knit"}
+
+
+# ── 명시 속성 arg (2026-08-31: material→fabric / pattern / neckline) ──────────
+
+
+def test_target_attrs_structured_pattern_unions_with_text():
+    # 명시 pattern arg 가 텍스트 추출과 합집합. (텍스트 없이 arg 만으로도 발동.)
+    out = _query_target_attrs(_item("cotton shirt", pattern="striped"))
+    assert out["pattern"] == {"striped"}
+    assert out["material"] == {"cotton"}
+
+
+def test_target_attrs_structured_neckline_arg_only():
+    # neckline 은 텍스트 추출기가 없어 명시 arg 로만 target 세팅된다.
+    out = _query_target_attrs(_item("knit sweater", neckline="v-neck"))
+    assert out["neckline"] == {"v-neck"}
+    assert out["material"] == {"knit"}
+    # arg 없으면 텍스트에 넥라인 단어가 있어도 안 잡힘(추출기 부재).
+    assert "neckline" not in _query_target_attrs(_item("v-neck knit sweater"))

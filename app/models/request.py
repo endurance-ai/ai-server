@@ -19,6 +19,10 @@ class AnalyzedItem(BaseModel):
     name: str | None = None
     fit: str | None = None
     fabric: str | None = None
+    # 2026-08-31 — 명시 속성 필터(rerank target). feature_metadata.pattern/neckline
+    # 과 정렬. fit/fabric 과 함께 "우와 비슷하다" 디테일 축.
+    pattern: str | None = None
+    neckline: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query: str | None = None

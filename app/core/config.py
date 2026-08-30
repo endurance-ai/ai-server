@@ -327,6 +327,9 @@ class Settings(BaseSettings):
     # 부스트로 돌려 exact-color(예: 아크네 블랙 진)를 상단에 유지하고 유사상품이
     # 아래를 채우게 한다. relax 안 됐으면(게이트 유지) color 는 부스트 대상 아님.
     ATTR_ALIGN_COLOR_W: float = 0.25
+    # 2026-08-31 — neckline(v-neck/turtleneck/off-shoulder/…) 정렬 가산. 풀 커버리지
+    # (223k)인데 종전 미사용이던 축. 명시 arg(search_products.neckline)로만 target 세팅.
+    ATTR_ALIGN_NECKLINE_W: float = 0.10
 
     # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
     # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.
