@@ -1,7 +1,7 @@
 """SPEC-CLARIFY-CARDS-001 — clarify_values 매핑 표 검증.
 
 REQ-CLARIFY-VALUE-MAPPING-001: 모든 enum 값이 매핑 표에 존재해야 한다.
-REQ-CLARIFY-CARD-003: 모든 라벨이 가독성 한계 내 + 이모지 금지 + Telegram
+REQ-CLARIFY-CARD-003: 모든 라벨이 가독성 한계 내 + 이모지 금지 + 콜백
 callback_data 64바이트 한도(R3) 검증.
 """
 
@@ -20,7 +20,7 @@ from app.channels.clarify_values import (
 )
 
 # REQ-CLARIFY-CARD-003 hard limits.
-LABEL_HARD_BYTES = 50  # Telegram inline button label limit (실제 ~64; 보수적으로 50).
+LABEL_HARD_BYTES = 50  # 인라인 버튼 라벨 한도 (실제 ~64; 보수적으로 50).
 LABEL_RECOMMENDED_CHARS = 16
 CALLBACK_HARD_BYTES = 64
 
@@ -85,7 +85,7 @@ class TestLabelGuards:
 
 
 class TestCallbackByteLimit:
-    """R3 — clarify:<axis>:<value> 콜백이 Telegram 64바이트 한도 안에 들어감."""
+    """R3 — clarify:<axis>:<value> 콜백이 callback_data 64바이트 한도 안에 들어감."""
 
     def test_all_callback_payloads_within_64b(self):
         for axis_val, opts in AXIS_OPTIONS.items():

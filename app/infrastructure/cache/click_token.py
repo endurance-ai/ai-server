@@ -3,7 +3,7 @@
 Mints short, unguessable tokens that wrap outbound product URLs through the
 redirect proxy (`GET /r/{token}`). Tap → proxy looks up token → emits
 `card_clicked` → 302 to product_url. Without this layer, AI server never sees
-the click (Telegram opens external URL directly from user's device).
+the click (the client opens the external URL directly from the user's device).
 
 Keyspace:
 - `kiko:click:{token}` (TTL 24h, JSON value): `{chat_id, rec_id, product_id,

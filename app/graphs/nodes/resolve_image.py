@@ -5,7 +5,7 @@ Wraps: `app/channels/link_resolver.py::resolve` (Pinterest / og:image).
 Direct photo uploads (`photo_file_id` without URL): download bytes via
 `adapter.download_attachment` and inline them as a `data:image/jpeg;base64,…`
 URL so the downstream vision node can process them through the same
-`image_url` field path. Telegram `message.photo` is always JPEG.
+`image_url` field path.
 """
 
 from __future__ import annotations

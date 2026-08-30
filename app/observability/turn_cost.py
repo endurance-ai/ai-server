@@ -6,7 +6,7 @@ including Vision (GPT-4o-mini via LLMProvider.chat) and Reflexion
 evaluator, not just the ReAct loop.
 
 Usage pattern:
-  telegram.py _invoke_graph  → reset_turn()
+  chat_service _run_graph    → reset_turn()
   llm.py LLMProvider.chat()  → accumulate_raw(model, usage_dict)
   react_loop.py per-LLM-call → accumulate_lc(model, usage_metadata)
   react_loop.py finally      → get_turn_totals()
@@ -194,7 +194,7 @@ def reset_turn(
     Must be called once per webhook turn before any LLM calls.
 
     `user_id` is the real `ai.user_profiles.user_id` for consumer-app turns
-    (None for telegram-channel turns, which have no app user_profiles row).
+    (None for non-app turns, which have no app user_profiles row).
     It rides the same per-turn accumulator so `emit()` call sites do not each
     need to thread it through separately (SPEC-CONVERSATION-LOG-001 follow-up).
     """

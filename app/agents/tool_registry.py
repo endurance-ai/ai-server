@@ -162,7 +162,7 @@ class RespondArgs(TypedDict, total=False):
     # NOTE (SPEC-AGENT-V2-REACT cards-spam fix): `cards` is intentionally NOT a
     # field. The LLM (esp. nova-lite) cannot serialize search candidates and
     # char-exploded a markdown string into a per-character list → 1-char
-    # Telegram sends + empty-string 400s. Cards are now sourced internally by
+    # channel sends + empty-string rejections. Cards are now sourced internally by
     # the respond tool from the turn's last search (`sess.last_results`).
     text: str
 
@@ -476,7 +476,7 @@ REGISTRY: dict[str, ToolMetadata] = {
         "result_typeddict": AskUserClarificationResult,
         "dispatch_fn_path": "app.agents.tools.ask_user_clarification:dispatch",
         "langfuse_span_tag": "tool.ask_user_clarification",
-        "side_effect_doc": "Sends a Telegram message with InlineKeyboard.",
+        "side_effect_doc": "Sends a channel message with an inline keyboard.",
         "terminates_loop": False,
     },
     "get_recent_history": {
@@ -527,7 +527,7 @@ REGISTRY: dict[str, ToolMetadata] = {
         "result_typeddict": RespondResult,
         "dispatch_fn_path": "app.agents.tools.respond:dispatch",
         "langfuse_span_tag": "tool.respond",
-        "side_effect_doc": "Sends Telegram messages (text + optional product cards).",
+        "side_effect_doc": "Sends channel messages (text + optional product cards).",
         "terminates_loop": True,
     },
 }
@@ -548,7 +548,7 @@ REGISTRY["suggest_next_step"] = {
     "result_typeddict": SuggestNextStepResult,
     "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
     "langfuse_span_tag": "tool.suggest_next_step",
-    "side_effect_doc": "Sends a Telegram message with InlineKeyboard (reuses adapter).",
+    "side_effect_doc": "Sends a channel message with an inline keyboard (reuses adapter).",
     "terminates_loop": False,
 }
 

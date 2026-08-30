@@ -57,7 +57,7 @@ POST /auth/revoke    — refresh_token revoke (204)
 
 ### 5. Chat Service (`app/services/chat_service.py`)
 
-**`CaptureAdapter`** 패턴: 기존 LangGraph 그래프를 그대로 재사용하되, Telegram으로 보내는 대신 in-process에서 캡처.
+**`CaptureAdapter`** 패턴: 기존 LangGraph 그래프를 그대로 재사용하되, 외부 채널로 보내는 대신 in-process에서 캡처.
 
 - `send_text` → `self._texts` 수집
 - `send_card` → `self._cards` 수집, `0` 반환 (non-None = 성공 신호)
@@ -68,7 +68,7 @@ POST /auth/revoke    — refresh_token revoke (204)
 abs(int.from_bytes(user_id.bytes[:8], 'big')) % (2**62)
 ```
 
-**Gender sync**: REST API 유저는 Telegram 버튼 플로우 없이 `user_profiles.gender`에서 읽어 taste profile에 미리 세팅. 미설정 시 기본값 `unisex`.
+**Gender sync**: REST API 유저는 인라인 버튼 플로우 없이 `user_profiles.gender`에서 읽어 taste profile에 미리 세팅. 미설정 시 기본값 `unisex`.
 
 ### 6. Chat API (`app/api/chat.py`)
 
@@ -110,6 +110,8 @@ REFRESH_TOKEN_EXPIRE_DAYS=30
 
 `feat/social-login-user-identity`
 
-## Telegram 호환성
+## 채널 현황
 
-기존 Telegram Webhook 흐름은 변경 없이 유지. 두 채널이 동일한 LangGraph 그래프를 공유한다.
+2026-08-27 기준 Telegram 채널은 제거되었고, 앱/웹 `/v1/chat` SSE 가 유일한 사용자 채널이다.
+여기에 기술된 `CaptureAdapter` / `StreamingAdapter` 패턴은 그대로 유효하다 — 동일한 LangGraph
+그래프를 `MessengerAdapter` 구현체만 바꿔 재사용한다.

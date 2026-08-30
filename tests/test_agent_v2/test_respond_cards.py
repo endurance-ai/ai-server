@@ -335,31 +335,6 @@ async def test_search_then_respond_cards_sent_this_turn(monkeypatch):
         set_store(None)
 
 
-# --- send_text empty/whitespace guard ---
-
-
-@pytest.mark.asyncio
-async def test_send_text_empty_guard():
-    from app.channels.telegram.adapter import TelegramAdapter
-
-    adapter = TelegramAdapter(bot_token="x:y")
-    posted: list = []
-
-    async def _fake_post(method, payload, **kw):
-        posted.append((method, payload))
-        return {"ok": True}
-
-    adapter._post = _fake_post  # type: ignore[assignment]
-
-    await adapter.send_text(123, "")
-    await adapter.send_text(123, "   ")
-    await adapter.send_text(123, "\n\t ")
-    assert posted == []  # NO Telegram call for empty/whitespace
-
-    await adapter.send_text(123, "real")
-    assert len(posted) == 1
-
-
 # --- respond idempotency under react_loop transient retry ---
 
 

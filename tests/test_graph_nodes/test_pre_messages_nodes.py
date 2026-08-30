@@ -43,7 +43,7 @@ class _RaisingTextAdapter(MessengerAdapter):
 
     async def send_text(self, chat_id: int, text: str) -> None:
         self.send_text_called += 1
-        raise RuntimeError("simulated telegram failure")
+        raise RuntimeError("simulated channel failure")
 
     async def send_card(self, chat_id: int, card: BotCard) -> int | None:  # pragma: no cover
         return None

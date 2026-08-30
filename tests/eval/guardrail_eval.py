@@ -8,7 +8,7 @@ scores the reply against the case's `expectations`.
 Why LiteLLM + persona only (no full ReAct loop):
 - Guardrails are baked into the persona system prompt, so the smallest
   faithful reproduction is "system prompt + user text -> chat completion".
-- Skips Modal embeddings, pgvector RPC, tool dispatch, and Telegram I/O so
+- Skips Modal embeddings, pgvector RPC, tool dispatch, and channel I/O so
   the eval is cheap and reproducible.
 - The judge does not see ground-truth product data, just the bot's words.
 

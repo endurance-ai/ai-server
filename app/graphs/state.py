@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.channels.critique import CritiqueDelta
 from app.channels.router import RoutedDecision
@@ -52,7 +52,9 @@ class InputState(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     message: ChannelMessage
-    chat_id: int
+    # Keep the serialized field for graph/persistence compatibility. New
+    # callers may use the channel-neutral ``session_key`` input/property.
+    chat_id: int = Field(validation_alias=AliasChoices("chat_id", "session_key"))
     from_user_id: int | None = None
 
     # SPEC-CONVERSATION-LOG-001 / REQ-LOG-THREAD-001 / REQ-LOG-TURN-001 —
@@ -84,6 +86,12 @@ class InputState(BaseModel):
     # 앱/웹(chat_service)은 계정 파생 id 를 명시적으로 넣고, Telegram(레거시)은
     # None 으로 두어 `chat_id` 폴백을 쓴다 — 그 경로에선 chat_id 가 곧 사람이다.
     cap_subject_id: int | None = None
+
+    @property
+    def session_key(self) -> int:
+        """Channel-neutral alias for the legacy integer graph key."""
+
+        return self.chat_id
 
 
 class WorkingState(InputState):

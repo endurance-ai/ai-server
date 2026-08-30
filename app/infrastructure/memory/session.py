@@ -96,6 +96,16 @@ class Session:
     # the cards land. Cleared once the follow-up is sent (or on a new turn).
     pending_pick_indices: list[int] = field(default_factory=list)
 
+    @property
+    def session_key(self) -> int:
+        """Channel-neutral alias for the legacy in-process session key."""
+
+        return self.chat_id
+
+    @session_key.setter
+    def session_key(self, value: int) -> None:
+        self.chat_id = value
+
 
 class SessionStore(Protocol):
     """Backend-agnostic session store contract.

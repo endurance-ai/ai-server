@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 # Dead external caller (kikoai/app on own v6 path post SPEC-SEARCH-V6-001);
-# retained, fed by shared v6 repo (the same SearchRepository the Telegram bot
+# retained, fed by shared v6 repo (the same SearchRepository the chat agent
 # agent path uses — migrating the shared repository covers both).
 @router.post(
     "/recommend",

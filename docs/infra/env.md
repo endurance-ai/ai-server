@@ -64,21 +64,13 @@ Do not place `.p8` material in client-visible env, logs, Git, or the mobile app.
 | `UPLOADS_MAX_SIZE_BYTES` | `10485760` | API가 허용하는 최대 이미지 크기(10MB). 초과 이미지는 클라이언트가 리사이즈 후 재요청 |
 | `UPLOADS_PRESIGN_EXPIRES_SECONDS` | `300` | presigned URL TTL. 런타임에서 60~3600초로 clamp |
 
-## Telegram 메신저 채널 (SPEC-MSG-001)
+## 봇 기본 설정
 
 | 키 | 용도 | 기본 |
 |----|------|-----|
-| `MESSENGER_BACKEND` | 활성 어댑터 (`telegram` \| `bluebubbles` \| `sendblue`) | `telegram` |
-| `TELEGRAM_BOT_TOKEN` | Bot API 인증 토큰 (`@BotFather` 발급) | 필수 |
-| `TELEGRAM_WEBHOOK_SECRET` | `X-Telegram-Bot-Api-Secret-Token` 검증값 (랜덤 32+ chars) | 필수 |
-| `TELEGRAM_PUBLIC_URL` | webhook 등록용 공개 HTTPS URL (dev: Cloudflare Tunnel) | 필수 |
-| `TELEGRAM_API_BASE` | Bot API base URL (셀프호스트 테스트 시 override) | `https://api.telegram.org` |
-| `TELEGRAM_BOT_USERNAME` | 봇 username (로그/health 노출용) | `kiko_fashion_ai_bot` |
 | `VISION_MODEL` | Vision 추출에 사용할 LiteLLM 모델 명칭 | `gpt-4o-mini` |
 | `BOT_LANGUAGE` | 봇 응답 언어 (`ko` / `en`) | `ko` |
 | `SESSION_TTL_SECONDS` | 인메모리 세션 만료 시간 (초) | `1800` |
-
-> dev 환경에서는 Cloudflare Tunnel(`cloudflared tunnel --url http://localhost:8000`)로 `TELEGRAM_PUBLIC_URL` 확보.
 
 ## Langfuse
 

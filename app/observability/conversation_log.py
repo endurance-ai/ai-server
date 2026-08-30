@@ -273,7 +273,7 @@ async def log_event(
     """Insert one row into `ai.log_conversation_event`. **Never raises.**
 
     `user_id` is the real `ai.user_profiles.user_id` for consumer-app turns
-    (None for telegram-channel turns). Callers normally omit it and let
+    (None for non-app turns). Callers normally omit it and let
     `emit()` fill it from the per-turn context (see `emit()` docstring).
 
     REQ-LOG-FAILSOFT-001 — any failure (pool acquire / encode / insert) is

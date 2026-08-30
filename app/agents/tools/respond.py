@@ -6,7 +6,7 @@ from `sess.last_results`, NEVER hand-serialized by the LLM. NO `_Flow` enum —
 the agent LLM is the single source of phrasing. Loop-terminating tool:
 `terminates_loop=True` in REGISTRY.
 
-Idempotency: `respond` has side effects (Telegram text + card carousel). The
+Idempotency: `respond` has side effects (channel text + card carousel). The
 TERMINAL tool is no longer retried by react_loop (SPEC-AGENT-V2-REACT fix —
 a partial send + full retry double-sent everything). As belt-and-suspenders
 this module is ALSO self-idempotent: the text-sent flag is set in `ctx`
@@ -14,7 +14,7 @@ IMMEDIATELY after the single text send (BEFORE the slow card loop), and each
 successfully-sent card id is tracked, so any defensive second entry skips the
 already-sent text and already-sent cards — the user never sees a duplicate.
 
-@MX:NOTE: [AUTO] Side effect: sends Telegram messages (text + cards).
+@MX:NOTE: [AUTO] Side effect: sends channel messages (text + cards).
 @MX:SPEC: SPEC-AGENT-V2-REACT
 """
 
@@ -43,14 +43,14 @@ def _esc(s: Any) -> str:
 def _safe_http_url(url: str) -> str | None:
     """Return the url only if it is an http(s) scheme, else None — prevents a
     catalog-sourced `javascript:` / `data:` URL becoming a tappable link in a
-    Telegram HTML-mode message."""
+    HTML-mode channel message."""
     return url if url.startswith(("https://", "http://")) else None
 
 
 logger = logging.getLogger(__name__)
 
-# Hybrid delivery: ONE album of up to this many photos (single Telegram
-# sendMediaGroup bubble) + ONE summary text message. Telegram caps a media
+# Hybrid delivery: ONE album of up to this many photos (single grouped
+# media bubble) + ONE summary text message. The adapter contract caps a media
 # group at 10; 5 keeps the album scannable and matches the V1 send_results cap.
 _ALBUM_SIZE = 5
 
@@ -151,7 +151,7 @@ def _has_plausible_image(c: Any) -> bool:
     a product URL (the exact validity gate `_candidate_to_card` enforces).
 
     sendMediaGroup is ATOMIC — one bad photo URL fails the whole group — so we
-    pre-filter rather than let Telegram reject the batch.
+    pre-filter rather than let the channel reject the batch.
     """
     img = getattr(c, "image_url", None)
     if img is None and isinstance(c, dict):
@@ -315,7 +315,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
         return RespondResult(ok=False, error="empty_response", text_sent=False, cards_sent=0)
 
     # Recommendation turn finalized + delivered. Attach the judge-readable
-    # request/result to the root `webhook.telegram` trace so the Langfuse
+    # request/result to the root `app.chat` trace so the Langfuse
     # LLM-as-judge has non-null input/output to score. Pure observability,
     # fail-open. Per-turn idempotent (_TRACE_IO_SET_KEY inside _set_trace_io):
     # this is the genuine-completion path, but the partial-delivery re-entry
@@ -482,7 +482,7 @@ def _delivered_products(chat_id: Any) -> list[dict[str, str]]:
 #   happened and MUST NOT be undone or delayed.
 def _set_trace_io(ctx: dict[str, Any], text: str, cards_sent: int) -> None:
     """Attach the recommendation turn's `input` (user request) and `output`
-    (delivered product set + reply) to the active `webhook.telegram` root
+    (delivered product set + reply) to the active `app.chat` root
     trace, so the Langfuse LLM-as-judge can score it.
 
     Idempotent per turn: guarded by `_TRACE_IO_SET_KEY` in the shared `ctx`
@@ -570,7 +570,7 @@ async def _mint_click_tokens(batch: list[Any], chat_id: int) -> list[str | None]
 def _build_summary(batch: list[Any], lang: str, urls_override: list[str | None] | None = None) -> str:
     """KO/EN header + numbered list. The item NAME is an HTML <a> link to the
     product URL (parse_mode HTML) so the buy path survives without per-card
-    Shop buttons (Telegram media groups forbid per-photo keyboards).
+    Shop buttons (grouped media sends forbid per-photo keyboards).
 
     `urls_override` (when supplied) is a per-index list of CTR-wrapped URLs
     (`{PUBLIC_BASE_URL}/r/{token}`) minted by `send_hybrid_batch`. Falls back
@@ -622,7 +622,7 @@ def _build_summary(batch: list[Any], lang: str, urls_override: list[str | None] 
 # list above already does with plain numbers). Paired with the help line in
 # `_build_summary` that explains taps feed the taste profile.
 _NUM_EMOJI = ["❤️ 1", "❤️ 2", "❤️ 3", "❤️ 4", "❤️ 5"]
-# Telegram callback_data 64-byte budget minus the "card:like:" prefix (10).
+# callback_data 64-byte budget minus the "card:like:" prefix (10).
 _LIKE_SUFFIX_BUDGET = 53
 
 
@@ -827,7 +827,7 @@ async def send_hybrid_batch(
     # always send cards individually instead of the sendMediaGroup album.
     # Per-card delivery lets each result carry its own inline keyboard
     # (♥ like / buy link) right next to the photo, which reads better in
-    # Telegram than a 5-photo bubble + separate summary text bubble. The
+    # in the client than a 5-photo bubble + separate summary text bubble. The
     # summary + 더보기 footer is still sent below after the per-card loop
     # completes so the pager / "different search" UI is preserved verbatim.
     # Flag exists as a kill-switch for fast rollback to the album path.
@@ -836,7 +836,7 @@ async def send_hybrid_batch(
     if _settings.INDIVIDUAL_CARD_DELIVERY:
         can_group = False
     else:
-        # Telegram media groups require 2..10 items; a single eligible candidate
+        # Grouped media sends require 2..10 items; a single eligible candidate
         # cannot form a group → go straight to the per-card path for that one.
         can_group = len(media) >= 2 and hasattr(adapter, "send_media_group")
     group_ok = False

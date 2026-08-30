@@ -2,7 +2,7 @@
 
 > kiko.ai AI search server. FastAPI pipeline over FashionSigLIP embeddings (Modal) + Supabase pgvector/pgroonga hybrid search with RRF.
 
-`endurance-ai/kiko.ai-app` (Next.js) calls `/recommend` after Instagram scrape + Vision analysis. Telegram channel (`@kiko_fashion_ai_bot`) consumes the same pipeline through a LangGraph StateGraph.
+`endurance-ai/kiko.ai-app` (Next.js) calls `/recommend` after Instagram scrape + Vision analysis. The kiko app and web clients consume the same pipeline through a LangGraph StateGraph over the `/chat` SSE endpoint.
 
 ```
 [Vercel / Next.js]              [EC2 / Docker Compose]            [Modal Serverless]
@@ -11,7 +11,7 @@ Apify + R2 + Vision       →     ai-server (this repo)       ↔    /embed (Fas
 session / auth / UI             LangGraph + LiteLLM
                                 Langfuse self-host
                                        ↑
-                          Telegram webhook (LangGraph)
+                          app / web clients — /chat SSE (LangGraph)
 ```
 
 ## Quickstart
@@ -19,7 +19,7 @@ session / auth / UI             LangGraph + LiteLLM
 ```bash
 uv sync
 cp .env.example .env
-# fill in Supabase, Modal, LiteLLM, Telegram keys
+# fill in Supabase, Modal, LiteLLM keys
 uv run uvicorn app.main:app --reload --port 8000
 curl http://localhost:8000/health
 ```
@@ -39,9 +39,9 @@ GitHub Actions on `dev` merge → ECR push → SSH deploy to EC2 t4g.medium (doc
 
 ```
 app/
-├── main.py              # FastAPI entrypoint + lifespan + messenger warmup
-├── api/                 # routers (recommend, health, webhooks/telegram)
-├── channels/            # messenger adapters (telegram), recommendation port, link_resolver, vision, session
+├── main.py              # FastAPI entrypoint + lifespan
+├── api/                 # routers (chat SSE, auth, recommend, health)
+├── channels/            # channel adapters, recommendation port, link_resolver, vision, session
 ├── graphs/              # LangGraph StateGraph (10 nodes) + routing
 ├── pipeline/            # embed → enhance_query → search → diversify
 ├── providers/           # SupabaseProvider, EmbedProvider, LLMProvider
@@ -55,10 +55,9 @@ app/
 | Layer | Role |
 |-------|------|
 | Vercel / `kiko.ai-app` | Apify, R2, Vision (GPT-4o-mini), session, UI, v4 fallback |
-| **ai-server (this repo)** | search orchestration, enhance_query, Langfuse trace, Telegram webhook + channel adapters |
+| **ai-server (this repo)** | search orchestration, enhance_query, Langfuse trace, `/chat` SSE + channel adapters |
 | Modal | FashionSigLIP embeddings (single + batch) |
 | Supabase | pgvector + pgroonga, `search_products_v5` RPC |
-| Telegram Bot API | channel transport (treated as a black box) |
 
 ## Core stack
 
@@ -84,7 +83,7 @@ app/
 
 ## Auth
 
-AI server is stateless — no auth on this side. `kiko.ai-app` owns session + Supabase Auth and passes the resolved context via request body. `/recommend` is gated by `X-Internal-Token`; `/webhooks/telegram` by `X-Telegram-Bot-Api-Secret-Token`.
+AI server is stateless — no auth on this side. `kiko.ai-app` owns session + Supabase Auth and passes the resolved context via request body. `/recommend` is gated by `X-Internal-Token`; app/web endpoints (`/chat`, `/me`, ...) by the app JWT.
 
 ## Related projects
 

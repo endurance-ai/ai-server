@@ -1,6 +1,6 @@
 # product.md — kiko.ai AI 서버 제품 개요
 
-패션 추천 AI 서버. `kikoai/app`(Next.js) 웹 경로의 검색 오케스트레이션과 Telegram 채널(`@kiko_fashion_ai_bot`) 기반 대화형 패션 추천 두 가지 경로를 제공한다.
+패션 추천 AI 서버. `kikoai/app`(Next.js) 웹 경로의 검색 오케스트레이션과 kiko 앱/웹 클라이언트 기반 대화형 패션 추천 두 가지 경로를 제공한다.
 
 ---
 
@@ -9,7 +9,7 @@
 kiko.ai AI 서버는 kiko.ai 패션 플랫폼의 AI 검색/추천 전담 서버다. FastAPI + LangGraph 기반으로 두 가지 진입 경로를 제공한다.
 
 1. **웹 경로** — `kikoai/app`(Next.js)이 Vision 분석까지 마친 단일 아이템을 `POST /recommend`로 전달하면, 이미지 임베딩 → 하이브리드 검색 → 다양성 필터 → product_id[] 반환.
-2. **Telegram 경로** — 사용자가 패션 이미지·Pinterest 링크를 DM으로 보내면 webhook → LangGraph StateGraph → 동일 파이프라인 → 채널 카드 응답.
+2. **앱/웹 채팅 경로** — 사용자가 앱·웹에서 패션 이미지·Pinterest 링크를 보내면 `/v1/chat` SSE → LangGraph StateGraph → 동일 파이프라인 → 카드 스트리밍 응답.
 
 현재 상태: 활발 개발 중인 초기 운영 단계 (v0.1.0). kikoai/app 과 연동되어 추천 파이프라인을 지속적으로 개선하고 있다.
 
@@ -25,11 +25,11 @@ kiko.ai AI 서버는 두 가지 외부 호출자를 가진다.
 3. kiko.ai AI 서버가 추천 product_id[] 를 반환한다.
 4. kikoai/app 이 AI 서버로부터 5xx 또는 타임아웃을 받으면 v4 검색(`/api/search-products`)으로 폴백한다.
 
-**Telegram 경로 (Telegram Bot API)**:
-1. 사용자가 `@kiko_fashion_ai_bot` DM으로 패션 이미지 또는 Pinterest 링크를 전송한다.
-2. Telegram이 `POST /webhooks/telegram`으로 update를 전달한다.
+**앱/웹 채팅 경로 (kiko 앱 · 웹)**:
+1. 사용자가 앱 또는 웹 채팅에서 패션 이미지 또는 Pinterest 링크를 전송한다.
+2. 클라이언트가 `POST /v1/chat/sessions/{id}/messages` (앱 JWT) 로 메시지를 전달하고 SSE 로 응답을 구독한다.
 3. LangGraph StateGraph가 ingest → vision → pick_item → (clarify?) → (evaluator) → search → send_results → respond 흐름으로 처리한다.
-4. Telegram 채널 카드(InlineKeyboard + 텍스트)로 추천 결과를 전달한다.
+4. SSE 이벤트(카드 + 텍스트 + 인라인 버튼)로 추천 결과를 전달한다.
 
 ---
 
@@ -37,7 +37,7 @@ kiko.ai AI 서버는 두 가지 외부 호출자를 가진다.
 
 ### 1. 통합 Vision 스키마 (SPEC-VISION-UNIFY-001)
 
-Telegram 봇의 GPT-4o-mini Vision 호출이 kikoai/app 웹 경로와 동일한 rich JSON 스키마를 출력한다. outfit-level 필드(styleNode, mood, palette, style)와 per-item 필드(subcategory, fit, colorFamily, searchQuery, searchQueryKo 등)를 포함하며, 두 채널의 검색 품질이 동일한 기준을 갖는다. `VISION_SCHEMA_V2` 환경변수로 즉시 롤백 가능하다.
+채팅 채널의 GPT-4o-mini Vision 호출이 kikoai/app 웹 경로와 동일한 rich JSON 스키마를 출력한다. outfit-level 필드(styleNode, mood, palette, style)와 per-item 필드(subcategory, fit, colorFamily, searchQuery, searchQueryKo 등)를 포함하며, 두 채널의 검색 품질이 동일한 기준을 갖는다. `VISION_SCHEMA_V2` 환경변수로 즉시 롤백 가능하다.
 
 ### 2. 자기-비평 루프 (SPEC-AGENTIC-CRITIQUE-001)
 
@@ -103,11 +103,11 @@ kiko.ai 는 검색 오케스트레이션에만 집중한다. 다른 책임은 �
 다음 기능은 kiko.ai AI 서버의 책임 범위 밖이다.
 
 - **세션 관리 / 인증**: kikoai/app 이 담당한다.
-- **웹 경로 Vision 분석**: 웹 `/recommend` 호출 시 Vision 분석은 kikoai/app 에서 LiteLLM proxy 를 통해 수행한다. Telegram 봇은 자체 Vision 모듈(`app/channels/vision.py`)을 보유한다.
+- **웹 경로 Vision 분석**: 웹 `/recommend` 호출 시 Vision 분석은 kikoai/app 에서 LiteLLM proxy 를 통해 수행한다. 채팅 경로는 자체 Vision 모듈(`app/channels/vision.py`)을 보유한다.
 - **배치 추천**: `scripts/embed_batch_local.py` 는 운영 이미지에 포함되지 않는 로컬 전용 스크립트다.
 - **상품 데이터 수집/저장**: Apify 스크래핑, R2/DB 저장은 kikoai/app 책임이다.
 - **`enhance_query` LLM 리파인**: feature flag 기본 off. 활성화 시 LiteLLM 경유 sparse 쿼리 정제가 파이프라인에 추가된다.
-- **그룹 채팅 / 채널 / 결제**: Telegram 봇은 1:1 DM 범위만 지원한다 (SPEC-MSG-001).
+- **그룹 채팅 / 멀티유저 세션**: 채팅 채널은 1:1 대화 범위만 지원한다 (SPEC-MSG-001).
 
 ---
 

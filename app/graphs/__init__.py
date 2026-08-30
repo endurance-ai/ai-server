@@ -1,4 +1,4 @@
-"""SPEC-AGENT-001: LangGraph 1.x StateGraph orchestration for the Telegram fashion bot.
+"""SPEC-AGENT-001: LangGraph 1.x StateGraph orchestration for the kiko fashion bot.
 
 This package replaces the procedural state machine in `app/channels/scenario.py`
 with a graph of small, single-purpose nodes. See `app/graphs/fashion_bot.py` for
