@@ -132,3 +132,44 @@ async def test_exclude_keywords_filters_candidates(monkeypatch):
     assert "keep2" in top_ids
     assert "drop1" not in top_ids  # 'jean' lowercase in name
     assert "drop2" not in top_ids  # 'JEAN' uppercase in name — still filtered
+
+
+@pytest.mark.asyncio
+async def test_exclude_brands_filters_candidates(monkeypatch):
+    """D2 — LLM-supplied `exclude_brands` on a FRESH search MUST drop candidates
+    whose brand matches an excluded brand (case-insensitive exact OR substring),
+    parity with refine_search action='exclude'. Lets a first-turn '자라 빼고 검정
+    재킷' avoid that brand with NO prior search to refine."""
+
+    async def stub_embed_text(q: str):
+        return [0.1] * 768
+
+    async def stub_rpc(fn_name, params):
+        return [
+            {"id": "keep1", "name": "Black Jacket", "brand": "COS", "distance": 0.1, "degraded": False},
+            {"id": "drop1", "name": "Black Jacket", "brand": "Zara", "distance": 0.2, "degraded": False},
+            {"id": "keep2", "name": "Wool Coat", "brand": "Acne Studios", "distance": 0.3, "degraded": False},
+            {"id": "drop2", "name": "Denim Jacket", "brand": "ZARA Home", "distance": 0.4, "degraded": False},
+        ]
+
+    async def stub_diversify(state):
+        state.final_candidates = list(state.raw_candidates or [])
+        return state
+
+    monkeypatch.setattr("app.pipeline.embed.EmbedProvider.embed_text", staticmethod(stub_embed_text))
+    monkeypatch.setattr("app.pipeline.search.DatabaseProvider.rpc", staticmethod(stub_rpc))
+    monkeypatch.setattr("app.pipeline.diversify.diversify_step", stub_diversify)
+    monkeypatch.setattr("app.channels.pre_messages.fire_pre_message", AsyncMock())
+    monkeypatch.setattr(sp, "_lookup_profile_gender", lambda ctx: "women")
+
+    args = {
+        "text_query": "black jacket women",
+        "exclude_brands": ["Zara"],
+    }
+    ctx = {"chat_id": 7, "user_key": "u:7"}
+    result = await sp.dispatch(args, ctx)
+    top_ids = {c.get("product_id") for c in result["top_candidates"]}
+    assert "keep1" in top_ids
+    assert "keep2" in top_ids
+    assert "drop1" not in top_ids  # brand 'Zara' exact (case-insensitive)
+    assert "drop2" not in top_ids  # 'ZARA Home' — 'zara' substring match
