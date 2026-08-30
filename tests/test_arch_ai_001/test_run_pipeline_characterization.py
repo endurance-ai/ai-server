@@ -122,16 +122,23 @@ _EXPECTED_FULL_14 = [
 ]
 _EXPECTED_FULL_COUNTS = {"raw": 14, "after_diversify": 14, "final": 14}
 
-# tolerance=0.0 → target=10: 재정렬된 순서의 상위 10 (p7 은 꼬리라 탈락, p10 진입).
+# 2026-08-30 — SEARCH_BRAND_CAP 5→3 (다양성 우선). 재정렬 시퀀스에서 uniqlo 는
+# 4개(p0,p1,p2,p12)라 4번째 p12 가 캡에 걸려 드롭 → 13개 생존. 나머지 브랜드는
+# 모두 ≤3 이라 무영향. brand_filter 활성 검색은 캡이 완화되어 14개 전부 생존
+# (그 케이스만 _EXPECTED_FULL_14 를 그대로 씀).
+_EXPECTED_CAPPED_13 = [t for t in _EXPECTED_FULL_14 if t[0] != "p12"]
+_EXPECTED_CAPPED_COUNTS = {"raw": 14, "after_diversify": 13, "final": 13}
+
+# tolerance=0.0 → target=10: 상위 10 에서 멈춤(드롭 대상 p12 는 11번째라 도달 전).
 _EXPECTED_T0_10 = _EXPECTED_FULL_14[:10]
 _EXPECTED_T0_COUNTS = {"raw": 14, "after_diversify": 10, "final": 10}
 
 
 _TOLERANCE_EXPECTATIONS = {
     # tolerance → (expected_tuples, expected_counts)
-    0.0: (_EXPECTED_T0_10, _EXPECTED_T0_COUNTS),  # target=10 — break at p9
-    0.5: (_EXPECTED_FULL_14, _EXPECTED_FULL_COUNTS),  # target=15 — process all, no drops
-    1.0: (_EXPECTED_FULL_14, _EXPECTED_FULL_COUNTS),  # target=20 — same as 0.5
+    0.0: (_EXPECTED_T0_10, _EXPECTED_T0_COUNTS),  # target=10 — break at p10 (before the cap drop)
+    0.5: (_EXPECTED_CAPPED_13, _EXPECTED_CAPPED_COUNTS),  # target=15 — brand_cap=3 drops p12
+    1.0: (_EXPECTED_CAPPED_13, _EXPECTED_CAPPED_COUNTS),  # target=20 — same as 0.5
 }
 
 
@@ -153,8 +160,8 @@ async def test_characterize_run_pipeline_final_limit(fixed_embed, patch_rpc, fin
     patch_rpc(_rows())
     resp = await run_pipeline(_req(tolerance=1.0, final_limit=final_limit))
     if final_limit is None:
-        assert _tuples(resp) == _EXPECTED_FULL_14
-        assert resp.counts == _EXPECTED_FULL_COUNTS
+        assert _tuples(resp) == _EXPECTED_CAPPED_13
+        assert resp.counts == _EXPECTED_CAPPED_COUNTS
     else:
         # final_limit=5 truncates diversify before caps exhaust the list.
         assert _tuples(resp) == _EXPECTED_FULL_14[:5]
@@ -166,8 +173,8 @@ async def test_characterize_run_pipeline_brand_filter(fixed_embed, patch_rpc, br
     patch_rpc(_rows())
     resp = await run_pipeline(_req(tolerance=0.5, brand_filter=brand_filter))
     if brand_filter is None:
-        assert _tuples(resp) == _EXPECTED_FULL_14
-        assert resp.counts == _EXPECTED_FULL_COUNTS
+        assert _tuples(resp) == _EXPECTED_CAPPED_13
+        assert resp.counts == _EXPECTED_CAPPED_COUNTS
     else:
         # brand_filter active → brand_cap 3*3=9, platform_cap=8. No cap bites
         # in the 14-row input → all survive.
@@ -193,6 +200,6 @@ async def test_characterize_run_pipeline_parallel_equivalence(fixed_embed, patch
     assert resp_par.item_id == resp_seq.item_id
     assert _tuples(resp_par) == _tuples(resp_seq)
     assert resp_par.counts == resp_seq.counts
-    # And both equal the locked golden (tolerance=0.5 → full 13).
-    assert _tuples(resp_par) == _EXPECTED_FULL_14
-    assert resp_par.counts == _EXPECTED_FULL_COUNTS
+    # And both equal the locked golden (tolerance=0.5 → brand_cap=3 → 13).
+    assert _tuples(resp_par) == _EXPECTED_CAPPED_13
+    assert resp_par.counts == _EXPECTED_CAPPED_COUNTS

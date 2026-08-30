@@ -93,9 +93,11 @@ class Settings(BaseSettings):
     # 5개만 남는 케이스 다수 발견. 특히 platform cap 은 "어디서 파느냐" 만
     # 통제할 뿐 옷의 본질과 무관 → 정확도만 깎고 다양성 이득은 미미.
     # brand_cap=5: 첫 album(5장) 이 단일 브랜드여도 OK (진짜 매치면 그게 정답).
-    # 15개 final 안엔 최소 3 brand 보장 (15/5) — 모노컬쳐 완전 차단까진 아니어도
-    # "ZARA 광고같다" 까진 안 감.
-    SEARCH_BRAND_CAP: int = 5  # 브랜드당 최대 (첫 album 단일 브랜드 허용)
+    # 15개 final 안엔 최소 5 brand 보장 (15/3). 2026-08-30: 5→3 으로 낮춤 —
+    # 실측(card_impression 14d) 결과 중립검색 27%가 한 브랜드 5장(캡 상한)까지
+    # 차지해 "비슷한 브랜드만 뜬다" 제보의 뿌리였음. 3 이면 한 브랜드 ≤20%.
+    # brand_filter 활성 검색은 diversify_service 에서 캡을 완화하므로 영향 없음.
+    SEARCH_BRAND_CAP: int = 3  # 브랜드당 최대 (다양성 우선; brand_filter 시 완화)
     SEARCH_PLATFORM_CAP: int = 8  # 플랫폼당 최대 (사실상 비활성)
     # SPEC-DIVERSIFY-ATTR-CAP — attribute-level diversity caps applied
     # alongside brand/platform. Keyed off `brand_nodes.attributes` first
