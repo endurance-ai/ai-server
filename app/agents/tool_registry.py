@@ -103,6 +103,9 @@ class SearchProductsArgs(TypedDict, total=False):
     min_price: float | None
     max_price: float | None
     exclude_keywords: list[str]
+    # 2026-08-30 (D2) — 첫 턴에 특정 브랜드 배제("자라 빼고 검정 재킷"). refine_search
+    # 의 exclude_brands 와 대칭. dispatch 가 candidate.brand 를 client-side 매칭해 드롭.
+    exclude_brands: list[str]
     boost_keywords: list[str]
     # NOTE (2026-05-20): `top_k` removed from LLM schema — Haiku 가 카드 캐러셀
     # 크기(5)를 따라하며 페이지네이션을 죽였음. dispatch 기본값 15 유지.
@@ -306,13 +309,20 @@ REGISTRY: dict[str, ToolMetadata] = {
             "max_price=100000; '5만원 이상' → min_price=50000; 'under $100' → "
             "max_price=130000. (For 'cheaper'/'더 저렴한' that ADJUSTS the CURRENT "
             "results, use refine_search instead — see below.)\n"
+            "  - `exclude_brands`: brands to EXCLUDE on a FRESH search (e.g. '자라 빼고 "
+            "검정 재킷' → exclude_brands=['Zara'], text_query='black jacket'). Use when a "
+            "NEW request names a brand to AVOID. Prefer the English brand name. (To exclude "
+            "from results ALREADY shown, use refine_search action='exclude'.)\n"
             "\n"
-            "[WHEN search_products vs refine_search]\n"
-            "Use search_products for a NEW request: a new garment / brand / style, or a "
-            "fresh budget query with no prior results to adjust. Use refine_search ONLY "
-            "when the user is ADJUSTING the items ALREADY shown this conversation "
-            "('더 저렴한', '다른 색으로', 'without Zara', '더 크롭으로'). If there is no "
-            "prior search yet, it is always search_products.\n"
+            "[WHEN search_products vs refine_search — DELTA vs PIVOT]\n"
+            "Once a search has run this conversation, decide by ONE question: does the new "
+            "message introduce a NEW positive target — a different GARMENT type, an OCCASION, "
+            "or a POSITIVE brand to switch TO? YES → PIVOT → search_products (a fresh search). "
+            "NO → it only ADJUSTS the SAME item (price / color / fit / material / added detail / "
+            "EXCLUDE a brand / broaden) → that is a DELTA → refine_search. Negative brand "
+            "('자라 빼고') = DELTA (refine); positive brand ('COS 니트', '산드로 걸로') = PIVOT "
+            "(search). No prior search yet → always search_products. Genuinely unsure → "
+            "search_products.\n"
             "\n"
             "[TEXT_QUERY CANONICAL FORM — REQUIRED for embedding cache stability]\n"
             "Always produce text_query in this exact shape:\n"
@@ -377,9 +387,12 @@ REGISTRY: dict[str, ToolMetadata] = {
             "Refine the PREVIOUS search by applying a delta — price clamp, style detail boost, "
             "exclude brand, color swap, broaden. Reuses the prior product query under the hood, "
             "so always prefer this over `search_products` when the user is ADJUSTING the same items.\n"
-            "REQUIRES a prior search in THIS conversation (there must be results to adjust). If the "
-            "user is starting fresh — a new garment/brand/style, or a first budget query with nothing "
-            "shown yet — use `search_products` instead (it also takes max_price/min_price).\n\n"
+            "REQUIRES a prior search in THIS conversation (there must be results to adjust). Use it "
+            "ONLY for a DELTA — an ADJUSTMENT to the SAME item (price / color / fit / material / "
+            "added detail / EXCLUDE a brand / broaden). If the user introduces a NEW garment TYPE, a "
+            "new OCCASION, or a POSITIVE brand to switch TO ('COS 니트', '산드로 걸로'), that is a "
+            "PIVOT — use `search_products` instead (refine would cling to the old item and show the "
+            "wrong products). A first budget query with nothing shown yet is also search_products.\n\n"
             "FIELD MAPPING — translate natural language into args. Multiple fields may apply at "
             "once. NEVER drop a user-mentioned detail just because it's hard to phrase:\n\n"
             "  ● PRICE → `max_price` / `min_price` (KRW integer 원, no currency symbol):\n"
@@ -636,6 +649,7 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
         # passes safely; reject anything else (dict, int, etc.).
         "boost_keywords",
         "exclude_keywords",
+        "exclude_brands",
     ):
         if key in args:
             v = args[key]

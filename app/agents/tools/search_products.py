@@ -1431,6 +1431,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     if boost:
         text_query = dedup_join(text_query, boost)
     exclude_kw = as_keyword_list(args.get("exclude_keywords"))
+    exclude_brands = as_keyword_list(args.get("exclude_brands"))
 
     # A non-empty text_query alone is sufficient. Only a turn with neither a
     # query nor a usable image is unanswerable.
@@ -1804,6 +1805,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             return str(getattr(c, "title", None) or getattr(c, "name", "") or "")
 
         cands = [c for c in cands if not any(k in _title_of(c).lower() for k in ek)]
+
+    # D2 (2026-08-30) — LLM-supplied `exclude_brands` on a FRESH search (parity
+    # with refine_search action='exclude'). Drops candidates whose brand matches
+    # an excluded brand (case-insensitive exact OR substring) so a first-turn
+    # "자라 빼고 검정 재킷" can avoid that brand with no prior search to refine.
+    if exclude_brands:
+        ebset = {b.lower() for b in exclude_brands}
+
+        def _brand_excluded(c: Any) -> bool:
+            b = (c.get("brand") if isinstance(c, dict) else getattr(c, "brand", "")) or ""
+            b = str(b).lower()
+            return bool(b) and any(x == b or x in b for x in ebset)
+
+        cands = [c for c in cands if not _brand_excluded(c)]
 
     # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
     # ranking + dislike discount so cosine ordering is preserved. The ceiling
