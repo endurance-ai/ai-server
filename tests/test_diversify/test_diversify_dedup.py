@@ -94,9 +94,9 @@ async def test_brand_filter_relaxes_caps_single_brand() -> None:
     캡이 겹쳐 5개로 잘렸다. brand_filter 활성 시 캡을 풀어 target 까지 채운다.
     """
     raw = [{"id": f"g{i}", "brand": "GLOWNY", "platform": "glowny"} for i in range(12)]
-    # brand_filter 없음 → brand_cap=5 로 5개만.
+    # brand_filter 없음 → brand_cap=3 로 3개만.
     capped = await diversify_service(_state(raw, final_limit=40))
-    assert len(capped.final_candidates) == 5
+    assert len(capped.final_candidates) == 3
     # brand_filter 있음 → 캡 완화, target(40)까지 = 12개 전부.
     relaxed = await diversify_service(_state(raw, final_limit=40, brand_filter=["GLOWNY"]))
     assert len(relaxed.final_candidates) == 12

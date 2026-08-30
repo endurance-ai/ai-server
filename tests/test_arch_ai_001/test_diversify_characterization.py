@@ -5,7 +5,7 @@ construct PipelineState + RecommendRequest directly and lock the exact output
 `id` order plus the full counts dict.
 
 Settings defaults exercised (app/core/config.py, 2026-06-17 relax v2):
-    SEARCH_BRAND_CAP    = 5   (brand_filter active -> *3 = 15)
+    SEARCH_BRAND_CAP    = 3   (brand_filter active -> max(*3, target))
     SEARCH_PLATFORM_CAP = 8
 tolerance -> target_count = int(round(10 + clamp(t,0,1)*10))  [banker's round]
 """
@@ -52,7 +52,7 @@ def _row(i: int, brand: str | None, platform: str = "p1") -> dict:
     return d
 
 
-# ── Case 1: brand_cap (default 5) — 5 of brand "A" all survive ─────────────
+# ── Case 1: brand_cap (default 3) — only first 3 of brand "A" survive ───────
 async def test_characterize_diversify_brand_cap_default():
     raw = [
         _row(0, "A"),
@@ -64,12 +64,12 @@ async def test_characterize_diversify_brand_cap_default():
         _row(6, "A"),
         _row(7, "B"),
     ]
-    # platform all "p1", platform_cap=8 → not hit. brand "A" cap=5 → A x5 all
-    # survive; B x2, C x1 are well under. All 8 kept.
+    # platform all "p1", platform_cap=8 → not hit. brand "A" cap=3 → first 3 A
+    # (r0,r1,r2) survive; r4 and r6 (4th/5th A) are dropped. B x2, C x1 under cap.
     out = await diversify_step(_state(raw, tolerance=0.5))
     ids = [c["id"] for c in out.final_candidates]
-    assert ids == ["r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"]
-    assert out.counts == {"after_diversify": 8, "final": 8}
+    assert ids == ["r0", "r1", "r2", "r3", "r5", "r7"]
+    assert out.counts == {"after_diversify": 6, "final": 6}
 
 
 # ── Case 2: brand_filter widening — cap 15, all 8 "A" survive ───────────────
@@ -141,9 +141,9 @@ async def test_characterize_diversify_blank_brand_shares_bucket():
     ]
     out = await diversify_step(_state(raw, tolerance=0.5))
     ids = [c["id"] for c in out.final_candidates]
-    # All four collapse to brand "" -> brand_cap 5 → 4 < 5, all keep.
-    assert ids == ["r0", "r1", "r2", "r3"]
-    assert out.counts == {"after_diversify": 4, "final": 4}
+    # All four collapse to brand "" -> brand_cap 3 → 4 > 3, drop the 4th (r3).
+    assert ids == ["r0", "r1", "r2"]
+    assert out.counts == {"after_diversify": 3, "final": 3}
 
 
 # ── Case 7: break mid-iteration — tail rows absent once target reached ─────
