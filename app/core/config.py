@@ -330,6 +330,11 @@ class Settings(BaseSettings):
     # 2026-08-31 — neckline(v-neck/turtleneck/off-shoulder/…) 정렬 가산. 풀 커버리지
     # (223k)인데 종전 미사용이던 축. 명시 arg(search_products.neckline)로만 target 세팅.
     ATTR_ALIGN_NECKLINE_W: float = 0.10
+    # 2026-08-31 — v2.6 enrichment(product_features_v26.attr) 축. 고커버리지(length
+    # 171k/sleeve 120k/leg_shape 39k). _attach_feature_metadata 가 v26 값을 머지.
+    ATTR_ALIGN_LENGTH_W: float = 0.12
+    ATTR_ALIGN_SLEEVE_W: float = 0.10
+    ATTR_ALIGN_LEG_SHAPE_W: float = 0.12
 
     # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
     # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.

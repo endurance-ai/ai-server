@@ -18,7 +18,16 @@ from app.services.search_service import (
 
 
 def _item(
-    search_query: str = "", *, fit=None, fabric=None, pattern=None, neckline=None, search_query_ko=None
+    search_query: str = "",
+    *,
+    fit=None,
+    fabric=None,
+    pattern=None,
+    neckline=None,
+    length=None,
+    sleeve_length=None,
+    leg_shape=None,
+    search_query_ko=None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         search_query=search_query,
@@ -27,6 +36,9 @@ def _item(
         fabric=fabric,
         pattern=pattern,
         neckline=neckline,
+        length=length,
+        sleeve_length=sleeve_length,
+        leg_shape=leg_shape,
     )
 
 
@@ -157,3 +169,16 @@ def test_target_attrs_structured_neckline_arg_only():
     assert out["material"] == {"knit"}
     # arg 없으면 텍스트에 넥라인 단어가 있어도 안 잡힘(추출기 부재).
     assert "neckline" not in _query_target_attrs(_item("v-neck knit sweater"))
+
+
+def test_target_attrs_v26_axes_length_sleeve_leg():
+    # v2.6 축(product_features_v26) — 명시 arg 로만 target 세팅.
+    out = _query_target_attrs(_item("wide jeans", length="full", sleeve_length="long", leg_shape="wide"))
+    assert out["length"] == {"full"}
+    assert out["sleeve_length"] == {"long"}
+    assert out["leg_shape"] == {"wide"}
+
+
+def test_target_attrs_length_cropped_normalizes_to_crop():
+    # length vocab 중복(crop/cropped) → 'cropped' 를 'crop' 으로 정규화.
+    assert _query_target_attrs(_item("cropped pants", length="cropped"))["length"] == {"crop"}

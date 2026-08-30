@@ -91,6 +91,13 @@ class SearchProductsArgs(TypedDict, total=False):
     material: str | None
     pattern: str | None
     neckline: str | None
+    # 2026-08-31 — v2.6 enrichment(product_features_v26) 축. 고커버리지.
+    #   length: 기장(regular/full/crop/knee/midi/mini/maxi/long/ankle/micro)
+    #   sleeve_length: 소매(long/short/sleeveless/three_quarter)
+    #   leg_shape: 다리통(wide/straight/flare/skinny/tapered/barrel)
+    length: str | None
+    sleeve_length: str | None
+    leg_shape: str | None
     # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
     # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
     # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
@@ -325,6 +332,10 @@ REGISTRY: dict[str, ToolMetadata] = {
             "('린넨'→'linen', 코튼/니트/울/데님/가죽/스웨이드/코듀로이), pattern ('스트라이프'→"
             "'striped', 체크/플로럴/도트/카모/그래픽 — NOT solid), neckline ('브이넥'→'v-neck', "
             "터틀넥/크루넥/오프숄더). These sharpen the similarity rerank; omit when unmentioned.\n"
+            "  - `length` / `sleeve_length` / `leg_shape`: bottom/length DETAIL, set ONLY when "
+            "named. length ('미디'→'midi', 맥시/미니/크롭/발목/무릎 → maxi/mini/crop/ankle/knee), "
+            "sleeve_length ('긴팔'→'long', 반팔/민소매 → short/sleeveless), leg_shape ('와이드'→"
+            "'wide', 스트레이트/플레어/스키니/테이퍼드). English lowercase.\n"
             "\n"
             "[WHEN search_products vs refine_search — DELTA vs PIVOT]\n"
             "Once a search has run this conversation, decide by ONE question: does the new "

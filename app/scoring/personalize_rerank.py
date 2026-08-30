@@ -56,6 +56,10 @@ class RerankWeights:
     attr_color: float = 0.0
     attr_pattern: float = 0.0
     attr_neckline: float = 0.0
+    # v2.6 enrichment 축 (product_features_v26.attr) — length/sleeve/leg_shape.
+    attr_length: float = 0.0
+    attr_sleeve_length: float = 0.0
+    attr_leg_shape: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -150,6 +154,16 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tneck = target_attrs.get("neckline")
     if tneck and str(fmeta.get("neckline") or "").strip().lower() in tneck:
         bonus += w.attr_neckline
+    # v2.6 축 — _attach_feature_metadata 가 product_features_v26.attr 에서 머지해 둔 값.
+    tlen = target_attrs.get("length")
+    if tlen and str(fmeta.get("length") or "").strip().lower() in tlen:
+        bonus += w.attr_length
+    tslv = target_attrs.get("sleeve_length")
+    if tslv and str(fmeta.get("sleeve_length") or "").strip().lower() in tslv:
+        bonus += w.attr_sleeve_length
+    tleg = target_attrs.get("leg_shape")
+    if tleg and str(fmeta.get("leg_shape") or "").strip().lower() in tleg:
+        bonus += w.attr_leg_shape
     return bonus
 
 
