@@ -418,6 +418,50 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     return {k: v for k, v in out.items() if v}
 
 
+# v26 → v1.1 neckline vocab 정규화(fill 시에만). 매핑 없는 값은 채우지 않는다
+# (candidate 쪽 neckline 은 v1.1 vocab 이므로 target 과 매칭되려면 통일 필요).
+_V26_NECKLINE_TO_V11: dict[str, str] = {
+    "v": "v-neck",
+    "round": "crew",
+    "square": "square",
+    "halter": "halter",
+    "off_shoulder": "off-shoulder",
+    "turtleneck": "turtleneck",
+    "collar": "collared",
+}
+# v1.1 feature_metadata 가 이미 갖는 축 — v1.1 값 우선(거동 불변), 없을 때만 v26 로 채운다.
+# (누수 픽스: v1.1 row 없는 v26-only ~26k 상품이 material/pattern/color/neckline rerank 를
+# 못 받던 문제. 나머지 신규축은 v1.1 에 없어 override=fill 이라 그대로.)
+_V26_FILL_KEYS = frozenset({"material", "pattern", "primary_color", "neckline"})
+
+
+def _merge_v26_attrs(fm: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
+    """v1.1 feature_metadata + v26 축 머지(순수함수, 테스트 용이).
+
+    - 신규축(length/surface/신발·가방 등, v1.1 에 없음): override=fill.
+    - _V26_FILL_KEYS(material/pattern/color/neckline, v1.1 이 이미 가짐): v1.1 우선, 빈 곳만 채움.
+    - neckline: v26 coarse → v1.1 vocab 정규화, 매핑 없으면 스킵.
+    - v26 없으면 fm 그대로.
+    """
+    if not (extra and any(extra.values())):
+        return fm
+    merged = dict(fm) if isinstance(fm, dict) else {}
+    for k, val in extra.items():
+        if not val:
+            continue
+        if k in _V26_FILL_KEYS:
+            if merged.get(k):
+                continue
+            if k == "neckline":
+                val = _V26_NECKLINE_TO_V11.get(str(val).strip().lower())
+                if not val:
+                    continue
+            merged[k] = val
+        else:
+            merged[k] = val
+    return merged
+
+
 async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
     """Attach `public.product_features.feature_metadata` to candidate rows in place.
 
@@ -440,13 +484,15 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             (ids,),
         )
         meta = {int(r[0]): r[1] for r in await cur.fetchall()}
-        # v2.6 enrichment (product_features_v26.attr) — 고커버리지 신규 축을 머지.
-        # v1.1 feature_metadata 와 키가 안 겹쳐 안전. fail-open: 없으면 v1.1 만.
+        # v2.6 enrichment (product_features_v26.attr) 머지. 신규축(length/surface/신발·가방 등)은
+        # v1.1 에 없어 override, 겹치는 축(material/pattern/color/neckline)은 v1.1 우선·빈 곳만 채움
+        # (_V26_FILL_KEYS). fail-open: v26 없으면 v1.1 만.
         await cur.execute(
             "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape', "
             "attr->>'surface', attr->'texture', attr->'design_details', "
             "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
-            "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone' "
+            "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone', "
+            "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline' "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -466,6 +512,11 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 "bag_structure": r[12],
                 "frame_shape": r[13],
                 "metal_tone": r[14],
+                # fill 축(v1.1 이 이미 갖는 것 — 없을 때만 채움).
+                "material": r[15],
+                "pattern": r[16],
+                "primary_color": r[17],
+                "neckline": r[18],
             }
             for r in await cur.fetchall()
         }
@@ -474,16 +525,7 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
         if not rid.isdigit():
             continue
         pid = int(rid)
-        fm = meta.get(pid)
-        extra = v26.get(pid)
-        if extra and any(extra.values()):
-            merged = dict(fm) if isinstance(fm, dict) else {}
-            for k, val in extra.items():
-                if val:
-                    merged[k] = val
-            r["feature_metadata"] = merged
-        else:
-            r["feature_metadata"] = fm
+        r["feature_metadata"] = _merge_v26_attrs(meta.get(pid), v26.get(pid))
 
 
 async def _apply_mood_filter(rows: list[dict[str, Any]], mood: str) -> list[dict[str, Any]]:
