@@ -864,6 +864,14 @@ async def run_text_only_search(
     surface: str | None = None,
     texture: str | None = None,
     design_details: str | None = None,
+    heel_type: str | None = None,
+    heel_height: str | None = None,
+    shaft: str | None = None,
+    shoe_toe: str | None = None,
+    bag_size: str | None = None,
+    bag_structure: str | None = None,
+    frame_shape: str | None = None,
+    metal_tone: str | None = None,
     color_family: str | None = None,
     name_query: str | None = None,
     top_k: int = 40,
@@ -915,6 +923,14 @@ async def run_text_only_search(
         surface=surface,
         texture=texture,
         design_details=design_details,
+        heel_type=heel_type,
+        heel_height=heel_height,
+        shaft=shaft,
+        shoe_toe=shoe_toe,
+        bag_size=bag_size,
+        bag_structure=bag_structure,
+        frame_shape=frame_shape,
+        metal_tone=metal_tone,
         color_family=color_family,
         name_query=name_query,
         search_query=text_query,
@@ -1580,6 +1596,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     surface = args.get("surface")
     texture = args.get("texture")
     design_details = args.get("design_details")
+    heel_type = args.get("heel_type")
+    heel_height = args.get("heel_height")
+    shaft = args.get("shaft")
+    shoe_toe = args.get("shoe_toe")
+    bag_size = args.get("bag_size")
+    bag_structure = args.get("bag_structure")
+    frame_shape = args.get("frame_shape")
+    metal_tone = args.get("metal_tone")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query = str(args.get("name_query") or "").strip() or None
 
@@ -1809,6 +1833,14 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 surface=surface,
                 texture=texture,
                 design_details=design_details,
+                heel_type=heel_type,
+                heel_height=heel_height,
+                shaft=shaft,
+                shoe_toe=shoe_toe,
+                bag_size=bag_size,
+                bag_structure=bag_structure,
+                frame_shape=frame_shape,
+                metal_tone=metal_tone,
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,

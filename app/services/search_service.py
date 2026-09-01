@@ -407,6 +407,14 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if design:
         out["design_details"] = {design}
 
+    # v2.6 비어패럴 조건부축(신발/가방/안경/주얼리) — 공유 리스트로 일괄 세팅.
+    from app.scoring.personalize_rerank import NONAPPAREL_SCALAR_AXES
+
+    for _ax in NONAPPAREL_SCALAR_AXES:
+        _v = str(getattr(item, _ax, None) or "").strip().lower()
+        if _v:
+            out[_ax] = {_v}
+
     return {k: v for k, v in out.items() if v}
 
 
@@ -436,7 +444,9 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
         # v1.1 feature_metadata 와 키가 안 겹쳐 안전. fail-open: 없으면 v1.1 만.
         await cur.execute(
             "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape', "
-            "attr->>'surface', attr->'texture', attr->'design_details' "
+            "attr->>'surface', attr->'texture', attr->'design_details', "
+            "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
+            "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone' "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -448,6 +458,14 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 "surface": r[4],
                 "texture": r[5],
                 "design_details": r[6],
+                "heel_type": r[7],
+                "heel_height": r[8],
+                "shaft": r[9],
+                "shoe_toe": r[10],
+                "bag_size": r[11],
+                "bag_structure": r[12],
+                "frame_shape": r[13],
+                "metal_tone": r[14],
             }
             for r in await cur.fetchall()
         }
@@ -742,6 +760,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_surface=settings.ATTR_ALIGN_SURFACE_W if want_attr else 0.0,
                 attr_texture=settings.ATTR_ALIGN_TEXTURE_W if want_attr else 0.0,
                 attr_design_details=settings.ATTR_ALIGN_DESIGN_DETAILS_W if want_attr else 0.0,
+                attr_nonapparel=settings.ATTR_ALIGN_NONAPPAREL_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

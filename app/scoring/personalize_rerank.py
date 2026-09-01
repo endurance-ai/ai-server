@@ -64,6 +64,8 @@ class RerankWeights:
     attr_surface: float = 0.0
     attr_texture: float = 0.0
     attr_design_details: float = 0.0
+    # v2.6 비어패럴 조건부축(신발/가방/안경/주얼리) — 전부 스칼라, 공유 가중치.
+    attr_nonapparel: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -128,6 +130,20 @@ def _gender_penalty(profile_gender: str, brand_gender_lean: str, weight: float) 
     return weight if _GENDER_CONFLICT.get(key, False) else 0.0
 
 
+# v2.6 비어패럴 조건부 스칼라축 — 신발/가방/안경/주얼리. search_service 가 target 세팅 +
+# _attach_feature_metadata 가 v26.attr 에서 머지, 여기서 공유 가중치로 정렬 가산.
+NONAPPAREL_SCALAR_AXES: tuple[str, ...] = (
+    "heel_type",
+    "heel_height",
+    "shaft",
+    "shoe_toe",
+    "bag_size",
+    "bag_structure",
+    "frame_shape",
+    "metal_tone",
+)
+
+
 def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[str, set[str]]) -> float:
     """쿼리 target 속성(fit/material) ↔ 후보 feature_metadata 정렬 가산.
     color/subcategory 는 RPC 하드게이트라 제외. 개인화가 아니라 쿼리 의도이므로
@@ -184,6 +200,12 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
         cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
         if tdd & cand:
             bonus += w.attr_design_details
+    # v2.6 비어패럴 스칼라축 — 공유 가중치(매칭 축마다 가산).
+    if w.attr_nonapparel:
+        for ax in NONAPPAREL_SCALAR_AXES:
+            tv = target_attrs.get(ax)
+            if tv and str(fmeta.get(ax) or "").strip().lower() in tv:
+                bonus += w.attr_nonapparel
     return bonus
 
 

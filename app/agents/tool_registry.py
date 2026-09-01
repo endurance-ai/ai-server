@@ -108,6 +108,20 @@ class SearchProductsArgs(TypedDict, total=False):
     surface: str | None
     texture: str | None
     design_details: str | None
+    # 2026-09-01 — v2.6 비어패럴 조건부축(product_features_v26.attr). 해당 카테고리에서만.
+    #   신발: heel_type(flat/block/stiletto/kitten/wedge/platform) · heel_height(flat/low/mid/high)
+    #        · shaft(none/ankle/mid_calf/knee/thigh) · shoe_toe(round/pointed/square/almond/open)
+    #   가방: bag_size(micro/mini/small/medium/large) · bag_structure(structured/semi/slouchy)
+    #   안경: frame_shape(round/square/cat_eye/aviator/rectangle/oval/shield)
+    #   주얼리: metal_tone(gold/silver/rose/mixed/black)
+    heel_type: str | None
+    heel_height: str | None
+    shaft: str | None
+    shoe_toe: str | None
+    bag_size: str | None
+    bag_structure: str | None
+    frame_shape: str | None
+    metal_tone: str | None
     # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
     # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
     # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
@@ -354,6 +368,12 @@ REGISTRY: dict[str, ToolMetadata] = {
             "('리브드'→'ribbed', 케이블/레이스/코듀로이/워싱 → cable/lace/corduroy/washed), "
             "design_details ('컷아웃'→'cutout', 슬릿/랩/코르셋/러플 → slit/wrap/corset/ruffle). "
             "단수 토큰 English lowercase — 유사도 rerank 를 날카롭게, 미언급 시 omit.\n"
+            "  - 비어패럴 DETAIL (해당 카테고리 상품일 때만): 신발 heel_height ('굽높은'→'high', "
+            "플랫/로우/미드)·heel_type ('스틸레토'→'stiletto', 통굽→platform/wedge, 블록)·shaft "
+            "('앵클부츠'→'ankle', 롱부츠→knee/thigh)·shoe_toe (오픈토→'open', 포인티드). 가방 "
+            "bag_size ('미니백'→'mini', 라지/스몰)·bag_structure (structured/slouchy). 안경 "
+            "frame_shape ('캣아이'→'cat_eye', 라운드/aviator). 주얼리 metal_tone ('골드'→'gold', "
+            "실버/로즈). English lowercase, 미언급 시 omit.\n"
             "  - `mood`: 스타일 무드/트렌드를 사용자가 명시할 때만 (예: '그런지st 바지', "
             "'올드머니룩 니트', '리조트 원피스'). 그 무드 상품만 HARD 필터. 반드시 아래 27개 "
             "폐쇄값 중 정확히 하나(한글 그대로): 미니멀룩·올드머니룩·프렌치시크·시티보이·프레피룩·"
