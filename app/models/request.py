@@ -27,6 +27,8 @@ class AnalyzedItem(BaseModel):
     length: str | None = None
     sleeve_length: str | None = None
     leg_shape: str | None = None
+    # 2026-09-01 — v2.6 스타일 무드 태그(product_features_v26.final_tags). 후보풀 하드필터.
+    mood: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query: str | None = None
