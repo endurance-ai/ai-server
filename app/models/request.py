@@ -33,6 +33,15 @@ class AnalyzedItem(BaseModel):
     surface: str | None = None
     texture: str | None = None
     design_details: str | None = None
+    # 2026-09-01 — v2.6 비어패럴 조건부축(신발/가방/안경/주얼리). rerank 소프트 가산.
+    heel_type: str | None = None
+    heel_height: str | None = None
+    shaft: str | None = None
+    shoe_toe: str | None = None
+    bag_size: str | None = None
+    bag_structure: str | None = None
+    frame_shape: str | None = None
+    metal_tone: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query: str | None = None
