@@ -42,6 +42,9 @@ class AnalyzedItem(BaseModel):
     bag_structure: str | None = None
     frame_shape: str | None = None
     metal_tone: str | None = None
+    # 2026-09-02 — v2.6 wash(데님 워싱)/graphics(로고·프린트).
+    wash: str | None = None
+    graphics: str | None = None
     color_family: str | None = Field(default=None, alias="colorFamily")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query: str | None = None

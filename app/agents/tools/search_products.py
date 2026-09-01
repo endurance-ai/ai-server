@@ -872,6 +872,8 @@ async def run_text_only_search(
     bag_structure: str | None = None,
     frame_shape: str | None = None,
     metal_tone: str | None = None,
+    wash: str | None = None,
+    graphics: str | None = None,
     color_family: str | None = None,
     name_query: str | None = None,
     top_k: int = 40,
@@ -931,6 +933,8 @@ async def run_text_only_search(
         bag_structure=bag_structure,
         frame_shape=frame_shape,
         metal_tone=metal_tone,
+        wash=wash,
+        graphics=graphics,
         color_family=color_family,
         name_query=name_query,
         search_query=text_query,
@@ -1604,6 +1608,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     bag_structure = args.get("bag_structure")
     frame_shape = args.get("frame_shape")
     metal_tone = args.get("metal_tone")
+    wash = args.get("wash")
+    graphics = args.get("graphics")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query = str(args.get("name_query") or "").strip() or None
 
@@ -1841,6 +1847,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 bag_structure=bag_structure,
                 frame_shape=frame_shape,
                 metal_tone=metal_tone,
+                wash=wash,
+                graphics=graphics,
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,

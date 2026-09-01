@@ -66,6 +66,9 @@ class RerankWeights:
     attr_design_details: float = 0.0
     # v2.6 비어패럴 조건부축(신발/가방/안경/주얼리) — 전부 스칼라, 공유 가중치.
     attr_nonapparel: float = 0.0
+    # v2.6 wash(데님 워싱)/graphics(로고·프린트) — 스칼라.
+    attr_wash: float = 0.0
+    attr_graphics: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -206,6 +209,13 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
             tv = target_attrs.get(ax)
             if tv and str(fmeta.get(ax) or "").strip().lower() in tv:
                 bonus += w.attr_nonapparel
+    # v2.6 wash/graphics(스칼라).
+    twash = target_attrs.get("wash")
+    if twash and str(fmeta.get("wash") or "").strip().lower() in twash:
+        bonus += w.attr_wash
+    tgfx = target_attrs.get("graphics")
+    if tgfx and str(fmeta.get("graphics") or "").strip().lower() in tgfx:
+        bonus += w.attr_graphics
     return bonus
 
 

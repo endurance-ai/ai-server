@@ -122,6 +122,10 @@ class SearchProductsArgs(TypedDict, total=False):
     bag_structure: str | None
     frame_shape: str | None
     metal_tone: str | None
+    # 2026-09-02 — v2.6 wash(데님 워싱: raw/light/medium/dark/acid/bleached) ·
+    #   graphics(none/logo/graphic/text/allover — 프린트/로고 유형).
+    wash: str | None
+    graphics: str | None
     # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
     # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
     # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
@@ -374,6 +378,9 @@ REGISTRY: dict[str, ToolMetadata] = {
             "bag_size ('미니백'→'mini', 라지/스몰)·bag_structure (structured/slouchy). 안경 "
             "frame_shape ('캣아이'→'cat_eye', 라운드/aviator). 주얼리 metal_tone ('골드'→'gold', "
             "실버/로즈). English lowercase, 미언급 시 omit.\n"
+            "  - `wash` / `graphics`: 데님 워싱·프린트 DETAIL, 명시될 때만. wash ('연청'→'light', "
+            "진청→dark, 생지→raw, 워싱→medium, 애시드→acid). graphics ('로고'→'logo', 프린트/그래픽→"
+            "graphic, 슬로건/레터링→text, 올오버프린트→allover). English lowercase.\n"
             "  - `mood`: 스타일 무드/트렌드를 사용자가 명시할 때만 (예: '그런지st 바지', "
             "'올드머니룩 니트', '리조트 원피스'). 그 무드 상품만 HARD 필터. 반드시 아래 27개 "
             "폐쇄값 중 정확히 하나(한글 그대로): 미니멀룩·올드머니룩·프렌치시크·시티보이·프레피룩·"

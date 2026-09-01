@@ -415,6 +415,14 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
         if _v:
             out[_ax] = {_v}
 
+    # v2.6 wash(데님 워싱)/graphics(로고·프린트).
+    wash = str(getattr(item, "wash", None) or "").strip().lower()
+    if wash:
+        out["wash"] = {wash}
+    graphics = str(getattr(item, "graphics", None) or "").strip().lower()
+    if graphics:
+        out["graphics"] = {graphics}
+
     return {k: v for k, v in out.items() if v}
 
 
@@ -492,7 +500,8 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             "attr->>'surface', attr->'texture', attr->'design_details', "
             "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
             "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone', "
-            "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline' "
+            "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline', "
+            "attr->>'wash', attr->>'graphics' "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -517,6 +526,9 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 "pattern": r[16],
                 "primary_color": r[17],
                 "neckline": r[18],
+                # 신규 override 축(v1.1 미보유).
+                "wash": r[19],
+                "graphics": r[20],
             }
             for r in await cur.fetchall()
         }
@@ -803,6 +815,8 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_texture=settings.ATTR_ALIGN_TEXTURE_W if want_attr else 0.0,
                 attr_design_details=settings.ATTR_ALIGN_DESIGN_DETAILS_W if want_attr else 0.0,
                 attr_nonapparel=settings.ATTR_ALIGN_NONAPPAREL_W if want_attr else 0.0,
+                attr_wash=settings.ATTR_ALIGN_WASH_W if want_attr else 0.0,
+                attr_graphics=settings.ATTR_ALIGN_GRAPHICS_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(
