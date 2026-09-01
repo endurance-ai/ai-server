@@ -335,6 +335,11 @@ class Settings(BaseSettings):
     ATTR_ALIGN_LENGTH_W: float = 0.12
     ATTR_ALIGN_SLEEVE_W: float = 0.10
     ATTR_ALIGN_LEG_SHAPE_W: float = 0.12
+    # 2026-09-01 — v2.6 스타일 디테일축(surface/texture/design_details). fit 이 못 담는
+    # 소재감·질감·디테일. 커버리지 surface 240k/texture 239k/design_details 176k.
+    ATTR_ALIGN_SURFACE_W: float = 0.10
+    ATTR_ALIGN_TEXTURE_W: float = 0.10
+    ATTR_ALIGN_DESIGN_DETAILS_W: float = 0.10
 
     # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
     # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.

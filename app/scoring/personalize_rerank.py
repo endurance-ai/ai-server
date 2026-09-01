@@ -60,6 +60,10 @@ class RerankWeights:
     attr_length: float = 0.0
     attr_sleeve_length: float = 0.0
     attr_leg_shape: float = 0.0
+    # v2.6 스타일 디테일축 — surface(스칼라)/texture(배열)/design_details(배열).
+    attr_surface: float = 0.0
+    attr_texture: float = 0.0
+    attr_design_details: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -164,6 +168,22 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tleg = target_attrs.get("leg_shape")
     if tleg and str(fmeta.get("leg_shape") or "").strip().lower() in tleg:
         bonus += w.attr_leg_shape
+    # v2.6 스타일 디테일 — surface(스칼라), texture/design_details(배열, material 과 동일 교집합).
+    tsurf = target_attrs.get("surface")
+    if tsurf and str(fmeta.get("surface") or "").strip().lower() in tsurf:
+        bonus += w.attr_surface
+    ttex = target_attrs.get("texture")
+    if ttex:
+        raw = fmeta.get("texture")
+        cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
+        if ttex & cand:
+            bonus += w.attr_texture
+    tdd = target_attrs.get("design_details")
+    if tdd:
+        raw = fmeta.get("design_details")
+        cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
+        if tdd & cand:
+            bonus += w.attr_design_details
     return bonus
 
 

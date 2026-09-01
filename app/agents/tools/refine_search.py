@@ -93,6 +93,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     boost = _as_keyword_list(args.get("boost_keywords"))
     exclude_kw = _as_keyword_list(args.get("exclude_keywords"))
     exclude_brands = _as_keyword_list(args.get("exclude_brands"))
+    # v2.6 무드 delta — 직전 결과를 특정 무드로 좁힌다(final_tags 하드필터, service 에서 적용).
+    mood = str(args.get("mood") or "").strip() or None
     # 이어받은 positive 브랜드 필터에서 배제 대상 제거 — 그 브랜드로 검색하며 동시에
     # 배제하면 0건이 되므로(예: 직전 'Zara 재킷' → '자라 빼고').
     if refine_brand and exclude_brands:
@@ -253,6 +255,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 gender=refine_gender,
                 fit=fit,
                 color_family=color_family,
+                mood=mood,
                 top_k=15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
@@ -277,6 +280,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 gender=refine_gender,
                 fit=fit,
                 color_family=color_family,
+                mood=mood,
                 top_k=15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
@@ -289,6 +293,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 brand_filter=refine_brand,
                 fit=fit,
                 color_family=color_family,
+                mood=mood,
                 top_k=15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,

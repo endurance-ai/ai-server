@@ -395,6 +395,18 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if leg:
         out["leg_shape"] = {leg}
 
+    # v2.6 스타일 디테일축 — surface(스칼라)/texture/design_details. _attach_feature_metadata
+    # 가 v26.attr 에서 머지(texture/design_details 는 배열 그대로).
+    surface = str(getattr(item, "surface", None) or "").strip().lower()
+    if surface:
+        out["surface"] = {surface}
+    texture = str(getattr(item, "texture", None) or "").strip().lower()
+    if texture:
+        out["texture"] = {texture}
+    design = str(getattr(item, "design_details", None) or "").strip().lower()
+    if design:
+        out["design_details"] = {design}
+
     return {k: v for k, v in out.items() if v}
 
 
@@ -423,11 +435,22 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
         # v2.6 enrichment (product_features_v26.attr) — 고커버리지 신규 축을 머지.
         # v1.1 feature_metadata 와 키가 안 겹쳐 안전. fail-open: 없으면 v1.1 만.
         await cur.execute(
-            "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape' "
+            "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape', "
+            "attr->>'surface', attr->'texture', attr->'design_details' "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
-        v26 = {int(r[0]): {"length": r[1], "sleeve_length": r[2], "leg_shape": r[3]} for r in await cur.fetchall()}
+        v26 = {
+            int(r[0]): {
+                "length": r[1],
+                "sleeve_length": r[2],
+                "leg_shape": r[3],
+                "surface": r[4],
+                "texture": r[5],
+                "design_details": r[6],
+            }
+            for r in await cur.fetchall()
+        }
     for r in rows:
         rid = str(r.get("id") or "")
         if not rid.isdigit():
@@ -443,6 +466,41 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             r["feature_metadata"] = merged
         else:
             r["feature_metadata"] = fm
+
+
+async def _apply_mood_filter(rows: list[dict[str, Any]], mood: str) -> list[dict[str, Any]]:
+    """v2.6 스타일 무드 하드필터 — 후보풀에서 `product_features_v26.final_tags` 에
+    해당 무드가 든 상품만 남긴다(순서 보존). fail-open: 매칭 0 또는 풀 다운이면 원본 유지
+    (무드 검색이 빈 결과로 502/무응답 되지 않게 — 임베딩이 이미 무드로 편향된 풀이라
+    보통 매칭이 존재)."""
+    m = (mood or "").strip()
+    if not m or not rows:
+        return rows
+    ids = [int(r["id"]) for r in rows if str(r.get("id") or "").isdigit()]
+    if not ids:
+        return rows
+    from app.providers import db_pool
+
+    pool = db_pool._pool  # noqa: SLF001
+    if pool is None:
+        return rows
+    try:
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT product_id FROM public.product_features_v26 "
+                "WHERE product_id = ANY(%s) AND %s = ANY(final_tags)",
+                (ids, m),
+            )
+            keep = {int(r[0]) for r in await cur.fetchall()}
+    except Exception as exc:  # noqa: BLE001 — never break search
+        logger.warning("[STEP 4.55][mood] filter skipped due to %s", type(exc).__name__)
+        return rows
+    filtered = [r for r in rows if str(r.get("id") or "").isdigit() and int(r["id"]) in keep]
+    if not filtered:
+        logger.info("[STEP 4.55][mood] '%s' 매칭 0 (pool=%d) — fail-open 원본 유지", m, len(rows))
+        return rows
+    logger.info("[STEP 4.55][mood] '%s' 하드필터 %d→%d", m, len(rows), len(filtered))
+    return filtered
 
 
 async def search_service(state: PipelineState) -> PipelineState:
@@ -637,6 +695,11 @@ async def search_service(state: PipelineState) -> PipelineState:
     # (e.g., public /recommend), (c) no signal in the profile, (d) any
     # unexpected error (fail-open: keep RPC order).
     # 속성정렬 ("우와 비슷하다") 은 쿼리 의도라 익명/콜드 유저에도 적용.
+    # v2.6 무드 하드필터 (명시 mood arg 로만). RPC 후보풀 → 해당 무드 상품만.
+    mood_arg = str(getattr(req.item, "mood", None) or "").strip()
+    if mood_arg:
+        rows = await _apply_mood_filter(rows, mood_arg)
+
     target_attrs = _query_target_attrs(req.item) if settings.ATTR_ALIGN_ENABLED else {}
     # 색 게이트가 relax 됐다면 요청 색을 소프트 부스트 축으로 추가 → exact-color 상단.
     if settings.ATTR_ALIGN_ENABLED and relaxed_color_family:
@@ -676,6 +739,9 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_length=settings.ATTR_ALIGN_LENGTH_W if want_attr else 0.0,
                 attr_sleeve_length=settings.ATTR_ALIGN_SLEEVE_W if want_attr else 0.0,
                 attr_leg_shape=settings.ATTR_ALIGN_LEG_SHAPE_W if want_attr else 0.0,
+                attr_surface=settings.ATTR_ALIGN_SURFACE_W if want_attr else 0.0,
+                attr_texture=settings.ATTR_ALIGN_TEXTURE_W if want_attr else 0.0,
+                attr_design_details=settings.ATTR_ALIGN_DESIGN_DETAILS_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(
