@@ -395,6 +395,18 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if leg:
         out["leg_shape"] = {leg}
 
+    # v2.6 스타일 디테일축 — surface(스칼라)/texture/design_details. _attach_feature_metadata
+    # 가 v26.attr 에서 머지(texture/design_details 는 배열 그대로).
+    surface = str(getattr(item, "surface", None) or "").strip().lower()
+    if surface:
+        out["surface"] = {surface}
+    texture = str(getattr(item, "texture", None) or "").strip().lower()
+    if texture:
+        out["texture"] = {texture}
+    design = str(getattr(item, "design_details", None) or "").strip().lower()
+    if design:
+        out["design_details"] = {design}
+
     return {k: v for k, v in out.items() if v}
 
 
@@ -423,11 +435,22 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
         # v2.6 enrichment (product_features_v26.attr) — 고커버리지 신규 축을 머지.
         # v1.1 feature_metadata 와 키가 안 겹쳐 안전. fail-open: 없으면 v1.1 만.
         await cur.execute(
-            "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape' "
+            "SELECT product_id, attr->>'length', attr->>'sleeve_length', attr->>'leg_shape', "
+            "attr->>'surface', attr->'texture', attr->'design_details' "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
-        v26 = {int(r[0]): {"length": r[1], "sleeve_length": r[2], "leg_shape": r[3]} for r in await cur.fetchall()}
+        v26 = {
+            int(r[0]): {
+                "length": r[1],
+                "sleeve_length": r[2],
+                "leg_shape": r[3],
+                "surface": r[4],
+                "texture": r[5],
+                "design_details": r[6],
+            }
+            for r in await cur.fetchall()
+        }
     for r in rows:
         rid = str(r.get("id") or "")
         if not rid.isdigit():
@@ -716,6 +739,9 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_length=settings.ATTR_ALIGN_LENGTH_W if want_attr else 0.0,
                 attr_sleeve_length=settings.ATTR_ALIGN_SLEEVE_W if want_attr else 0.0,
                 attr_leg_shape=settings.ATTR_ALIGN_LEG_SHAPE_W if want_attr else 0.0,
+                attr_surface=settings.ATTR_ALIGN_SURFACE_W if want_attr else 0.0,
+                attr_texture=settings.ATTR_ALIGN_TEXTURE_W if want_attr else 0.0,
+                attr_design_details=settings.ATTR_ALIGN_DESIGN_DETAILS_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

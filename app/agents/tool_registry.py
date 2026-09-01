@@ -101,6 +101,13 @@ class SearchProductsArgs(TypedDict, total=False):
     # 2026-09-01 — v2.6 스타일 무드 태그(product_features_v26.final_tags). 사용자가
     #   무드/트렌드를 명시할 때만. 후보풀 하드필터(그 무드 상품만). 27개 폐쇄값 중 하나.
     mood: str | None
+    # 2026-09-01 — v2.6 스타일 디테일축(product_features_v26.attr). rerank 소프트 가산.
+    #   surface: 소재감(matte/glossy/metallic/sheer/sequin/coated)
+    #   texture: 질감(ribbed/cable/distressed/crochet/lace/corduroy/washed/…)
+    #   design_details: 디테일(cutout/slit/wrap/corset/ruffle/…)  ※단수 토큰
+    surface: str | None
+    texture: str | None
+    design_details: str | None
     # 2026-07-16 — garment 단어 (예: "hoodie", "sneakers"). dispatch 가
     # vision_category 부재 시(순수 텍스트 턴) family gate + p_subcategory
     # 파생에 사용. 종전엔 스키마에 없어 unknown_keys 로 거부되던 배선.
@@ -342,6 +349,11 @@ REGISTRY: dict[str, ToolMetadata] = {
             "named. length ('미디'→'midi', 맥시/미니/크롭/발목/무릎 → maxi/mini/crop/ankle/knee), "
             "sleeve_length ('긴팔'→'long', 반팔/민소매 → short/sleeveless), leg_shape ('와이드'→"
             "'wide', 스트레이트/플레어/스키니/테이퍼드). English lowercase.\n"
+            "  - `surface` / `texture` / `design_details`: 소재감·질감·디테일 DETAIL, 명시될 때만. "
+            "surface ('메탈릭'→'metallic', 새틴광택/시스루/시퀸 → glossy/sheer/sequin), texture "
+            "('리브드'→'ribbed', 케이블/레이스/코듀로이/워싱 → cable/lace/corduroy/washed), "
+            "design_details ('컷아웃'→'cutout', 슬릿/랩/코르셋/러플 → slit/wrap/corset/ruffle). "
+            "단수 토큰 English lowercase — 유사도 rerank 를 날카롭게, 미언급 시 omit.\n"
             "  - `mood`: 스타일 무드/트렌드를 사용자가 명시할 때만 (예: '그런지st 바지', "
             "'올드머니룩 니트', '리조트 원피스'). 그 무드 상품만 HARD 필터. 반드시 아래 27개 "
             "폐쇄값 중 정확히 하나(한글 그대로): 미니멀룩·올드머니룩·프렌치시크·시티보이·프레피룩·"
