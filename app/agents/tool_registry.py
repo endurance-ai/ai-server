@@ -138,6 +138,9 @@ class RefineSearchArgs(TypedDict, total=False):
     max_price: float | None
     min_price: float | None
     drop_min_price: bool
+    # 2026-09-01 — v2.6 스타일 무드 태그(final_tags). 직전 결과를 특정 무드로 좁히는
+    #   delta refine ("리조트st로", "그런지 느낌으로"). search_products.mood 와 동일 27 폐쇄값.
+    mood: str | None
     # SPEC-SEARCH-V6-STYLE-WIRING text-only follow-up: optional 1-letter style
     # node override. Same digest is appended to the refine_search tool
     # description by style_node.warm_cache().
@@ -446,6 +449,9 @@ REGISTRY: dict[str, ToolMetadata] = {
             "      Always include action='refine' alongside style detail boosts.\n\n"
             "  ● COLOR SWAP → `color` (English color word). Use action='color_swap'.\n"
             "      '파란색으로' / 'in blue'  → color='blue', action='color_swap'\n\n"
+            "  ● MOOD → `mood` (직전 결과를 특정 스타일 무드로 좁힘, HARD 필터). 한글 27 폐쇄값 "
+            "(search_products.mood 와 동일: 그런지·리조트·핫걸·올드머니룩·Y2K·코케트 …).\n"
+            "      '리조트st로' / '더 그런지하게'  → mood='리조트' / mood='그런지', action='refine'\n\n"
             "  ● EXCLUDE → `exclude_brands` or `exclude_keywords` + action='exclude'.\n"
             "      '자라 빼고' / 'without Zara'  → exclude_brands=['Zara'], action='exclude'\n\n"
             "  ● BROADEN (0-result recovery) → action='broaden'. Drop subcategory/brand filters; "

@@ -1198,6 +1198,7 @@ async def run_smart_blended_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
+    mood: str | None = None,
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
@@ -1299,6 +1300,7 @@ async def run_smart_blended_search(
         subcategory=subcategory,
         fit=fit,
         color_family=color_family,
+        mood=mood,
         search_query=modifier_query,
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
@@ -1343,6 +1345,7 @@ async def run_image_search(
     brand_filter: list[str] | None = None,
     fit: str | None = None,
     color_family: str | None = None,
+    mood: str | None = None,
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
@@ -1366,6 +1369,7 @@ async def run_image_search(
         subcategory=subcategory,
         fit=fit,
         color_family=color_family,
+        mood=mood,
         search_query=text_query,
     )
     style_node = StyleNode(primary=style_node_primary) if style_node_primary else None
