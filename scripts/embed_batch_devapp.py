@@ -149,7 +149,11 @@ def load_model(device: str):
     return model, preprocess
 
 
-def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
+def fetch_pending(
+    conn: psycopg.Connection,
+    limit: int | None,
+    platforms: list[str] | None = None,
+) -> list[dict]:
     """활성·대표 이미지 보유 미임베딩 products 일괄 수집."""
     # pending = product_embeddings 에 row 가 없는 products (anti-join).
     # 구 `products.embedding IS NULL` 센티넬은 migration 086 에서 컬럼 drop 됨 —
@@ -182,12 +186,18 @@ def fetch_pending(conn: psycopg.Connection, limit: int | None) -> list[dict]:
                   AND pif.next_retry_at <= now()
                 )
               )
+        {platform_filter}
         ORDER BY p.id
     """
+    platform_filter = ""
+    params: list[object] = []
+    if platforms:
+        platform_filter = "AND p.platform = ANY(%s)"
+        params.append(platforms)
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
     with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql)
+        cur.execute(sql.format(platform_filter=platform_filter), params)
         rows = cur.fetchall()
     return [{**r, "id": str(r["id"])} for r in rows]
 
@@ -636,6 +646,11 @@ def fmt_eta(seconds: float) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument(
+        "--platform",
+        default=None,
+        help="comma-separated platform keys to restrict embedding (for example samostuff,teak)",
+    )
     ap.add_argument("--limit", type=int, default=None, help="N 개만 처리 (테스트용)")
     ap.add_argument("--batch-size", type=int, default=16, help="GPU/MPS 배치 크기 (default 16)")
     ap.add_argument("--download-workers", type=int, default=8, help="이미지 다운로드 동시성 (default 8)")
@@ -662,7 +677,8 @@ def main() -> None:
         model, preprocess = load_model(device)
 
         print("[fetch] 미임베딩 products 조회...")
-        pending = fetch_pending(conn, limit=args.limit)
+        platforms = [p.strip() for p in args.platform.split(",") if p.strip()] if args.platform else None
+        pending = fetch_pending(conn, limit=args.limit, platforms=platforms)
         total = len(pending)
         print(f"[fetch] {total} 건 처리 예정")
         if total == 0:
