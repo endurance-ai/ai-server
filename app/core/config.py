@@ -343,6 +343,10 @@ class Settings(BaseSettings):
     # 2026-09-01 — v2.6 비어패럴 조건부축(신발 heel/shaft/toe·가방 size/structure·
     # 안경 frame·주얼리 metal_tone) 공유 가중치. 카테고리 내 고커버리지.
     ATTR_ALIGN_NONAPPAREL_W: float = 0.12
+    # 2026-09-02 — v2.6 wash(데님 워싱: raw/light/medium/dark/acid/bleached)·
+    # graphics(none/logo/graphic/text/allover). v1.1 미보유 신규축.
+    ATTR_ALIGN_WASH_W: float = 0.12
+    ATTR_ALIGN_GRAPHICS_W: float = 0.10
 
     # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
     # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.
