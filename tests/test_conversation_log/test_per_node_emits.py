@@ -74,6 +74,65 @@ def adapter_ctx():
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# LOG-T0 — ingest → user_text / user_photo / user_callback (intake, turn_no=0)
+# The inbound user event: catalog #1–#3 were documented but never emitted,
+# leaving turns with no visible trigger. `ingest` now records it at the
+# universal entry node.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_log_t0_ingest_emits_user_text():
+    from app.graphs.nodes.ingest import ingest
+
+    s = _state(_msg(text="블랙 오버사이즈 블레이저"))
+    with patch("app.graphs.nodes.ingest.emit") as m:
+        await ingest(s)
+    ut = [c for c in m.call_args_list if c.kwargs.get("event_type") == "user_text"]
+    assert len(ut) == 1
+    assert ut[0].kwargs["turn_no"] == 0
+    assert ut[0].kwargs["payload"]["text"] == "블랙 오버사이즈 블레이저"
+    assert ut[0].kwargs["payload"]["lang_detected"] == "ko"
+
+
+@pytest.mark.asyncio
+async def test_log_t0_ingest_emits_user_callback_not_text():
+    from app.graphs.nodes.ingest import ingest
+
+    s = _state(_msg(callback_data="clarify:fit:oversized"))
+    with patch("app.graphs.nodes.ingest.emit") as m:
+        await ingest(s)
+    events = [c.kwargs.get("event_type") for c in m.call_args_list]
+    assert "user_callback" in events
+    assert "user_text" not in events  # callback shape is not text
+
+
+@pytest.mark.asyncio
+async def test_log_t0_ingest_emits_user_photo_for_url():
+    from app.graphs.nodes.ingest import ingest
+
+    s = _state(_msg(urls=["https://example.com/a.jpg"]))
+    with patch("app.graphs.nodes.ingest.emit") as m:
+        await ingest(s)
+    up = [c for c in m.call_args_list if c.kwargs.get("event_type") == "user_photo"]
+    assert len(up) == 1
+    assert up[0].kwargs["payload"]["image_url"] == "https://example.com/a.jpg"
+
+
+@pytest.mark.asyncio
+async def test_log_t0_ingest_contentless_emits_no_user_event():
+    from app.graphs.nodes.ingest import ingest
+
+    s = _state(_msg())  # no text / photo / url / callback
+    with patch("app.graphs.nodes.ingest.emit") as m:
+        await ingest(s)
+    events = [c.kwargs.get("event_type") for c in m.call_args_list]
+    assert "user_text" not in events
+    assert "user_photo" not in events
+    assert "user_callback" not in events
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # LOG-T11 — ingest → intent_routed (turn_no=1)
 # ─────────────────────────────────────────────────────────────────────────
 
