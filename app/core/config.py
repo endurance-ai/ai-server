@@ -347,6 +347,11 @@ class Settings(BaseSettings):
     # graphics(none/logo/graphic/text/allover). v1.1 미보유 신규축.
     ATTR_ALIGN_WASH_W: float = 0.12
     ATTR_ALIGN_GRAPHICS_W: float = 0.10
+    # 무드/스타일(product_features_v26.final_tags, 27 폐쇄값: 미니멀룩/그런지/스트릿/
+    # Y2K/고프코어…). 예전엔 mood arg 가 하드필터였으나 (0매치 fail-open 랜덤 +
+    # 근접무드 배제 + 필터 후 무드-blind 정렬) 전환 최악(윤영 지형도 6~11%) → 하드
+    # 필터 제거하고 rerank 부스트로 전환. Kiko 차별축이라 가중 최고(0.25>fit 0.20).
+    ATTR_ALIGN_MOOD_W: float = 0.25
 
     # (2026-08-27 죽은코드 정리) CRITIQUE_CHEAPER_RATIO 제거 — 유일 소비자
     # critique._candidate_to_anchor/parse_callback 이 clarify.py 로 대체돼 삭제됨.

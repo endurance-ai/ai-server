@@ -353,6 +353,13 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     qtext = " ".join(s for s in (getattr(item, "search_query", None), getattr(item, "search_query_ko", None)) if s)
 
+    # 무드(v2.6 final_tags, 27 폐쇄값) — 명시 mood arg 로만. 예전엔 하드필터였으나
+    # rerank 부스트축으로 전환(하드필터 제거). final_tags 는 한글이라 소문자화는
+    # 사실상 무해(candidate 측도 동일 정규화).
+    mood = str(getattr(item, "mood", None) or "").strip().lower()
+    if mood:
+        out["mood"] = {mood}
+
     # fit — 구조화 인자 우선, 없으면 쿼리 텍스트에서 추출.
     fit = str(getattr(item, "fit", None) or "").strip().lower()
     fit_vals = (_FIT_NORM.get(fit) or ({fit} if fit else set())) or _extract_fit_from_text(qtext)
@@ -501,7 +508,7 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
             "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone', "
             "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline', "
-            "attr->>'wash', attr->>'graphics' "
+            "attr->>'wash', attr->>'graphics', final_tags "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -529,6 +536,8 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 # 신규 override 축(v1.1 미보유).
                 "wash": r[19],
                 "graphics": r[20],
+                # v2.6 스타일 무드 태그(final_tags 배열, 27 폐쇄값) → 무드 rerank 축.
+                "mood_tags": r[21],
             }
             for r in await cur.fetchall()
         }
@@ -540,39 +549,10 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
         r["feature_metadata"] = _merge_v26_attrs(meta.get(pid), v26.get(pid))
 
 
-async def _apply_mood_filter(rows: list[dict[str, Any]], mood: str) -> list[dict[str, Any]]:
-    """v2.6 스타일 무드 하드필터 — 후보풀에서 `product_features_v26.final_tags` 에
-    해당 무드가 든 상품만 남긴다(순서 보존). fail-open: 매칭 0 또는 풀 다운이면 원본 유지
-    (무드 검색이 빈 결과로 502/무응답 되지 않게 — 임베딩이 이미 무드로 편향된 풀이라
-    보통 매칭이 존재)."""
-    m = (mood or "").strip()
-    if not m or not rows:
-        return rows
-    ids = [int(r["id"]) for r in rows if str(r.get("id") or "").isdigit()]
-    if not ids:
-        return rows
-    from app.providers import db_pool
-
-    pool = db_pool._pool  # noqa: SLF001
-    if pool is None:
-        return rows
-    try:
-        async with pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT product_id FROM public.product_features_v26 "
-                "WHERE product_id = ANY(%s) AND %s = ANY(final_tags)",
-                (ids, m),
-            )
-            keep = {int(r[0]) for r in await cur.fetchall()}
-    except Exception as exc:  # noqa: BLE001 — never break search
-        logger.warning("[STEP 4.55][mood] filter skipped due to %s", type(exc).__name__)
-        return rows
-    filtered = [r for r in rows if str(r.get("id") or "").isdigit() and int(r["id"]) in keep]
-    if not filtered:
-        logger.info("[STEP 4.55][mood] '%s' 매칭 0 (pool=%d) — fail-open 원본 유지", m, len(rows))
-        return rows
-    logger.info("[STEP 4.55][mood] '%s' 하드필터 %d→%d", m, len(rows), len(filtered))
-    return filtered
+# NOTE — `_apply_mood_filter`(v2.6 무드 하드필터)는 제거됨(2026-09-04). 무드는
+# 이제 하드필터가 아니라 `_query_target_attrs` 의 mood 축 + personalize_rerank 의
+# attr_mood 부스트로 처리한다(리콜 보존 + 무드 매칭 상단). 하드필터의 0매치
+# fail-open 랜덤·근접무드 배제·필터 후 무드-blind 정렬 문제를 해소.
 
 
 async def search_service(state: PipelineState) -> PipelineState:
@@ -767,11 +747,11 @@ async def search_service(state: PipelineState) -> PipelineState:
     # (e.g., public /recommend), (c) no signal in the profile, (d) any
     # unexpected error (fail-open: keep RPC order).
     # 속성정렬 ("우와 비슷하다") 은 쿼리 의도라 익명/콜드 유저에도 적용.
-    # v2.6 무드 하드필터 (명시 mood arg 로만). RPC 후보풀 → 해당 무드 상품만.
-    mood_arg = str(getattr(req.item, "mood", None) or "").strip()
-    if mood_arg:
-        rows = await _apply_mood_filter(rows, mood_arg)
-
+    # v2.6 무드 — 예전엔 여기서 `_apply_mood_filter` 하드필터(해당 무드 상품만)를
+    # 걸었으나, 0매치 fail-open 랜덤 + 근접무드 배제 + 필터 후 무드-blind 정렬로
+    # 전환이 최악이었다(윤영 쿼리 지형도: 무드 6~11%). 하드필터를 제거하고
+    # `_query_target_attrs` 의 mood 축으로 rerank 부스트만 준다 — 리콜 보존(상품
+    # 더 노출)하면서 무드 매칭 상품을 상단으로. 2026-09-04.
     target_attrs = _query_target_attrs(req.item) if settings.ATTR_ALIGN_ENABLED else {}
     # 색 게이트가 relax 됐다면 요청 색을 소프트 부스트 축으로 추가 → exact-color 상단.
     if settings.ATTR_ALIGN_ENABLED and relaxed_color_family:
@@ -808,6 +788,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_color=settings.ATTR_ALIGN_COLOR_W if want_attr else 0.0,
                 attr_pattern=settings.ATTR_ALIGN_PATTERN_W if want_attr else 0.0,
                 attr_neckline=settings.ATTR_ALIGN_NECKLINE_W if want_attr else 0.0,
+                attr_mood=settings.ATTR_ALIGN_MOOD_W if want_attr else 0.0,
                 attr_length=settings.ATTR_ALIGN_LENGTH_W if want_attr else 0.0,
                 attr_sleeve_length=settings.ATTR_ALIGN_SLEEVE_W if want_attr else 0.0,
                 attr_leg_shape=settings.ATTR_ALIGN_LEG_SHAPE_W if want_attr else 0.0,
