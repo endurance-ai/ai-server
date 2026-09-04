@@ -455,7 +455,7 @@ async def ingest(state: WorkingState) -> dict:
     #     is identical to the per-card crit:click path; emits `card_clicked`.
     #   - cards:more → send the NEXT album+summary batch from sess.last_results.
     #   - cards:refine → no side effect here; flows to the agent (which already
-    #     exposes refine_search / suggest_next_step) — no new search invented.
+    #     exposes refine_search) — no new search invented.
     # crit:* / clarify:* behavior is untouched.
     try:
         cb_data = msg.callback_data or ""

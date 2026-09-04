@@ -3,7 +3,7 @@
 - `search_products` / `refine_search` dispatch 진입 직전 1회 호출.
 - `respond` dispatch 진입 직전 1회 호출.
 - 다른 tool (analyze_image, update_taste, get_recent_history,
-  ask_user_clarification, suggest_next_step) 은 호출하지 않음.
+  ask_user_clarification) 은 호출하지 않음.
 - 모두 fire-and-forget (`asyncio.create_task`) — tool body 를 block 하지 않음.
 """
 
@@ -82,7 +82,6 @@ async def _run_with_tool(monkeypatch: pytest.MonkeyPatch, tool_name: str, args: 
         "update_taste": "app.agents.tools.update_taste.dispatch",
         "get_recent_history": "app.agents.tools.get_recent_history.dispatch",
         "ask_user_clarification": "app.agents.tools.ask_user_clarification.dispatch",
-        "suggest_next_step": "app.agents.tools.suggest_next_step.dispatch",
     }
     if tool_name in tool_module:
         monkeypatch.setattr(

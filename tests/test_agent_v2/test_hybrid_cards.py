@@ -353,7 +353,7 @@ async def test_cards_more_sends_next_batch(monkeypatch):
 async def test_cards_refine_excluded_from_fresh_query(monkeypatch):
     """cards:refine carries no taste side effect in ingest and is excluded
     from the fresh-query predicate (flows to the agent which already exposes
-    refine_search / suggest_next_step — verified via routing)."""
+    refine_search — verified via routing)."""
     from app.graphs.nodes import ingest as ingest_mod
 
     set_store(_FakeStore(_session_with_results(5)))

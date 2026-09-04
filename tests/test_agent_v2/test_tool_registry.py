@@ -12,11 +12,11 @@ import pytest
 from app.agents.tool_registry import REGISTRY, TOOL_NAMES, validate_args
 
 
-def test_registry_has_9_tools():
-    # SPEC-AGENT-V2-CLEANUP-001 — suggest_next_step is now unconditional.
-    # 2026-08 — web_search added (gated on TAVILY_API_KEY at LLM-exposure time,
-    # but always present in REGISTRY for dispatch).
-    assert len(REGISTRY) == 9
+def test_registry_has_8_tools():
+    # suggest_next_step was removed (dead: no callback receiver on any channel,
+    # 0 calls in 14d prod). 2026-08 — web_search added (gated on TAVILY_API_KEY
+    # at LLM-exposure time, but always present in REGISTRY for dispatch).
+    assert len(REGISTRY) == 8
     expected = {
         "analyze_image",
         "search_products",
@@ -26,7 +26,6 @@ def test_registry_has_9_tools():
         "get_recent_history",
         "web_search",
         "respond",
-        "suggest_next_step",
     }
     assert set(TOOL_NAMES) == expected
 

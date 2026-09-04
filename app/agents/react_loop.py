@@ -58,7 +58,7 @@ _SYSTEM_PROMPT = (
     "a `text` argument — never pass cards or product data; the system attaches the search result "
     "cards automatically from the most recent search.\n\n"
     "Tools available: analyze_image, search_products, refine_search, update_taste, "
-    "ask_user_clarification, get_recent_history, suggest_next_step, respond. "
+    "ask_user_clarification, get_recent_history, respond. "
     "Prefer the fewest tool calls; NEVER repeat a tool with identical args.\n\n"
     "NEVER provide an image_url argument to any tool, and never invent one. Imagery is "
     "resolved internally from session state — `search_products` works from `text_query` "
@@ -121,6 +121,14 @@ _SYSTEM_PROMPT = (
     "<garment/occasion>' = PIVOT. If the new message carries NO garment/occasion/positive-brand of "
     "its own (only attribute words) it can ONLY be a delta → refine. Genuinely unsure → "
     "search_products (a wrong refine drifts off-topic and lies about updating; a fresh search is safe).\n\n"
+    "DURABLE TASTE (update_taste) — when the user states a STANDING preference meant to last BEYOND "
+    "this one search (a general like/dislike of a BRAND or STYLE — '난 미니멀한 게 좋아', '자라는 원래 "
+    "별로야', 'I love COS', 'I hate logos'), ALSO call `update_taste(source='free_text')` with the "
+    "relevant brand_likes/brand_dislikes/keyword_likes/keyword_dislikes, THEN continue the turn "
+    "normally (it does NOT terminate the loop; still end with `respond`). This is SEPARATE from a "
+    "per-search exclude: '자라 빼고' for THIS search only is `refine_search(action='exclude')`, whereas "
+    "a durable '자라는 안 사' is `update_taste` (persisted dislikes down-rank matches in every later "
+    "search). A single message can be both (search/refine AND update_taste).\n\n"
     "Price bounds — convert budget mentions to KRW integer 원 and pass as `min_price`/`max_price` "
     "(numeric only, omit when user didn't mention price — never invent one). "
     "Examples: '5만원 이하' → max_price=50000; '10만원 정도' → max_price=120000 (±20%); "
@@ -190,18 +198,19 @@ _SYSTEM_PROMPT = (
 # the system prompt (the AGENT_V3_PROACTIVE_ENABLED flag was removed).
 _PROACTIVE_DIRECTIVE = (
     "Be proactive. When a `search_products` / `refine_search` result is weak "
-    "(candidates_count < 3), do NOT jump straight to `suggest_next_step` and do NOT "
-    "just respond with an apology. First try to RESCUE the turn with ONE more "
-    "`refine_search` call using a broader delta:\n"
+    "(candidates_count < 3), do NOT just respond with an apology. First try to "
+    "RESCUE the turn with ONE more `refine_search` call using a broader delta:\n"
     "  - If the last call had a `max_price` clamp → bump it ~25% higher and retry.\n"
     "  - Else if it had a `color`/`fit`/`brand` filter → drop the most restrictive one "
     "and retry.\n"
     '  - Else → `refine_search(action="broaden")` once.\n'
-    "Only if this second attempt is ALSO weak (< 3), THEN call `suggest_next_step` to "
-    "offer concrete follow-up options (similar items, different fit, another mood, or "
-    "broaden). This 'rescue once, then escalate' rule prevents dead-end turns where the "
-    "catalog just doesn't have anything at the exact price/style slice the user asked "
-    "for — one broadened retry almost always yields something usable.\n"
+    "If this second attempt is ALSO weak (< 3), do NOT keep retrying — `respond` "
+    "honestly that exact matches were limited and describe the close alternatives you "
+    "DID find, then offer ONE concrete follow-up in your text (a different fit, another "
+    "mood, or broadening). This 'rescue once, then respond honestly' rule prevents "
+    "dead-end turns where the catalog just doesn't have anything at the exact price/"
+    "style slice the user asked for — one broadened retry almost always yields something "
+    "usable.\n"
     "When intent is genuinely too thin to search (≤1 signal AND no garment bucket), ONE coarse "
     "`ask_user_clarification(axis='category_pick')` is fine — but never more than one per request, and "
     "never to narrow within a bucket (see G5). Otherwise just search and show "
@@ -1107,7 +1116,6 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
     # string is identical for every user sharing the same language, Anthropic's
     # prompt cache is shared cross-user and cross-turn (not just within a single
     # turn's iterations). cache_control: ephemeral marks the 5-min TTL boundary.
-    logger.info("💡 [v3:proactive] suggest_next_step offered")
     _lang = session_lang(sess)
     system_content = _STATIC_SYSTEM_PROMPT_KO if _lang == "ko" else _STATIC_SYSTEM_PROMPT_EN
 

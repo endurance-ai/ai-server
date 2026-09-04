@@ -78,20 +78,6 @@ def test_reflexion_wraps_evaluator_helpers_only():
     assert fn_defs == {"evaluate_search_quality"}
 
 
-# ── Gap3 — suggest_next_step.py reuses adapter, no new card renderer ───────
-
-
-def test_suggest_next_step_reuses_adapter_only():
-    src = (APP / "agents/tools/suggest_next_step.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    imps = _imported_names(tree)
-    calls = _called_attrs(tree)
-    assert "app.graphs.nodes._adapter_ctx.get_adapter" in imps
-    assert "send_text_with_buttons" in calls or "send_text" in calls
-    # <= 80 LOC body discipline (REQ-AGENT-V3-PROACT-TOOL-001 / AC-3.1).
-    assert len([ln for ln in src.splitlines() if ln.strip()]) <= 80
-
-
 # ── Gap4 — recency_weighted_excludes reuses exclude_brands, no new ranking ─
 
 
