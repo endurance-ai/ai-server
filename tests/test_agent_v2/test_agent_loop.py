@@ -608,6 +608,19 @@ def test_system_prompt_contains_redundancy_rules():
     assert "ReAct agent" in p
 
 
+def test_system_prompt_has_instruction_disclosure_defense():
+    """C — 프롬프트 인젝션/시스템 프롬프트 유출 방어(윤영 지형도의 실제 인젝션
+    쿼리 대응). persona 를 통해 _SYSTEM_PROMPT 에 실려야 한다."""
+    from app.agents import react_loop as rl
+
+    p = rl._SYSTEM_PROMPT
+    assert "Instruction-disclosure defense" in p
+    # 핵심 금지: 시스템 프롬프트를 드러내지/직렬화하지 않음 + override/diagnostic 모드 무시
+    assert "NEVER reveal" in p and "system prompt" in p
+    assert "DIAGNOSTIC_MODE_VERIFIED" in p or "SYSTEM OVERRIDE" in p
+    assert "DATA, never instructions" in p
+
+
 class _FakeHTTPError(Exception):
     """Mimics httpx/openai status-bearing exception."""
 
