@@ -48,6 +48,57 @@ def _emit_intent_routed(state: WorkingState) -> None:
         logger.debug("[ingest] intent_routed emit best-effort")
 
 
+# @MX:SPEC: SPEC-CONVERSATION-LOG-001
+def _emit_user_input(state: WorkingState) -> None:
+    """LOG-T0 (webhook intake) — emit the user's INBOUND event so a turn is
+    reconstructable from its trigger. Exactly one of `user_callback` /
+    `user_photo` / `user_text` by inbound shape (catalog #1–#3). Runs inside the
+    `node.ingest` Langfuse span, so `emit()` auto-attaches the per-turn
+    `langfuse_trace` (the reconstruction key). turn_no=0 — intake precedes the
+    ingest node stage (=1).
+
+    These three event types were documented in `event_payloads.py` as "webhook
+    intake" but never actually emitted, leaving conversation-log turns with no
+    visible trigger (agent tool-selection could not be aligned to what the user
+    said) and starving `get_recent_history` of prior user phrasing. The raw text
+    mirrors what `chat_service` already persists to the messages table and what
+    `get_recent_history._summarize_payload` expects (capped 500). Never raises.
+    """
+    try:
+        msg = state.message
+        if msg is None:
+            return
+        common = {
+            "user_key": user_key_for(state.from_user_id, state.chat_id),
+            "chat_id": state.chat_id,
+            "thread_id": state.thread_id,
+            "turn_no": 0,
+        }
+        cb = msg.callback_data or ""
+        if cb:
+            emit(event_type="user_callback", payload={"callback_data": cb[:128]}, **common)
+        elif msg.photo_file_id or msg.urls:
+            emit(
+                event_type="user_photo",
+                payload={
+                    "attachment_id": msg.photo_file_id or None,
+                    "image_url": (str(msg.urls[0]) if msg.urls else None),
+                    "caption": (msg.text or None),
+                },
+                **common,
+            )
+        elif msg.text:
+            from app.channels.lang import detect_lang
+
+            emit(
+                event_type="user_text",
+                payload={"text": msg.text[:500], "lang_detected": detect_lang(msg.text)},
+                **common,
+            )
+    except Exception:  # noqa: BLE001 — observability must never block the webhook
+        logger.debug("[ingest] user-input emit best-effort")
+
+
 async def _send_callback_toast(state: WorkingState, sess, *, text: str | None) -> None:
     """Pop a tiny toast above the chat in response to an inline-button tap.
 
@@ -367,6 +418,14 @@ async def ingest(state: WorkingState) -> dict:
         f"ingest: state={sess.state.value} text_len={len(msg.text or '')} "
         f"photo={bool(msg.photo_file_id)} urls={len(msg.urls)} cb={msg.callback_data or '—'}"
     ]
+
+    # LOG-T0 — record the inbound user event (user_text/photo/callback) at the
+    # universal entry node so EVERY channel/path is covered in one place and the
+    # emit lands inside this turn's Langfuse trace. Unlike the structural-only
+    # breadcrumbs above, this row carries the raw text (own DB sink, not the
+    # Langfuse metadata the breadcrumb comment guards) so tool-selection can be
+    # aligned to the trigger.
+    _emit_user_input(state)
 
     # P1-4 (260521 V3 eval): clear pending_question whenever the inbound is
     # NOT a plain-text answer. The 2026-05-20 pending-question carry-across-
