@@ -103,10 +103,14 @@ class Settings(BaseSettings):
     # alongside brand/platform. Keyed off `brand_nodes.attributes` first
     # token (vibe[0] / silhouette[0]) — lookup is via brand_node_cache.
     # Cache miss → cap skipped for that candidate (fail-open). Cap > 0
-    # enables, 0 disables that dimension. Final_limit is typically 15,
-    # so 5 forces ≥3 distinct groups per page without starving results.
-    SEARCH_VIBE_CAP: int = 5
-    SEARCH_SILHOUETTE_CAP: int = 5
+    # enables, 0 disables that dimension. Scaled with SEARCH_FINAL_LIMIT(=30):
+    # at 10 they still force ≥3 distinct groups per page without bottlenecking
+    # the larger result set ("상품 최대한 많이" — 2026-09-04). brand cap stays
+    # at 3 (윤영 tuned it for the "비슷한 브랜드만" complaint, #251) — with a
+    # 30 target that needs ≥10 distinct brands, which the top-50 pool usually
+    # supplies, so brand diversity is preserved while showing more.
+    SEARCH_VIBE_CAP: int = 10
+    SEARCH_SILHOUETTE_CAP: int = 10
 
     # SPEC-BRAND-2TOWER-RESCORE — blend brand_multimodal_embeddings into
     # the product-distance ranking. α weights product distance vs brand
@@ -115,7 +119,9 @@ class Settings(BaseSettings):
     # close matches.
     BRAND_2TOWER_ENABLED: bool = True
     BRAND_2TOWER_ALPHA: float = 0.8
-    SEARCH_FINAL_LIMIT: int = 15  # 최종 응답 개수
+    # 최종 응답 개수(비브랜드 검색 기본 top_k). 앱 2열 그리드 + album_size=40 이
+    # 받쳐줌. 2026-09-04 15→30 ("상품 최대한 많이"). env(SEARCH_FINAL_LIMIT)로 튜닝.
+    SEARCH_FINAL_LIMIT: int = 30
 
     # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
     # 안전 롤아웃: 기본 False. 운영 검증 후 .env 에서 true 로 전환.

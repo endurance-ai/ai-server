@@ -1560,7 +1560,15 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             except Exception:  # noqa: BLE001
                 pass
 
-    top_k = int(args.get("top_k") or 15)
+    # 일반(비브랜드) 검색의 기본 표시 개수. 예전엔 여기 `15`가 하드코딩돼 있어
+    # config `SEARCH_FINAL_LIMIT`이 실제로는 무시됐다 — 이제 config 에 연결해
+    # env 로 튜닝 가능하게 한다("상품 최대한 많이" 노브). 공급단(SEARCH_DEFAULT_K
+    # fetch=50 / hybrid pool=100)이 충분해 이 값까지 채워지고, diversify 는
+    # req.final_limit(=top_k)을 target 으로 쓰므로 별도 실링 없음. 브랜드 검색은
+    # 아래에서 40 으로 별도 상향(다양성 캡 해제).
+    from app.core.config import settings as _settings
+
+    top_k = int(args.get("top_k") or _settings.SEARCH_FINAL_LIMIT)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
     # REAL Vision garment category from ctx (`vision_category`, set in
     # react_loop._build_ctx from state.vision_selected_item / detected_items).
