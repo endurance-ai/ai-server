@@ -392,6 +392,21 @@ _MOOD_LEXICON: tuple[tuple[str, str], ...] = (
     ("deconstructed", "해체주의"),
     ("핫걸", "핫걸"),
     ("hot girl", "핫걸"),
+    # 러블리/걸리시 → 코케트 + 발레코어(멀티). 데이터 근거(2026-09-05): 두 태그
+    # 모두 WHITE dress 페미닌, girly detail(lace/frill/ruffle/ribbon) 발레코어
+    # 15.3%·코케트 10.6%. 모리걸은 CREAM/pants/2.7% = 내추럴이라 제외.
+    ("러블리", "코케트"),
+    ("러블리", "발레코어"),
+    ("걸리시", "코케트"),
+    ("걸리시", "발레코어"),
+    ("사랑스러운", "코케트"),
+    ("페미닌", "코케트"),
+    ("lovely", "코케트"),
+    ("girly", "코케트"),
+    ("girly", "발레코어"),
+    # 밀리터리 → 워크웨어(유틸리티 무드). '카모'는 pattern 축 소관이라 무드 제외.
+    ("밀리터리", "워크웨어"),
+    ("military", "워크웨어"),
 )
 
 
@@ -408,6 +423,36 @@ def _extract_mood_from_text(text: str) -> set[str]:
     for token, tag in _MOOD_LEXICON:
         if token in low:  # 한글은 대소문자 무관하므로 low 로 통일 매칭 가능
             out.add(tag.lower())
+    return out
+
+
+# "빈티지"는 무드 코어가 아니라 모든 무드에 걸치는 직교 성질(시대감/질감)이라
+# 무드 렉시콘에서 제외하고, 그 느낌의 정량적 집인 texture 축(washed/distressed,
+# 카탈로그 커버리지 ~15k)으로 라우팅한다(윤영 2026-09-05: "빈티지함은 모든 무드에
+# 있는데 정량으로 가르기 어렵다"). rerank 부스트라 하드필터 아님.
+_TEXTURE_TEXT: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("빈티지", ("washed", "distressed")),
+    ("빈티지한", ("washed", "distressed")),
+    ("구제", ("washed", "distressed")),
+    ("워싱", ("washed",)),
+    ("워시드", ("washed",)),
+    ("vintage", ("washed", "distressed")),
+    ("washed", ("washed",)),
+    ("distressed", ("distressed",)),
+    ("디스트로이드", ("distressed",)),
+)
+
+
+def _extract_texture_from_text(text: str) -> set[str]:
+    """쿼리 텍스트 → v2.6 texture vocab(washed/distressed). '빈티지/구제/워싱'
+    같은 직교 성질어를 무드가 아닌 질감 축으로 보낸다."""
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for token, vals in _TEXTURE_TEXT:
+        if token in low:
+            out.update(vals)
     return out
 
 
@@ -480,8 +525,9 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if surface:
         out["surface"] = {surface}
     texture = str(getattr(item, "texture", None) or "").strip().lower()
-    if texture:
-        out["texture"] = {texture}
+    texture_vals = ({texture} if texture else set()) | _extract_texture_from_text(qtext)
+    if texture_vals:
+        out["texture"] = texture_vals
     design = str(getattr(item, "design_details", None) or "").strip().lower()
     if design:
         out["design_details"] = {design}
