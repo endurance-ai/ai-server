@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from app.services.search_service import (
     _extract_fit_from_text,
     _extract_material_from_text,
+    _extract_mood_from_text,
     _extract_pattern_from_text,
     _query_target_attrs,
 )
@@ -69,6 +70,27 @@ def test_extract_fit_korean():
 def test_extract_fit_none_when_absent():
     assert _extract_fit_from_text("elegant midi dress") == set()
     assert _extract_fit_from_text("") == set()
+
+
+# ── 무드 추출 (A: 무드 rerank 발화 경로 — 에이전트가 mood arg 를 거의 안 채움) ──
+
+
+def test_extract_mood_korean_and_english():
+    assert _extract_mood_from_text("그런지 크롭 티셔츠") == {"그런지"}
+    assert _extract_mood_from_text("minimal street outfit") == {"미니멀룩", "스트릿"}
+    assert _extract_mood_from_text("y2k 미니스커트") == {"y2k"}
+
+
+def test_extract_mood_none_when_absent():
+    # 무드어 없는 순수 속성 쿼리엔 오탐 없음.
+    assert _extract_mood_from_text("블랙 카고 팬츠") == set()
+    assert _extract_mood_from_text("") == set()
+
+
+def test_query_target_attrs_mood_from_text():
+    # mood arg 없이 텍스트만으로도 target_attrs["mood"] 발화(부스트 트리거).
+    out = _query_target_attrs(_item("고프코어 바람막이"))
+    assert out.get("mood") == {"고프코어"}
 
 
 # ── material 추출 ───────────────────────────────────────────────────────────

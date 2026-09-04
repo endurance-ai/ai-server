@@ -341,6 +341,76 @@ def _extract_pattern_from_text(text: str) -> set[str]:
     return out
 
 
+# 무드 어휘 → v2.6 final_tags(27 폐쇄값) 매핑. 실측상 에이전트가 `mood` arg 를
+# 거의 안 채우고(30일 2건) text_query 에 묻으므로(#241 fit 과 동일 패턴), 쿼리
+# 텍스트에서 결정론적으로 무드를 추출해 rerank 부스트를 실제로 발화시킨다.
+# 고신뢰 직접 매핑만 수록 — 애매한 어휘(빈티지→그런지?/올드머니?, 밀리터리→
+# 워크웨어?/고프코어?, 러블리→코케트?/발레코어?)는 오탐 방지 위해 제외(윤영
+# 도메인 확장 대상). (substring, tag) — 한글 부분일치 / 영문 소문자 부분일치.
+_MOOD_LEXICON: tuple[tuple[str, str], ...] = (
+    ("미니멀", "미니멀룩"),
+    ("minimal", "미니멀룩"),
+    ("그런지", "그런지"),
+    ("grunge", "그런지"),
+    ("스트릿", "스트릿"),
+    ("스트리트", "스트릿"),
+    ("street", "스트릿"),
+    ("y2k", "Y2K"),
+    ("와이투케이", "Y2K"),
+    ("프레피", "프레피룩"),
+    ("preppy", "프레피룩"),
+    ("아메카지", "아메카지"),
+    ("amekaji", "아메카지"),
+    ("고프코어", "고프코어"),
+    ("gorpcore", "고프코어"),
+    ("올드머니", "올드머니룩"),
+    ("old money", "올드머니룩"),
+    ("프렌치", "프렌치시크"),
+    ("french chic", "프렌치시크"),
+    ("시티보이", "시티보이"),
+    ("cityboy", "시티보이"),
+    ("워크웨어", "워크웨어"),
+    ("workwear", "워크웨어"),
+    ("다크웨어", "다크웨어"),
+    ("darkwear", "다크웨어"),
+    ("코케트", "코케트"),
+    ("coquette", "코케트"),
+    ("발레코어", "발레코어"),
+    ("balletcore", "발레코어"),
+    ("블록코어", "블록코어"),
+    ("blokecore", "블록코어"),
+    ("란제리", "란제리코어"),
+    ("lingerie", "란제리코어"),
+    ("애슬레저", "애슬레저/요가"),
+    ("athleisure", "애슬레저/요가"),
+    ("코티지코어", "코티지코어"),
+    ("cottagecore", "코티지코어"),
+    ("클러빙", "나이트클러빙"),
+    ("나이트클럽", "나이트클러빙"),
+    ("모리걸", "모리걸"),
+    ("해체주의", "해체주의"),
+    ("deconstructed", "해체주의"),
+    ("핫걸", "핫걸"),
+    ("hot girl", "핫걸"),
+)
+
+
+def _extract_mood_from_text(text: str) -> set[str]:
+    """쿼리 텍스트에서 무드 토큰 추출 → v2.6 final_tags(27 폐쇄값) 집합.
+
+    에이전트가 `mood` 구조화 인자를 거의 안 채우는 실측 패턴 보완([[#241]] fit 과
+    동일). 고신뢰 직접 매핑만(오탐 방지). 한글 부분일치 / 영문 소문자 부분일치.
+    """
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for token, tag in _MOOD_LEXICON:
+        if token in low:  # 한글은 대소문자 무관하므로 low 로 통일 매칭 가능
+            out.add(tag.lower())
+    return out
+
+
 def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
 
@@ -353,12 +423,14 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     qtext = " ".join(s for s in (getattr(item, "search_query", None), getattr(item, "search_query_ko", None)) if s)
 
-    # 무드(v2.6 final_tags, 27 폐쇄값) — 명시 mood arg 로만. 예전엔 하드필터였으나
-    # rerank 부스트축으로 전환(하드필터 제거). final_tags 는 한글이라 소문자화는
-    # 사실상 무해(candidate 측도 동일 정규화).
+    # 무드(v2.6 final_tags, 27 폐쇄값) — 하드필터에서 rerank 부스트축으로 전환.
+    # 구조화 mood arg 우선, 없으면 쿼리 텍스트에서 추출(에이전트가 mood 를 거의
+    # 안 채우는 실측: 30일 2건 → 텍스트 추출이 실질 발화 경로). 한글 소문자화는
+    # 무해(candidate 측도 동일 정규화).
     mood = str(getattr(item, "mood", None) or "").strip().lower()
-    if mood:
-        out["mood"] = {mood}
+    mood_vals = ({mood} if mood else set()) or _extract_mood_from_text(qtext)
+    if mood_vals:
+        out["mood"] = set(mood_vals)
 
     # fit — 구조화 인자 우선, 없으면 쿼리 텍스트에서 추출.
     fit = str(getattr(item, "fit", None) or "").strip().lower()
