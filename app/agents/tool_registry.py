@@ -33,8 +33,6 @@ __all__ = [
     "GetRecentHistoryArgs",
     "WebSearchArgs",
     "RespondArgs",
-    # SPEC-AGENT-V3-REACT Gap3 — 8th tool (flag-gated registration)
-    "SuggestNextStepArgs",
     # Tool results
     "AnalyzeImageResult",
     "SearchProductsResult",
@@ -44,7 +42,6 @@ __all__ = [
     "GetRecentHistoryResult",
     "WebSearchResult",
     "RespondResult",
-    "SuggestNextStepResult",
     # Helpers
     "validate_args",
     "TOOL_NAMES",
@@ -196,13 +193,6 @@ class WebSearchArgs(TypedDict, total=False):
     query: str  # what to look up on the web (English or Korean)
 
 
-class SuggestNextStepArgs(TypedDict, total=False):
-    # SPEC-AGENT-V3-REACT Gap3 — proactive follow-up options card.
-    kind: Literal["similar", "fit_change", "different_mood", "broaden", "generic"]
-    options: list[str]
-    prompt: str
-
-
 class RespondArgs(TypedDict, total=False):
     # NOTE (SPEC-AGENT-V2-REACT cards-spam fix): `cards` is intentionally NOT a
     # field. The LLM (esp. nova-lite) cannot serialize search candidates and
@@ -283,13 +273,6 @@ class RespondResult(TypedDict, total=False):
     error: str | None
     text_sent: bool
     cards_sent: int
-
-
-class SuggestNextStepResult(TypedDict, total=False):
-    ok: bool
-    error: str | None
-    card_sent: bool
-    kind: str
 
 
 # ── Metadata + REGISTRY ────────────────────────────────────────────────────
@@ -516,8 +499,17 @@ REGISTRY: dict[str, ToolMetadata] = {
     "update_taste": {
         "name": "update_taste",
         "description": (
-            "Persist user taste preferences (brand likes/dislikes, keyword affinities). "
-            "Use after explicit user feedback like 'I love that brand'."
+            "Persist a DURABLE taste preference the user states in conversation — a "
+            "general, lasting like or dislike of a BRAND or STYLE that should carry "
+            "across future searches, NOT a filter for just this one search.\n"
+            "  - Call it (source='free_text') when the user expresses a standing "
+            "preference: '난 미니멀한 게 좋아', '자라는 별로야', 'I love COS', 'I hate "
+            "logos' → set brand_likes / brand_dislikes / keyword_likes / keyword_dislikes "
+            "accordingly, THEN continue (it does NOT terminate the loop; end with `respond`).\n"
+            "  - Do NOT use it for a one-off adjustment of the CURRENT results — '이 브랜드 "
+            "빼고' / 'without Zara' for this search is `refine_search(action='exclude')`, "
+            "not a durable taste change.\n"
+            "Persisted dislikes down-rank matching products in every later search."
         ),
         "args_typeddict": UpdateTasteArgs,
         "result_typeddict": UpdateTasteResult,
@@ -608,26 +600,13 @@ REGISTRY: dict[str, ToolMetadata] = {
         "terminates_loop": True,
     },
 }
-
-# SPEC-AGENT-V2-CLEANUP-001 — the 8th tool (`suggest_next_step`) is now
-# ALWAYS registered (the AGENT_V3_PROACTIVE_ENABLED flag was removed). The
-# ReAct agent is the permanent, only topology.
-# @MX:NOTE: [AUTO] 8-tool registry — suggest_next_step is unconditional
-REGISTRY["suggest_next_step"] = {
-    "name": "suggest_next_step",
-    "description": (
-        "Proactively send the user a follow-up options card (similar items, "
-        "fit change, different mood, broaden). Use when results are weak "
-        "(candidates_count < 3) or to offer next steps. Does NOT terminate "
-        "the loop — follow with `respond` once the user has options."
-    ),
-    "args_typeddict": SuggestNextStepArgs,
-    "result_typeddict": SuggestNextStepResult,
-    "dispatch_fn_path": "app.agents.tools.suggest_next_step:dispatch",
-    "langfuse_span_tag": "tool.suggest_next_step",
-    "side_effect_doc": "Sends a channel message with an inline keyboard (reuses adapter).",
-    "terminates_loop": False,
-}
+# NOTE — `suggest_next_step` (formerly the 8th tool) was removed. It sent an
+# inline-keyboard follow-up-options card whose `suggest:{kind}:{value}` callback
+# had NO receiver on any channel (app or server), so tapping it did nothing; it
+# also saw 0 calls in 14 days of production traffic. Its intent — offering next
+# steps — is served by the agent's own conversational follow-up in `respond`
+# ("색상이나 핏으로 좁혀볼까?"). Removing it shrinks the tool schema/system prompt
+# with no behavior loss.
 
 TOOL_NAMES: tuple[str, ...] = tuple(REGISTRY.keys())
 

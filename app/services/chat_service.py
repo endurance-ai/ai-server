@@ -346,11 +346,11 @@ def _done_payload(reply: BotReply, graph_result: dict | None) -> dict[str, str]:
 
 def _infer_clarify_axis(callback_data: str) -> str:
     """Infer the UI axis from a callback_data prefix — pure string parsing so the
-    6 hasattr-fallback call sites (pick_item, ask_clarify, intro, ask_user_clarification,
-    search_products, suggest_next_step) never need to pass an explicit axis.
+    hasattr-fallback call sites (pick_item, ask_clarify, intro, ask_user_clarification,
+    search_products) never need to pass an explicit axis.
 
     item:N -> pick_item / clarify:{axis}:val -> {axis} (gender, category_pick, ...)
-    onboard:lang:xx -> lang / suggest:... -> suggest_next_step / card(s):... -> cards
+    onboard:lang:xx -> lang / card(s):... -> cards
     """
     parts = callback_data.split(":", 2)
     head = parts[0] if parts else ""
@@ -358,8 +358,6 @@ def _infer_clarify_axis(callback_data: str) -> str:
         return "pick_item"
     if head in ("clarify", "onboard") and len(parts) > 1:
         return parts[1]
-    if head == "suggest":
-        return "suggest_next_step"
     if head in ("card", "cards"):
         return "cards"
     return head or "unknown"
