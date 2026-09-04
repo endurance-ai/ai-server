@@ -239,6 +239,7 @@ _PATTERN_NORM: dict[str, str] = {
     "polka": "dot",
     "camo": "camo",
     "camouflage": "camo",
+    "military": "camo",  # 밀리터리 무드의 대표 신호 = 카모 패턴(윤영 2026-09-05)
     "animal": "animal",
     "leopard": "animal",
     "cheetah": "animal",
@@ -262,6 +263,7 @@ _PATTERN_NORM: dict[str, str] = {
     "물방울": "dot",
     "카모": "camo",
     "카무플라주": "camo",
+    "밀리터리": "camo",  # 밀리터리 대표 신호 = 카모 패턴(윤영 2026-09-05)
     "레오파드": "animal",
     "호피": "animal",
     "지브라": "animal",
@@ -404,9 +406,9 @@ _MOOD_LEXICON: tuple[tuple[str, str], ...] = (
     ("lovely", "코케트"),
     ("girly", "코케트"),
     ("girly", "발레코어"),
-    # 밀리터리 → 워크웨어(유틸리티 무드). '카모'는 pattern 축 소관이라 무드 제외.
-    ("밀리터리", "워크웨어"),
-    ("military", "워크웨어"),
+    # NOTE — '밀리터리'는 무드가 아니라 pattern(camo) 지배라 여기서 제외하고
+    # _PATTERN_NORM 으로 라우팅(윤영 2026-09-05: "밀리터리면 카모가 대표, 워크웨어
+    # 단독 아님"). '카고'는 garment(카탈로그 속성축 없음)라 text_query 로 처리.
 )
 
 

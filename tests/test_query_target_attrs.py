@@ -101,8 +101,12 @@ def test_extract_mood_lovely_multi_tag():
     assert "모리걸" not in _extract_mood_from_text("러블리한 스타일")
 
 
-def test_extract_mood_military_to_workwear():
-    assert _extract_mood_from_text("밀리터리 재킷") == {"워크웨어"}
+def test_military_is_camo_pattern_not_mood():
+    # 밀리터리는 무드가 아니라 pattern(camo) 지배 (윤영: 워크웨어 단독 아님, 카모가 대표).
+    assert "워크웨어" not in _extract_mood_from_text("밀리터리 재킷")
+    out = _query_target_attrs(_item("밀리터리 카고 팬츠"))
+    assert out.get("pattern") == {"camo"}
+    assert "mood" not in out
 
 
 def test_vintage_is_texture_not_mood():
