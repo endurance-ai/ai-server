@@ -56,6 +56,8 @@ class RerankWeights:
     attr_color: float = 0.0
     attr_pattern: float = 0.0
     attr_neckline: float = 0.0
+    # v2.6 스타일 무드축 (product_features_v26.final_tags, 27 폐쇄값) — 하드필터 대체.
+    attr_mood: float = 0.0
     # v2.6 enrichment 축 (product_features_v26.attr) — length/sleeve/leg_shape.
     attr_length: float = 0.0
     attr_sleeve_length: float = 0.0
@@ -216,6 +218,13 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tgfx = target_attrs.get("graphics")
     if tgfx and str(fmeta.get("graphics") or "").strip().lower() in tgfx:
         bonus += w.attr_graphics
+    # v2.6 무드/스타일(final_tags 배열) — 쿼리 무드 ∩ 후보 무드 태그.
+    tmood = target_attrs.get("mood")
+    if tmood:
+        raw = fmeta.get("mood_tags")
+        cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
+        if tmood & cand:
+            bonus += w.attr_mood
     return bonus
 
 

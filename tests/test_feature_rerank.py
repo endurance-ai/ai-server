@@ -58,6 +58,27 @@ def test_attr_align_fit_lifts_matching_candidate_without_profile():
     assert [c["id"] for c in out] == ["2", "1"]
 
 
+def test_attr_align_mood_lifts_matching_candidate():
+    # A(무드 rerank축) — 쿼리 무드('그런지')와 맞는 후보(final_tags→mood_tags)를,
+    # 임베딩 거리가 더 먼데도 위로. 하드필터 대체(리콜 보존 + 무드 상단).
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.10, "feature_metadata": {"mood_tags": ["미니멀룩"]}},
+        {"id": "2", "brand": "B", "distance": 0.18, "feature_metadata": {"mood_tags": ["그런지", "다크웨어"]}},
+    ]
+    out = rerank(cands, None, weights=RerankWeights(attr_mood=0.25), target_attrs={"mood": {"그런지"}})
+    assert [c["id"] for c in out] == ["2", "1"]
+
+
+def test_attr_align_mood_no_match_preserves_order():
+    # 무드 미스면 부스트 0 → 임베딩 순서 보존(근접무드 배제 없음).
+    cands = [
+        {"id": "1", "brand": "A", "distance": 0.10, "feature_metadata": {"mood_tags": ["미니멀룩"]}},
+        {"id": "2", "brand": "B", "distance": 0.18, "feature_metadata": {"mood_tags": ["프레피룩"]}},
+    ]
+    out = rerank(cands, None, weights=RerankWeights(attr_mood=0.25), target_attrs={"mood": {"그런지"}})
+    assert [c["id"] for c in out] == ["1", "2"]
+
+
 def test_attr_align_alone_triggers_reorder_for_anonymous():
     # target_attrs 만으로 (profile/feature_scores 없이) reorder 가 켜져야 한다.
     cands = [
