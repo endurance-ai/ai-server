@@ -584,9 +584,14 @@ def test_system_prompt_contains_redundancy_rules():
     from app.agents import react_loop as rl
 
     p = rl._SYSTEM_PROMPT
-    assert "Avoid redundant tool calls" in p
-    # search-then-respond default
-    assert "your NEXT action is `respond`" in p
+    # anti-redundancy (moved to the fewest-calls rule; G1b clarifies re-show is NOT redundant)
+    assert "NEVER repeat a tool with identical args" in p
+    # G1 greeting/chit-chat → plain respond (no search)
+    assert "greeting" in p and "chit-chat" in p
+    # card-honesty contract: cards only on a turn that searched; never point off-screen
+    assert "ZERO cards are shown" in p
+    assert "스크롤" in p  # banned scroll-up phrasing is explicitly called out
+    assert "G1b" in p  # want-to-see/pick → must search this turn
     assert "Do NOT call `analyze_image`" in p
     # vision-context guard
     assert "`detected_items:`" in p and "`user_selected_item:`" in p and "`style_node:`" in p
