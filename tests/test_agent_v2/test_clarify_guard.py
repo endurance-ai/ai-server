@@ -22,6 +22,12 @@ def test_signal_garment_korean():
     assert _has_search_signal("빈티지 셔츠", {}) == "garment"
 
 
+def test_signal_longsleeve_korean():
+    # 실트레이스 2026-09-05: "롱슬리브 찾아줘"인데 clarify 2번 남발. 롱슬리브도 garment.
+    assert _has_search_signal("약간 빈티지한 무든데 걸리시한 롱슬리브 찾아줘", {}) == "garment"
+    assert _has_search_signal("뭔소리야 롱슬리브 찾으라고", {}) == "garment"
+
+
 def test_signal_price_takes_priority():
     # 가격 신호가 먼저 잡힌다("더 저렴한" / "10만원 이하").
     assert _has_search_signal("이 후디보다 더 저렴한 후디", {}) == "price"
@@ -50,6 +56,19 @@ async def test_dispatch_blocks_clarify_when_garment_present():
     res = await dispatch(
         {"axis": "fit", "options": ["slim", "loose"]},
         {"text_query": "롱 부츠컷 청바지"},
+    )
+    assert res["ok"] is False
+    assert res["card_sent"] is False
+    assert "has_search_signal" in str(res["error"])
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blocks_when_garment_in_raw_user_msg_only():
+    # 실트레이스: 검색 전 clarify 턴이라 text_query 는 비었지만 원문(user_msg)에
+    # garment("롱슬리브")가 있으면 차단돼야 한다(에이전트 영어번역만 보면 놓침).
+    res = await dispatch(
+        {"axis": "subcategory_disambiguation", "options": ["셔츠", "니트"]},
+        {"text_query": "", "user_msg": "뭔소리야 롱슬리브 찾으라고"},
     )
     assert res["ok"] is False
     assert res["card_sent"] is False
