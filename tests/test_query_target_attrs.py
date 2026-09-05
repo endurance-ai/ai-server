@@ -101,6 +101,13 @@ def test_extract_mood_lovely_multi_tag():
     assert "모리걸" not in _extract_mood_from_text("러블리한 스타일")
 
 
+def test_extract_mood_sexy_multi_tag():
+    # 섹시/관능 → 핫걸 + 란제리코어 + 나이트클러빙(엄브렐라). 리조트/Y2K는 제외.
+    assert _extract_mood_from_text("섹시한 원피스") == {"핫걸", "란제리코어", "나이트클러빙"}
+    assert _extract_mood_from_text("관능적인 룩") == {"핫걸", "란제리코어"}
+    assert "리조트" not in _extract_mood_from_text("섹시한 룩")
+
+
 def test_military_is_camo_pattern_not_mood():
     # 밀리터리는 무드가 아니라 pattern(camo) 지배 (윤영: 워크웨어 단독 아님, 카모가 대표).
     assert "워크웨어" not in _extract_mood_from_text("밀리터리 재킷")
