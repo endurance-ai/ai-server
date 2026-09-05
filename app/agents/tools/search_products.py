@@ -471,6 +471,9 @@ def _to_card_candidate(cand: Any) -> Any:
             score=float(1.0 - cand.get("distance", 1.0)),
             dense_rank=None,
             sparse_rank=None,
+            # 색/소재/핏 보존 — 핀 앵커의 특징을 에이전트가 알 수 있게(rerank 단계의
+            # _attach_feature_metadata 가 이 dict 에 붙여둔 값).
+            feature_metadata=cand.get("feature_metadata"),
         )
     except Exception:  # noqa: BLE001
         return cand
