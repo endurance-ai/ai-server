@@ -472,6 +472,50 @@ def _extract_texture_from_text(text: str) -> set[str]:
     return out
 
 
+# 소매 길이 어휘 → v2.6 sleeve_length vocab(long/short/sleeveless/three_quarter,
+# 카탈로그 long63k·short33k·sleeveless22k·three_quarter3k). 에이전트가 sleeve_length
+# 구조화 arg 를 거의 안 채우고 "롱슬리브"를 text_query 에 묻으므로(윤영 2026-09-05),
+# 텍스트에서 결정론 추출해 소매 속성 rerank 를 실제로 발화시킨다. (긴팔/반팔은
+# clarify garment 어휘와 겹치지만 관심 축이 달라 무해.)
+_SLEEVE_TEXT: tuple[tuple[str, str], ...] = (
+    ("롱슬리브", "long"),
+    ("롱 슬리브", "long"),
+    ("긴팔", "long"),
+    ("긴소매", "long"),
+    ("long sleeve", "long"),
+    ("long-sleeve", "long"),
+    ("longsleeve", "long"),
+    ("반팔", "short"),
+    ("반소매", "short"),
+    ("숏슬리브", "short"),
+    ("short sleeve", "short"),
+    ("short-sleeve", "short"),
+    ("민소매", "sleeveless"),
+    ("나시", "sleeveless"),
+    ("슬리브리스", "sleeveless"),
+    ("sleeveless", "sleeveless"),
+    # '7부/칠부' 단독은 바지(7부 팬츠=기장)와 충돌하므로 소매 명시형만.
+    ("7부소매", "three_quarter"),
+    ("7부 소매", "three_quarter"),
+    ("칠부소매", "three_quarter"),
+    ("three quarter sleeve", "three_quarter"),
+    ("three-quarter sleeve", "three_quarter"),
+)
+
+
+def _extract_sleeve_from_text(text: str) -> set[str]:
+    """쿼리 텍스트 → v2.6 sleeve_length vocab. '롱슬리브/반팔/민소매/7부' 등을
+    소매 속성으로 보내 rerank 부스트가 실제로 걸리게 한다."""
+    if not text:
+        return set()
+    low = text.lower()
+    out: set[str] = set()
+    for token, val in _SLEEVE_TEXT:
+        if token in low:
+            out.add(val)
+    return out
+
+
 def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
 
@@ -529,8 +573,9 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if length:
         out["length"] = {"crop" if length == "cropped" else length}
     sleeve = str(getattr(item, "sleeve_length", None) or "").strip().lower()
-    if sleeve:
-        out["sleeve_length"] = {sleeve}
+    sleeve_vals = ({sleeve} if sleeve else set()) | _extract_sleeve_from_text(qtext)
+    if sleeve_vals:
+        out["sleeve_length"] = sleeve_vals
     leg = str(getattr(item, "leg_shape", None) or "").strip().lower()
     if leg:
         out["leg_shape"] = {leg}

@@ -14,6 +14,7 @@ from app.services.search_service import (
     _extract_material_from_text,
     _extract_mood_from_text,
     _extract_pattern_from_text,
+    _extract_sleeve_from_text,
     _extract_texture_from_text,
     _query_target_attrs,
 )
@@ -114,6 +115,26 @@ def test_military_is_camo_pattern_not_mood():
     out = _query_target_attrs(_item("밀리터리 카고 팬츠"))
     assert out.get("pattern") == {"camo"}
     assert "mood" not in out
+
+
+def test_extract_sleeve_length():
+    # 소매 어휘 → sleeve_length vocab (에이전트가 arg 안 넣고 text 에 묻는 것 보완).
+    assert _extract_sleeve_from_text("long sleeve sweater") == {"long"}
+    assert _extract_sleeve_from_text("롱슬리브 니트") == {"long"}
+    assert _extract_sleeve_from_text("반팔 티셔츠") == {"short"}
+    assert _extract_sleeve_from_text("민소매 원피스") == {"sleeveless"}
+    assert _extract_sleeve_from_text("나시") == {"sleeveless"}
+
+
+def test_sleeve_7bu_pants_no_false_positive():
+    # '7부 팬츠'는 기장(다리)이지 소매가 아님 → sleeve 미발화(bare 7부 제외).
+    assert _extract_sleeve_from_text("7부 팬츠") == set()
+    assert _extract_sleeve_from_text("7부소매 니트") == {"three_quarter"}
+
+
+def test_query_target_attrs_sleeve_from_text():
+    out = _query_target_attrs(_item("롱슬리브 니트"))
+    assert out.get("sleeve_length") == {"long"}
 
 
 def test_vintage_is_texture_not_mood():
