@@ -14,6 +14,7 @@ from app.services.search_service import (
     _extract_material_from_text,
     _extract_mood_from_text,
     _extract_pattern_from_text,
+    _extract_texture_from_text,
     _query_target_attrs,
 )
 
@@ -91,6 +92,37 @@ def test_query_target_attrs_mood_from_text():
     # mood arg 없이 텍스트만으로도 target_attrs["mood"] 발화(부스트 트리거).
     out = _query_target_attrs(_item("고프코어 바람막이"))
     assert out.get("mood") == {"고프코어"}
+
+
+def test_extract_mood_lovely_multi_tag():
+    # 러블리/걸리시 → 코케트 + 발레코어(데이터 근거 멀티태그). 모리걸 제외.
+    assert _extract_mood_from_text("러블리한 원피스") == {"코케트", "발레코어"}
+    assert _extract_mood_from_text("걸리시 룩") == {"코케트", "발레코어"}
+    assert "모리걸" not in _extract_mood_from_text("러블리한 스타일")
+
+
+def test_extract_mood_sexy_multi_tag():
+    # 섹시/관능 → 핫걸 + 란제리코어 + 나이트클러빙(엄브렐라). 리조트/Y2K는 제외.
+    assert _extract_mood_from_text("섹시한 원피스") == {"핫걸", "란제리코어", "나이트클러빙"}
+    assert _extract_mood_from_text("관능적인 룩") == {"핫걸", "란제리코어"}
+    assert "리조트" not in _extract_mood_from_text("섹시한 룩")
+
+
+def test_military_is_camo_pattern_not_mood():
+    # 밀리터리는 무드가 아니라 pattern(camo) 지배 (윤영: 워크웨어 단독 아님, 카모가 대표).
+    assert "워크웨어" not in _extract_mood_from_text("밀리터리 재킷")
+    out = _query_target_attrs(_item("밀리터리 카고 팬츠"))
+    assert out.get("pattern") == {"camo"}
+    assert "mood" not in out
+
+
+def test_vintage_is_texture_not_mood():
+    # "빈티지"는 무드 코어가 아님(직교 성질) → mood 미발화, texture 축으로.
+    assert _extract_mood_from_text("빈티지 카고팬츠") == set()
+    assert _extract_texture_from_text("빈티지 카고팬츠") == {"washed", "distressed"}
+    out = _query_target_attrs(_item("빈티지 데님 자켓"))
+    assert "mood" not in out
+    assert out.get("texture") == {"washed", "distressed"}
 
 
 # ── material 추출 ───────────────────────────────────────────────────────────
