@@ -21,6 +21,7 @@ def _state(
     tolerance: float = 0.5,
     final_limit: int | None = None,
     brand_filter: list[str] | None = None,
+    relax_diversity: bool = False,
 ) -> PipelineState:
     item = AnalyzedItem(
         id="item-1",
@@ -35,6 +36,7 @@ def _state(
         brandFilter=brand_filter,
         tolerance=tolerance,
         finalLimit=final_limit,
+        relaxDiversity=relax_diversity,
     )
     st = PipelineState(request=req)
     st.raw_candidates = raw
@@ -99,6 +101,19 @@ async def test_brand_filter_relaxes_caps_single_brand() -> None:
     assert len(capped.final_candidates) == 3
     # brand_filter 있음 → 캡 완화, target(40)까지 = 12개 전부.
     relaxed = await diversify_service(_state(raw, final_limit=40, brand_filter=["GLOWNY"]))
+    assert len(relaxed.final_candidates) == 12
+
+
+async def test_relax_diversity_anchor_similarity_relaxes_caps() -> None:
+    """②(윤영 P1): 특정 상품 앵커 "더 비슷하게"는 relax_diversity 로 캡을 풀어
+    PDP 유사상품처럼 순수 유사도 상단(=같은 브랜드/결이라도)이 살아남는다.
+    다양성 캡이 제일 닮은 상품을 잘라내던 게 "더비슷하게 < PDP" 원인이었다."""
+    raw = [{"id": f"g{i}", "brand": "GLOWNY", "platform": "glowny"} for i in range(12)]
+    # relax_diversity 없음 → brand_cap=3.
+    capped = await diversify_service(_state(raw, final_limit=40))
+    assert len(capped.final_candidates) == 3
+    # relax_diversity=True → 캡 완화, 12개 전부(가장 닮은 것 보존).
+    relaxed = await diversify_service(_state(raw, final_limit=40, relax_diversity=True))
     assert len(relaxed.final_candidates) == 12
 
 

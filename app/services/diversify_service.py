@@ -36,7 +36,11 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     # 겹쳐 걸리면 target 보다 훨씬 적게(관측: 5개) 잘려 나갔다. brand 필터가
     # 있을 때는 브랜드 다양성 개념이 무의미하므로 platform/vibe/silhouette 캡을
     # 끄고 brand 캡만 target 까지 허용한다.
-    if req.brand_filter:
+    # brand_filter(브랜드 지정) 또는 relax_diversity(특정 상품 앵커 "더 비슷하게")
+    # 는 다양성보다 유사도가 우선이다 — 캡을 풀어 가장 닮은 상품이 살아남게 한다
+    # (PDP 유사상품처럼). 안 그러면 vibe/silhouette/brand 캡이 제일 닮은(=같은
+    # 결) 상품을 오히려 잘라내 "더 비슷하게"가 PDP보다 나쁘게 나온다(윤영 2026-09-05).
+    if req.brand_filter or getattr(req, "relax_diversity", False):
         brand_cap = max(settings.SEARCH_BRAND_CAP * 3, target)
         platform_cap = target
         vibe_cap = 0

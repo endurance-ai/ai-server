@@ -883,6 +883,7 @@ async def run_text_only_search(
     style_node_primary: str | None = None,
     user_key: str | None = None,
     override_embedding: list[float] | None = None,
+    relax_diversity: bool = False,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -950,6 +951,7 @@ async def run_text_only_search(
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
+        relax_diversity=relax_diversity,
     )
     state = PipelineState(request=req, user_key=user_key)
     # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes
