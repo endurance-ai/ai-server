@@ -918,11 +918,36 @@ def _anchor_card_line(callback_data: str | None, sess: Any) -> str | None:
         bits.append(f"brand={brand}")
     if price_str:
         bits.append(f"price={price_str}")
+    # 핀 상품의 실제 속성(색/소재/핏/패턴/종류) — sess.last_results 에 실린
+    # feature_metadata 에서 읽는다. 예전엔 이게 없어 "이름에서 색 추측"하라는
+    # 땜빵을 줬고, 에이전트가 "그 상품 특징을 모른다"고 답했다(윤영 실트레이스).
+    fm = getattr(anchor, "feature_metadata", None)
+    if isinstance(fm, dict):
+        color = str(fm.get("primary_color") or "").strip()
+        if color:
+            bits.append(f"color={color}")
+        raw_mat = fm.get("material")
+        if isinstance(raw_mat, list):
+            mat = ", ".join(str(m).strip() for m in raw_mat if m)
+        else:
+            mat = str(raw_mat or "").strip()
+        if mat:
+            bits.append(f"material={mat}")
+        fit = str(fm.get("fit") or "").strip()
+        if fit:
+            bits.append(f"fit={fit}")
+        pattern = str(fm.get("pattern") or "").strip()
+        if pattern and pattern != "solid":
+            bits.append(f"pattern={pattern}")
+    subcat = str(getattr(anchor, "subcategory", "") or "").strip()
+    if subcat:
+        bits.append(f"subcategory={subcat}")
     line = "anchor_card: " + " ".join(bits)
     line += (
-        "\n→ Preserve the anchor's distinctive color/style words in "
-        "refine_search boost_keywords (extract from name: e.g. 'white', "
-        "'black', 'navy', 'linen', 'cropped'). For 'cheaper' set "
+        "\n→ This is the product the user is pointing at — you KNOW its attributes "
+        "above (color/material/fit/subcategory); describe them honestly if asked, "
+        "never say you don't know. For refine_search, preserve the anchor's "
+        "distinctive color/material/fit in boost_keywords. For 'cheaper' set "
         "max_price≈round(anchor_price*0.7)."
     )
     return line

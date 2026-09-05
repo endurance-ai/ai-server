@@ -298,6 +298,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 style_node_primary=style_node_primary,
                 user_key=user_key,
                 override_embedding=pinned_embedding,
+                # 특정 상품 앵커 "더 비슷하게" — diversify 다양성 캡을 풀어
+                # PDP 유사상품처럼 순수 유사도 상단이 살아남게 한다(윤영 P1).
+                relax_diversity=pinned_embedding is not None,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): shared enrichment helper. Host in log only (internal

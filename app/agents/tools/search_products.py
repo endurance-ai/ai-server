@@ -471,6 +471,9 @@ def _to_card_candidate(cand: Any) -> Any:
             score=float(1.0 - cand.get("distance", 1.0)),
             dense_rank=None,
             sparse_rank=None,
+            # 색/소재/핏 보존 — 핀 앵커의 특징을 에이전트가 알 수 있게(rerank 단계의
+            # _attach_feature_metadata 가 이 dict 에 붙여둔 값).
+            feature_metadata=cand.get("feature_metadata"),
         )
     except Exception:  # noqa: BLE001
         return cand
@@ -880,6 +883,7 @@ async def run_text_only_search(
     style_node_primary: str | None = None,
     user_key: str | None = None,
     override_embedding: list[float] | None = None,
+    relax_diversity: bool = False,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -947,6 +951,7 @@ async def run_text_only_search(
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
+        relax_diversity=relax_diversity,
     )
     state = PipelineState(request=req, user_key=user_key)
     # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes

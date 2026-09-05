@@ -73,6 +73,11 @@ class RecommendRequest(BaseModel):
     price_filter: PriceFilter | None = Field(default=None, alias="priceFilter")
     tolerance: float = Field(default=0.5, ge=0.0, le=1.0)
     final_limit: int | None = Field(default=None, alias="finalLimit", ge=1, le=50)
+    # 특정 상품을 앵커로 한 "더 비슷하게"류 유사 검색 — diversify 다양성 캡을
+    # 완화해 PDP 유사상품 리스트처럼 순수 유사도 상단이 살아남게 한다(윤영
+    # 2026-09-05: "상품 느낌은 그냥 유사도만 뽑는 게 더 잘 보여"). brand_filter
+    # 와 동일한 완화를 재사용.
+    relax_diversity: bool = Field(default=False, alias="relaxDiversity")
 
     @field_validator("image_url")
     @classmethod

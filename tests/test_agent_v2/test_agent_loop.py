@@ -450,9 +450,41 @@ def test_anchor_card_line_surfaces_brand_name_price_for_crit_cheap():
     assert "WHITE SLEEVELESS BLOUSE" in line
     assert "DIVE IN" in line
     assert "₩71,357" in line
-    # Directive must explicitly tell the LLM to preserve color/style words.
+    # Directive must tell the LLM to preserve color/material/fit in boost_keywords.
     assert "boost_keywords" in line
-    assert "white" in line  # explicit color hint in directive
+
+
+def test_anchor_card_line_surfaces_feature_metadata_attrs():
+    """⑤ 핀 상품 상세 미확보 픽스(윤영 2026-09-05: '사진도 있는데 색/소재/핏
+    모른다'). last_results 에 feature_metadata 가 실리면 앵커 라인이 색/소재/핏/
+    종류를 노출하고 '모른다 하지 말라'를 지시한다."""
+    from app.agents import react_loop as rl
+
+    anchor = type(
+        "C",
+        (),
+        {
+            "name": "니트-T",
+            "brand": "MILLO WOMEN",
+            "price": 89000,
+            "subcategory": "knitwear",
+            "feature_metadata": {
+                "primary_color": "CREAM",
+                "material": ["cotton"],
+                "fit": "relaxed",
+                "pattern": "solid",
+            },
+        },
+    )()
+    sess = type("Sess", (), {"last_results": [anchor]})()
+    line = rl._anchor_card_line("crit:more:0", sess)
+    assert line is not None
+    assert "color=CREAM" in line
+    assert "material=cotton" in line
+    assert "fit=relaxed" in line
+    assert "subcategory=knitwear" in line
+    assert "pattern=" not in line  # solid 은 기본값이라 제외
+    assert "never say you don't know" in line
 
 
 def test_anchor_card_line_returns_none_for_non_crit_callbacks():
