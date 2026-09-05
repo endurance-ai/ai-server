@@ -43,6 +43,9 @@ _KO_GARMENTS: frozenset[str] = frozenset(
         "티셔츠",
         "반팔",
         "긴팔",
+        "롱슬리브",
+        "롱슬리브탑",
+        "롱슬립",
         "나시",
         "셔츠",
         "남방",
@@ -154,7 +157,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> AskUserClarific
     # clarify 남발 가드: 유저가 이미 garment/brand/price 를 줬으면 되묻지 말고
     # 바로 검색/refine. 에이전트는 이 에러를 받으면 search_products(신규) 또는
     # refine_search(직전 결과 조정: '더 저렴한', 색 변경 등)로 진행한다.
-    _signal = _has_search_signal(str(ctx.get("text_query") or ""), ctx)
+    # 에이전트 영어번역(text_query)뿐 아니라 유저 원문(user_msg, 한글)도 검사한다.
+    # clarify 턴엔 아직 검색을 안 해 text_query 가 비거나 "long sleeve"(=garment
+    # family 아님)라, 원문 "롱슬리브 찾아줘"를 못 보면 남발을 못 막는다(실트레이스
+    # 2026-09-05). 둘 중 하나라도 신호면 차단.
+    _signal = _has_search_signal(str(ctx.get("text_query") or ""), ctx) or _has_search_signal(
+        str(ctx.get("user_msg") or ""), ctx
+    )
     if _signal:
         logger.info("🚦 [clarify] blocked — search signal=%s → search_now", _signal)
         return AskUserClarificationResult(

@@ -531,6 +531,10 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         "thread_id": state.thread_id,
         "lang": session_lang(sess),
         "text_query": ctx_text_query,
+        # 유저 원문(한글 그대로) — clarify 가드 등이 에이전트 영어번역(text_query)이
+        # 아니라 원문에서 garment/brand/price 신호를 봐야 하기 때문(예: "롱슬리브
+        # 찾아줘"가 text_query 엔 안 남거나 "long sleeve"로 바뀌어 garment 매칭 실패).
+        "user_msg": (state.message.text or "") if state.message else "",
         "style_node_primary": state.vision_outfit_style_node_primary,
         # SPEC-SEARCH-V6-001 family gate: the REAL Vision garment category
         # (NOT the style-node letter). `search_products` passes THIS as the
