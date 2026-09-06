@@ -1482,9 +1482,47 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     exclude_kw = as_keyword_list(args.get("exclude_keywords"))
     exclude_brands = as_keyword_list(args.get("exclude_brands"))
 
+    # SPEC-SEARCH-BRAND-SIMILAR-001 (2026-09-07) — "X 같은/비슷한 옷". brand 하드
+    # 필터가 아니라 X 브랜드 상품 임베딩 centroid 를 앵커로 결이 비슷한 상품을
+    # 유사도로 뽑고, X 자신은 제외한다("비슷한"=다른 브랜드). 핀 상품 앵커
+    # (override_embedding)와 동일 배선을 재사용 — 새 알고리즘 없음. 이미지/핀 앵커
+    # 턴은 자체 앵커가 있어 제외. 미인식/카탈로그 임베딩 부재면 fail-open(일반
+    # 텍스트 경로로 폴백; web_search 로 미학 추정 금지 — 카탈로그가 답).
+    # 사건: "스키즘 인듀싱 같은 옷들"(chat 4362450883795240354) → 브랜드 미인식 →
+    # web_search 환각 → 가짜 mood → 정반대 결과.
+    similar_seed_names: list[str] | None = None
+    _sim_raw = args.get("similar_to_brand")
+    if isinstance(_sim_raw, str) and _sim_raw.strip() and not has_image and pinned_embedding is None:
+        seed_names = _resolve_brand_filter(_sim_raw)
+        if seed_names:
+            try:
+                from app.providers.database import DatabaseProvider
+
+                centroid = await DatabaseProvider.get_brand_centroid_embedding(seed_names)
+            except Exception as exc:  # noqa: BLE001 — 앵커는 부가 기능, 검색을 막지 않는다
+                logger.warning("[brand-similar] centroid fetch failed: %r", exc)
+                centroid = None
+            if centroid is not None:
+                pinned_embedding = centroid
+                similar_seed_names = seed_names
+                exclude_brands = list(dict.fromkeys([*exclude_brands, *seed_names]))
+                if not text_query:
+                    text_query = "fashion"  # 앵커가 검색을 이끔; text 는 메타/로그 폴백
+                logger.info(
+                    "🔗 [brand-similar] seed=%r → names=%r centroid_dim=%d (X 제외, centroid 앵커)",
+                    _sim_raw,
+                    seed_names,
+                    len(centroid),
+                )
+            else:
+                logger.info("🔗 [brand-similar] seed=%r 카탈로그 임베딩 없음 → 텍스트 폴백", _sim_raw)
+        else:
+            logger.info("🔗 [brand-similar] seed=%r 미인식 → 텍스트 폴백", _sim_raw)
+
     # A non-empty text_query alone is sufficient. Only a turn with neither a
-    # query nor a usable image is unanswerable.
-    if not text_query and not has_image:
+    # query nor a usable image (nor a brand-similar centroid anchor) is
+    # unanswerable.
+    if not text_query and not has_image and pinned_embedding is None:
         return SearchProductsResult(ok=False, error="no_query", candidates_count=0, top_candidates=[])
 
     # SPEC-GENDER-PIN-001 (260522) — gender resolution before searching.
@@ -1588,7 +1626,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # already win the legacy path) does nothing extra to fit/color here.
     # ctx.vision_category leak: prior knit turn → pinned jeans → search would
     # still apply the knit family gate. Mirrors refine_search PR #112.
-    if pinned_embedding is not None:
+    # 260907 — 핀 상품(pinned_pid)일 때만 카테고리 억제. brand-similar 앵커도
+    # pinned_embedding 을 쓰지만 "스키즘 같은 바지"의 args.category(pants)는
+    # 살려야 하므로 else 분기로 흘려보낸다(SPEC-SEARCH-BRAND-SIMILAR-001).
+    if pinned_pid is not None:
         category = pinned_category or ctx.get("vision_category")
         # Pinned anchor: 이전 Vision 턴의 subcategory 를 새 anchor 에 누출하지
         # 않는다 (fit/color 클리어와 동일한 원칙 — refine_search PR #112).
@@ -1636,7 +1677,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # canonical brand_name 을 resolve 해서 p_brand_names EXACT 매치에 태운다.
     # 미인식 브랜드는 필터 없이 진행 (fail-open — 브랜드 토큰은 text_query
     # 임베딩에 그대로 남아 soft 신호로 작동).
-    brand_filter = _resolve_brand_filter(args.get("brand"))
+    # brand-similar 활성 시 brand 하드필터는 무시(둘 다 오면 similar 우선) — seed
+    # 를 필터로 걸면 exclude 와 충돌해 빈 결과가 난다.
+    brand_filter = None if similar_seed_names else _resolve_brand_filter(args.get("brand"))
 
     # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 brand
     # arg 로 안 넣는 문제 보정. react_loop._build_ctx 가 원문에서 브랜드를 감지해
@@ -1704,6 +1747,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # brand_filter 활성 시 다양성 캡을 끄므로 이 만큼 실제로 채워진다.
     if brand_filter:
         top_k = max(top_k, 40)
+    # brand-similar 는 "일단 여러 개 다 보여주고 리파인" 의도(SPEC-SEARCH-BRAND-
+    # SIMILAR-001). diversify 캡은 그대로(여러 브랜드 스프레드)라 과하지 않게 상향.
+    elif similar_seed_names:
+        top_k = max(top_k, 30)
 
     # Multi-turn image blending (Level 1 image-first refinement):
     # when no current image URL exists but an origin image URL is stored from
