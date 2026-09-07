@@ -1213,6 +1213,132 @@ async def _run_brand_similar_shortcircuit(
     return None
 
 
+# 맨-브랜드 요청에서 브랜드 토큰 외에 무시할 필러(조사/동사/일상어). 정규화 후 대조.
+_BRAND_REQ_FILLER: Final[frozenset[str]] = frozenset(
+    {
+        "보여줘",
+        "보여",
+        "보여줄래",
+        "보여주라",
+        "줘",
+        "찾아줘",
+        "찾아",
+        "찾아봐",
+        "추천",
+        "추천해줘",
+        "해줘",
+        "좀",
+        "신상",
+        "신상품",
+        "있어",
+        "있나",
+        "없어",
+        "제품",
+        "옷",
+        "거",
+        "것",
+        "응",
+        "네",
+        "그",
+        "이",
+        "좋아",
+        "어때",
+        "골라줘",
+        "골라",
+        "보고싶어",
+        "궁금해",
+        "궁금",
+        "new",
+        "님",
+        "요",
+    }
+)
+
+
+def _norm_filler(tok: str) -> str:
+    return re.sub(r"[^\w가-힣]", "", tok).lower()
+
+
+def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any] | None:
+    """맨-브랜드 요청("글로니 보여줘", "마뗑킴")을 결정론적으로 검색으로 보낸다.
+
+    Haiku 가 낯선 브랜드를 되묻는(respond) 문제(실제 프로덕션 "글로니가 뭐냐").
+    원문이 카탈로그 브랜드로 EXACT 스캔되고, 브랜드 토큰 외 나머지가 필러/품목
+    1개 이하뿐이면 search_products(brand) 강제. 유사마커('같은/비슷')는 brand-similar
+    라우터가 처리하므로 제외. fuzzy 아닌 EXACT 스캔만 — bare 라우팅은 보수적으로
+    (오타는 LLM 폴백). 콜백/이미지/장문 턴 제외. 미검출 → None."""
+    try:
+        if state.image_url:
+            return None
+        msg = state.message
+        if msg is None or getattr(msg, "callback_data", None):
+            return None
+        raw = (msg.text or "").strip()
+        if not raw or len(raw) > 40:
+            return None
+        if _BRAND_SIMILAR_MARKER_RE.search(raw):
+            return None
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+
+        names = scan_text_for_brand(raw)
+        if not names:
+            return None
+        tokens = raw.split()
+        n = len(tokens)
+        matched: set[int] = set()
+        for i in range(n):
+            for span in (3, 2, 1):
+                if i + span <= n and scan_text_for_brand(" ".join(tokens[i : i + span])):
+                    matched.update(range(i, i + span))
+                    break
+        remaining = [
+            tokens[k] for k in range(n) if k not in matched and _norm_filler(tokens[k]) not in _BRAND_REQ_FILLER
+        ]
+        # 브랜드 토큰 + 필러 외 실질 토큰이 2개 이상이면 단순 브랜드요청이 아님(비교/질문 등) → LLM.
+        if len(remaining) > 1:
+            return None
+        label = " ".join(tokens[k] for k in sorted(matched)) or (names[0] if names else "")
+        text_query = remaining[0] if remaining else "clothing"
+        return {"brand": names[0], "text_query": text_query, "label": label}
+    except Exception:  # noqa: BLE001 — 라우팅 보정은 부가 기능, 루프를 막지 않는다
+        logger.debug("[bare-brand route] detect skipped", exc_info=True)
+        return None
+
+
+async def _run_bare_brand_shortcircuit(
+    req: dict[str, Any], state: WorkingState, sess: Any, ctx: dict[str, Any]
+) -> dict[str, Any] | None:
+    """검출된 맨-브랜드 요청을 search_products(brand)로 직접 실행 + respond. 0결과/실패면
+    None → 일반 루프 폴백."""
+    from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.agents.tools.search_products import dispatch as sp_dispatch
+
+    lang = ctx.get("lang") or session_lang(sess)
+    label = req.get("label") or req.get("brand")
+    args: dict[str, Any] = {"brand": req["brand"], "text_query": req.get("text_query") or "clothing"}
+    logger.info("🎯 [bare-brand route] deterministic brand=%r label=%r", req["brand"], label)
+    result = await sp_dispatch(args, ctx)
+    ok = bool(result.get("ok"))
+    cnt = int(result.get("candidates_count") or 0)
+    err = result.get("error")
+    hist = [{"tool_name": "search_products", "args": _args_summary(args)}]
+    if err == "awaiting_gender":
+        return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": None}
+    if ok and cnt > 0:
+        text = (
+            f"{label} 상품 골라봤어. 마음에 드는 거 있어?"
+            if lang == "ko"
+            else f"Here are {label} picks. See anything you like?"
+        )
+        try:
+            await respond_dispatch({"text": text}, ctx)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[bare-brand route] respond failed: %r", exc)
+        return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": text}
+    logger.info("[bare-brand route] fallthrough (ok=%s cnt=%d err=%r) → 일반 루프", ok, cnt, err)
+    return None
+
+
 async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Run the ReAct loop. Returns a state delta dict for the LangGraph node."""
     llm = get_llm()
@@ -1269,6 +1395,14 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
         _bs_delta = await _run_brand_similar_shortcircuit(_bs_seed, state, sess, ctx)
         if _bs_delta is not None:
             return _bs_delta
+
+    # 결정론적 맨-브랜드 요청 라우팅: "글로니 보여줘"/"마뗑킴" 을 Haiku 가 되묻는
+    # 문제(실 프로덕션)를 LLM 이전에 차단 — 원문이 카탈로그 브랜드면 강제 검색.
+    _bb_req = _detect_bare_brand_request(state, sess)
+    if _bb_req is not None:
+        _bb_delta = await _run_bare_brand_shortcircuit(_bb_req, state, sess, ctx)
+        if _bb_delta is not None:
+            return _bb_delta
 
     # Static system prompt: one of two pre-built constants (KO/EN). Because the
     # string is identical for every user sharing the same language, Anthropic's

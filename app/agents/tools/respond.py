@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from typing import Any
 
 from app.agents.tool_registry import RespondResult
@@ -186,8 +187,20 @@ def _candidate_identity(c: Any) -> Any:
     return None
 
 
+_TOOL_XML_RE = re.compile(r"</?(?:antml:)?(?:invoke|parameter|function_calls|function_results)\b[^>]*>", re.IGNORECASE)
+
+
+def _strip_tool_xml(text: str) -> str:
+    """모델이 tool-call 을 구조화 대신 텍스트로 뱉을 때 새는 XML 태그 제거
+    (실트레이스: 로제 케이스 respond 텍스트에 '<invoke name="respond"><parameter …>'
+    가 그대로 노출). 태그만 벗기고 안쪽 실텍스트는 유지. 유저 전달 choke point."""
+    if not text or "<" not in text:
+        return text
+    return _TOOL_XML_RE.sub("", text).strip()
+
+
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RespondResult:
-    text = (args.get("text") or "").strip()
+    text = _strip_tool_xml((args.get("text") or "").strip())
     chat_id = ctx.get("chat_id")
     if chat_id is None:
         return RespondResult(ok=False, error="missing_chat_id", text_sent=False, cards_sent=0)
