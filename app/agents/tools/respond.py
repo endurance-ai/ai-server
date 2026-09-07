@@ -806,6 +806,19 @@ async def send_hybrid_batch(
         if await _is_already_shown(c):
             continue
         eligible_pos.append((start + i, c))
+    # 260907 — 거짓말 방지: 신선응답(offset==0, 검색/refine 결과를 '지금' 제시하는
+    # 턴)에서 cross-turn dedup 이 결과를 0장으로 만들면 respond 텍스트("몇 개 나왔어"/
+    # "찾아봤어")가 거짓이 된다. 특히 refine(cheaper/color 로 좁힌 셋이 직전에 이미
+    # 보여준 것과 겹칠 때) 전부 걸러져 dense_count>0 인데 card_sent 0 (실트레이스
+    # 17:27 블레이저 refine). dedup 은 반복피로 완화용 nice-to-have 일 뿐 — 실결과가
+    # 있는데 0장을 내보내면 안 된다. 이미지가능 후보가 있으면 dedup 없이 다시 채운다.
+    # 페이지네이션('더보기', offset is None)은 그대로: 남은 게 다 본 거면 0장이 정직하다.
+    if not eligible_pos and is_fresh_search:
+        for i, c in enumerate(all_candidates[start:]):
+            if _has_plausible_image(c):
+                eligible_pos.append((start + i, c))
+        if eligible_pos:
+            logger.info("[tool.respond] dedup→0 on fresh reply; re-showing %d (거짓말 방지)", len(eligible_pos))
     # 앱(SSE StreamingAdapter)은 미디어그룹 없이 카드별로 스트리밍하므로 텔레그램
     # 앨범 10장 제약과 무관 — 어댑터가 `album_size`(int) 를 노출하면 그 값을 쓴다
     # (앱은 2열 그리드라 한 배치에 더 많이). 미노출/비-int(테스트 MagicMock 등)는
