@@ -107,7 +107,8 @@ class RecordViewResponse(BaseModel):
 
 
 class OutboundRequest(BaseModel):
-    source: Literal["curation", "search", "pdp", "wishlist", "history"] | None = None
+    session_id: UUID | None = None
+    source: Literal["curation", "search", "pdp", "wishlist", "history"] = "pdp"
     section_id: str | None = Field(default=None, max_length=100)
 
 
@@ -422,7 +423,11 @@ async def record_outbound(
         product_id=product_id,
         signal_type="outbound",
         dedupe_key=f"outbound:{user_id}:{product_id}:{datetime.now(tz=UTC).date()}",
-        metadata={"source": body.source, "section_id": body.section_id},
+        metadata={
+            "thread_id": str(body.session_id) if body.session_id else None,
+            "source": body.source,
+            "section_id": body.section_id,
+        },
     )
     return OutboundResponse(recorded=recorded)
 
