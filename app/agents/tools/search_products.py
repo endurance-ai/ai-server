@@ -1799,6 +1799,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         style_node_primary = (
             _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else ctx.get("style_node_primary")
         )
+    # brand-similar: centroid 앵커가 이미 스타일 신호다. 에이전트가 환각한
+    # style_node letter(예 'L')를 HARD 필터(p_style_node_id)로 얹으면 gender·seed
+    # exclude 와 겹쳐 결과가 0으로 죽는다(실트레이스 14:52 dense_count=0). 하드
+    # 스타일 필터는 끄고 centroid 유사도에 맡긴다.
+    if similar_seed_names:
+        style_node_primary = None
     # SPEC-PERSONALIZE-RERANK — forward the per-turn user_key so search_service
     # can look up TasteProfile and re-order the v6 raw rows.
     user_key = ctx.get("user_key")

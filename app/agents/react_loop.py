@@ -1155,7 +1155,12 @@ def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
             return None
         if not _BRAND_SIMILAR_MARKER_RE.search(raw):
             return None
-        if _is_short_affirmative(raw) or _is_followup_reference(raw, sess):
+        # ⚠️ _is_followup_reference 는 쓰지 않는다 — followup 토큰에 '비슷'이 들어
+        # 있어서 brand-similar 의 핵심 마커('X 비슷한')를 전부 followup 으로 오판,
+        # 라우터가 항상 스킵됐다(실트레이스 chat 4362450883795240354, 14:51).
+        # 아래 브랜드 검출이 있으면 그 자체가 "프리어 결과 참조"가 아니라 "새
+        # 브랜드 기준 유사검색" 의도라 followup 가드는 불필요하고 해롭다.
+        if _is_short_affirmative(raw):
             return None
         from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand_fuzzy
 
