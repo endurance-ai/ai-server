@@ -22,31 +22,64 @@ def test_chips_contract():
     assert chips_for("men") == []  # men 골든셋 등록 전까지 빈 배열 (스펙 v1.1)
 
 
-def test_candidate_selection_balances_brands_and_honors_cross_section_exclusion():
+def test_candidate_selection_uses_ten_popular_products_per_brand():
     rows = []
-    for pid in range(1, 121):
+    for pid in range(1, 301):
         rows.append(
             {
                 "product_id": pid,
                 "base_score": float(100 - pid),
                 "base_rank": pid,
-                "brand_key": f"brand-{(pid - 1) // 4}",
+                "brand_key": f"brand-{(pid - 1) // 10}",
                 "style_node_id": pid,
             }
         )
     selected = select_candidate_ids(
         rows,
         section_id="trending-search",
-        excluded_ids={1},
+        excluded_ids=set(),
         seed="test",
     )
     assert len(selected) == 100
-    assert 1 not in selected
-    selected_brands = [f"brand-{(pid - 1) // 4}" for pid in selected]
-    assert max(selected_brands.count(brand) for brand in set(selected_brands)) == 4
+    selected_brands = [f"brand-{(pid - 1) // 10}" for pid in selected]
+    assert len(set(selected_brands)) == 10
+    assert {selected_brands.count(brand) for brand in set(selected_brands)} == {10}
 
 
-def test_candidate_selection_fills_one_hundred_even_with_few_brands():
+def test_trending_selection_continues_after_brands_with_fewer_than_ten_products():
+    rows = []
+    pid = 1
+    for brand_index in range(12):
+        product_count = 9 if brand_index == 0 else 10
+        for _ in range(product_count):
+            rows.append(
+                {
+                    "product_id": pid,
+                    "base_score": float(1000 - pid),
+                    "base_rank": pid,
+                    "brand_key": f"brand-{brand_index}",
+                    "style_node_id": pid,
+                }
+            )
+            pid += 1
+
+    selected = select_candidate_ids(
+        rows,
+        section_id="trending-search",
+        excluded_ids={1},
+        seed="ten-by-ten",
+    )
+
+    brand_by_id = {row["product_id"]: row["brand_key"] for row in rows}
+    selected_brands = [brand_by_id[product_id] for product_id in selected]
+    assert len(selected) == 100
+    assert selected_brands.count("brand-0") == 8  # one of its nine was excluded
+    assert "brand-10" in selected_brands  # the next brand fills the remainder
+    assert selected_brands.count("brand-10") == 2
+    assert max(selected_brands.count(brand) for brand in set(selected_brands)) == 10
+
+
+def test_trending_selection_requires_enough_brands_to_fill_the_section():
     rows = [
         {
             "product_id": pid,
@@ -65,9 +98,7 @@ def test_candidate_selection_fills_one_hundred_even_with_few_brands():
         seed="few-brands",
     )
 
-    assert len(selected) == 100
-    assert len([pid for pid in selected if pid <= 60]) == 50
-    assert len([pid for pid in selected if pid > 60]) == 50
+    assert selected == []
 
 
 def test_candidate_selection_uses_taste_scores_without_weakening_section_size():
