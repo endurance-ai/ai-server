@@ -396,6 +396,11 @@ async def refresh_auto_sections(
 
         processed: set[str] = set()
         for section_id in ordered_section_ids:
+            if section_id not in cached_ids:
+                # The admin owns section existence. Do not generate orphaned
+                # candidates or count a gender/section that is not active.
+                processed.add(section_id)
+                continue
             section_index = _AUTO_IDS.index(section_id)
             for prior_section_id in _AUTO_IDS[:section_index]:
                 if prior_section_id not in processed:
