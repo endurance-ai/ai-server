@@ -471,6 +471,15 @@ class Settings(BaseSettings):
     # nova 쓰냐" 오해 유발 — 실제로는 nova 로 툴콜링한 적 없음). 빈 문자열은
     # llm_client 에서 fail-closed 안전망(이 기본값으론 도달 불가).
     AGENT_LLM_MODEL: str = "claude-haiku-4-5"
+    # model-tiering (2026-09-07): 라우팅(=첫 tool-selection)만 상위 모델로 승격하는
+    # 노브. 실측상 Haiku 는 라우팅 정확도 81%(브랜드 60/pivot 50/상황 67 — 재관
+    # 게이트 미달), Sonnet 은 98.5%. 라우팅 실패는 턴 전체를 망치므로 첫 N iteration
+    # 만 상위 모델로 돌리고 이후 follow-through 는 저렴한 AGENT_LLM_MODEL 유지 →
+    # 비용 증분을 턴당 라우팅 콜 몇 개로 제한. 빈 문자열 = 비활성(전 구간 AGENT_LLM_MODEL,
+    # 기존 동작 그대로). 활성화는 박스 ~/env/.env 에서 이 값만 세팅(예 claude-sonnet-4-5).
+    AGENT_ROUTER_LLM_MODEL: str = ""
+    # 라우터 모델로 돌릴 선두 iteration 수(라우팅 결정은 보통 iter 1). 1 권장.
+    AGENT_ROUTER_ITERATIONS: int = 1
     # Per-LLM-call timeout in seconds.
     AGENT_LLM_TIMEOUT_S: float = 5.0
     # Transient-error retry knobs (SPEC-AGENT-V2-REACT runtime hardening).

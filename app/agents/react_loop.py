@@ -1221,6 +1221,25 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             "response_text": fb.get("response_text"),
         }
 
+    # model-tiering (2026-09-07): 라우팅(선두 iteration)만 상위 모델로. Haiku 라우팅
+    # 정확도 81% vs Sonnet 98.5%(실측) — 라우팅 실패가 턴 전체를 망치므로 첫
+    # AGENT_ROUTER_ITERATIONS 회만 router 모델, 이후 follow-through 는 base(Haiku).
+    # AGENT_ROUTER_LLM_MODEL 빈값 = 비활성(전 구간 base, 기존 동작). router bind
+    # 실패 시 base 로 fail-open.
+    _router_model = (settings.AGENT_ROUTER_LLM_MODEL or "").strip()
+    _router_iters = max(0, int(settings.AGENT_ROUTER_ITERATIONS))
+    router_llm = llm
+    if _router_model and _router_model != (settings.AGENT_LLM_MODEL or "").strip():
+        _rl = get_llm(_router_model)
+        if _rl is not None:
+            router_llm = _rl
+            logger.info(
+                "[model-tiering] router=%s (first %d iter) · base=%s",
+                _router_model,
+                _router_iters,
+                settings.AGENT_LLM_MODEL,
+            )
+
     max_iter = max(1, int(settings.AGENT_MAX_ITERATIONS))
     token_budget = max(0, int(settings.AGENT_TURN_TOKEN_BUDGET))
     tool_timeout = float(settings.AGENT_TOOL_TIMEOUT_S)
@@ -1291,7 +1310,10 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
 
     for it in range(1, max_iter + 1):
         iterations = it
-        logger.info("🔄 [agent] iter %d/%d", it, max_iter)
+        # model-tiering: 선두 iteration 은 router(상위) 모델, 이후는 base.
+        active_llm = router_llm if it <= _router_iters else llm
+        active_model = _router_model if (it <= _router_iters and router_llm is not llm) else _agent_model
+        logger.info("🔄 [agent] iter %d/%d (model=%s)", it, max_iter, active_model or "?")
 
         # Token budget guard (REQ-AGENT-PERF-TURN-BUDGET-001).
         if token_budget and cumulative_tokens >= token_budget:
@@ -1355,7 +1377,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
                 except Exception:  # noqa: BLE001
                     llm_config = None
                 _ainvoke_kw = {"config": llm_config} if llm_config is not None else {}
-                ai_msg = await asyncio.wait_for(llm.ainvoke(messages, **_ainvoke_kw), timeout=llm_timeout)
+                ai_msg = await asyncio.wait_for(active_llm.ainvoke(messages, **_ainvoke_kw), timeout=llm_timeout)
                 break
             except (TimeoutError, Exception) as exc:  # noqa: BLE001
                 last_exc = exc
@@ -1405,7 +1427,7 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             from app.observability.turn_cost import accumulate_lc
 
             accumulate_lc(
-                _agent_model,
+                active_model or _agent_model,
                 um,
                 response_metadata=getattr(ai_msg, "response_metadata", None),
                 source="react_loop",
