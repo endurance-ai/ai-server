@@ -34,6 +34,7 @@ _SECTION_SIZE = CURATION_SECTION_PRODUCT_LIMIT
 # The second auto slot must still have 100 candidates after the first slot's
 # products are excluded. Keep extra headroom for differing quality filters.
 _CANDIDATES_PER_SECTION = CURATION_SECTION_PRODUCT_LIMIT * 3
+_TRENDING_PRODUCTS_PER_BRAND = 10
 
 _WINTER_NAME_RE = "패딩|기모|플리스|무스탕|puffer|fleece"
 _BASE_EXCLUDED_CATEGORIES = ("other",)
@@ -173,6 +174,13 @@ def _candidate_sql(section_id: str) -> str:
                 WHERE product_rank <= 3
                 GROUP BY brand_key
             ),
+            candidate_brands AS (
+                SELECT brand_key
+                FROM brand_scores
+                ORDER BY brand_score DESC,
+                         md5(brand_key || current_date::text)
+                LIMIT {_CANDIDATES_PER_SECTION}
+            ),
             ranked AS (
                 SELECT bp.*, bs.brand_score,
                     row_number() OVER (
@@ -181,6 +189,8 @@ def _candidate_sql(section_id: str) -> str:
                     ) AS base_rank
                 FROM brand_products bp
                 JOIN brand_scores bs USING (brand_key)
+                WHERE bp.brand_key IN (SELECT brand_key FROM candidate_brands)
+                  AND bp.product_rank <= {_TRENDING_PRODUCTS_PER_BRAND}
             )
             SELECT product_id, false AS is_hot, brand_score AS base_score, base_rank,
                    brand_key, brand_node_id, style_node_id
@@ -319,6 +329,20 @@ def select_candidate_ids(
             brand_order.append(brand)
         brand_rows[brand].append(pid)
 
+    if section_id == "trending-search":
+        # The trending slot is a brand showcase: try up to ten popular products
+        # from each brand in popularity order, continuing with the next brand
+        # when a brand has fewer than ten usable candidates.
+        selected: list[int] = []
+        for brand in brand_order:
+            products = brand_rows[brand]
+            selected.extend(products[:_TRENDING_PRODUCTS_PER_BRAND])
+            if len(selected) >= _SECTION_SIZE:
+                break
+        if len(selected) < _SECTION_SIZE:
+            return [] if require_full else selected
+        return selected[:_SECTION_SIZE]
+
     # Rank decides the order within each brand and the order in which brands
     # enter the rotation. Repeated rounds keep the mix even, while allowing a
     # single/few brands to fill the full section instead of stopping at a cap.
@@ -372,6 +396,11 @@ async def refresh_auto_sections(
 
         processed: set[str] = set()
         for section_id in ordered_section_ids:
+            if section_id not in cached_ids:
+                # The admin owns section existence. Do not generate orphaned
+                # candidates or count a gender/section that is not active.
+                processed.add(section_id)
+                continue
             section_index = _AUTO_IDS.index(section_id)
             for prior_section_id in _AUTO_IDS[:section_index]:
                 if prior_section_id not in processed:

@@ -681,8 +681,8 @@ async def test_refresh_trending_ranks_brands_by_top_product_engagement(client: A
         )
         trending_ids = list((await cur.fetchone())[0])
 
-    assert trending_ids[0] in products_a
-    assert product_b == trending_ids[1]
+    assert set(trending_ids[:3]) == set(products_a)
+    assert product_b == trending_ids[3]
     assert len(set(products_a) & set(trending_ids)) == 3
 
 
