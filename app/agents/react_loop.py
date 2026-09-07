@@ -1274,7 +1274,7 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             return None
         if _BRAND_SIMILAR_MARKER_RE.search(raw):
             return None
-        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names, scan_text_for_brand
 
         names = scan_text_for_brand(raw)
         if not names:
@@ -1282,9 +1282,12 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
         tokens = raw.split()
         n = len(tokens)
         matched: set[int] = set()
+        # resolve_brand_names 는 EXACT 키 조회(sub-scan 없음)라 '브랜드인 토큰 span'만
+        # 정확히 잡는다. scan_text_for_brand 를 쓰면 "글로니 보여줘"가 sub-scan 으로
+        # truthy 라 '보여줘'까지 브랜드 토큰으로 오표기됨(label 오염).
         for i in range(n):
             for span in (3, 2, 1):
-                if i + span <= n and scan_text_for_brand(" ".join(tokens[i : i + span])):
+                if i + span <= n and resolve_brand_names(" ".join(tokens[i : i + span])):
                     matched.update(range(i, i + span))
                     break
         remaining = [
