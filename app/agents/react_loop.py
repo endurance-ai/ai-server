@@ -25,7 +25,7 @@ import logging
 import re
 import time
 from importlib import import_module
-from typing import Any
+from typing import Any, Final
 
 from langchain_core.messages import ToolMessage
 
@@ -92,10 +92,14 @@ _SYSTEM_PROMPT = (
     "fresh cards actually appear (prior cards may be gone). NEVER answer this by pointing to "
     "off-screen cards ('위에 있어', 'scroll up'). Reuse the prior query; this is NOT a redundant call "
     "— it is the only way cards reach the screen.\n"
-    "G2 — the request hinges on a STYLE REFERENCE or an unfamiliar brand you can't concretely "
-    "picture (celebrity/influencer look, an 'OO st(스타일)' tag like '닝닝 공항패션st', a label whose "
-    "aesthetic you don't know) → `web_search` FIRST, then continue to G4 with a concrete "
-    "color/fit/garment/mood query. Skip for plain garment/brand requests you can already search.\n"
+    "G2 — the request hinges on a STYLE REFERENCE you can't concretely picture (celebrity/"
+    "influencer look, an 'OO st(스타일)' tag like '닝닝 공항패션st') → `web_search` FIRST, then "
+    "continue to G4 with a concrete color/fit/garment/mood query.\n"
+    "  G2-EXCEPTION — a BRAND NAME is NOT a web_search case, even one you don't recognize (Korean "
+    "indie labels included) and even with a typo. '<브랜드> 같은/비슷한/느낌/st' → `search_products` "
+    "with `similar_to_brand=<브랜드>` (vibe of that brand from OUR catalog). A bare '<브랜드>' or "
+    "'<브랜드> <옷>' → `search_products` with `brand=<브랜드>`. NEVER `web_search` a brand name and "
+    "NEVER ask 'what is it / 뭔지 모르겠어' — our catalog resolves brands (typos too).\n"
     "G3 — a search already ran THIS conversation AND the message is a DELTA on the SAME item "
     "(price/color/fit/material/detail/exclude/broaden — see DELTA vs PIVOT) → `refine_search`.\n"
     "G4 — a searchable intent exists: a garment, a brand+garment, a PIVOT (new garment/occasion/"
@@ -1124,6 +1128,82 @@ def _cap_subject_id(state: WorkingState) -> int:
     return state.cap_subject_id or state.chat_id
 
 
+# 유사 마커 — "X 같은/비슷한/느낌/처럼/감성/스타일" + "OOst"(한글/공백 뒤 st).
+# 'Stussy' 같은 브랜드 내부 'st' 오검출을 피하려 st 는 한글/공백 뒤에서만 인정.
+_BRAND_SIMILAR_MARKER_RE: Final[re.Pattern[str]] = re.compile(
+    r"같은|비슷|느낌|처럼|감성|스타일|(?<=[가-힣 ])st\b", re.IGNORECASE
+)
+
+
+def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
+    """원문에 [카탈로그 브랜드(fuzzy)] + [유사 마커]가 있으면 seed 브랜드명을 반환.
+
+    Haiku 가 "X 같은/비슷한 옷" 을 search_products(similar_to_brand)로 안 잡고
+    web_search(G2)/clarify(G5)로 흘리는 문제(실트레이스 chat 4362450883795240354)를
+    프롬프트 이전 단계에서 결정론적으로 차단(SPEC-SEARCH-BRAND-SIMILAR-001). 콜백/
+    이미지/짧은긍정/후속참조 턴은 제외. 마커 게이트가 fuzzy 스캔 오탐의 1차 방어.
+    미검출/미확신 → None(일반 루프로 진행). 절대 raise 안 함."""
+    try:
+        if state.image_url:
+            return None
+        msg = state.message
+        if msg is None or getattr(msg, "callback_data", None):
+            return None
+        raw = (msg.text or "").strip()
+        # 긴 문장은 상황쿼리/자유대화일 확률 ↑ → 오발 방지로 제외.
+        if not raw or len(raw) > 80:
+            return None
+        if not _BRAND_SIMILAR_MARKER_RE.search(raw):
+            return None
+        if _is_short_affirmative(raw) or _is_followup_reference(raw, sess):
+            return None
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand_fuzzy
+
+        names = scan_text_for_brand_fuzzy(raw)
+        if not names:
+            return None
+        return names[0]  # canonical; dispatch 가 다시 resolve 한다
+    except Exception:  # noqa: BLE001 — 라우팅 보정은 부가 기능, 루프를 막지 않는다
+        logger.debug("[brand-similar route] detect skipped", exc_info=True)
+        return None
+
+
+async def _run_brand_similar_shortcircuit(
+    seed: str, state: WorkingState, sess: Any, ctx: dict[str, Any]
+) -> dict[str, Any] | None:
+    """검출된 seed 로 search_products(similar_to_brand)를 직접 실행하고 respond 로
+    카드까지 보낸다. 0결과/실패면 None 반환 → 일반 LLM 루프로 폴백(브로드닝 등)."""
+    from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.agents.tools.search_products import dispatch as sp_dispatch
+
+    lang = ctx.get("lang") or session_lang(sess)
+    args: dict[str, Any] = {"similar_to_brand": seed, "text_query": "clothes"}
+    logger.info("🎯 [brand-similar route] deterministic seed=%r", seed)
+    result = await sp_dispatch(args, ctx)
+    ok = bool(result.get("ok"))
+    cnt = int(result.get("candidates_count") or 0)
+    err = result.get("error")
+    hist = [{"tool_name": "search_products", "args": _args_summary(args)}]
+    if ok and cnt > 0:
+        text = (
+            f"{seed} 결이 비슷한 것들 찾아봤어. 마음에 드는 거 있으면 더 좁혀줄게."
+            if lang == "ko"
+            else f"Here are pieces with a similar vibe to {seed}. Tell me if you want to narrow it down."
+        )
+        try:
+            await respond_dispatch({"text": text}, ctx)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[brand-similar route] respond failed: %r", exc)
+        return {
+            "agent_iterations": 1,
+            "agent_status": "completed",
+            "tool_call_history": hist,
+            "response_text": text,
+        }
+    logger.info("[brand-similar route] fallthrough (ok=%s cnt=%d err=%r) → 일반 루프", ok, cnt, err)
+    return None
+
+
 async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Run the ReAct loop. Returns a state delta dict for the LangGraph node."""
     llm = get_llm()
@@ -1152,6 +1232,15 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
 
     ctx = _build_ctx(state, sess)
     user_key = ctx["user_key"]
+
+    # 결정론적 brand-similar 라우팅 (SPEC-SEARCH-BRAND-SIMILAR-001): "X 같은/비슷한"
+    # 을 Haiku 가 web_search(G2)/clarify(G5)로 흘리는 문제를 LLM 이전 단계에서 차단.
+    # seed 검출 시 검색+respond 를 직접 수행하고 턴 종료; 0결과/실패면 일반 루프 폴백.
+    _bs_seed = _detect_brand_similar_intent(state, sess)
+    if _bs_seed is not None:
+        _bs_delta = await _run_brand_similar_shortcircuit(_bs_seed, state, sess, ctx)
+        if _bs_delta is not None:
+            return _bs_delta
 
     # Static system prompt: one of two pre-built constants (KO/EN). Because the
     # string is identical for every user sharing the same language, Anthropic's

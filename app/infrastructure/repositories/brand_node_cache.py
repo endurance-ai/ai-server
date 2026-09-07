@@ -282,6 +282,43 @@ def scan_text_for_brand(text: str | None) -> list[str] | None:
     return best_names
 
 
+def scan_text_for_brand_fuzzy(text: str | None) -> list[str] | None:
+    """scan_text_for_brand 의 오타 내성 버전 — exact 미스 윈도우에 fuzzy 적용.
+
+    ⚠️ 결정론적 brand-similar 라우터(react_loop)처럼 이미 '유사 마커(같은/비슷/
+    느낌…)'로 브랜드 의도가 확정된 뒤에만 쓸 것 — 마커 게이트가 오탐의 1차 방어다.
+    자유 응답/일반 스캔엔 exact 스캔(scan_text_for_brand)을 쓸 것.
+
+    exact 최장매치를 먼저 시도하고, 없을 때만 span 3·2·1 윈도우에 대해
+    resolve_brand_names_fuzzy 로 근사매칭한다. span 1 fuzzy 도 허용하되(단일토큰
+    브랜드 오타 '발렌시아'→Balenciaga 대응) 오탐 방어는 다층: 마커 게이트(호출부)
+    + fuzzy 자체 가드(길이≥3·ratio≥0.72·모호성 margin) + _SCAN_STOPWORDS. 2글자
+    이하 일상어는 fuzzy 길이 가드에서 컷. 미발견/미워밍이면 None."""
+    exact = scan_text_for_brand(text)
+    if exact:
+        return exact
+    if not text or not isinstance(text, str):
+        return None
+    tokens = text.split()
+    n = len(tokens)
+    if n == 0:
+        return None
+    best_span = 0
+    best_names: list[str] | None = None
+    for i in range(n):
+        for span in (3, 2, 1):
+            if i + span > n:
+                continue
+            cand = " ".join(tokens[i : i + span])
+            if span == 1 and cand.strip().lower() in _SCAN_STOPWORDS:
+                continue
+            names = resolve_brand_names_fuzzy(cand)
+            if names and span > best_span:
+                best_span = span
+                best_names = names
+    return best_names
+
+
 def is_warmed() -> bool:
     return _warmed
 

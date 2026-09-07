@@ -1550,6 +1550,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             pinned = req_gender if req_gender in _GENDER_TOKENS else _lookup_profile_gender(ctx)
             if pinned:
                 text_query = f"{text_query} {pinned}".strip()
+            elif similar_seed_names:
+                # brand-similar 는 "일단 여러 개 보여줘" 스프레드 의도 — 성별 카드로
+                # 되묻는 마찰 대신 unisex 로 흘린다(프로필 성별은 위 pinned 에서 이미
+                # 반영됨). 게다가 성별 카드 재실행(ingest)은 similar_to_brand 를
+                # stash 하지 않아 앵커를 잃으므로, 여기서 카드를 안 띄우는 게 옳다.
+                text_query = f"{text_query} unisex".strip()
             elif not has_image:
                 # Unknown + never pinned + pure text → ask once. Stash the
                 # search args so the callback can resume without re-typing.
