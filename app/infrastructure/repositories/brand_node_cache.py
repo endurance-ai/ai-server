@@ -21,6 +21,7 @@ Fail-open contract:
 
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 from dataclasses import dataclass
@@ -180,6 +181,68 @@ def resolve_brand_names(query: str | None) -> list[str] | None:
     lk = normalize_brand(query)
     if lk and lk in _acronym_index and lk not in _filter_index:
         return list(_acronym_index[lk])
+    return None
+
+
+# Fuzzy(오타 내성) 매칭 파라미터 — brand / similar_to_brand 슬롯 전용
+# (SPEC-SEARCH-BRAND-SIMILAR-001 레이어2). 자유문장 스캔엔 쓰지 않는다.
+_FUZZY_MIN_LEN: Final[int] = 3  # 너무 짧으면 오탐 위험 → 스킵
+_FUZZY_MIN_RATIO: Final[float] = 0.72  # difflib ratio 하한
+_FUZZY_MARGIN: Final[float] = 0.06  # 1등 vs '다른 그룹' 2등 격차 하한(모호성 가드)
+_FUZZY_PREFILTER: Final[float] = 0.5  # 후보 편입 하한(연산 절감)
+
+
+def resolve_brand_names_fuzzy(query: str | None) -> list[str] | None:
+    """Exact resolve 먼저, 미스면 정규화 키에 대한 근사매칭(사용자 오타 내성).
+
+    ⚠️ LLM 이 '브랜드'라고 슬롯(brand / similar_to_brand)에 담은 값에만 쓸 것 —
+    그 슬롯 자체가 강한 브랜드 의도 신호라 오탐 위험이 낮다. 자유문장 스캔
+    (scan_text_for_brand)엔 절대 쓰지 말 것(문장 아무 단어나 브랜드로 튄다).
+    exact 히트 시 그대로 반환 → 기존 동작 불변.
+
+    가드: 정규화 길이 ≥ _FUZZY_MIN_LEN, difflib ratio ≥ _FUZZY_MIN_RATIO,
+    그리고 1등이 '다른 브랜드 그룹' 2등을 _FUZZY_MARGIN 이상 앞설 때만 채택
+    (모호하면 None). 미확신/미워밍 → None (fail-open). 절대 raise 안 함."""
+    exact = resolve_brand_names(query)
+    if exact:
+        return exact
+    if not query or not isinstance(query, str) or not query.strip() or not _filter_index:
+        return None
+
+    best_names: tuple[str, ...] | None = None
+    best_ratio = 0.0
+    second_ratio = 0.0  # 1등과 '다른 그룹' 중 최고 유사도(모호성 판정용)
+    for norm_fn in (normalize_brand_ko, normalize_brand):
+        key = norm_fn(query)
+        if not key or len(key) < _FUZZY_MIN_LEN:
+            continue
+        klen = len(key)
+        for idx_key, names in _filter_index.items():
+            # 길이 차가 크면 스킵(연산 절감 + 오탐 감소).
+            if abs(len(idx_key) - klen) > max(3, klen // 2):
+                continue
+            r = difflib.SequenceMatcher(None, key, idx_key).ratio()
+            if r < _FUZZY_PREFILTER:
+                continue
+            names_t = tuple(names)
+            if r > best_ratio:
+                # 밀려난 직전 1등이 '다른 그룹'이면 그게 2등 후보가 된다.
+                if best_names is not None and best_names != names_t:
+                    second_ratio = max(second_ratio, best_ratio)
+                best_ratio = r
+                best_names = names_t
+            elif names_t != best_names and r > second_ratio:
+                second_ratio = r
+
+    if best_names is not None and best_ratio >= _FUZZY_MIN_RATIO and (best_ratio - second_ratio) >= _FUZZY_MARGIN:
+        logger.info(
+            "🔎 [brand_fuzzy] %r → %r (ratio=%.2f margin=%.2f)",
+            query,
+            list(best_names),
+            best_ratio,
+            best_ratio - second_ratio,
+        )
+        return list(best_names)
     return None
 
 

@@ -281,13 +281,18 @@ def _resolve_brand_filter(raw: Any) -> list[str] | None:
     (들)을 resolve 한다. 한/영 표면형·괄호 약칭·이니셜 약칭을 모두 흡수하고,
     같은 브랜드의 중복 노드(예: 'Post Archive Faction' + '… (PAF)')는 모든
     canonical 명을 함께 반환해 RPC 가 두 노드에 걸린 상품을 다 잡는다.
-    미인식/캐시 미워밍이면 None (fail-open: 필터 없이 진행)."""
+    미인식/캐시 미워밍이면 None (fail-open: 필터 없이 진행).
+
+    260907 레이어2(SPEC-SEARCH-BRAND-SIMILAR-001): exact 미스 시 `resolve_brand_
+    names_fuzzy` 로 사용자 오타 내성(스키즘인듀씽→Schism Inducing). fuzzy 는 이
+    브랜드 슬롯(brand / similar_to_brand)에서만 — LLM 이 브랜드라고 담은 값이라
+    오탐 위험이 낮다. 자유문장 스캔은 exact 유지."""
     if not raw or not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names
+        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names_fuzzy
 
-        names = resolve_brand_names(raw)
+        names = resolve_brand_names_fuzzy(raw)
         if names:
             return names
         logger.info("[tool.search_products] brand %r not in brand_node_cache — filter skipped (fail-open)", raw)
