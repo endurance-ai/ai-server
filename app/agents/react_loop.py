@@ -1137,6 +1137,9 @@ def _cap_subject_id(state: WorkingState) -> int:
 _BRAND_SIMILAR_MARKER_RE: Final[re.Pattern[str]] = re.compile(
     r"같은|비슷|느낌|처럼|감성|스타일|(?<=[가-힣 ])st\b", re.IGNORECASE
 )
+# 모바일 핀 상품 칩 프리픽스 "[#12345 · brand · name · ₩price]" — 이 턴은 '이 상품과
+# 비슷한'(PDP 유사상품) 의도라 search_products 의 상품 임베딩 앵커가 처리해야 한다.
+_PINNED_CHIP_RE: Final[re.Pattern[str]] = re.compile(r"^\[#\d")
 
 
 def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
@@ -1154,6 +1157,11 @@ def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
         if msg is None or getattr(msg, "callback_data", None):
             return None
         raw = (msg.text or "").strip()
+        # 핀 상품 칩("[#12345 · TAEY · …] 비슷한 거")은 '이 상품과 비슷한'(PDP 유사상품)
+        # 의도라 상품 임베딩 앵커(search_products _PINNED_PID_RE 경로)가 처리해야 한다.
+        # 칩의 브랜드명을 긁어 '브랜드 유사'로 가로채면 안 됨(실버그: TAEY 40장 쏟음).
+        if _PINNED_CHIP_RE.match(raw):
+            return None
         # 긴 문장은 상황쿼리/자유대화일 확률 ↑ → 오발 방지로 제외.
         if not raw or len(raw) > 80:
             return None
@@ -1274,6 +1282,9 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
         if msg is None or getattr(msg, "callback_data", None):
             return None
         raw = (msg.text or "").strip()
+        # 핀 상품 칩은 상품 앵커 경로가 처리 — 라우터가 칩 브랜드로 가로채지 않는다.
+        if _PINNED_CHIP_RE.match(raw):
+            return None
         if not raw or len(raw) > 40:
             return None
         if _BRAND_SIMILAR_MARKER_RE.search(raw):
