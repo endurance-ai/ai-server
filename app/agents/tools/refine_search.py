@@ -385,6 +385,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # Persist FULL refined candidates so `respond` renders real cards
     # internally (parity with search_products; LLM never serializes cards).
     persist_last_results(ctx, cands)
+    # 260907 — refine 표식: respond 에서 dedup 이 카드를 0장으로 만들면(좁힌 셋이
+    # 직전에 이미 뿌린 것과 겹칠 때) 재충전해 "나왔어" 거짓말을 막는다. fresh 새
+    # 검색의 억제(260611)는 건드리지 않도록 refine 턴에만 건다.
+    from app.agents.tools.search_products import REFINE_TURN_KEY
+
+    ctx[REFINE_TURN_KEY] = True
 
     # 260611 — emit `search_done` (is_refine=True) so the next turn's memory
     # context still surfaces this as the active query for further refinement.

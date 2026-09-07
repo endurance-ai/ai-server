@@ -491,6 +491,9 @@ def _to_card_candidate(cand: Any) -> Any:
 # `ctx` is built once per turn in react_loop and shared by reference across
 # search_products / refine_search / respond dispatch (react_loop.py:301+524).
 CARDS_READY_KEY = "_cards_ready_this_turn"
+# 이번 턴이 refine(리파인)인지 표식 — respond 가 dedup 으로 카드 0장이 될 때
+# refine 이면 재충전(거짓말 방지), fresh 새 검색이면 260611 억제 유지에 쓴다.
+REFINE_TURN_KEY = "_refine_this_turn"
 
 
 def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
