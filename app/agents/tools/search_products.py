@@ -1695,12 +1695,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 를 필터로 걸면 exclude 와 충돌해 빈 결과가 난다.
     brand_filter = None if similar_seed_names else _resolve_brand_filter(args.get("brand"))
 
+    # 260908 — 핀 상품 유사("[#id · TAEY …] 비슷한 거")는 '이 상품과 비슷한'=크로스
+    # 브랜드 유사상품(PDP 유사)이 의도다. 상품 임베딩 앵커(pinned_pid)가 있으면 brand
+    # 하드필터를 강제로 끈다 — 안 그러면 칩의 브랜드(TAEY)로 필터돼 그 브랜드만 쏟는다
+    # (실버그: 상품 선택 후 비슷한거 → TAEY 40장). 핀-복구/오추측 블록도 스킵.
+    if pinned_pid is not None:
+        brand_filter = None
     # 브랜드 sticky 핀(결정론적): 에이전트가 낯선 국내 브랜드('글로니')를 brand
     # arg 로 안 넣는 문제 보정. react_loop._build_ctx 가 원문에서 브랜드를 감지해
     # 세션 핀에 저장하므로, LLM 이 brand 를 빠뜨렸으면 그 핀을 적용한다
     # ('글로니 → (상의) → (바지)' 전 구간 유지). 핀이 없고 clarify 답 턴이면
     # 직전 검색 결과(단일 브랜드)에서 복구도 시도(보조).
-    if brand_filter is None:
+    if pinned_pid is not None:
+        pass  # 핀 상품 유사 = 크로스브랜드, 브랜드 핀/복구 스킵
+    elif brand_filter is None:
         from app.agents.last_query import get_pinned_brand
 
         pinned = get_pinned_brand(ctx.get("chat_id"))
