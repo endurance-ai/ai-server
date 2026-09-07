@@ -130,6 +130,11 @@ class SearchProductsArgs(TypedDict, total=False):
     # 2026-07-16 — 사용자가 특정 브랜드를 지정한 경우 ("아크네 가디건").
     # brand_node_cache 로 canonical 명 resolve → p_brand_names EXACT 필터.
     brand: str | None
+    # 2026-09-07 — "X 같은/비슷한 옷" (SPEC-SEARCH-BRAND-SIMILAR-001). brand 하드
+    # 필터가 아니라 X 브랜드 상품 임베딩 centroid 를 앵커로 유사 상품을 뽑고 X
+    # 자신은 제외한다. dispatch 가 get_brand_centroid_embedding → override_embedding
+    # 경로(핀 상품 앵커와 동일)로 태움. brand 와 상호배타(같이 오면 similar 우선).
+    similar_to_brand: str | None
     # 2026-08-19 — 특정 상품/모델을 지목한 경우 상품명 매칭어. 상품명에 나올
     # 법한 고유 서술어/모델 토큰만 (예: '2021M', 'trompe l’oeil', 'museum').
     # products.name 을 word-trigram 매칭해 그 상품을 상단으로 부스트한다.
@@ -327,6 +332,14 @@ REGISTRY: dict[str, ToolMetadata] = {
             "'X 브랜드 제품/옷' — set brand=X EVEN IF X is also a common "
             "material/color word. e.g. '스웨이드 브랜드 제품 추천' → brand='스웨이드' "
             "(the brand SUADE), NOT color_family/material 'suede'.\n"
+            "  - `similar_to_brand`: when the user wants the VIBE of a brand, not the "
+            "brand itself — 'X 같은/비슷한/느낌/st 옷', 'clothes like X'. Put X here "
+            "(same resolver as `brand`: Korean/English/acronym). Returns products from "
+            "OTHER brands that FEEL like X (image-embedding similarity to X's catalog), "
+            "X itself excluded. Do NOT set `brand` too in this case, and do NOT "
+            "web_search the brand's aesthetic — the catalog IS the answer. Prefer "
+            "showing a broad spread first, then refine. (Use `brand` — not this — when "
+            "they want X's OWN products: 'X 신상', 'X 후드'.)\n"
             "  - `name_query`: ONLY when the user names a SPECIFIC product / model / "
             "line (e.g. '아크네 2021M 진', 'the museum shirt', 'trompe l’oeil 진'). Put "
             "the distinctive descriptor here in ENGLISH ('2021M', 'museum', 'trompe "
