@@ -1709,6 +1709,23 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         if pinned:
             brand_filter = pinned
             logger.info("[tool.search_products] brand pin: applied %r (agent omitted brand)", pinned)
+    else:
+        # 260907 — 브랜드 오추측 교정: 에이전트가 낯선 국내 브랜드의 영문명을
+        # 잘못 추측하는 문제("마뗑킴"→brand:"maison margiela"→엉뚱 브랜드 카드).
+        # react_loop._build_ctx 가 원문을 EXACT 스캔해 핀한 브랜드가 있고, 그게
+        # 에이전트 brand 와 '다른 그룹'이면 원문(사용자 실제 표기)을 우선한다.
+        # 스캔은 EXACT+stopword 라 보수적 — 확신 매치일 때만 핀이 존재한다.
+        # 같은 브랜드('아크네'↔'acne studios')는 그룹이 같아 override 안 함.
+        from app.agents.last_query import get_pinned_brand
+
+        _pin = get_pinned_brand(ctx.get("chat_id"))
+        if _pin and brand_filter and {b.lower() for b in _pin} != {b.lower() for b in brand_filter}:
+            logger.info(
+                "[tool.search_products] brand override: agent %r ≠ 원문핀 %r → 원문 우선(오추측 교정)",
+                brand_filter,
+                _pin,
+            )
+            brand_filter = _pin
 
     # 브랜드 pivot style carry (2026-08-24): 브랜드는 지정됐는데 text_query 가
     # 스타일 서술 없이 브랜드/성별/필러뿐이면("스킴스로 보여줘"), 직전 성공검색의
