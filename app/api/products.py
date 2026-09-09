@@ -90,7 +90,32 @@ class ProductDetail(BaseModel):
     color: str | None
     tags: list[str] | None
     brand_node: BrandNode | None
+    canonical_variant_id: int | None = None
     similar: list[ProductRef] = Field(default_factory=list)
+
+
+class CatalogOffer(BaseModel):
+    offer_id: int
+    platform: str
+    source_product_id: int
+    source_product_key: str
+    source_variant_key: str
+    product_url: str
+    price: float | None
+    currency: str | None
+    in_stock: bool
+    sizes: list[str] | None
+    last_seen_at: str | None
+
+
+class CatalogVariantDetail(BaseModel):
+    variant_id: int
+    catalog_product_id: int
+    brand: str
+    model_name: str | None
+    color: str | None
+    images: list[str]
+    offers: list[CatalogOffer]
 
 
 class RecordViewRequest(BaseModel):
@@ -156,7 +181,7 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
                 -- VLM 폴백 CASE 를 걷어냈다.
                 p.gender,
                 pf.feature_metadata->>'primary_color' AS color, p.tags,
-                p.brand_node_id,
+                p.brand_node_id, p.canonical_variant_id,
                 bn.brand_name, bn.brand_name_normalized
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
@@ -169,7 +194,7 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
     if not row:
         return None
     brand_node = (
-        BrandNode(id=row[16], brand_name=row[17], brand_name_normalized=row[18]) if row[16] is not None else None
+        BrandNode(id=row[16], brand_name=row[18], brand_name_normalized=row[19]) if row[16] is not None else None
     )
     return ProductDetail(
         id=row[0],
@@ -189,6 +214,59 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
         color=row[14],
         tags=list(row[15]) if row[15] else None,
         brand_node=brand_node,
+        canonical_variant_id=row[17],
+    )
+
+
+async def _get_catalog_variant(pool: AsyncConnectionPool, variant_id: int) -> CatalogVariantDetail | None:
+    """Return a canonical color variant and its current platform offers."""
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT
+                cv.id, cv.catalog_product_id, cp.brand, cp.model_name,
+                cv.color, cv.images,
+                po.id, po.platform, po.source_product_id,
+                po.source_product_key, po.source_variant_key,
+                po.product_url, COALESCE(po.sale_price, po.listed_price), po.source_currency, po.in_stock,
+                po.sizes, po.last_seen_at
+            FROM public.catalog_variants cv
+            JOIN public.catalog_products cp ON cp.id = cv.catalog_product_id
+            LEFT JOIN public.product_offers po ON po.catalog_variant_id = cv.id
+            WHERE cv.id = %s
+            ORDER BY po.in_stock DESC NULLS LAST, po.last_seen_at DESC NULLS LAST
+            """,
+            (variant_id,),
+        )
+        rows = await cur.fetchall()
+    if not rows:
+        return None
+    first = rows[0]
+    offers = [
+        CatalogOffer(
+            offer_id=row[6],
+            platform=row[7],
+            source_product_id=row[8],
+            source_product_key=row[9],
+            source_variant_key=row[10],
+            product_url=row[11],
+            price=float(row[12]) if row[12] is not None else None,
+            currency=row[13],
+            in_stock=bool(row[14]),
+            sizes=list(row[15]) if row[15] else None,
+            last_seen_at=row[16].isoformat() if row[16] is not None else None,
+        )
+        for row in rows
+        if row[6] is not None
+    ]
+    return CatalogVariantDetail(
+        variant_id=first[0],
+        catalog_product_id=first[1],
+        brand=first[2],
+        model_name=first[3],
+        color=first[4],
+        images=list(first[5]) if first[5] else [],
+        offers=offers,
     )
 
 
@@ -347,6 +425,22 @@ async def list_viewed(
         for r in page
     ]
     return ViewedListResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get(
+    "/catalog/variants/{variant_id}",
+    response_model=CatalogVariantDetail,
+    status_code=status.HTTP_200_OK,
+)
+async def get_catalog_variant(
+    variant_id: int,
+    pool: AsyncConnectionPool = Depends(provide_db_pool),
+) -> CatalogVariantDetail:
+    """Return one canonical color variant with its platform offers."""
+    variant = await _get_catalog_variant(pool, variant_id)
+    if variant is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Catalog variant not found")
+    return variant
 
 
 @router.get("/products/{product_id}", response_model=ProductDetail, status_code=status.HTTP_200_OK)

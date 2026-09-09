@@ -14,6 +14,7 @@ class Candidate(BaseModel):
     product_url: str | None = Field(default=None, serialization_alias="productUrl")
     platform: str | None = None
     subcategory: str | None = None
+    canonical_variant_id: str | None = Field(default=None, serialization_alias="canonicalVariantId")
     score: float
     dense_rank: int | None = Field(default=None, serialization_alias="denseRank")
     sparse_rank: int | None = Field(default=None, serialization_alias="sparseRank")
