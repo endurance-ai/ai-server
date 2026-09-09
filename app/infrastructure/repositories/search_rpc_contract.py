@@ -49,6 +49,7 @@ class SearchRpcRowContract(BaseModel):
     product_url: str | None = None
     platform: str | None = None
     subcategory: str | None = None
+    canonical_variant_id: str | int | None = None
     distance: float | None = None
     degraded: bool | None = None
 

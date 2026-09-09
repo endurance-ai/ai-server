@@ -76,6 +76,9 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     # v6 RPC distance-tie 또는 refine cumulative merge 에서 동일 id 가 두 번
     # 들어와도 사용자에게 한 번만 노출. falsy id 는 bypass (graceful fallback).
     seen_ids: set[str] = set()
+    # Canonical color-variant identity is the strongest duplicate key. Source
+    # rows without an assignment intentionally fall through to legacy guards.
+    seen_canonical_variants: set[str] = set()
     # 260522: content-level dedup. The catalog has the SAME product scraped under
     # different product_ids (live: 'Rier t-shirt, fog ₩1,295,000' appeared as #4
     # AND #5 — distinct ids, identical brand+name+price). The id-only guard let
@@ -93,6 +96,11 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     for c in state.raw_candidates:
         pid = c.get("id")
         if pid and pid in seen_ids:
+            drops_dup += 1
+            continue
+        canonical_variant_id = c.get("canonical_variant_id")
+        canonical_key = str(canonical_variant_id) if canonical_variant_id is not None else None
+        if canonical_key and canonical_key in seen_canonical_variants:
             drops_dup += 1
             continue
         brand = (c.get("brand") or "").lower()
@@ -126,6 +134,8 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         out.append(c)
         if pid:
             seen_ids.add(pid)
+        if canonical_key:
+            seen_canonical_variants.add(canonical_key)
         if content_key is not None:
             seen_content.add(content_key)
         seen_brand[brand] = seen_brand.get(brand, 0) + 1

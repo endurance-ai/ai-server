@@ -41,6 +41,7 @@ class SearchCandidate:
     score: float
     dense_rank: int | None
     sparse_rank: int | None
+    canonical_variant_id: str | None = None
 
 
 def search_candidate_from_row(row: RpcRow) -> SearchCandidate:
@@ -58,6 +59,9 @@ def search_candidate_from_row(row: RpcRow) -> SearchCandidate:
         score=float(row.get("score", 0.0)),
         dense_rank=row.get("dense_rank"),
         sparse_rank=row.get("sparse_rank"),
+        canonical_variant_id=(
+            str(row["canonical_variant_id"]) if row.get("canonical_variant_id") is not None else None
+        ),
     )
 
 

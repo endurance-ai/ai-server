@@ -91,7 +91,7 @@ CREATE OR REPLACE FUNCTION public.search_products_v6(
   p_gender        text DEFAULT NULL::text,  -- NEW: 'men'|'women' (unisex 상품은 항상 포함)
   p_limit         integer DEFAULT 30
 )
- RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, distance double precision, degraded boolean)
+ RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, canonical_variant_id bigint, distance double precision, degraded boolean)
  LANGUAGE plpgsql
  STABLE
 AS $function$
@@ -143,7 +143,7 @@ BEGIN
     -- ── rung 1: EXACT node + family gate (NOT degraded) ────────────
     RETURN QUERY
       SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url,
-             p.platform, p.subcategory,
+             p.platform, p.subcategory, p.canonical_variant_id,
              (pe.embedding <=> query_embedding)::double precision AS distance,
              false AS degraded
       FROM products p
@@ -202,7 +202,7 @@ BEGIN
   IF v_node_count > 0 THEN
     RETURN QUERY
       SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url,
-             p.platform, p.subcategory,
+             p.platform, p.subcategory, p.canonical_variant_id,
              (pe.embedding <=> query_embedding)::double precision AS distance,
              true AS degraded
       FROM products p
@@ -235,7 +235,7 @@ BEGIN
   -- ── rung 3: node + family BOTH dropped (still degraded) ──────────
   RETURN QUERY
     SELECT p.id, p.brand, p.name, p.price, p.image_url, p.product_url,
-           p.platform, p.subcategory,
+           p.platform, p.subcategory, p.canonical_variant_id,
            (pe.embedding <=> query_embedding)::double precision AS distance,
            true AS degraded
     FROM products p

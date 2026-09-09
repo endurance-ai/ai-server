@@ -79,6 +79,9 @@ async def run_pipeline(req: RecommendRequest, *, user_key: str | None = None) ->
             product_url=c.get("product_url"),
             platform=c.get("platform"),
             subcategory=c.get("subcategory"),
+            canonical_variant_id=(
+                str(c["canonical_variant_id"]) if c.get("canonical_variant_id") is not None else None
+            ),
             score=float(1.0 - c.get("distance", 1.0)),
             dense_rank=None,
             sparse_rank=None,

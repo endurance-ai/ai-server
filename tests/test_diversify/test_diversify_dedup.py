@@ -63,6 +63,16 @@ async def test_dedup_drops_duplicate_id() -> None:
     assert ids.count("prod-A") == 1
 
 
+async def test_dedup_drops_duplicate_canonical_variant_across_offers() -> None:
+    raw = [
+        {"id": "offer-kr", "canonical_variant_id": 42, "brand": "A", "platform": "kr"},
+        {"id": "offer-us", "canonical_variant_id": 42, "brand": "A", "platform": "us"},
+        {"id": "offer-other-color", "canonical_variant_id": 43, "brand": "A", "platform": "us"},
+    ]
+    out = await diversify_service(_state(raw, final_limit=10))
+    assert [row["id"] for row in out.final_candidates] == ["offer-kr", "offer-other-color"]
+
+
 async def test_missing_id_bypass_dedup() -> None:
     """`id=None` / `id=""` 은 dedup 우회 — collapse 되지 않고 모두 통과."""
     raw = [
