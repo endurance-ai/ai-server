@@ -181,7 +181,8 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
                 -- VLM 폴백 CASE 를 걷어냈다.
                 p.gender,
                 pf.feature_metadata->>'primary_color' AS color, p.tags,
-                p.brand_node_id, p.canonical_variant_id,
+                p.brand_node_id,
+                (to_jsonb(p)->>'canonical_variant_id')::bigint AS canonical_variant_id,
                 bn.brand_name, bn.brand_name_normalized
             FROM public.products p
             LEFT JOIN public.brand_nodes bn ON bn.id = p.brand_node_id
