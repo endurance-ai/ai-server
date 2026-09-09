@@ -226,7 +226,7 @@ async def _get_catalog_variant(pool: AsyncConnectionPool, variant_id: int) -> Ca
             """
             SELECT
                 cv.id, cv.catalog_product_id, cp.brand, cp.model_name,
-                cv.color, cv.images,
+                COALESCE(cv.color_label, cv.color_key) AS color, cv.images,
                 po.id, po.platform, po.source_product_id,
                 po.source_product_key, po.source_variant_key,
                 po.product_url, COALESCE(po.sale_price, po.listed_price), po.source_currency, po.in_stock,
