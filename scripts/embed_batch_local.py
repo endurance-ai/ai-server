@@ -1,7 +1,7 @@
 """FashionSigLIP 로컬 배치 임베딩.
 
 DB의 활성 products 중 product_embeddings row 가 없고 대표 image_url 이 있는 항목을 모아 로컬 머신에서
-FashionSigLIP 으로 인코딩한 뒤 `bulk_update_product_embeddings` RPC 로 일괄 upsert.
+FashionSigLIP 으로 인코딩한 뒤 provenance-guarded `bulk_update_product_embeddings_v2` RPC 로 저장.
 (v6: product_embeddings 별도 테이블 — products.embedding 컬럼 없음)
 
 Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
@@ -32,6 +32,7 @@ import io
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 # 프로젝트 root 를 sys.path 에 추가 — scripts/ 에서 실행 시 app.* import 가능
@@ -47,6 +48,22 @@ MODEL_ID = "Marqo/marqo-fashionSigLIP"
 PAGE_SIZE = 200
 UPSERT_CHUNK = 25  # HNSW 인덱스 유지비용 — chunk 크면 DB statement_timeout(~8s) 초과
 UPSERT_MIN_CHUNK = 5  # 자동 분할 하한
+
+
+@dataclass(frozen=True)
+class SnapshotImage:
+    image: Image.Image
+    source_image_url: str
+    source_image_revision: str
+
+
+@dataclass
+class WriteSummary:
+    applied: int = 0
+    stale: int = 0
+    missing: int = 0
+    failed: int = 0
+    planned: int = 0
 
 
 def detect_device() -> str:
@@ -76,16 +93,19 @@ def fetch_pending(sb, limit: int | None = None) -> list[dict]:
     PostgREST left join: product_embeddings!left(product_id) + is.null 필터.
     """
     rows: list[dict] = []
-    offset = 0
+    last_id: str | None = None
     while True:
         q = (
             sb.table("products")
-            .select("id, image_url, product_embeddings!left(product_id)")
+            .select("id,image_url,image_revision,product_embeddings!left(product_id)")
             .is_("product_embeddings.product_id", "null")
             .eq("in_stock", True)
             .not_.is_("image_url", "null")
-            .range(offset, offset + PAGE_SIZE - 1)
+            .order("id")
+            .limit(PAGE_SIZE)
         )
+        if last_id is not None:
+            q = q.gt("id", last_id)
         res = q.execute()
         page = res.data or []
         if not page:
@@ -93,8 +113,10 @@ def fetch_pending(sb, limit: int | None = None) -> list[dict]:
         # product_embeddings 키 제거 — 이후 로직은 id/image_url 만 사용
         for row in page:
             row.pop("product_embeddings", None)
+            row["id"] = str(row["id"])
+            row["image_revision"] = str(row["image_revision"])
         rows.extend(page)
-        offset += PAGE_SIZE
+        last_id = str(page[-1]["id"])
         if limit and len(rows) >= limit:
             return rows[:limit]
         print(f"[fetch] 누적 {len(rows)} ...")
@@ -107,9 +129,9 @@ def download_image(client: httpx.Client, url: str) -> Image.Image:
     return Image.open(io.BytesIO(r.content)).convert("RGB")
 
 
-def download_batch(rows: list[dict], workers: int) -> dict[str, Image.Image]:
+def download_batch(rows: list[dict], workers: int) -> dict[str, SnapshotImage]:
     """병렬 다운로드. 실패한 이미지는 결과에서 제외."""
-    out: dict[str, Image.Image] = {}
+    out: dict[str, SnapshotImage] = {}
     with httpx.Client(timeout=15.0, follow_redirects=True) as client:
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures: dict = {}
@@ -118,25 +140,26 @@ def download_batch(rows: list[dict], workers: int) -> dict[str, Image.Image]:
                 if not image_url:
                     continue
                 fut = ex.submit(download_image, client, image_url)
-                futures[fut] = r["id"]
+                futures[fut] = r
             for fut in as_completed(futures):
-                pid = futures[fut]
+                row = futures[fut]
+                pid = row["id"]
                 try:
-                    out[pid] = fut.result()
+                    out[pid] = SnapshotImage(fut.result(), str(row["image_url"]), str(row["image_revision"]))
                 except Exception as e:
                     print(f"  [skip] {pid}: {type(e).__name__}: {str(e)[:80]}")
     return out
 
 
 def encode_batch(
-    model, preprocess, images: dict[str, Image.Image], batch_size: int, device: str
+    model, preprocess, images: dict[str, SnapshotImage], batch_size: int, device: str
 ) -> dict[str, list[float]]:
     import torch
     import torch.nn.functional as F  # noqa: N812
 
     embs: dict[str, list[float]] = {}
     ids = list(images.keys())
-    pils = list(images.values())
+    pils = [snapshot.image for snapshot in images.values()]
     for i in range(0, len(pils), batch_size):
         chunk_pils = pils[i : i + batch_size]
         chunk_ids = ids[i : i + batch_size]
@@ -153,22 +176,43 @@ def to_pgvector(values: list[float]) -> str:
     return "[" + ",".join(f"{v:.7f}" for v in values) + "]"
 
 
-def upsert(sb, embeddings: dict[str, list[float]], dry_run: bool = False, chunk_size: int = UPSERT_CHUNK) -> int:
+def upsert(
+    sb,
+    embeddings: dict[str, list[float]],
+    images: dict[str, SnapshotImage],
+    dry_run: bool = False,
+    chunk_size: int = UPSERT_CHUNK,
+) -> WriteSummary:
     """timeout(57014) 감지 시 chunk_size 자동 절반 → 최소 UPSERT_MIN_CHUNK 까지 시도."""
-    payload = [{"id": pid, "embedding": to_pgvector(e), "model": MODEL_ID} for pid, e in embeddings.items()]
+    payload = [
+        {
+            "id": pid,
+            "embedding": to_pgvector(e),
+            "model": MODEL_ID,
+            "source_image_url": images[pid].source_image_url,
+            "source_image_revision": images[pid].source_image_revision,
+        }
+        for pid, e in embeddings.items()
+    ]
     if dry_run:
         print(f"  [dry-run] would upsert {len(payload)} rows")
-        return len(payload)
+        return WriteSummary(planned=len(payload))
 
-    total = 0
+    summary = WriteSummary()
     i = 0
     cur_chunk = chunk_size
     while i < len(payload):
         chunk = payload[i : i + cur_chunk]
         try:
-            res = sb.rpc("bulk_update_product_embeddings", {"payload": chunk}).execute()
-            n = res.data if isinstance(res.data, int) else 0
-            total += n
+            res = sb.rpc("bulk_update_product_embeddings_v2", {"payload": chunk}).execute()
+            results = res.data if isinstance(res.data, list) else []
+            by_id = {str(item.get("id")): item.get("outcome") for item in results if isinstance(item, dict)}
+            for item in chunk:
+                outcome = by_id.get(item["id"])
+                if outcome in {"applied", "stale", "missing"}:
+                    setattr(summary, outcome, getattr(summary, outcome) + 1)
+                else:
+                    summary.failed += 1
             i += cur_chunk
         except Exception as e:
             err = str(e)
@@ -178,7 +222,7 @@ def upsert(sb, embeddings: dict[str, list[float]], dry_run: bool = False, chunk_
                 cur_chunk = new_size
                 continue
             raise
-    return total
+    return summary
 
 
 def fmt_eta(seconds: float) -> str:
@@ -189,7 +233,7 @@ def fmt_eta(seconds: float) -> str:
     return f"{seconds / 3600:.2f}h"
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--limit", type=int, default=None, help="N 개만 처리 (테스트용)")
     ap.add_argument("--batch-size", type=int, default=16, help="GPU/MPS 배치 크기 (default 16)")
@@ -221,11 +265,13 @@ def main() -> None:
     print(f"[fetch] {total} 건 처리 예정")
     if total == 0:
         print("처리할 항목 없음")
-        return
+        return 0
 
     start = time.time()
     upserted_total = 0
     failed_total = 0
+    stale_total = 0
+    missing_total = 0
     page_count = (total + PAGE_SIZE - 1) // PAGE_SIZE
 
     for offset in range(0, total, PAGE_SIZE):
@@ -249,24 +295,37 @@ def main() -> None:
         encode_dur = time.time() - encode_start
         print(f"  encode:   {len(embs)} on {device} — {encode_dur:.1f}s ({len(embs) / encode_dur:.1f}/s)")
 
-        n = upsert(sb, embs, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
-        upserted_total += n
+        write = upsert(sb, embs, images, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
+        upserted_total += write.applied
+        failed_total += write.failed
+        stale_total += write.stale
+        missing_total += write.missing
 
         elapsed = time.time() - page_start
         done = offset + page_n
         overall_rate = done / (time.time() - start)
         eta = (total - done) / overall_rate if overall_rate > 0 else 0
-        print(f"  upsert:   {n}    | page {elapsed:.1f}s | 전체 {done}/{total} | ETA {fmt_eta(eta)}")
+        print(
+            f"  upsert: applied={write.applied} planned={write.planned} stale={write.stale} "
+            f"missing={write.missing} "
+            f"failed={write.failed} | page {elapsed:.1f}s | 전체 {done}/{total} | ETA {fmt_eta(eta)}"
+        )
 
     elapsed = time.time() - start
-    print(f"\n✅ 완료 — upsert {upserted_total}/{total} (다운로드 실패 {failed_total}) · {fmt_eta(elapsed)}")
+    print(
+        f"\n완료 — applied={upserted_total} stale={stale_total} missing={missing_total} "
+        f"failed={failed_total}/{total} · {fmt_eta(elapsed)}"
+    )
 
     cov = sb.from_("product_embedding_coverage").select("*").execute()
     if cov.data:
         print("\n[coverage 검증]")
         for row in cov.data:
             print(f"  {row['platform']:30s}  {row['embedded']:>6}/{row['total']:<6}  ({row['pct_embedded']}%)")
+    if args.dry_run:
+        return 0
+    return 1 if failed_total + stale_total + missing_total > 0 else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
