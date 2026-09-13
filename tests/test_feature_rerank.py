@@ -79,6 +79,33 @@ def test_attr_align_mood_no_match_preserves_order():
     assert [c["id"] for c in out] == ["1", "2"]
 
 
+def test_mood_idf_weight_scales_by_rarity():
+    # 흔한 태그(미니멀룩 52%)≈0, 희귀 태그(발레코어 2.5%)=풀, 미지 태그는 억제 안 함.
+    from app.scoring.personalize_rerank import _mood_idf_weight
+
+    assert _mood_idf_weight("미니멀룩") < 0.15
+    assert _mood_idf_weight("발레코어") > 0.95
+    assert _mood_idf_weight("듣도보도못한태그") == 1.0
+    # Y2K 대소문자 무관.
+    assert _mood_idf_weight("Y2K") == _mood_idf_weight("y2k")
+
+
+def test_mood_idf_common_tag_cannot_flip_but_rare_can():
+    # Phase2 핵심: 동일 거리차에서 흔한 무드(미니멀룩)는 못 뒤집고 희귀 무드(발레코어)는 뒤집는다.
+    def run(mood_tag):
+        cands = [
+            {"id": "close", "brand": "A", "distance": 0.10, "feature_metadata": {"mood_tags": ["미니멀룩"]}},
+            {"id": "match", "brand": "B", "distance": 0.20, "feature_metadata": {"mood_tags": [mood_tag]}},
+        ]
+        return [
+            c["id"]
+            for c in rerank(cands, None, weights=RerankWeights(attr_mood=0.25), target_attrs={"mood": {mood_tag}})
+        ]
+
+    assert run("미니멀룩") == ["close", "match"]  # 흔한 태그: 부스트≈0 → 거리순 유지
+    assert run("발레코어") == ["match", "close"]  # 희귀 태그: 풀 부스트 → 뒤집힘
+
+
 def test_attr_align_alone_triggers_reorder_for_anonymous():
     # target_attrs 만으로 (profile/feature_scores 없이) reorder 가 켜져야 한다.
     cands = [

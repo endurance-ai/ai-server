@@ -24,6 +24,7 @@ Fail-open:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +34,59 @@ from app.infrastructure.repositories.brand_node_cache import normalize_brand
 from app.scoring.feature_taste import mean_feature_pref
 
 logger = logging.getLogger(__name__)
+
+
+# ── 무드 태그 IDF 다운가중 ──────────────────────────────────────────────────
+# product_features_v26.final_tags 는 recall 지향 게이트(style_gate.py)의 산물이라
+# 정밀 임계가 안 걸려 흔한 태그가 비대하다(미니멀룩 52% = 카탈로그 절반 = 무드
+# 신호로선 무정보). rerank 무드 보너스를 태그 희귀도(IDF)로 스케일해 흔한 태그의
+# 부스트를 죽이고 희귀·변별 태그만 온전히 살린다.
+# 스냅샷: 2026-09-13 dev product_features_v26 (has_final 239,481), df=태그빈도/has_final.
+# 재-enrichment 로 분포가 바뀌면 아래 쿼리로 갱신:
+#   WITH t AS (SELECT unnest(final_tags) tag FROM product_features_v26 WHERE final_tags IS NOT NULL)
+#   SELECT tag, count(*)::float/(SELECT count(*) FROM product_features_v26 WHERE final_tags IS NOT NULL)
+#   FROM t GROUP BY tag;
+_MOOD_DF_SNAPSHOT: dict[str, float] = {
+    "미니멀룩": 0.5205,
+    "해체주의": 0.1761,
+    "다크웨어": 0.1502,
+    "그런지": 0.1403,
+    "프레피룩": 0.1321,
+    "스트릿": 0.1089,
+    "핫걸": 0.0960,
+    "y2k": 0.0955,
+    "슬래커코어": 0.0920,
+    "아메카지": 0.0916,
+    "나이트클러빙": 0.0879,
+    "프렌치시크": 0.0841,
+    "시티보이": 0.0821,
+    "고프코어": 0.0787,
+    "올드머니룩": 0.0614,
+    "러닝코어": 0.0485,
+    "코티지코어": 0.0420,
+    "리조트": 0.0410,
+    "모리걸": 0.0401,
+    "워크웨어": 0.0380,
+    "그래놀라코어": 0.0352,
+    "포엣코어": 0.0341,
+    "코케트": 0.0335,
+    "발레코어": 0.0255,
+    "블록코어": 0.0236,
+    "란제리코어": 0.0211,
+    "애슬레저/요가": 0.0197,
+}
+# df→가중 정규화 앵커: df≥60%(무정보)→0, df≤5%(변별)→1.0. 사이는 log 스케일 선형.
+_MOOD_IDF_LO = math.log(1.0 / 0.60)
+_MOOD_IDF_HI = math.log(1.0 / 0.05)
+
+
+def _mood_idf_weight(tag: str) -> float:
+    """무드 태그 → [0,1] 희귀도 가중(흔할수록 0). 미지 태그는 억제 안 함(1.0)."""
+    df = _MOOD_DF_SNAPSHOT.get(tag.strip().lower())
+    if df is None or df <= 0.0:
+        return 1.0
+    idf = math.log(1.0 / df)
+    return max(0.0, min(1.0, (idf - _MOOD_IDF_LO) / (_MOOD_IDF_HI - _MOOD_IDF_LO)))
 
 
 @dataclass(frozen=True)
@@ -219,12 +273,14 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     if tgfx and str(fmeta.get("graphics") or "").strip().lower() in tgfx:
         bonus += w.attr_graphics
     # v2.6 무드/스타일(final_tags 배열) — 쿼리 무드 ∩ 후보 무드 태그.
+    # 보너스를 매칭 태그의 IDF 희귀도로 스케일(미니멀룩 등 흔한 태그≈0, 희귀 태그=풀).
     tmood = target_attrs.get("mood")
     if tmood:
         raw = fmeta.get("mood_tags")
         cand = {str(m).strip().lower() for m in raw} if isinstance(raw, list) else {str(raw).strip().lower()}
-        if tmood & cand:
-            bonus += w.attr_mood
+        matched = tmood & cand
+        if matched:
+            bonus += w.attr_mood * max(_mood_idf_weight(t) for t in matched)
     return bonus
 
 
