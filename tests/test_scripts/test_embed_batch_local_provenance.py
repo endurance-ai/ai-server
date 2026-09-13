@@ -2,7 +2,7 @@
 
 from PIL import Image
 
-from scripts.embed_batch_local import SnapshotImage, upsert
+from scripts.embed_batch_local import SnapshotImage, result_exit_code, upsert
 
 
 class FakeRpcResponse:
@@ -64,3 +64,8 @@ def test_timeout_retry_keeps_the_original_source_snapshot() -> None:
     assert len(client.calls) == 2
     assert client.calls[0][1]["payload"] == client.calls[1][1]["payload"]
     assert client.calls[1][1]["payload"][0]["source_image_revision"] == "9007199254740993"
+
+
+def test_dry_run_validation_failures_still_produce_failure_exit_status() -> None:
+    assert result_exit_code(failed=1, stale=0, missing=0) == 1
+    assert result_exit_code(failed=0, stale=0, missing=0) == 0

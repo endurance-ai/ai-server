@@ -233,6 +233,11 @@ def fmt_eta(seconds: float) -> str:
     return f"{seconds / 3600:.2f}h"
 
 
+def result_exit_code(*, failed: int, stale: int, missing: int) -> int:
+    """Return non-zero when any requested product was not safely written."""
+    return int(failed + stale + missing > 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--limit", type=int, default=None, help="N 개만 처리 (테스트용)")
@@ -317,14 +322,7 @@ def main() -> int:
         f"failed={failed_total}/{total} · {fmt_eta(elapsed)}"
     )
 
-    cov = sb.from_("product_embedding_coverage").select("*").execute()
-    if cov.data:
-        print("\n[coverage 검증]")
-        for row in cov.data:
-            print(f"  {row['platform']:30s}  {row['embedded']:>6}/{row['total']:<6}  ({row['pct_embedded']}%)")
-    if args.dry_run:
-        return 0
-    return 1 if failed_total + stale_total + missing_total > 0 else 0
+    return result_exit_code(failed=failed_total, stale=stale_total, missing=missing_total)
 
 
 if __name__ == "__main__":
