@@ -495,6 +495,27 @@ CARDS_READY_KEY = "_cards_ready_this_turn"
 # refine 이면 재충전(거짓말 방지), fresh 새 검색이면 260611 억제 유지에 쓴다.
 REFINE_TURN_KEY = "_refine_this_turn"
 
+# bare-brand "브랜드 보여줘" 시 앞자리에 노출할 해당 브랜드 상품 수(나머지는 유사 브랜드).
+_BRAND_HEAD_COUNT = 6
+# 품목/속성 없는 순수 브랜드 요청("오호스 보여줘")의 generic text_query 값들.
+_GENERIC_BRAND_QUERIES = frozenset(
+    {
+        "",
+        "clothing",
+        "clothes",
+        "fashion",
+        "apparel",
+        "item",
+        "items",
+        "product",
+        "products",
+        "outfit",
+        "style",
+        "옷",
+        "의류",
+    }
+)
+
 
 def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
     """Stash the FULL turn candidates into the session so `respond` can render
@@ -705,6 +726,25 @@ def _cand_attr(c: Any, key: str) -> Any:
     if isinstance(c, dict):
         return c.get(key)
     return getattr(c, key, None)
+
+
+def _merge_brand_similar(head: list[Any], sim: list[Any], seedset: set[str], top_k: int) -> list[Any]:
+    """브랜드 head 뒤에 seed 브랜드 제외한 유사 후보를 dedup 하며 top_k 까지 이어붙인다.
+
+    bare-brand 요청("오호스 보여줘")에서 해당 브랜드 몇 개 + 결이 비슷한 다른
+    브랜드를 한 카드셋으로 합칠 때 씀. head 는 이미 브랜드 필터된 상위 후보.
+    """
+    seen = {str(_cand_attr(c, "id") or _cand_attr(c, "product_id") or "") for c in head}
+    merged = list(head)
+    for c in sim:
+        cid = str(_cand_attr(c, "id") or _cand_attr(c, "product_id") or "")
+        if str(_cand_attr(c, "brand") or "").lower() in seedset or (cid and cid in seen):
+            continue
+        seen.add(cid)
+        merged.append(c)
+        if len(merged) >= top_k:
+            break
+    return merged
 
 
 async def _build_result_digest(cands: list[Any], *, limit: int = 15) -> dict[str, Any] | None:
@@ -1976,6 +2016,79 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             candidates_count=0,
             top_candidates=[],
         )
+
+    # bare-brand "브랜드 보여줘" — 해당 브랜드 M개 노출 후 결이 비슷한 다른 브랜드로 채운다.
+    # (2026-09-13) brand 하드필터만이면 그 브랜드만 나오던 걸, brand-similar centroid
+    # 앵커(SPEC-SEARCH-BRAND-SIMILAR-001)를 재사용해 뒤에 유사 브랜드 상품을 append.
+    # seed 브랜드는 제외. 텍스트 경로 전용(이미지/핀 앵커 턴은 자체 앵커라 제외).
+    # 트리거: bare-brand 라우터가 명시(append_similar_brand) 하거나, LLM 경로라도
+    # "품목/속성 없는 순수 브랜드 요청"(generic text_query + 구조화 제약 전무)이면 자동.
+    _other_constraints = any(
+        [
+            category,
+            subcategory,
+            color_family,
+            fit,
+            material,
+            pattern,
+            neckline,
+            length,
+            sleeve_length,
+            leg_shape,
+            mood,
+            surface,
+            texture,
+            design_details,
+            name_query,
+            style_node_primary,
+            args.get("min_price"),
+            args.get("max_price"),
+            multi_queries,
+        ]
+    )
+    # 원본 args.text_query 로 판정 — 로컬 text_query 는 위에서 성별 토큰이 덧붙어 오염됨.
+    _bare_brand_like = (
+        bool(brand_filter)
+        and not _other_constraints
+        and (args.get("text_query") or "").strip().lower() in _GENERIC_BRAND_QUERIES
+    )
+    if (
+        (args.get("append_similar_brand") or _bare_brand_like)
+        and brand_filter
+        and not has_image
+        and pinned_embedding is None
+        and cands
+    ):
+        try:
+            from app.providers.database import DatabaseProvider
+
+            centroid = await DatabaseProvider.get_brand_centroid_embedding(brand_filter)
+        except Exception as exc:  # noqa: BLE001 — 부가 기능, 검색을 막지 않는다
+            logger.warning("[bare-brand+similar] centroid fetch failed: %r", exc)
+            centroid = None
+        if centroid is not None:
+            head = cands[:_BRAND_HEAD_COUNT]
+            seedset = {b.lower() for b in brand_filter}
+            try:
+                sim = await run_text_only_search(
+                    text_query=text_query or "fashion",
+                    gender=structured_gender,
+                    top_k=top_k,
+                    user_key=user_key,
+                    override_embedding=centroid,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[bare-brand+similar] similar search failed: %r", exc)
+                sim = []
+            merged = _merge_brand_similar(head, sim, seedset, top_k)
+            logger.info(
+                "🔗 [bare-brand+similar] brand=%r head=%d + similar=%d → %d",
+                brand_filter,
+                len(head),
+                len(merged) - len(head),
+                len(merged),
+            )
+            cands = merged
 
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike before persisting
     # (flag-gated; OFF → cands unchanged → V2 byte-identical).

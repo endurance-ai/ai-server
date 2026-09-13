@@ -147,3 +147,31 @@ def test_scan_skips_common_word_aliases(monkeypatch):
     # '키스'(Kith)처럼 일상어와 겹치는 1어절 별칭은 오탐 방지로 스캔 제외.
     _seed_cache(monkeypatch, "키스")
     assert scan_text_for_brand("키스 하고 싶은 원피스") is None
+
+
+# --- bare-brand + similar 병합 (2026-09-13) ------------------------------------
+
+
+def test_merge_brand_similar_head_then_similar_excludes_seed():
+    from app.agents.tools.search_products import _merge_brand_similar
+
+    head = [{"id": "1", "brand": "OJOS"}, {"id": "2", "brand": "OJOS"}]
+    sim = [
+        {"id": "2", "brand": "OJOS"},  # dedup (이미 head)
+        {"id": "9", "brand": "OJOS"},  # seed 브랜드 → 제외
+        {"id": "3", "brand": "GLOWNY"},
+        {"id": "4", "brand": "999HUMANITY"},
+    ]
+    out = _merge_brand_similar(head, sim, {"ojos"}, top_k=10)
+    assert [c["id"] for c in out] == ["1", "2", "3", "4"]
+    assert all(c["brand"] != "OJOS" for c in out[2:])
+
+
+def test_merge_brand_similar_respects_top_k():
+    from app.agents.tools.search_products import _merge_brand_similar
+
+    head = [{"id": "1", "brand": "OJOS"}]
+    sim = [{"id": str(i), "brand": "X"} for i in range(10, 20)]
+    out = _merge_brand_similar(head, sim, {"ojos"}, top_k=4)
+    assert len(out) == 4
+    assert out[0]["id"] == "1"
