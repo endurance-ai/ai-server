@@ -4,7 +4,8 @@
 Supabase REST 의존을 제거하고 psycopg 로 직접 SELECT + RPC 호출.
 
 DB 의 활성 products 중 product_embeddings row 가 없고 정상 `image_url` 을 가진 항목을
-모아 로컬 머신에서 FashionSigLIP 으로 인코딩한 뒤 일괄 upsert.
+모아 로컬 머신에서 FashionSigLIP 으로 인코딩한 뒤 provenance-guarded
+`bulk_update_product_embeddings_v2` RPC 로 일괄 upsert.
 
 `image_url` 이 대표 이미지의 단일 출처다. 영구적으로 깨진 대표 URL은 DB의 다른 이미지
 후보와 상품 페이지에서 복구하고, 원자적 repair RPC로 모든 이미지 필드를 정리한 뒤에만
@@ -40,6 +41,8 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
     --upsert-chunk 25       # RPC 1회 upsert row 수
 
 재실행 안전 — product_embeddings anti-join과 이미지 실패 상태로 중단 지점부터 이어진다.
+다운로드 전 products.image_url/image_revision 스냅샷을 저장 RPC까지 유지하므로,
+동시에 대표 이미지가 바뀐 상품은 stale 결과로 거부된다.
 
 배치 완료 시 DB 역할에 권한이 있으면 product_crawl_status(091, brand_node_id 기준)와
 product_crawl_runs 에 반영한다. 권한이 없는 임베딩 전용 역할에서는 경고 후 건너뛰며,
@@ -52,10 +55,9 @@ import argparse
 import io
 import json
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -103,9 +105,27 @@ class ImageRepair:
 class DownloadOutcome:
     product_id: str
     canonical_url: str
+    canonical_revision: str
     image: Image.Image | None = None
     repair: ImageRepair | None = None
     failure: ImageFailure | None = None
+
+
+@dataclass(frozen=True)
+class SnapshotImage:
+    image: Image.Image
+    source_image_url: str
+    source_image_revision: str
+
+
+@dataclass
+class WriteSummary:
+    applied: int = 0
+    stale: int = 0
+    missing: int = 0
+    failed: int = 0
+    planned: int = 0
+    applied_ids: set[str] = field(default_factory=set)
 
 
 class ProductImageMetaParser(HTMLParser):
@@ -166,6 +186,7 @@ def fetch_pending(
         SELECT p.id,
                p.brand_node_id,
                p.image_url,
+               p.image_revision,
                p.source_image_url,
                p.images,
                p.product_url,
@@ -347,14 +368,25 @@ def discover_product_images(client: httpx.Client, row: dict) -> tuple[str, list[
 def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
     pid = str(row["id"])
     canonical = str(row["image_url"])
+    canonical_revision = str(row["image_revision"])
     prior_attempts = int(row.get("image_failure_attempts") or 0)
     try:
-        return DownloadOutcome(product_id=pid, canonical_url=canonical, image=download_image(client, canonical))
+        return DownloadOutcome(
+            product_id=pid,
+            canonical_url=canonical,
+            canonical_revision=canonical_revision,
+            image=download_image(client, canonical),
+        )
     except Exception as error:
         canonical_failure = classify_download_error(canonical, error, prior_attempts)
 
     if canonical_failure.disposition == "retryable":
-        return DownloadOutcome(product_id=pid, canonical_url=canonical, failure=canonical_failure)
+        return DownloadOutcome(
+            product_id=pid,
+            canonical_url=canonical,
+            canonical_revision=canonical_revision,
+            failure=canonical_failure,
+        )
 
     bad_urls = {canonical}
     db_candidates = unique_http_urls(
@@ -372,6 +404,7 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
             return DownloadOutcome(
                 product_id=pid,
                 canonical_url=canonical,
+                canonical_revision=canonical_revision,
                 image=image,
                 repair=ImageRepair(pid, canonical, candidate, source, clean_images, sorted(bad_urls), False),
             )
@@ -392,7 +425,12 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
             error=f"{canonical_failure.error}; product page verification unavailable",
             next_retry_at=datetime.now(UTC) + RETRY_DELAY,
         )
-        return DownloadOutcome(product_id=pid, canonical_url=canonical, failure=retryable)
+        return DownloadOutcome(
+            product_id=pid,
+            canonical_url=canonical,
+            canonical_revision=canonical_revision,
+            failure=retryable,
+        )
 
     discovered_candidates = unique_http_urls(discovered, exclude=bad_urls)
     for candidate in discovered_candidates:
@@ -405,6 +443,7 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
             return DownloadOutcome(
                 product_id=pid,
                 canonical_url=canonical,
+                canonical_revision=canonical_revision,
                 image=image,
                 repair=ImageRepair(pid, canonical, candidate, candidate, clean_images, sorted(bad_urls), False),
             )
@@ -430,7 +469,13 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
         error=f"{canonical_failure.error}; no verified replacement ({page_state})",
         next_retry_at=None,
     )
-    return DownloadOutcome(product_id=pid, canonical_url=canonical, repair=repair, failure=terminal)
+    return DownloadOutcome(
+        product_id=pid,
+        canonical_url=canonical,
+        canonical_revision=canonical_revision,
+        repair=repair,
+        failure=terminal,
+    )
 
 
 def download_batch(rows: list[dict], workers: int) -> list[DownloadOutcome]:
@@ -445,8 +490,16 @@ def download_batch(rows: list[dict], workers: int) -> list[DownloadOutcome]:
                     outcomes.append(fut.result())
                 except Exception as e:
                     canonical = str(row.get("image_url") or "unknown")
+                    canonical_revision = str(row["image_revision"])
                     fallback = classify_download_error(canonical, e)
-                    outcomes.append(DownloadOutcome(product_id=pid, canonical_url=canonical, failure=fallback))
+                    outcomes.append(
+                        DownloadOutcome(
+                            product_id=pid,
+                            canonical_url=canonical,
+                            canonical_revision=canonical_revision,
+                            failure=fallback,
+                        )
+                    )
     return outcomes
 
 
@@ -454,16 +507,19 @@ def persist_download_outcomes(
     conn: psycopg.Connection,
     outcomes: list[DownloadOutcome],
     dry_run: bool,
-) -> dict[str, Image.Image]:
+) -> dict[str, SnapshotImage]:
     """Persist repair/failure state before allowing an image to be embedded."""
-    images: dict[str, Image.Image] = {}
+    images: dict[str, SnapshotImage] = {}
     for outcome in outcomes:
         repair_applied = outcome.repair is None
+        source_image_url = outcome.canonical_url
+        source_image_revision = outcome.canonical_revision
         if outcome.repair is not None:
             repair = outcome.repair
             payload = {
                 "id": repair.product_id,
                 "before_url": repair.before_url,
+                "before_revision": outcome.canonical_revision,
                 "replacement_url": repair.replacement_url,
                 "source_image_url": repair.source_image_url,
                 "images": repair.images,
@@ -476,12 +532,27 @@ def persist_download_outcomes(
                     f" -> {(repair.replacement_url or 'NULL')[:60]}"
                 )
                 repair_applied = True
+                if repair.replacement_url is not None:
+                    source_image_url = repair.replacement_url
             else:
                 try:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT repair_product_image_assets(%s)", [Jsonb([payload])])
+                        cur.execute("SELECT repair_product_image_assets_v2(%s)", [Jsonb([payload])])
                         row = cur.fetchone()
-                        repair_applied = bool(row and row[0] == 1)
+                        response = row[0] if row else None
+                        results = response if isinstance(response, list) else []
+                        result = results[0] if len(results) == 1 and isinstance(results[0], dict) else None
+                        repair_applied = bool(
+                            result
+                            and str(result.get("id")) == outcome.product_id
+                            and result.get("outcome") == "applied"
+                            and str(result.get("image_revision", "")).isdigit()
+                            and (outcome.image is None or isinstance(result.get("image_url"), str))
+                        )
+                        if repair_applied and result is not None:
+                            if isinstance(result.get("image_url"), str):
+                                source_image_url = result["image_url"]
+                            source_image_revision = str(result["image_revision"])
                     conn.commit()
                 except Exception:
                     conn.rollback()
@@ -513,7 +584,11 @@ def persist_download_outcomes(
                     raise
 
         if outcome.image is not None and repair_applied:
-            images[outcome.product_id] = outcome.image
+            images[outcome.product_id] = SnapshotImage(
+                image=outcome.image,
+                source_image_url=source_image_url,
+                source_image_revision=source_image_revision,
+            )
             if outcome.repair is None and not dry_run:
                 try:
                     with conn.cursor() as cur:
@@ -529,14 +604,14 @@ def persist_download_outcomes(
 
 
 def encode_batch(
-    model, preprocess, images: dict[str, Image.Image], batch_size: int, device: str
+    model, preprocess, images: dict[str, SnapshotImage], batch_size: int, device: str
 ) -> dict[str, list[float]]:
     import torch
     import torch.nn.functional as F  # noqa: N812
 
     embs: dict[str, list[float]] = {}
     ids = list(images.keys())
-    pils = list(images.values())
+    pils = [snapshot.image for snapshot in images.values()]
     for i in range(0, len(pils), batch_size):
         chunk_pils = pils[i : i + batch_size]
         chunk_ids = ids[i : i + batch_size]
@@ -556,27 +631,47 @@ def to_pgvector(values: list[float]) -> str:
 def upsert(
     conn: psycopg.Connection,
     embeddings: dict[str, list[float]],
+    images: dict[str, SnapshotImage],
     dry_run: bool,
     chunk_size: int,
-) -> int:
+) -> WriteSummary:
     """timeout/오류 시 chunk_size 절반으로 자동 재시도, 최소 UPSERT_MIN_CHUNK 까지."""
-    payload = [{"id": pid, "embedding": to_pgvector(e), "model": MODEL_ID} for pid, e in embeddings.items()]
+    payload = [
+        {
+            "id": pid,
+            "embedding": to_pgvector(embedding),
+            "model": MODEL_ID,
+            "source_image_url": images[pid].source_image_url,
+            "source_image_revision": images[pid].source_image_revision,
+        }
+        for pid, embedding in embeddings.items()
+    ]
     if dry_run:
         print(f"  [dry-run] would upsert {len(payload)} rows")
-        return len(payload)
+        return WriteSummary(planned=len(payload))
 
-    total = 0
+    summary = WriteSummary()
     i = 0
     cur_chunk = chunk_size
     while i < len(payload):
         chunk = payload[i : i + cur_chunk]
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT bulk_update_product_embeddings(%s)", [Jsonb(chunk)])
+                cur.execute("SELECT bulk_update_product_embeddings_v2(%s)", [Jsonb(chunk)])
                 row = cur.fetchone()
-                n = row[0] if row else 0
+                response = row[0] if row else None
             conn.commit()
-            total += n
+            results = response if isinstance(response, list) else []
+            by_id = {str(item.get("id")): item.get("outcome") for item in results if isinstance(item, dict)}
+            for item in chunk:
+                pid = item["id"]
+                outcome = by_id.get(pid)
+                if outcome in {"applied", "stale", "missing"}:
+                    setattr(summary, outcome, getattr(summary, outcome) + 1)
+                    if outcome == "applied":
+                        summary.applied_ids.add(pid)
+                else:
+                    summary.failed += 1
             i += cur_chunk
         except (psycopg.errors.QueryCanceled, psycopg.errors.OperationalError) as e:
             conn.rollback()
@@ -589,7 +684,7 @@ def upsert(
         except Exception:
             conn.rollback()
             raise
-    return total
+    return summary
 
 
 def sync_crawl_status(conn: psycopg.Connection, brand_embed_counts: dict[int, int]) -> None:
@@ -644,7 +739,12 @@ def fmt_eta(seconds: float) -> str:
     return f"{seconds / 3600:.2f}h"
 
 
-def main() -> None:
+def result_exit_code(*, failed: int, stale: int, missing: int) -> int:
+    """Return non-zero when any requested product was not safely written."""
+    return int(failed + stale + missing > 0)
+
+
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
         "--platform",
@@ -667,7 +767,7 @@ def main() -> None:
     if not dsn:
         print("ERROR: 환경변수 KIKOAI_DEVAPP_DSN 미설정")
         print('예) export KIKOAI_DEVAPP_DSN="postgresql://app_user:PASS@54.116.104.193:5432/kikoai?sslmode=require"')
-        sys.exit(1)
+        return 1
 
     print("[db] connecting...")
     conn = psycopg.connect(dsn, application_name="embed_batch_devapp")
@@ -683,7 +783,7 @@ def main() -> None:
         print(f"[fetch] {total} 건 처리 예정")
         if total == 0:
             print("처리할 항목 없음")
-            return
+            return 0
 
         # product_id → brand_node_id (동기화용, brand_node_id NULL은 자연히 제외)
         id_to_brand = {r["id"]: r["brand_node_id"] for r in pending if r["brand_node_id"] is not None}
@@ -692,6 +792,8 @@ def main() -> None:
         start = time.time()
         upserted_total = 0
         failed_total = 0
+        stale_total = 0
+        missing_total = 0
         page_count = (total + PAGE_SIZE - 1) // PAGE_SIZE
 
         for offset in range(0, total, PAGE_SIZE):
@@ -716,11 +818,14 @@ def main() -> None:
             encode_dur = time.time() - encode_start
             print(f"  encode:   {len(embs)} on {device} — {encode_dur:.1f}s ({len(embs) / encode_dur:.1f}/s)")
 
-            n = upsert(conn, embs, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
-            upserted_total += n
+            write = upsert(conn, embs, images, dry_run=args.dry_run, chunk_size=args.upsert_chunk)
+            upserted_total += write.applied
+            failed_total += write.failed
+            stale_total += write.stale
+            missing_total += write.missing
 
             if not args.dry_run:
-                for pid in embs:
+                for pid in write.applied_ids:
                     brand_id = id_to_brand.get(pid)
                     if brand_id is not None:
                         brand_embed_counts[brand_id] = brand_embed_counts.get(brand_id, 0) + 1
@@ -729,10 +834,17 @@ def main() -> None:
             done = offset + page_n
             overall_rate = done / (time.time() - start)
             eta = (total - done) / overall_rate if overall_rate > 0 else 0
-            print(f"  upsert:   {n}    | page {elapsed:.1f}s | 전체 {done}/{total} | ETA {fmt_eta(eta)}")
+            print(
+                f"  upsert: applied={write.applied} planned={write.planned} stale={write.stale} "
+                f"missing={write.missing} failed={write.failed} | page {elapsed:.1f}s | "
+                f"전체 {done}/{total} | ETA {fmt_eta(eta)}"
+            )
 
         elapsed = time.time() - start
-        print(f"\n완료 — upsert {upserted_total}/{total} (다운로드 실패 {failed_total}) · {fmt_eta(elapsed)}")
+        print(
+            f"\n완료 — applied={upserted_total} stale={stale_total} missing={missing_total} "
+            f"failed={failed_total}/{total} · {fmt_eta(elapsed)}"
+        )
 
         sync_crawl_status(conn, brand_embed_counts)
 
@@ -764,9 +876,10 @@ def main() -> None:
                 tot = row.get("total", 0)
                 pct = row.get("pct_embedded", 0)
                 print(f"  {plat:30s}  {emb:>6}/{tot:<6}  ({pct}%)")
+        return result_exit_code(failed=failed_total, stale=stale_total, missing=missing_total)
     finally:
         conn.close()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

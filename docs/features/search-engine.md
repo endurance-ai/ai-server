@@ -148,3 +148,9 @@ AI 서버 5xx/timeout 시 Next.js 의 `/api/find/search` 가 기존 v4 검색(`/
 | `app/services/diversify_service.py` | 브랜드/플랫폼 캡 + content-level dedup (260522) |
 | `migrations/versions/0008_add_taste_gender.py` | `ai.user_taste_profile.gender TEXT` 추가 (SPEC-GENDER-PIN-001) |
 | `infra/search-rpc-contract.md` | RPC 계약 상세 + drift 동작 |
+
+## 로컬 상품 이미지 embedding provenance (2026-09)
+
+`scripts/embed_batch_local.py`는 다운로드 전에 `products.image_url`과 DB 소유 `image_revision`을 함께 캡처하고 `bulk_update_product_embeddings_v2`에 `source_image_url`/`source_image_revision`으로 전달한다. RPC의 `applied`만 완료 수에 포함하며 `stale`, `missing`, 다운로드 실패와 응답에서 누락된 ID는 미완료로 보고한다. 재시도에도 최초 이미지의 URL/revision을 유지한다.
+
+이 caller를 실행하려면 `kiko.ai-app`의 migration 121이 먼저 적용되어야 한다. 기존 `product_embeddings`에서 provenance가 NULL인 벡터는 별도 복구 대상이다. direct-Postgres runner(`embed_batch_devapp.py`)도 이미지 복구 결과의 새 URL/revision을 받아 v2 writer로 저장하며, 적용된 ID만 crawl status 집계에 포함한다. 독립 AWS runner 역시 v2를 사용한다. migration 123의 직접 쓰기 권한 회수는 조건부 embedding 삭제를 사용하는 복구 도구의 전용 RPC 계약과 함께 적용해야 한다.
