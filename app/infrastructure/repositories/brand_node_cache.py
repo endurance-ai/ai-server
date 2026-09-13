@@ -421,6 +421,11 @@ async def warm_cache() -> None:
     groups: dict[str, list[str]] = {}
     alias_to_groups: dict[str, set[str]] = {}
     acro_to_groups: dict[str, set[str]] = {}
+    # 큐레이티드 별칭(ai.brand_aliases)은 노드명 파생 키와 분리해 둔다 — 사람이 명시한
+    # "이 표기 = 이 브랜드"라, 우연히 같은 이름을 가진 다른(보통 상품 없는 중복) 노드와
+    # 키가 충돌해도 큐레이티드 쪽이 이기게 하기 위함(오호스→OJOS 가 유령노드 '오호스'에
+    # 밀려 드롭되던 버그).
+    curated_to_groups: dict[str, set[str]] = {}
     # brand_id → group / attrs, so curated brand_aliases rows (fetched below)
     # attach to the right brand group and share its attrs in `_cache`.
     brandid_to_group: dict[int, str] = {}
@@ -491,7 +496,7 @@ async def warm_cache() -> None:
             if not keys:
                 continue
             for key in keys:
-                alias_to_groups.setdefault(key, set()).add(gk)
+                curated_to_groups.setdefault(key, set()).add(gk)
                 # rerank/diversity lookup: alias resolves to the brand's attrs.
                 brand_attrs = brandid_to_attrs.get(brand_id)
                 if brand_attrs is not None and key not in built:
@@ -505,6 +510,12 @@ async def warm_cache() -> None:
         groups[gk] = list(dict.fromkeys(groups[gk]))
     # Exact-alias index — keep unambiguous aliases only.
     filt: dict[str, list[str]] = {key: groups[next(iter(gks))] for key, gks in alias_to_groups.items() if len(gks) == 1}
+    # Curated aliases override node-name collisions: a human-approved alias
+    # ('오호스'→OJOS) wins over an incidental same-name node ('오호스', 0 products).
+    # Only when the curated alias itself is unambiguous (→ single group).
+    for key, gks in curated_to_groups.items():
+        if len(gks) == 1:
+            filt[key] = groups[next(iter(gks))]
     # Acronym fallback — unambiguous AND not already an exact alias.
     acro_idx: dict[str, list[str]] = {
         key: groups[next(iter(gks))] for key, gks in acro_to_groups.items() if len(gks) == 1 and key not in filt
