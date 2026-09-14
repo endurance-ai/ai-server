@@ -1329,8 +1329,13 @@ async def _run_bare_brand_shortcircuit(
 
     lang = ctx.get("lang") or session_lang(sess)
     label = req.get("label") or req.get("brand")
-    args: dict[str, Any] = {"brand": req["brand"], "text_query": req.get("text_query") or "clothing"}
-    logger.info("🎯 [bare-brand route] deterministic brand=%r label=%r", req["brand"], label)
+    # 브랜드 상품 몇 개 + 결이 비슷한 다른 브랜드로 채운다(그 브랜드만 쏟지 않도록).
+    args: dict[str, Any] = {
+        "brand": req["brand"],
+        "text_query": req.get("text_query") or "clothing",
+        "append_similar_brand": True,
+    }
+    logger.info("🎯 [bare-brand route] deterministic brand=%r label=%r (+similar)", req["brand"], label)
     result = await sp_dispatch(args, ctx)
     ok = bool(result.get("ok"))
     cnt = int(result.get("candidates_count") or 0)
@@ -1340,9 +1345,9 @@ async def _run_bare_brand_shortcircuit(
         return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": None}
     if ok and cnt > 0:
         text = (
-            f"{label} 상품 골라봤어. 마음에 드는 거 있어?"
+            f"{label} 상품이랑, 결이 비슷한 다른 브랜드도 같이 골라봤어. 마음에 드는 거 있어?"
             if lang == "ko"
-            else f"Here are {label} picks. See anything you like?"
+            else f"Here are {label} picks plus a few similar brands. See anything you like?"
         )
         try:
             await respond_dispatch({"text": text}, ctx)
