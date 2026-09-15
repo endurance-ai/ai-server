@@ -166,6 +166,8 @@ jobs:
             echo "[kiko.ai DEV] AI 배포 시작"
             echo "=========================================="
             /home/ec2-user/scripts/deploy.ai.sh ${{ needs.build-and-push.outputs.image_tag }}
+            cd /home/ec2-user
+            sudo docker compose exec -T ai-server alembic upgrade head
 
   # ============================================
   # Job 4: DB 함수 적용 (dev-app) — 7/10 사고 재발 방지
