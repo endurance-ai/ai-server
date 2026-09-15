@@ -37,26 +37,9 @@ def upgrade() -> None:
         )
         """
     )
-    # Production shares the crawler-owned public schema, while some hermetic
-    # AI-only migration tests intentionally bootstrap no public.products table.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-          IF to_regclass('public.products') IS NOT NULL
-             AND NOT EXISTS (
-               SELECT 1 FROM pg_constraint
-               WHERE conname = 'edit_shop_rankings_product_id_fkey'
-                 AND conrelid = 'ai.edit_shop_rankings'::regclass
-             ) THEN
-            ALTER TABLE ai.edit_shop_rankings
-              ADD CONSTRAINT edit_shop_rankings_product_id_fkey
-              FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
-          END IF;
-        END
-        $$
-        """
-    )
+    # public.products is owned by the app database role. Keep the cross-schema
+    # identifier indexed but unconstrained so the AI deploy role does not need
+    # ownership privileges on the crawler-owned table.
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_edit_shop_rankings_lookup
