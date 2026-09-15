@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
 from app.services.curation_taste import record_product_signal
+from app.services.outbound_url import with_partner_attribution
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,7 @@ async def _get_product(pool: AsyncConnectionPool, product_id: int) -> ProductDet
         sale_price=float(row[7]) if row[7] is not None else None,
         image_url=row[8],
         images=list(row[9]) if row[9] else None,
-        product_url=row[10],
+        product_url=with_partner_attribution(row[10]),
         in_stock=row[11],
         platform=row[12],
         gender=list(row[13]) if row[13] else None,
@@ -250,7 +251,7 @@ async def _get_catalog_variant(pool: AsyncConnectionPool, variant_id: int) -> Ca
             source_product_id=row[8],
             source_product_key=row[9],
             source_variant_key=row[10],
-            product_url=row[11],
+            product_url=with_partner_attribution(row[11]),
             price=float(row[12]) if row[12] is not None else None,
             currency=row[13],
             in_stock=bool(row[14]),
@@ -311,7 +312,7 @@ async def _get_similar(pool: AsyncConnectionPool, product_id: int, limit: int = 
             original_price=float(r[4]) if r[4] is not None else None,
             sale_price=float(r[5]) if r[5] is not None else None,
             image_url=r[6],
-            product_url=r[7],
+            product_url=with_partner_attribution(r[7]),
         )
         for r in rows
     ]
@@ -554,7 +555,7 @@ async def link_check(
             alive=alive,
             last_checked_at=checked_at,
             http_status=status_code,
-            alternative_url=final_url if final_url != product.product_url else None,
+            alternative_url=with_partner_attribution(final_url) if final_url != product.product_url else None,
         )
     except (httpx.RequestError, TimeoutError):
         return LinkCheckResponse(

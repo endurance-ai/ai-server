@@ -51,6 +51,25 @@ async def test_redirect_happy_path(fake_redis):
     assert kwargs["payload"]["product_id"] == "pid-1"
 
 
+async def test_redirect_adds_slowsteadyclub_partner_utm(fake_redis):
+    token = await click_token.mint_token(
+        42,
+        "trace-x",
+        "pid-1",
+        "https://slowsteadyclub.com/product/detail.html?product_no=27440",
+    )
+    assert token
+
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get(f"/r/{token}")
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == (
+        "https://slowsteadyclub.com/product/detail.html?product_no=27440"
+        "&utm_source=kiko&utm_medium=referral&utm_campaign=slowsteadyclub"
+    )
+
+
 async def test_redirect_miss_returns_410(fake_redis):
     client = TestClient(app, follow_redirects=False)
     resp = client.get("/r/does-not-exist")

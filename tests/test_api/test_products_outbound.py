@@ -2,13 +2,65 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from app.api import products
+
+
+def _pool_returning_product(row: tuple[object, ...]) -> MagicMock:
+    cursor = AsyncMock()
+    cursor.fetchone.return_value = row
+    cursor_context = MagicMock()
+    cursor_context.__aenter__ = AsyncMock(return_value=cursor)
+    cursor_context.__aexit__ = AsyncMock(return_value=None)
+    connection = MagicMock()
+    connection.cursor.return_value = cursor_context
+    connection_context = MagicMock()
+    connection_context.__aenter__ = AsyncMock(return_value=connection)
+    connection_context.__aexit__ = AsyncMock(return_value=None)
+    pool = MagicMock()
+    pool.connection.return_value = connection_context
+    return pool
+
+
+@pytest.mark.asyncio
+async def test_get_product_decorates_slowsteadyclub_url_at_response_boundary():
+    pool = _pool_returning_product(
+        (
+            42,
+            "AURALEE",
+            "Coat",
+            "outer",
+            None,
+            100_000,
+            None,
+            None,
+            "https://img.example/42.jpg",
+            None,
+            "https://slowsteadyclub.com/product/detail.html?product_no=42",
+            True,
+            "slowsteadyclub",
+            ["men"],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+    )
+
+    detail = await products._get_product(pool, 42)
+
+    assert detail is not None
+    assert detail.product_url == (
+        "https://slowsteadyclub.com/product/detail.html?product_no=42"
+        "&utm_source=kiko&utm_medium=referral&utm_campaign=slowsteadyclub"
+    )
 
 
 @pytest.mark.asyncio
