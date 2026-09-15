@@ -8,6 +8,7 @@ from app.api.chat import router as chat_router
 from app.api.curation import router as curation_router
 from app.api.debug import router as debug_router
 from app.api.devices import router as devices_router
+from app.api.edit_shops import router as edit_shops_router
 from app.api.feedback import router as feedback_router
 from app.api.health import router as health_router
 from app.api.history import router as history_router
@@ -38,6 +39,7 @@ router.include_router(me_router)
 router.include_router(onboarding_router)
 router.include_router(brands_router)
 router.include_router(curation_router)
+router.include_router(edit_shops_router)
 router.include_router(saves_router)
 router.include_router(style_nodes_router)
 router.include_router(products_router)

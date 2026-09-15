@@ -518,7 +518,20 @@ async def refresh_once(pool: AsyncConnectionPool) -> None:
         negative_n = await attribute_negative_impressions(pool)
     except Exception as exc:  # noqa: BLE001
         logger.warning("🗂 [curation] negative attribution failed: %r", exc)
-    logger.info("🗂 [curation] refresh done · auto=%d negative=%d", auto_n, negative_n)
+    edit_shop_n = 0
+    try:
+        from app.services.edit_shop_rankings import edit_shop_refresh_due, refresh_edit_shop_rankings
+
+        if await edit_shop_refresh_due(pool):
+            edit_shop_n = await refresh_edit_shop_rankings(pool)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("🗂 [edit-shops] ranking refresh failed: %r", exc)
+    logger.info(
+        "🗂 [curation] refresh done · auto=%d negative=%d edit_shop=%d",
+        auto_n,
+        negative_n,
+        edit_shop_n,
+    )
 
 
 async def curation_refresh_loop() -> None:
