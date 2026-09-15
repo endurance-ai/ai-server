@@ -20,7 +20,11 @@ async def _login(client: AsyncClient) -> str:
     return f"Bearer {resp.json()['access_token']}"
 
 
-async def _insert_product(pool, brand_node_id: int | None = None) -> int:
+async def _insert_product(
+    pool,
+    brand_node_id: int | None = None,
+    product_url: str | None = None,
+) -> int:
     """Insert a test product and return its id."""
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
@@ -36,7 +40,7 @@ async def _insert_product(pool, brand_node_id: int | None = None) -> int:
                 "tops",
                 50000,
                 "https://img.test/img.jpg",
-                f"https://shop.test/{uuid4()}",
+                product_url or f"https://shop.test/{uuid4()}",
                 brand_node_id,
             ),
         )
@@ -100,6 +104,22 @@ async def test_get_product_allows_no_auth(client: AsyncClient, pool):
     resp = await client.get(f"/v1/products/{product_id}")
     assert resp.status_code == 200
     assert resp.json()["id"] == product_id
+
+
+@pytest.mark.asyncio
+async def test_get_product_adds_slowsteadyclub_partner_utm(client: AsyncClient, pool):
+    product_id = await _insert_product(
+        pool,
+        product_url="https://slowsteadyclub.com/product/detail.html?product_no=27440",
+    )
+
+    resp = await client.get(f"/v1/products/{product_id}")
+
+    assert resp.status_code == 200
+    assert resp.json()["product_url"] == (
+        "https://slowsteadyclub.com/product/detail.html?product_no=27440"
+        "&utm_source=kiko&utm_medium=referral&utm_campaign=slowsteadyclub"
+    )
 
 
 # ── POST /v1/products/{id}/view ──────────────────────────────────────────────
