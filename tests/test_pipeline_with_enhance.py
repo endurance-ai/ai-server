@@ -109,6 +109,7 @@ def _expected_v6_params() -> dict[str, Any]:
         "p_color_family": None,
         "p_gender": None,
         "p_limit": 50,
+        "p_platform": None,
     }
 
 

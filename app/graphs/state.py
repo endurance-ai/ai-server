@@ -77,6 +77,9 @@ class InputState(BaseModel):
     # req_price_max: upper price bound in KRW integer 원 (None → no ceiling).
     req_gender: str | None = None
     req_price_max: int | None = None
+    # Server-controlled edit-shop scope. It is deliberately absent from the
+    # agent tool schema, so the LLM cannot alter or omit the hard filter.
+    req_platform: str | None = None
 
     # SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체.
     #

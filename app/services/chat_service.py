@@ -32,6 +32,7 @@ from app.core.identity import user_id_to_session_key, uuid_to_session_key
 from app.graphs.fashion_bot import GRAPH
 from app.graphs.nodes._adapter_ctx import reset_adapter, set_adapter
 from app.graphs.state import InputState
+from app.infrastructure.memory.session import get_store
 from app.infrastructure.memory.taste_profile import user_key_for
 from app.observability.langfuse import build_callback_handler, observe, update_current_trace
 from app.observability.pii import hash_id
@@ -73,6 +74,20 @@ _KST = timezone(timedelta(hours=9))
 def _user_id_to_chat_id(user_id: UUID) -> int:
     """Deprecated compatibility alias for older callers/tests."""
     return user_id_to_session_key(user_id)
+
+
+def _set_request_platform(chat_id: int, platform: str | None) -> None:
+    """Replace the session's edit-shop scope for a new app-chat message."""
+    store = get_store()
+    sess = store.get_or_create(chat_id)
+    if sess.request_platform != platform:
+        sess.request_platform = platform
+        store.update(sess)
+
+
+def _get_request_platform(chat_id: int) -> str | None:
+    """Restore the last explicit scope for body-less button callbacks."""
+    return get_store().get_or_create(chat_id).request_platform
 
 
 def _session_id_to_chat_id(session_id: UUID) -> int:
@@ -679,6 +694,7 @@ async def invoke(
     *,
     gender: str | None = None,
     price_max: int | None = None,
+    platform: str | None = None,
     skip_item_pick: bool = False,
 ) -> tuple[UUID, BotReply]:
     """Invoke the fashion bot graph for a consumer user.
@@ -696,6 +712,7 @@ async def invoke(
 
     user_chat_id = _user_id_to_chat_id(user_id)
     session_chat_id = _session_id_to_chat_id(resolved_session_id)
+    _set_request_platform(session_chat_id, platform)
     urls = _extract_urls(text)
     message = ChannelMessage(
         chat_id=session_chat_id,
@@ -716,6 +733,7 @@ async def invoke(
         turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
+        req_platform=platform,
         skip_item_pick=skip_item_pick,
     )
 
@@ -757,6 +775,7 @@ async def invoke_streaming(
     *,
     gender: str | None = None,
     price_max: int | None = None,
+    platform: str | None = None,
     attached_image_url: str | None = None,
     skip_item_pick: bool = False,
 ) -> AsyncGenerator[tuple[str, dict]]:
@@ -767,6 +786,7 @@ async def invoke_streaming(
     user_chat_id = _user_id_to_chat_id(user_id)
     resolved_session_id = await get_or_create_session(pool, user_id, session_id)
     session_chat_id = _session_id_to_chat_id(resolved_session_id)
+    _set_request_platform(session_chat_id, platform)
     cap_status = await get_app_cap_status(pool, user_id)
 
     yield "session", {"session_id": str(resolved_session_id), **cap_status.session_payload()}
@@ -826,6 +846,7 @@ async def invoke_streaming(
         turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
+        req_platform=platform,
         skip_item_pick=skip_item_pick,
     )
 
@@ -920,6 +941,7 @@ async def invoke_streaming_callback(
     """
     user_chat_id = _user_id_to_chat_id(user_id)
     session_chat_id = _session_id_to_chat_id(session_id)
+    request_platform = _get_request_platform(session_chat_id)
     cap_status = await get_app_cap_status(pool, user_id)
     yield "session", {"session_id": str(session_id), **cap_status.session_payload()}
 
@@ -943,6 +965,7 @@ async def invoke_streaming_callback(
         cap_subject_id=user_chat_id,
         thread_id=thread_id,
         turn_no=turn_no,
+        req_platform=request_platform,
     )
 
     streaming = StreamingAdapter()

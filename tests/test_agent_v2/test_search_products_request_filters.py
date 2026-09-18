@@ -14,6 +14,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 import app.agents.tools.search_products as sp
 from app.api.chat import ChatRequest
@@ -55,6 +56,21 @@ def test_chat_request_gender_normalize(raw, expected):
 def test_chat_request_price_max_clamp(raw, expected):
     req = ChatRequest(message="hi", price_max=raw)
     assert req.price_max == expected
+
+
+@pytest.mark.parametrize("platform", ["slowsteadyclub", "etcseoul", "fr8ight", "8division", "kith"])
+def test_chat_request_accepts_registered_edit_shop_platform(platform):
+    assert ChatRequest(message="hi", platform=platform.upper()).platform == platform
+
+
+@pytest.mark.parametrize("platform", ["", "unknown-shop", "kith-2065"])
+def test_chat_request_rejects_unregistered_platform(platform):
+    with pytest.raises(ValidationError):
+        ChatRequest(message="hi", platform=platform)
+
+
+def test_chat_request_platform_defaults_to_unscoped():
+    assert ChatRequest(message="hi").platform is None
 
 
 # ── search_products dispatch overrides ─────────────────────────────────────────
@@ -135,3 +151,25 @@ def test_effective_max_price_arg_wins_over_ctx():
     assert sp.effective_max_price(None, {}) is None
     # Non-positive filter value → treated as no ceiling.
     assert sp.effective_max_price(None, {"req_price_max": 0}) is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_forces_request_platform_into_text_search(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_search(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(sp, "run_text_only_search", fake_search)
+    monkeypatch.setattr(sp, "_lookup_profile_gender", lambda _ctx: "unisex")
+    monkeypatch.setattr("app.channels.pre_messages.fire_pre_message", AsyncMock())
+
+    result = await sp.dispatch(
+        {"text_query": "black knit", "category": "knitwear", "brand": "A.P.C."},
+        {"chat_id": 7, "user_key": "u:7", "req_platform": "slowsteadyclub"},
+    )
+
+    assert result["ok"] is True
+    assert captured["platform"] == "slowsteadyclub"
+    assert captured["category"] == "knitwear"

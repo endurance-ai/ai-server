@@ -781,6 +781,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             color_family=color_norm,
             subcategory=sub_norm,
             gender=gender_norm,
+            platform=req.platform,
             w_text=settings.SEARCH_HYBRID_W_TEXT,
             pool=settings.SEARCH_HYBRID_POOL,
             name_query=(str(getattr(req.item, "name_query", None) or "").strip() or None),
@@ -796,6 +797,7 @@ async def search_service(state: PipelineState) -> PipelineState:
             color_family=color_norm,
             subcategory=sub_norm,
             gender=gender_norm,
+            platform=req.platform,
         )
         _do_search = SearchRepository.search
         rpc_name = "search_products_v6"
@@ -808,13 +810,14 @@ async def search_service(state: PipelineState) -> PipelineState:
     canonical = to_canonical_family(category_for_gate)
     logger.info(
         "[STEP 4.5][search] category raw=%r → canonical=%r family_gate=%s "
-        "subcat=%r color=%r gender=%r style_node=%s→id=%s",
+        "subcat=%r color=%r gender=%r platform=%r style_node=%s→id=%s",
         req.item.category,
         canonical,
         "active" if canonical != "other" else "skipped(other)",
         sub_norm,
         color_norm,
         gender_norm,
+        req.platform,
         style_node_code,
         params.get("p_style_node_id"),
     )

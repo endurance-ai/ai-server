@@ -43,6 +43,7 @@ def test_full_session_round_trip():
     s.boost_keywords = ["oversized"]
     s.clarify_axis = "formality"
     s.clarify_value = "casual"
+    s.request_platform = "slowsteadyclub"
     s.lang = "ko"
     store.update(s)
 
@@ -62,6 +63,7 @@ def test_full_session_round_trip():
     assert s2.last_results[0].brand == "ami"
     assert s2.shown_product_ids == ["p1", "p2"]
     assert s2.boost_keywords == ["oversized"]
+    assert s2.request_platform == "slowsteadyclub"
     assert s2.lang == "ko"
 
 
@@ -73,6 +75,7 @@ def test_lazy_expiry_returns_fresh_session():
     s = store.get_or_create(333)
     s.state = SessionState.RESULTS_SENT
     s.boost_keywords = ["oversized"]
+    s.request_platform = "slowsteadyclub"
     store.update(s)
 
     # Manually set ttl_expires_at to 1s in the past
@@ -90,6 +93,7 @@ def test_lazy_expiry_returns_fresh_session():
     assert s2.state == SessionState.IDLE
     assert s2.boost_keywords == []
     assert s2.last_results == []
+    assert s2.request_platform is None
 
 
 def test_lazy_expiry_collapses_concurrent_reads_to_one_row():

@@ -23,7 +23,8 @@ search_products_v6(
   p_category        text    DEFAULT NULL,  -- canonical family token (20-token set, or "other")
   p_subcategory     text    DEFAULT NULL,  -- always NULL (products.subcategory 100% NULL)
   p_brand_names     text[]  DEFAULT NULL,  -- optional brand filter
-  p_limit           integer DEFAULT 50     -- top-K
+  p_limit           integer DEFAULT 50,    -- top-K
+  p_platform        text    DEFAULT NULL   -- optional edit-shop retailer scope
 ) RETURNS TABLE (
   id          bigint,          -- products.id (bigint; PostgREST may return int or str)
   brand       text,
@@ -58,6 +59,10 @@ query_embedding → cosine distance (HNSW pgvector)
 `p_category` 가 `CANONICAL_FAMILIES` 의 20개 토큰 중 하나 (예: `"outerwear"`, `"tops"`) 이면 family gate 활성. `"other"` 이거나 빈값이면 gate 스킵 (cosine-only degrade — 의도된 동작, NOT broken).
 
 클라이언트 정규화는 `app/infrastructure/repositories/category_family.py:to_canonical_family()` 가 단일 소스. Vision 7-enum(`Outer/Top/Bottom/Shoes/Bag/Dress/Accessories`) → 정규 토큰 매핑 포함.
+
+`p_platform`이 지정된 편집샵 검색은 모든 fallback rung에서 판매처를 유지한다. 유효한
+family category가 해당 판매처에 없으면 category를 해제해 다른 품목을 채우지 않고 빈
+결과를 반환한다. `p_brand_names`와 category 조건은 platform 조건과 AND로 결합된다.
 
 ### text query path (v6)
 
