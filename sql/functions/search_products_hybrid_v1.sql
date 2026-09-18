@@ -66,7 +66,8 @@ CREATE OR REPLACE FUNCTION public.search_products_hybrid_v1(
   p_name_query    text DEFAULT NULL,              -- 상품명 trigram 매칭어 (특정 상품 지목)
   p_w_name        double precision DEFAULT 0.35,  -- 이름 매치 부스트 가중 (distance 에서 차감)
   p_pool          integer DEFAULT 100,            -- 공간별 kNN 풀 크기
-  p_limit         integer DEFAULT 50
+  p_limit         integer DEFAULT 50,
+  p_platform      text DEFAULT NULL::text
 )
  RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, distance double precision, degraded boolean)
  LANGUAGE plpgsql
@@ -100,6 +101,7 @@ BEGIN
            OR COALESCE(cc.family, 'other') = v_target_family)
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_platform IS NULL OR p.platform = p_platform)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
@@ -118,6 +120,7 @@ BEGIN
            OR COALESCE(cc.family, 'other') = v_target_family)
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_platform IS NULL OR p.platform = p_platform)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
@@ -137,6 +140,7 @@ BEGIN
            OR COALESCE(cc.family, 'other') = v_target_family)
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_platform IS NULL OR p.platform = p_platform)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])

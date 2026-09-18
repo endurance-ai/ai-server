@@ -25,6 +25,7 @@ def _state(
     tolerance: float = 0.5,
     final_limit: int | None = None,
     brand_filter: list[str] | None = None,
+    platform: str | None = None,
 ) -> PipelineState:
     item = AnalyzedItem(
         id="item-1",
@@ -37,6 +38,7 @@ def _state(
         item=item,
         imageUrl="https://example.com/x.jpg",
         brandFilter=brand_filter,
+        platform=platform,
         tolerance=tolerance,
         finalLimit=final_limit,
     )
@@ -97,6 +99,18 @@ async def test_characterize_diversify_platform_cap():
     # platform X count 5 < cap 8 → no drops. All 6 kept.
     assert ids == ["r0", "r1", "r2", "r3", "r4", "r5"]
     assert out.counts == {"after_diversify": 6, "final": 6}
+
+
+async def test_scoped_platform_disables_only_platform_cap():
+    raw = [_row(i, f"B{i}", platform="slowsteadyclub") for i in range(12)]
+    out = await diversify_step(_state(raw, tolerance=0.0, platform="slowsteadyclub"))
+    assert [c["id"] for c in out.final_candidates] == [f"r{i}" for i in range(10)]
+
+
+async def test_scoped_platform_keeps_brand_cap():
+    raw = [_row(i, "A", platform="slowsteadyclub") for i in range(8)]
+    out = await diversify_step(_state(raw, platform="slowsteadyclub"))
+    assert [c["id"] for c in out.final_candidates] == ["r0", "r1", "r2"]
 
 
 # ── Case 4: tolerance -> target_count (incl. banker's rounding) ────────────

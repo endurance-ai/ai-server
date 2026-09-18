@@ -87,6 +87,7 @@ async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
         # 2026-07-16 — p_gender 하드 필터 (req.gender 미지정 → None = off)
         "p_gender": None,
         "p_limit": 50,
+        "p_platform": None,
     }
 
 
@@ -108,6 +109,7 @@ async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture
         "p_color_family",
         "p_gender",
         "p_limit",
+        "p_platform",
     }
 
 

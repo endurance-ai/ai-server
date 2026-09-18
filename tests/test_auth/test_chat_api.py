@@ -162,6 +162,53 @@ async def test_create_session_empty_message_rejected(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_platform_scope_flows_to_messages_and_callbacks_then_clears(client: AsyncClient):
+    auth = await _login(client)
+    scopes: list[str | None] = []
+
+    async def _capture(state, **_):
+        scopes.append(state.req_platform)
+
+    with patch("app.services.chat_service.GRAPH") as mock_graph:
+        mock_graph.ainvoke = AsyncMock(side_effect=_capture)
+        created = await client.post(
+            "/v1/chat/sessions",
+            json={"message": "니트", "platform": "slowsteadyclub"},
+            headers={"Authorization": auth},
+        )
+        session_id = _parse_sse(created.text)["session"]["session_id"]
+        callback = await client.post(
+            f"/v1/chat/sessions/{session_id}/callback",
+            json={"callback_data": "clarify:category:knitwear", "label": "니트"},
+            headers={"Authorization": auth},
+        )
+        cleared = await client.post(
+            f"/v1/chat/sessions/{session_id}/messages",
+            json={"message": "전체에서 찾아줘"},
+            headers={"Authorization": auth},
+        )
+        callback_after_clear = await client.post(
+            f"/v1/chat/sessions/{session_id}/callback",
+            json={"callback_data": "clarify:category:outerwear", "label": "아우터"},
+            headers={"Authorization": auth},
+        )
+
+    assert created.status_code == callback.status_code == cleared.status_code == callback_after_clear.status_code == 200
+    assert scopes == ["slowsteadyclub", "slowsteadyclub", None, None]
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_unknown_platform(client: AsyncClient):
+    auth = await _login(client)
+    resp = await client.post(
+        "/v1/chat/sessions",
+        json={"message": "니트", "platform": "unknown-shop"},
+        headers={"Authorization": auth},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_chat_requires_auth(client: AsyncClient):
     resp = await client.post("/v1/chat/sessions", json={"message": "hi"})
     assert resp.status_code in (401, 403)  # HTTPBearer returns 403 on missing header

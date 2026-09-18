@@ -81,6 +81,9 @@ class Session:
     # (관측 로그용; 다음 turn에서 자연 만료).
     clarify_axis: str | None = None
     clarify_value: str | None = None
+    # Last explicit app-chat edit-shop scope. Button callbacks have no request
+    # body platform, so they restore this value for their follow-up search.
+    request_platform: str | None = None
     last_active: float = field(default_factory=lambda: time.time())
     # Sticky reply language. Set on every text turn by `app.channels.lang`.
     # Defaults to 'en' for back-compat with existing snapshots / tests.

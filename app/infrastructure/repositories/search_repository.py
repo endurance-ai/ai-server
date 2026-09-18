@@ -63,6 +63,7 @@ class SearchRepository:
         color_family: str | None = None,
         subcategory: str | None = None,
         gender: str | None = None,
+        platform: str | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -123,6 +124,7 @@ class SearchRepository:
             # RPC: p.gender && ARRAY[p_gender,'unisex'] — unisex 상품 항상 포함.
             "p_gender": gender,
             "p_limit": settings.SEARCH_DEFAULT_K,
+            "p_platform": platform,
         }
 
     @staticmethod
@@ -135,6 +137,7 @@ class SearchRepository:
         color_family: str | None = None,
         subcategory: str | None = None,
         gender: str | None = None,
+        platform: str | None = None,
         w_text: float,
         pool: int,
         name_query: str | None = None,
@@ -161,6 +164,7 @@ class SearchRepository:
             "p_name_query": (name_query or None),
             "p_pool": pool,
             "p_limit": settings.SEARCH_DEFAULT_K,
+            "p_platform": platform,
         }
 
     @staticmethod
