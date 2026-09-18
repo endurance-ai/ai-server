@@ -138,7 +138,9 @@ async def edit_shop_filters(
                 SELECT category AS key, count(*)::int AS n,
                        (array_agg(image_url ORDER BY id DESC))[1] AS thumbnail
                 FROM eligible
-                WHERE category IS NOT NULL AND btrim(category) <> ''
+                WHERE category IS NOT NULL
+                  AND btrim(category) <> ''
+                  AND lower(btrim(category)) <> 'accessories'
                 GROUP BY category
             )
             SELECT key, n, thumbnail FROM grouped ORDER BY key

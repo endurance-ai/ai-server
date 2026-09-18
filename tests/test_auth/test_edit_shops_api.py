@@ -52,6 +52,17 @@ async def edit_shop_rows(pool):
                 ("C", "Men top", "tops", 30000, "https://img/3", "https://shop/p/3", True, ["men"], 3),
                 ("D", "Too cheap", "tops", 4999, "https://img/4", "https://shop/p/4", True, ["women"], 4),
                 ("E", "Sold out", "tops", 9000, "https://img/5", "https://shop/p/5", False, ["women"], 5),
+                (
+                    "F",
+                    "Women accessory",
+                    "accessories",
+                    15000,
+                    "https://img/6",
+                    "https://shop/p/6",
+                    True,
+                    ["women"],
+                    6,
+                ),
             ],
         )
         await cur.execute("SELECT id, product_no FROM public.products ORDER BY product_no")
@@ -80,9 +91,9 @@ async def test_filters_apply_quality_and_include_unisex(client: AsyncClient, edi
     body = response.json()
     assert body["shop"]["display_name"] == "SLOW STEADY CLUB"
     assert body["selected_gender"] == "women"
-    assert {item["key"]: item["count"] for item in body["genders"]} == {"women": 2, "men": 2}
+    assert {item["key"]: item["count"] for item in body["genders"]} == {"women": 3, "men": 2}
     assert [(item["key"], item["count"]) for item in body["categories"]] == [
-        ("all", 2),
+        ("all", 3),
         ("outerwear", 2),
     ]
 
