@@ -34,6 +34,7 @@ from pydantic import BaseModel, field_validator
 from app.api.deps import get_current_user_id
 from app.core.di import provide_db_pool
 from app.services import chat_service
+from app.services.edit_shop_rankings import EDIT_SHOP_PLATFORMS
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
@@ -84,6 +85,9 @@ class ChatRequest(BaseModel):
     # surface: 호출 서피스. "web_explore"(홍보 랜딩) 면 웹 전용 카드 상향 + 최소 카드
     # 보장을 켠다. 미전달(모바일/앱) → 기존 동작. 알 수 없는 값은 무시(모바일 취급).
     surface: str | None = None
+    # Optional edit-shop scope. When set, every search in this turn (including
+    # agent retries and callbacks) is hard-limited to that retailer catalog.
+    platform: str | None = None
     # Image uploaded via POST /v1/uploads (presigned S3 PUT → CloudFront/CDN URL).
     # Passed through to ChannelMessage.urls — the existing SSRF guard there drops
     # it silently if malformed, same fail-open contract as the Pinterest-link path.
@@ -109,6 +113,16 @@ class ChatRequest(BaseModel):
         except (TypeError, ValueError):
             return None
         return n if n > 0 else None
+
+    @field_validator("platform", mode="before")
+    @classmethod
+    def _validate_platform(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        platform = str(v).strip().lower()
+        if platform not in EDIT_SHOP_PLATFORMS:
+            raise ValueError("platform must be a registered edit-shop platform")
+        return platform
 
 
 class ChatCallbackRequest(BaseModel):
@@ -183,6 +197,7 @@ async def create_session(
         gender=body.gender,
         price_max=body.price_max,
         surface=body.surface,
+        platform=body.platform,
         attached_image_url=body.attached_image_url,
         skip_item_pick=body.skip_item_pick,
     )
@@ -216,6 +231,7 @@ async def continue_session(
         gender=body.gender,
         price_max=body.price_max,
         surface=body.surface,
+        platform=body.platform,
         attached_image_url=body.attached_image_url,
         skip_item_pick=body.skip_item_pick,
     )

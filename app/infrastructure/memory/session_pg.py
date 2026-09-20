@@ -144,6 +144,7 @@ async def _aget_or_create(chat_id: int) -> Session:
                     boost_keywords                     = '[]'::jsonb,
                     clarify_axis                       = NULL,
                     clarify_value                      = NULL,
+                    request_platform                   = NULL,
                     lang                               = 'en',
                     last_active                        = now(),
                     ttl_expires_at                     = now() + (%(ttl)s || ' seconds')::interval
@@ -180,11 +181,11 @@ async def _aupdate(session: Session) -> None:
                 vision_outfit_style_node_secondary, vision_outfit_mood_tags,
                 vision_outfit_gender, user_intent, last_results, shown_product_ids,
                 last_critique_summary, boost_keywords, clarify_axis, clarify_value,
-                lang, last_active, ttl_expires_at,
+                request_platform, lang, last_active, ttl_expires_at,
                 onboarded_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s,
                 %s
             )
             ON CONFLICT (chat_id) DO UPDATE SET
@@ -208,6 +209,7 @@ async def _aupdate(session: Session) -> None:
                 boost_keywords                     = EXCLUDED.boost_keywords,
                 clarify_axis                       = EXCLUDED.clarify_axis,
                 clarify_value                      = EXCLUDED.clarify_value,
+                request_platform                   = EXCLUDED.request_platform,
                 lang                               = EXCLUDED.lang,
                 last_active                        = EXCLUDED.last_active,
                 ttl_expires_at                     = EXCLUDED.ttl_expires_at,
@@ -235,6 +237,7 @@ async def _aupdate(session: Session) -> None:
                 Jsonb(_to_jsonable(session.boost_keywords)),
                 session.clarify_axis,
                 session.clarify_value,
+                session.request_platform,
                 session.lang,
                 now_ts,
                 ttl_expires,
@@ -306,6 +309,7 @@ def _row_to_session(cols: list[str], row: Any) -> Session:
         boost_keywords=list(data.get("boost_keywords") or []),
         clarify_axis=data.get("clarify_axis"),
         clarify_value=data.get("clarify_value"),
+        request_platform=data.get("request_platform"),
         lang=data.get("lang") or "en",
         last_active=_dt_to_ts(last_active) if last_active else 0.0,
         onboarded_at=data.get("onboarded_at"),

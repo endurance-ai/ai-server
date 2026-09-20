@@ -89,7 +89,8 @@ CREATE OR REPLACE FUNCTION public.search_products_v6(
   p_brand_names   text[] DEFAULT NULL::text[],
   p_color_family  text DEFAULT NULL::text,  -- 16 canonical family (BLACK/GREY/…)
   p_gender        text DEFAULT NULL::text,  -- NEW: 'men'|'women' (unisex 상품은 항상 포함)
-  p_limit         integer DEFAULT 30
+  p_limit         integer DEFAULT 30,
+  p_platform      text DEFAULT NULL::text
 )
  RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, canonical_variant_id bigint, distance double precision, degraded boolean)
  LANGUAGE plpgsql
@@ -131,6 +132,7 @@ BEGIN
       )
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_platform IS NULL OR p.platform = p_platform)
       AND (p_color_family IS NULL
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (
@@ -163,6 +165,7 @@ BEGIN
         )
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+        AND (p_platform IS NULL OR p.platform = p_platform)
         AND (p_color_family IS NULL
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
@@ -192,6 +195,7 @@ BEGIN
     )
     AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
     AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+    AND (p_platform IS NULL OR p.platform = p_platform)
     AND (p_color_family IS NULL
          OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
     AND (
@@ -221,6 +225,7 @@ BEGIN
         )
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+        AND (p_platform IS NULL OR p.platform = p_platform)
         AND (p_color_family IS NULL
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
@@ -229,6 +234,16 @@ BEGIN
         )
       ORDER BY pe.embedding <=> query_embedding ASC, p.first_seen_at DESC
       LIMIT p_limit;
+    RETURN;
+  END IF;
+
+  -- An edit-shop composer promises that explicit category constraints remain
+  -- inside that retailer. If the scoped family has no rows, return empty
+  -- instead of entering the legacy category-dropping fallback rung.
+  IF p_platform IS NOT NULL
+     AND p_category IS NOT NULL
+     AND v_target_family IS NOT NULL
+     AND v_target_family <> 'other' THEN
     RETURN;
   END IF;
 
@@ -246,6 +261,7 @@ BEGIN
     WHERE p.in_stock = true
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
+      AND (p_platform IS NULL OR p.platform = p_platform)
       AND (p_color_family IS NULL
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (

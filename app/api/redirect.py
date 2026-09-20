@@ -23,6 +23,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from app.infrastructure.cache.click_token import lookup_token
 from app.observability.conversation_log import emit
+from app.services.outbound_url import with_partner_attribution
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ async def outbound_redirect(token: str):
         logger.debug("[redirect] emit best-effort skip", exc_info=True)
 
     logger.info("🐱 [redirect] hit token=%s… product=%s", token[:6], product_id[:12])
-    return RedirectResponse(url=product_url, status_code=302)
+    return RedirectResponse(url=with_partner_attribution(product_url), status_code=302)
 
 
 # 260611 — cap fake-door membership click → kikoai.me landing page.

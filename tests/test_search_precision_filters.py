@@ -27,6 +27,7 @@ def _state(
     subcategory: str | None = None,
     color_family: str | None = None,
     gender: str | None = None,
+    platform: str | None = None,
 ) -> PipelineState:
     item = AnalyzedItem(
         id="item-1",
@@ -35,7 +36,7 @@ def _state(
         colorFamily=color_family,
         searchQuery="q",
     )
-    req = RecommendRequest(item=item, imageUrl="https://example.com/x.jpg", gender=gender)
+    req = RecommendRequest(item=item, imageUrl="https://example.com/x.jpg", gender=gender, platform=platform)
     state = PipelineState(request=req)
     state.embedding = list(_EMBED)
     return state
@@ -68,14 +69,17 @@ def _rows(*ids: int) -> list[dict]:
 def test_build_params_seven_keys_with_precision_filters():
     params = SearchRepository.build_params(
         embedding=_EMBED,
-        brand_filter=None,
+        brand_filter=["A.P.C."],
         category="hoodie",
         subcategory="hoodie",
         color_family="black",
+        platform="slowsteadyclub",
     )
     assert params["p_subcategory"] == "hoodie"
     assert params["p_color_family"] == "black"
     assert params["p_category"] == "tops"
+    assert params["p_brand_names"] == ["A.P.C."]
+    assert params["p_platform"] == "slowsteadyclub"
 
 
 # ── subcategory → family 정렬 ───────────────────────────────────────────────
@@ -231,6 +235,18 @@ async def test_relax_retry_preserves_gender(monkeypatch):
     assert spy.calls[1]["p_gender"] == "women"
 
 
+async def test_relax_retry_preserves_platform_and_category(monkeypatch):
+    spy = _RpcSpy([_rows(1), _rows(2, 3, 4, 5, 6)])
+    _install(monkeypatch, spy)
+    monkeypatch.setattr(settings, "SEARCH_FILTER_RELAX_MIN", 5)
+    await search_service(_state(category="hoodie", color_family="black", platform="slowsteadyclub"))
+    assert len(spy.calls) == 2
+    assert spy.calls[0]["p_platform"] == "slowsteadyclub"
+    assert spy.calls[1]["p_platform"] == "slowsteadyclub"
+    assert spy.calls[0]["p_category"] == "tops"
+    assert spy.calls[1]["p_category"] == "tops"
+
+
 # ── SPEC-SEARCH-HYBRID-001 — 텍스트 쿼리 하이브리드 라우팅 ─────────────────────
 
 
@@ -244,11 +260,13 @@ def test_build_params_hybrid_adds_blend_knobs():
         color_family="black",
         w_text=0.3,
         pool=100,
+        platform="slowsteadyclub",
     )
     # 게이트 키는 build_params 와 동일 시맨틱
     assert params["p_category"] == "tops"
     assert params["p_subcategory"] == "hoodie"
     assert params["p_color_family"] == "black"
+    assert params["p_platform"] == "slowsteadyclub"
     # 블렌드 노브
     assert params["p_w_text"] == 0.3
     assert params["p_pool"] == 100

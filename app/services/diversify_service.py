@@ -54,7 +54,10 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)
     else:
         brand_cap = settings.SEARCH_BRAND_CAP
-        platform_cap = settings.SEARCH_PLATFORM_CAP
+        # A scoped edit-shop query necessarily returns one platform. Keep the
+        # normal brand/style diversity rules, but do not let the platform cap
+        # truncate an otherwise valid retailer catalog result set.
+        platform_cap = target if req.platform else settings.SEARCH_PLATFORM_CAP
         # SPEC-DIVERSIFY-ATTR-CAP — vibe / silhouette diversity (0 disables).
         vibe_cap = int(settings.SEARCH_VIBE_CAP or 0)
         silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)

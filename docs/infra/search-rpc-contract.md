@@ -18,6 +18,7 @@ AI 서버가 `search_products_v6` RPC 응답 행을 diversify 에 넘기기 전�
 | `p_subcategory` | `text` | `NULL` | 항상 NULL — `products.subcategory` 가 DB 전체 100% NULL (narrowing 무의미) |
 | `p_brand_names` | `text[]` | `NULL` | 브랜드 필터 (없으면 NULL) |
 | `p_limit` | `integer` | `50` | 반환 후보 수 (`SEARCH_DEFAULT_K`) |
+| `p_platform` | `text` | `NULL` | 판매처 exact 필터. null이면 전체 검색. 편집샵 범위에서는 category fallback도 이 필터 안에서 유지 |
 
 **v5에서 제거된 파라미터**: `query_text`, `gender_filter`, `subcategory_filter`, `price_min`, `price_max`, `tags_filter`, `k`, `rrf_k` — v6 RPC에 존재하지 않음.
 

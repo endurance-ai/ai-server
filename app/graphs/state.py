@@ -80,6 +80,9 @@ class InputState(BaseModel):
     # req_surface: 호출 서피스("web_explore" = 홍보 랜딩). 웹 전용 카드 상향 + 최소
     # 카드 보장을 켜는 스위치. None(모바일/앱) → 기존 동작 그대로.
     req_surface: str | None = None
+    # Server-controlled edit-shop scope. It is deliberately absent from the
+    # agent tool schema, so the LLM cannot alter or omit the hard filter.
+    req_platform: str | None = None
 
     # SPEC-DAILY-TOKEN-CAP-001 — 일일 토큰 캡을 청구할 주체.
     #

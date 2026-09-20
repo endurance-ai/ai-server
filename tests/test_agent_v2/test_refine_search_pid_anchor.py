@@ -56,6 +56,7 @@ def _captured_search(monkeypatch):
         captured["category"] = state.request.item.category
         captured["fit"] = state.request.item.fit
         captured["color_family"] = state.request.item.color_family
+        captured["platform"] = state.request.platform
         captured["style_node"] = state.request.style_node.primary if state.request.style_node is not None else None
         state.raw_candidates = [{"id": "p1", "name": "X", "brand": "Y"}]
         return state
@@ -82,6 +83,7 @@ async def test_pinned_id_anchors_on_product_embedding(monkeypatch, _mock_embed_t
     ctx = {
         "chat_id": 1,
         "image_url": "",
+        "req_platform": "slowsteadyclub",
         # Mobile prefix shape produced by kikoai-mobile home.tsx.
         "text_query": "[#12345 · MM6 Maison Margiela · 트렌치 · ₩680,000] 더 비슷하게",
     }
@@ -91,6 +93,7 @@ async def test_pinned_id_anchors_on_product_embedding(monkeypatch, _mock_embed_t
     fetch.assert_awaited_once_with(12345)
     _mock_embed_text.assert_not_awaited()
     assert _captured_search["embedding"] == _ANCHOR_VEC
+    assert _captured_search["platform"] == "slowsteadyclub"
 
 
 @pytest.mark.asyncio

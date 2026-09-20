@@ -229,6 +229,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             )
         # SPEC-PERSONALIZE-RERANK — same user, same TasteProfile lookup.
         user_key = ctx.get("user_key")
+        platform = ctx.get("req_platform")
 
         # Multi-turn image blending (Level 1): when no current image URL exists
         # but the original image URL is stored from the Vision turn, blend the
@@ -253,6 +254,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 text_query=text_query,
                 category=category,
                 gender=refine_gender,
+                platform=platform,
                 fit=fit,
                 color_family=color_family,
                 mood=mood,
@@ -278,6 +280,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 prior_outfit_context=prior_ctx or None,
                 category=category,
                 gender=refine_gender,
+                platform=platform,
                 fit=fit,
                 color_family=color_family,
                 mood=mood,
@@ -291,6 +294,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 category=category,
                 gender=refine_gender,
                 brand_filter=refine_brand,
+                platform=platform,
                 fit=fit,
                 color_family=color_family,
                 mood=mood,

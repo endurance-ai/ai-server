@@ -554,6 +554,7 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         "req_price_max": state.req_price_max,
         # req_surface: "web_explore" → search_products 가 웹 전용 카드 상향 + 최소 카드 보장.
         "req_surface": getattr(state, "req_surface", None),
+        "req_platform": state.req_platform,
     }
 
 
@@ -1448,6 +1449,17 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
     except Exception as exc:  # noqa: BLE001 — fail-soft, proceed without memory
         logger.warning("[agent_v3] memory injection failed, falling back: %r", exc)
         logger.info("🧠 [v3:memory] skip · build error")
+
+    # Trusted server-side scope. This is informational for intent parsing only;
+    # the actual filter is injected into every search below the tool boundary.
+    # In particular, the shop name must not be interpreted as a product brand.
+    if ctx.get("req_platform"):
+        platform_context = (
+            "[CURRENT EDIT-SHOP SCOPE]\n"
+            f"platform={ctx['req_platform']}. Search only this retailer's catalog. "
+            "This is a retailer/platform, not a brand. Do not add it as a brand filter.\n\n"
+        )
+        mem_prefix = platform_context + mem_prefix
 
     # Use plain dicts to construct messages — avoids langchain message-class imports.
     # cache_control is Anthropic-only; non-Anthropic Bedrock models (Kimi/Moonshot,

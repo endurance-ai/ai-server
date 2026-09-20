@@ -5,7 +5,13 @@ from datetime import UTC, datetime
 import pytest
 
 from app.channels.schemas import BotCard, BotReply, ChannelMessage
-from app.services.chat_service import _URL_RE, _done_payload, _extract_urls
+from app.services.chat_service import (
+    _URL_RE,
+    _done_payload,
+    _extract_urls,
+    _get_request_platform,
+    _set_request_platform,
+)
 
 
 @pytest.mark.parametrize(
@@ -62,6 +68,21 @@ def test_channel_message_receives_extracted_urls() -> None:
     )
     assert len(msg.urls) == 1
     assert "pin.it" in str(msg.urls[0])
+
+
+def test_request_platform_is_sticky_for_callbacks_and_explicitly_clearable() -> None:
+    from app.infrastructure.memory.session import InMemorySessionStore, get_store, set_store
+
+    original = get_store()
+    try:
+        set_store(InMemorySessionStore())
+        _set_request_platform(123, "slowsteadyclub")
+        assert _get_request_platform(123) == "slowsteadyclub"
+        assert _get_request_platform(456) is None  # session isolation
+        _set_request_platform(123, None)
+        assert _get_request_platform(123) is None
+    finally:
+        set_store(original)
 
 
 def test_ssrf_guard_blocks_internal_url() -> None:

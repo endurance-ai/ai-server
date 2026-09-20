@@ -67,6 +67,7 @@ class RecommendRequest(BaseModel):
     item: AnalyzedItem
     image_url: str = Field(alias="imageUrl", description="검색 기준 슬라이드 R2 URL")
     brand_filter: list[str] | None = Field(default=None, alias="brandFilter")
+    platform: str | None = None
     gender: str | None = None
     style_node: StyleNode | None = Field(default=None, alias="styleNode")
     mood_tags: list[str] | None = Field(default=None, alias="moodTags")

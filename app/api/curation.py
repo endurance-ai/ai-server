@@ -66,6 +66,8 @@ class CurationSection(BaseModel):
     title: str
     subtitle: str | None
     products: list[CurationProduct]
+    destination_type: Literal["edit_shop"] | None = None
+    destination_key: str | None = None
 
 
 class CurationResponse(BaseModel):
@@ -108,7 +110,8 @@ async def _load_sections(
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             """
-            SELECT section_id, slot_type, title, subtitle, product_ids, display_type
+            SELECT section_id, slot_type, title, subtitle, product_ids, display_type,
+                   destination_type, destination_key
             FROM ai.curation_sections
             WHERE gender = %s AND is_active
             ORDER BY sort_order ASC, section_id ASC
@@ -138,7 +141,16 @@ async def _load_sections(
             )
             feature_scores = {(str(r[0]), str(r[1])): float(r[2]) for r in await cur.fetchall()}
 
-        for section_id, slot_type, _title, _subtitle, product_ids, _display_type in section_rows:
+        for (
+            section_id,
+            slot_type,
+            _title,
+            _subtitle,
+            product_ids,
+            _display_type,
+            _destination_type,
+            _destination_key,
+        ) in section_rows:
             # Sections are independent: a product may intentionally appear in
             # more than one row, including multiple trending displays.
             if section_id in PERSONALIZED_AUTO_SECTION_IDS:
@@ -235,7 +247,16 @@ async def _load_sections(
                 )
 
     sections: list[CurationSection] = []
-    for section_id, slot_type, title, subtitle, product_ids, display_type in section_rows:
+    for (
+        section_id,
+        slot_type,
+        title,
+        subtitle,
+        product_ids,
+        display_type,
+        destination_type,
+        destination_key,
+    ) in section_rows:
         selected = selected_by_section.get(section_id, product_ids or [])
         hydrated = [products[pid] for pid in selected if pid in products]
         if section_id in PERSONALIZED_AUTO_SECTION_IDS and not hydrated:
@@ -250,6 +271,8 @@ async def _load_sections(
                 title=title,
                 subtitle=subtitle,
                 products=hydrated,
+                destination_type=destination_type,
+                destination_key=destination_key,
             )
         )
     return sections
