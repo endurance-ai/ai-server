@@ -45,6 +45,13 @@ async def diversify_service(state: PipelineState) -> PipelineState:
         platform_cap = target
         vibe_cap = 0
         silhouette_cap = 0
+    elif getattr(req, "web_max", False):
+        # 웹 홍보 랜딩 "최대한 많이" — 브랜드 캡만 완화(3→WEB_BRAND_CAP, 한 브랜드
+        # 도배 방지로 완전 off 는 아님)+플랫폼 캡 해제. vibe/silhouette 은 기본 유지.
+        brand_cap = max(settings.SEARCH_WEB_BRAND_CAP, settings.SEARCH_BRAND_CAP)
+        platform_cap = target
+        vibe_cap = int(settings.SEARCH_VIBE_CAP or 0)
+        silhouette_cap = int(settings.SEARCH_SILHOUETTE_CAP or 0)
     else:
         brand_cap = settings.SEARCH_BRAND_CAP
         # A scoped edit-shop query necessarily returns one platform. Keep the

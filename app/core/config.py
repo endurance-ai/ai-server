@@ -122,6 +122,11 @@ class Settings(BaseSettings):
     # 최종 응답 개수(비브랜드 검색 기본 top_k). 앱 2열 그리드 + album_size=40 이
     # 받쳐줌. 2026-09-04 15→30 ("상품 최대한 많이"). env(SEARCH_FINAL_LIMIT)로 튜닝.
     SEARCH_FINAL_LIMIT: int = 30
+    # 웹 홍보 랜딩(surface="web_explore") 전용 — "최대한 많이" + 최소 카드 보장.
+    # 모바일은 위 기본값 그대로. request.final_limit le=50 제약이라 상한 50(=풀 크기).
+    SEARCH_WEB_FINAL_LIMIT: int = 50  # 웹 top_k (모바일 30 대비 상향)
+    SEARCH_WEB_BRAND_CAP: int = 8  # 웹 diversify 브랜드 캡(모바일 3 완화, 단 도배 방지)
+    SEARCH_WEB_MIN_CARDS: int = 10  # 웹 최소 카드 — 미달 시 유사도 백필 / 0이면 게이트해제 재검색
 
     # enhance_query — LLM 기반 sparse 검색 쿼리 정제 (SPEC-PIPELINE-001)
     # 안전 롤아웃: 기본 False. 운영 검증 후 .env 에서 true 로 전환.

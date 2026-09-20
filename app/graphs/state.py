@@ -77,6 +77,9 @@ class InputState(BaseModel):
     # req_price_max: upper price bound in KRW integer 원 (None → no ceiling).
     req_gender: str | None = None
     req_price_max: int | None = None
+    # req_surface: 호출 서피스("web_explore" = 홍보 랜딩). 웹 전용 카드 상향 + 최소
+    # 카드 보장을 켜는 스위치. None(모바일/앱) → 기존 동작 그대로.
+    req_surface: str | None = None
     # Server-controlled edit-shop scope. It is deliberately absent from the
     # agent tool schema, so the LLM cannot alter or omit the hard filter.
     req_platform: str | None = None

@@ -552,6 +552,8 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         # fallback price ceiling when the LLM didn't supply max_price.
         "req_gender": state.req_gender,
         "req_price_max": state.req_price_max,
+        # req_surface: "web_explore" → search_products 가 웹 전용 카드 상향 + 최소 카드 보장.
+        "req_surface": getattr(state, "req_surface", None),
         "req_platform": state.req_platform,
     }
 
