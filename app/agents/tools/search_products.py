@@ -747,6 +747,91 @@ def _merge_brand_similar(head: list[Any], sim: list[Any], seedset: set[str], top
     return merged
 
 
+def _cand_pid(c: Any) -> int | None:
+    raw = _cand_attr(c, "id") or _cand_attr(c, "product_id")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _ensure_min_web_cards(
+    cands: list[Any],
+    *,
+    minimum: int,
+    top_k: int,
+    text_query: str,
+    gender: str | None,
+    user_key: str | None,
+) -> list[Any]:
+    """웹 홍보 랜딩 최소 카드 보장. 결과가 minimum 미만이면 채운다("무조건 뭐라도").
+
+    - 결과 ≥1: 그 카드들의 이미지 임베딩 centroid 를 앵커로 유사 상품을 뽑아 백필
+      (PDP 유사상품처럼 "결이 비슷한 것"으로 채움).
+    - 결과 0(또는 centroid 실패): 게이트 없이 쿼리 텍스트 임베딩만으로 재검색 →
+      최근접 상품. 카탈로그에 임베딩이 있는 한 비지 않는다.
+    fail-open — 어떤 단계가 실패해도 원본 cands 를 그대로 반환(절대 raise 안 함)."""
+    if len(cands) >= minimum:
+        return cands
+    from app.providers.database import DatabaseProvider
+
+    seen = {str(_cand_pid(c) or "") for c in cands}
+    seen.discard("")
+    filler: list[Any] = []
+
+    # 1) 결과 있으면 centroid 유사 백필
+    if cands:
+        embs: list[list[float]] = []
+        for c in cands:
+            pid = _cand_pid(c)
+            if pid is None:
+                continue
+            try:
+                e = await DatabaseProvider.get_product_embedding(pid)
+            except Exception:  # noqa: BLE001
+                e = None
+            if e:
+                embs.append(list(e))
+        if embs:
+            centroid = [sum(vals) / len(embs) for vals in zip(*embs, strict=False)]
+            try:
+                filler = await run_text_only_search(
+                    text_query=text_query or "fashion",
+                    gender=gender,
+                    top_k=max(top_k, minimum),
+                    user_key=user_key,
+                    override_embedding=centroid,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[web-min-cards] centroid backfill failed: %r", exc)
+                filler = []
+
+    # 2) 여전히 부족(0 결과 등) → 게이트 없이 텍스트 임베딩 재검색(범위 확장)
+    if not filler:
+        try:
+            filler = await run_text_only_search(
+                text_query=text_query or "fashion",
+                gender=gender,
+                top_k=max(top_k, minimum),
+                user_key=user_key,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[web-min-cards] widened re-search failed: %r", exc)
+            filler = []
+
+    out = list(cands)
+    for c in filler:
+        cid = str(_cand_pid(c) or "")
+        if cid and cid in seen:
+            continue
+        seen.add(cid)
+        out.append(c)
+        if len(out) >= minimum:
+            break
+    logger.info("🌐 [web-min-cards] %d → %d (minimum=%d)", len(cands), len(out), minimum)
+    return out
+
+
 async def _build_result_digest(cands: list[Any], *, limit: int = 15) -> dict[str, Any] | None:
     """결과셋의 속성 분포를 요약 — respond 가 "대부분 미디에 린넨" 처럼 구체적으로,
     그러나 사실에 근거해 묘사하도록(데이드림 벤치마크). 상위 `limit` 개의 subcategory/
@@ -932,6 +1017,7 @@ async def run_text_only_search(
     user_key: str | None = None,
     override_embedding: list[float] | None = None,
     relax_diversity: bool = False,
+    web_max: bool = False,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -1000,6 +1086,7 @@ async def run_text_only_search(
         final_limit=max(1, int(top_k)),
         style_node=style_node,
         relax_diversity=relax_diversity,
+        web_max=web_max,
     )
     state = PipelineState(request=req, user_key=user_key)
     # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes
@@ -1665,7 +1752,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 아래에서 40 으로 별도 상향(다양성 캡 해제).
     from app.core.config import settings as _settings
 
-    top_k = int(args.get("top_k") or _settings.SEARCH_FINAL_LIMIT)
+    # 웹 홍보 랜딩(surface=web_explore) — 카드 상한을 웹 전용값으로 올리고(모바일 무영향),
+    # diversify 브랜드 캡 완화(web_max) + 아래 최소 카드 보장을 켠다.
+    is_web = ctx.get("req_surface") == "web_explore"
+    _default_top_k = _settings.SEARCH_WEB_FINAL_LIMIT if is_web else _settings.SEARCH_FINAL_LIMIT
+    top_k = int(args.get("top_k") or _default_top_k)
     # SPEC-SEARCH-V6-001 family gate plumbing fix: the search `category` is the
     # REAL Vision garment category from ctx (`vision_category`, set in
     # react_loop._build_ctx from state.vision_selected_item / detected_items).
@@ -2000,6 +2091,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 style_node_primary=style_node_primary,
                 user_key=user_key,
                 override_embedding=pinned_embedding,
+                web_max=is_web,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /
@@ -2127,6 +2219,20 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # falls back to the per-request mobile filter slider when the LLM didn't
     # supply an explicit max_price.
     cands = apply_price_filter(cands, args.get("min_price"), effective_max_price(args.get("max_price"), ctx))
+
+    # 웹 홍보 랜딩 최소 카드 보장(surface=web_explore) — 절대 빈약하게 두지 않는다.
+    # <MIN 이면: 결과가 있으면 그 카드들의 이미지 임베딩 centroid 로 유사 상품 백필,
+    # 0 이면 게이트(색/카테고리/브랜드/스타일노드/무드) 다 풀고 쿼리 텍스트 임베딩만으로
+    # 재검색해 최근접으로 채운다("무조건 뭐라도"). 이미지/핀 앵커 턴은 자체 앵커라 제외.
+    if is_web and not has_image and pinned_embedding is None and len(cands) < _settings.SEARCH_WEB_MIN_CARDS:
+        cands = await _ensure_min_web_cards(
+            cands,
+            minimum=_settings.SEARCH_WEB_MIN_CARDS,
+            top_k=top_k,
+            text_query=text_query,
+            gender=structured_gender,
+            user_key=user_key,
+        )
 
     # Persist FULL candidates for the turn so `respond` can render real cards
     # internally (the LLM never hand-serializes cards). LLM context still gets

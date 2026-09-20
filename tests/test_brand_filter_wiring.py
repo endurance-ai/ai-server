@@ -175,3 +175,50 @@ def test_merge_brand_similar_respects_top_k():
     out = _merge_brand_similar(head, sim, {"ojos"}, top_k=4)
     assert len(out) == 4
     assert out[0]["id"] == "1"
+
+
+# --- 웹 최소 카드 보장 _ensure_min_web_cards (2026-09-21) --------------------
+
+
+async def test_web_min_cards_noop_when_enough():
+    import app.agents.tools.search_products as sp
+
+    cands = [{"id": str(i), "brand": "A"} for i in range(10)]
+    out = await sp._ensure_min_web_cards(cands, minimum=10, top_k=50, text_query="x", gender=None, user_key=None)
+    assert out is cands  # 이미 충분 → 그대로
+
+
+async def test_web_min_cards_centroid_backfill(monkeypatch):
+    import app.agents.tools.search_products as sp
+    from app.providers.database import DatabaseProvider
+
+    async def fake_emb(pid):
+        return [0.1, 0.2, 0.3, 0.4]
+
+    monkeypatch.setattr(DatabaseProvider, "get_product_embedding", fake_emb)
+    filler = [{"id": str(i), "brand": "X"} for i in range(3, 25)]
+
+    async def fake_search(**kw):
+        assert kw.get("override_embedding")  # centroid 앵커로 호출됨
+        return filler
+
+    monkeypatch.setattr(sp, "run_text_only_search", fake_search)
+    cands = [{"id": "1", "brand": "A"}, {"id": "2", "brand": "B"}]
+    out = await sp._ensure_min_web_cards(cands, minimum=10, top_k=50, text_query="x", gender=None, user_key=None)
+    assert len(out) == 10
+    assert [c["id"] for c in out[:2]] == ["1", "2"]  # 원본 앞
+    assert len({c["id"] for c in out}) == 10  # dedup
+
+
+async def test_web_min_cards_widen_when_zero(monkeypatch):
+    import app.agents.tools.search_products as sp
+
+    filler = [{"id": str(i), "brand": "X"} for i in range(30)]
+
+    async def fake_search(**kw):
+        assert "override_embedding" not in kw or kw.get("override_embedding") is None  # 게이트/앵커 없는 재검색
+        return filler
+
+    monkeypatch.setattr(sp, "run_text_only_search", fake_search)
+    out = await sp._ensure_min_web_cards([], minimum=10, top_k=50, text_query="x", gender=None, user_key=None)
+    assert len(out) == 10  # 0 이어도 무조건 채움

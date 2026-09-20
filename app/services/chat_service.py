@@ -759,6 +759,7 @@ async def invoke_streaming(
     price_max: int | None = None,
     attached_image_url: str | None = None,
     skip_item_pick: bool = False,
+    surface: str | None = None,
 ) -> AsyncGenerator[tuple[str, dict]]:
     """Invoke the fashion bot graph and yield (event_type, payload) tuples for SSE.
 
@@ -826,6 +827,7 @@ async def invoke_streaming(
         turn_no=turn_no,
         req_gender=gender,
         req_price_max=price_max,
+        req_surface=surface,
         skip_item_pick=skip_item_pick,
     )
 

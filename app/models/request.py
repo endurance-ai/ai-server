@@ -78,6 +78,10 @@ class RecommendRequest(BaseModel):
     # 2026-09-05: "상품 느낌은 그냥 유사도만 뽑는 게 더 잘 보여"). brand_filter
     # 와 동일한 완화를 재사용.
     relax_diversity: bool = Field(default=False, alias="relaxDiversity")
+    # 웹 홍보 랜딩(surface=web_explore) — "최대한 많이". diversify 브랜드 캡을
+    # 모바일 3 대신 SEARCH_WEB_BRAND_CAP(8)로 완화하되 완전 해제는 아님(한 브랜드
+    # 도배 방지). relax_diversity(=캡 사실상 off)와 구분되는 중간 완화.
+    web_max: bool = Field(default=False, alias="webMax")
 
     @field_validator("image_url")
     @classmethod

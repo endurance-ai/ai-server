@@ -81,6 +81,9 @@ class ChatRequest(BaseModel):
     # price_max: upper price bound in KRW integer 원. <=0 / None → no ceiling.
     gender: str | None = None
     price_max: int | None = None
+    # surface: 호출 서피스. "web_explore"(홍보 랜딩) 면 웹 전용 카드 상향 + 최소 카드
+    # 보장을 켠다. 미전달(모바일/앱) → 기존 동작. 알 수 없는 값은 무시(모바일 취급).
+    surface: str | None = None
     # Image uploaded via POST /v1/uploads (presigned S3 PUT → CloudFront/CDN URL).
     # Passed through to ChannelMessage.urls — the existing SSRF guard there drops
     # it silently if malformed, same fail-open contract as the Pinterest-link path.
@@ -179,6 +182,7 @@ async def create_session(
         pool,
         gender=body.gender,
         price_max=body.price_max,
+        surface=body.surface,
         attached_image_url=body.attached_image_url,
         skip_item_pick=body.skip_item_pick,
     )
@@ -211,6 +215,7 @@ async def continue_session(
         session_id=session_id,
         gender=body.gender,
         price_max=body.price_max,
+        surface=body.surface,
         attached_image_url=body.attached_image_url,
         skip_item_pick=body.skip_item_pick,
     )
