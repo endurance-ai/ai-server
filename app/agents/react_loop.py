@@ -2038,6 +2038,11 @@ async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]
             and int(result.get("candidates_count") or 0) == 0
         )
         if _reflexion_eligible:
+            from app.agents._reflexion import RESULT_COUNT_KEY
+
+            # This search's own count (0) — sess.last_results may still hold the
+            # previous search's cards, which must not be graded as this result.
+            ctx[RESULT_COUNT_KEY] = 0
             quality = await _maybe_reflexion(state, sess, ctx, turn_deadline)
             if quality is not None:
                 result = {**result, "_quality": quality}

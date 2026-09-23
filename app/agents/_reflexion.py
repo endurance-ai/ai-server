@@ -36,6 +36,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ctx key carrying THIS turn's search `candidates_count` (set by react_loop just
+# before Reflexion runs). `sess.last_results` is intentionally not cleared on a
+# 0-result search (pagination / pinned-item lookups rely on it), so it can hold
+# the PREVIOUS search's cards — the count, not the session list, decides empty.
+RESULT_COUNT_KEY = "_v3_reflexion_result_count"
+
 
 async def evaluate_search_quality(state: Any, sess: Any, ctx: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the last search via the existing evaluator helpers.
@@ -46,8 +52,13 @@ async def evaluate_search_quality(state: Any, sess: Any, ctx: dict[str, Any]) ->
     Returns a small dict derived from `CritiqueScore`:
       {"score": float, "retry_suggested": bool, "reason": str}
     On empty results the LLM-free fast-path broaden delta is used (no LLM call).
+    "Empty" = this turn's search returned 0 (`ctx[RESULT_COUNT_KEY] == 0`) OR
+    `sess.last_results` is empty — otherwise a 0-result search after an earlier
+    hit would send the stale previous cards to the evaluator LLM.
     """
     candidates = list(getattr(sess, "last_results", None) or [])
+    if ctx.get(RESULT_COUNT_KEY) == 0:
+        candidates = []
     user_intent = getattr(sess, "user_intent", None)
     # Mirror evaluator node's vision_item source exactly.
     vision_item = getattr(state, "vision_selected_item", None) or getattr(sess, "vision_item", None)
