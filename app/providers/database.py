@@ -130,6 +130,43 @@ class DatabaseProvider:
         return [x / n for x in acc]
 
     @classmethod
+    async def brand_has_family(cls, brand_names: list[str], family: str, gender: str | None = None) -> bool | None:
+        """브랜드(canonical 명들)에 해당 family 상품이 1개라도 있는지.
+
+        맨-브랜드 라우터가 "자라 아우터"류 요청에서 쓴다 — v6 RPC 는 family 로
+        걸러 0건이면 rung 3 에서 family 게이트를 버리고 브랜드 전 상품을 돌려주므로
+        (마르지엘라 보스턴백 → 신발·티) 결과만 봐서는 '그 품목이 없음'을 알 수 없다.
+        `products.category` 는 2026-07-15 부터 family 토큰으로 정규화돼 있어 직접
+        비교한다. 브랜드 매칭은 RPC 와 같은 brand_nodes.brand_name 기준이고, RPC 가
+        거르는 재고(in_stock=true)·성별(gender && [g,'unisex']) 조건도 똑같이 건다 —
+        품절뿐인 품목(팔로마 울 가방 3개 전부 품절)을 '있음'으로 보면 RPC 가 다시
+        family 를 버린다. gender 는 'men'/'women' 만 필터로 쓴다(그 외 None).
+
+        반환: 있음 True / 없음 False / 조회 실패 None(호출부 fail-open).
+        """
+        if not brand_names or not family:
+            return None
+        try:
+            client = await cls.get_client()
+            nodes = await client.from_("brand_nodes").select("id").in_("brand_name", brand_names).execute()
+            node_ids = [r.get("id") for r in (nodes.data or []) if r.get("id") is not None]
+            if not node_ids:
+                return None
+            q = (
+                client.from_("products")
+                .select("id")
+                .in_("brand_node_id", node_ids)
+                .eq("category", family)
+                .eq("in_stock", True)
+            )
+            if gender in ("men", "women"):
+                q = q.ov("gender", [gender, "unisex"])
+            prod = await q.limit(1).execute()
+        except Exception:
+            return None
+        return bool(prod.data)
+
+    @classmethod
     async def get_product_category(cls, product_id: int) -> str | None:
         """`public.products.category` 단건 조회 (PostgREST select).
 

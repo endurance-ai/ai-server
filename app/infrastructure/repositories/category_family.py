@@ -206,7 +206,171 @@ def to_canonical_family(raw: str | None) -> str:
     return "other"
 
 
+# 2026-09-25 — 맨-브랜드 라우터("자라 아우터", "팔로마 울 가방")가 남은 품목
+# 한 단어를 family 로 걸기 위한 한글 품목어 → family. 품목어 한 토큰만 받는다
+# (문장 파싱 아님). 정확 일치 먼저, 없으면 접미 일치('보스턴백'→백, '후드집업'
+# →집업). 모호한 단어(니트=소재/품목, 데님=소재/바지)는 품목 위치에 단독으로
+# 올 때 품목 의미가 우세하므로 포함한다. 확신 없으면 넣지 말 것 → None.
+_KO_GARMENT_FAMILY: dict[str, str] = {
+    # outerwear
+    "아우터": "outerwear",
+    "자켓": "outerwear",
+    "재킷": "outerwear",
+    "코트": "outerwear",
+    "점퍼": "outerwear",
+    "잠바": "outerwear",
+    "패딩": "outerwear",
+    "블루종": "outerwear",
+    "블레이저": "outerwear",
+    "트렌치": "outerwear",
+    "트렌치코트": "outerwear",
+    "바람막이": "outerwear",
+    "야상": "outerwear",
+    "무스탕": "outerwear",
+    "조끼": "outerwear",
+    # tops
+    "상의": "tops",
+    "티": "tops",
+    "티셔츠": "tops",
+    "반팔": "tops",
+    "긴팔": "tops",
+    "롱슬리브": "tops",
+    "셔츠": "tops",
+    "남방": "tops",
+    "블라우스": "tops",
+    "탑": "tops",
+    "나시": "tops",
+    "민소매": "tops",
+    "후드": "tops",
+    "후디": "tops",
+    "후드티": "tops",
+    "후드집업": "tops",
+    "집업": "tops",
+    "맨투맨": "tops",
+    "스웻셔츠": "tops",
+    # knitwear
+    "니트": "knitwear",
+    "스웨터": "knitwear",
+    "가디건": "knitwear",
+    # bottoms
+    "하의": "bottoms",
+    "바지": "bottoms",
+    "팬츠": "bottoms",
+    "청바지": "bottoms",
+    "데님": "bottoms",
+    "진": "bottoms",
+    "슬랙스": "bottoms",
+    "조거": "bottoms",
+    "반바지": "bottoms",
+    "쇼츠": "bottoms",
+    "치마": "bottoms",
+    "스커트": "bottoms",
+    "레깅스": "bottoms",
+    # dresses
+    "원피스": "dresses",
+    "드레스": "dresses",
+    # shoes
+    "신발": "shoes",
+    "구두": "shoes",
+    "운동화": "shoes",
+    "스니커즈": "shoes",
+    "부츠": "shoes",
+    "로퍼": "shoes",
+    "샌들": "shoes",
+    "슬리퍼": "shoes",
+    "힐": "shoes",
+    "뮬": "shoes",
+    # bags
+    "가방": "bags",
+    "백": "bags",
+    "백팩": "bags",
+    "토트": "bags",
+    "크로스백": "bags",
+    "숄더백": "bags",
+    "클러치": "bags",
+    # headwear / jewelry / eyewear
+    "모자": "headwear",
+    "캡": "headwear",
+    "비니": "headwear",
+    "버킷햇": "headwear",
+    "주얼리": "jewelry",
+    "귀걸이": "jewelry",
+    "귀고리": "jewelry",
+    "목걸이": "jewelry",
+    "반지": "jewelry",
+    "팔찌": "jewelry",
+    "안경": "eyewear",
+    "선글라스": "eyewear",
+    # accessories
+    "지갑": "accessories",
+    "벨트": "accessories",
+    "머플러": "accessories",
+    "스카프": "accessories",
+    "장갑": "accessories",
+    "양말": "accessories",
+}
+
+# 접미 일치 규칙(길이 내림차순으로 시도). 합성 품목어용 — '보스턴백', '미니백',
+# '레더자켓', '울코트', '와이드팬츠'. 짧은 접미('백')는 2음절 이상 단어에만 적용.
+_KO_GARMENT_SUFFIXES: tuple[tuple[str, str], ...] = tuple(
+    sorted(
+        (
+            ("백", "bags"),
+            ("가방", "bags"),
+            ("자켓", "outerwear"),
+            ("재킷", "outerwear"),
+            ("코트", "outerwear"),
+            ("점퍼", "outerwear"),
+            ("패딩", "outerwear"),
+            ("블루종", "outerwear"),
+            ("셔츠", "tops"),
+            ("티셔츠", "tops"),
+            ("블라우스", "tops"),
+            ("집업", "tops"),
+            ("후드", "tops"),
+            ("후디", "tops"),
+            ("니트", "knitwear"),
+            ("가디건", "knitwear"),
+            ("팬츠", "bottoms"),
+            ("바지", "bottoms"),
+            ("스커트", "bottoms"),
+            ("슬랙스", "bottoms"),
+            ("원피스", "dresses"),
+            ("드레스", "dresses"),
+            ("부츠", "shoes"),
+            ("스니커즈", "shoes"),
+            ("로퍼", "shoes"),
+            ("샌들", "shoes"),
+        ),
+        key=lambda kv: -len(kv[0]),
+    )
+)
+
+
+def garment_family(token: str | None) -> str | None:
+    """품목어 한 토큰 → canonical family, 품목어가 아니면 None.
+
+    한글은 `_KO_GARMENT_FAMILY` 정확 일치 → 접미 일치 순. 영문은
+    `to_canonical_family` 재사용(미인식 `other` 는 None 으로 돌려 "품목 아님"을
+    표현). 맨-브랜드 라우터가 "브랜드 + 품목 1개" 요청의 품목을 family 필터로
+    걸 때 쓴다 — 확신 없는 입력은 None(라우터는 기존 동작 유지).
+    """
+    t = (token or "").strip().lower()
+    if not t:
+        return None
+    if t in _KO_GARMENT_FAMILY:
+        return _KO_GARMENT_FAMILY[t]
+    if any("가" <= ch <= "힣" for ch in t):
+        for suffix, fam in _KO_GARMENT_SUFFIXES:
+            if t.endswith(suffix) and len(t) > len(suffix):
+                return fam
+        return None
+    fam = to_canonical_family(t)
+    return None if fam == "other" else fam
+
+
 __all__ = [
     "CANONICAL_FAMILIES",
+    "garment_family",
     "to_canonical_family",
 ]
