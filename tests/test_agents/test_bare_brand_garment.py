@@ -288,3 +288,56 @@ def test_garment_query_en(token, hint):
     from app.infrastructure.repositories.category_family import garment_query_en
 
     assert garment_query_en(token) == hint
+
+
+# ── '브랜드' 명시 라벨 + 영문 브랜드 뒤 한글 품목 (2026-09-25 후속) ─────────────
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "스웨이드 브랜드",
+        "스웨이드 브랜드 보여줘",
+        "스웨이드 브랜드 제품 추천",
+        "브랜드 스웨이드",
+        "스웨이드브랜드",
+        "스웨이드 브랜드꺼",
+    ],
+)
+def test_labeled_brand_routes_to_brand_with_clean_query(monkeypatch, text):
+    _seed(monkeypatch, _CATALOG)
+    req = react_loop._detect_bare_brand_request(_state(text), None)
+    assert req is not None
+    assert req["brand"] == "SUADE"
+    assert req["text_query"] == "clothing"
+    assert req["family"] is None
+
+
+def test_labeled_brand_with_garment_goes_garment_path(monkeypatch):
+    _seed(monkeypatch, _CATALOG)
+    req = react_loop._detect_bare_brand_request(_state("스웨이드 브랜드 자켓"), None)
+    assert req is not None
+    assert (req["brand"], req["family"], req["garment"]) == ("SUADE", "outerwear", "자켓")
+
+
+@pytest.mark.parametrize(
+    ("text", "brand", "family", "garment"),
+    [
+        ("suade 바지", "SUADE", "bottoms", "바지"),
+        ("maison margiela 가방", "Maison Margiela", "bags", "가방"),
+        ("zara 아우터", "ZARA", "outerwear", "아우터"),
+    ],
+)
+def test_latin_brand_does_not_swallow_korean_garment(monkeypatch, text, brand, family, garment):
+    # 영문 정규화가 한글을 지워 'suade 바지' 전체가 브랜드 키로 잡히던 버그.
+    _seed(monkeypatch, _CATALOG)
+    req = react_loop._detect_bare_brand_request(_state(text), None)
+    assert req is not None
+    assert (req["brand"], req["family"], req["garment"]) == (brand, family, garment)
+
+
+def test_multiword_brand_still_resolves(monkeypatch):
+    _seed(monkeypatch, _CATALOG)
+    req = react_loop._detect_bare_brand_request(_state("팔로마 울 가방"), None)
+    assert req is not None
+    assert req["label"] == "팔로마 울"

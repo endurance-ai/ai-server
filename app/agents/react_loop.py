@@ -1270,6 +1270,14 @@ def _norm_filler(tok: str) -> str:
     return re.sub(r"[^\w가-힣]", "", tok).lower()
 
 
+def _is_brand_req_filler(tok: str) -> bool:
+    """필러 토큰인지. '브랜드'·'브랜드꺼'처럼 브랜드 명시 라벨도 필러로 친다 —
+    "스웨이드 브랜드 자켓"에서 라벨이 남은 토큰으로 세지면 품목('자켓')을 못 잡고,
+    "스웨이드 브랜드"의 검색어가 '브랜드'라는 무의미어가 된다."""
+    t = _norm_filler(tok)
+    return t in _BRAND_REQ_FILLER or t.startswith("브랜드") or t == "brand"
+
+
 def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any] | None:
     """맨-브랜드 요청("글로니 보여줘", "마뗑킴")을 결정론적으로 검색으로 보낸다.
 
@@ -1294,15 +1302,16 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             return None
         from app.infrastructure.repositories.brand_node_cache import (
             attribute_shadows_brand,
-            resolve_brand_names,
+            resolve_brand_window,
             scan_text_for_brand,
+            split_brand_label,
         )
         from app.infrastructure.repositories.category_family import garment_family
 
         names = scan_text_for_brand(raw)
         if not names:
             return None
-        tokens = raw.split()
+        tokens = split_brand_label(raw).split()
         n = len(tokens)
         matched: set[int] = set()
         # resolve_brand_names 는 EXACT 키 조회(sub-scan 없음)라 '브랜드인 토큰 span'만
@@ -1314,12 +1323,10 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             for span in (3, 2, 1):
                 if span == 1 and attribute_shadows_brand(tokens, i):
                     continue
-                if i + span <= n and resolve_brand_names(" ".join(tokens[i : i + span])):
+                if i + span <= n and resolve_brand_window(tokens, i, span):
                     matched.update(range(i, i + span))
                     break
-        remaining = [
-            tokens[k] for k in range(n) if k not in matched and _norm_filler(tokens[k]) not in _BRAND_REQ_FILLER
-        ]
+        remaining = [tokens[k] for k in range(n) if k not in matched and not _is_brand_req_filler(tokens[k])]
         # 브랜드 토큰 + 필러 외 실질 토큰이 2개 이상이면 단순 브랜드요청이 아님(비교/질문 등) → LLM.
         if len(remaining) > 1:
             return None
