@@ -1292,7 +1292,12 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             return None
         if _BRAND_SIMILAR_MARKER_RE.search(raw):
             return None
-        from app.infrastructure.repositories.brand_node_cache import resolve_brand_names, scan_text_for_brand
+        from app.infrastructure.repositories.brand_node_cache import (
+            attribute_shadows_brand,
+            resolve_brand_names,
+            scan_text_for_brand,
+        )
+        from app.infrastructure.repositories.category_family import garment_family
 
         names = scan_text_for_brand(raw)
         if not names:
@@ -1303,8 +1308,12 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
         # resolve_brand_names 는 EXACT 키 조회(sub-scan 없음)라 '브랜드인 토큰 span'만
         # 정확히 잡는다. scan_text_for_brand 를 쓰면 "글로니 보여줘"가 sub-scan 으로
         # truthy 라 '보여줘'까지 브랜드 토큰으로 오표기됨(label 오염).
+        # 속성어 1어절('스웨이드' 등)은 스캔과 같은 기준으로 브랜드 토큰에서 뺀다 —
+        # "자라 스웨이드 자켓"의 '스웨이드'가 SUADE 로 먹히지 않고 남은 토큰(속성)이 된다.
         for i in range(n):
             for span in (3, 2, 1):
+                if span == 1 and attribute_shadows_brand(tokens, i):
+                    continue
                 if i + span <= n and resolve_brand_names(" ".join(tokens[i : i + span])):
                     matched.update(range(i, i + span))
                     break
@@ -1316,7 +1325,18 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             return None
         label = " ".join(tokens[k] for k in sorted(matched)) or (names[0] if names else "")
         text_query = remaining[0] if remaining else "clothing"
-        return {"brand": names[0], "text_query": text_query, "label": label}
+        # 남은 한 토큰이 품목어면 family 필터로 건다("자라 아우터" → outerwear).
+        # 이전엔 품목어가 text_query 에만 실려 브랜드 전 상품이 쏟아졌다(9월 세션:
+        # 마르지엘라 보스턴백 → 신발·티 40건, 자라 아우터 → 원피스·바지).
+        garment = remaining[0] if remaining else None
+        family = garment_family(garment) if garment else None
+        return {
+            "brand": names[0],
+            "text_query": text_query,
+            "label": label,
+            "garment": garment if family else None,
+            "family": family,
+        }
     except Exception:  # noqa: BLE001 — 라우팅 보정은 부가 기능, 루프를 막지 않는다
         logger.debug("[bare-brand route] detect skipped", exc_info=True)
         return None
@@ -1332,6 +1352,10 @@ async def _run_bare_brand_shortcircuit(
 
     lang = ctx.get("lang") or session_lang(sess)
     label = req.get("label") or req.get("brand")
+    family = req.get("family")
+    garment = req.get("garment") or ""
+    if family:
+        return await _run_bare_brand_garment(req, label, family, garment, lang, ctx)
     # 브랜드 상품 몇 개 + 결이 비슷한 다른 브랜드로 채운다(그 브랜드만 쏟지 않도록).
     args: dict[str, Any] = {
         "brand": req["brand"],
@@ -1359,6 +1383,86 @@ async def _run_bare_brand_shortcircuit(
         return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": text}
     logger.info("[bare-brand route] fallthrough (ok=%s cnt=%d err=%r) → 일반 루프", ok, cnt, err)
     return None
+
+
+async def _run_bare_brand_garment(
+    req: dict[str, Any], label: str, family: str, garment: str, lang: str, ctx: dict[str, Any]
+) -> dict[str, Any] | None:
+    """ "브랜드 + 품목"(자라 아우터, 팔로마 울 가방) 요청 — 품목을 family 필터로 건다.
+
+    브랜드에 그 품목이 있으면 브랜드+family 검색. 없으면 먼저 "없다"고 말하고,
+    결이 비슷한 다른 브랜드의 같은 품목을 보여준다(similar_to_brand + family).
+    무관한 상품으로 채우지 않는다 — 9월 세션에서 첫 턴의 필러가 신뢰를 가장 크게
+    깎았다. 조회 실패·0건이면 None → 일반 루프 폴백."""
+    from app.agents.tools.respond import dispatch as respond_dispatch
+    from app.agents.tools.search_products import _lookup_profile_gender
+    from app.agents.tools.search_products import dispatch as sp_dispatch
+    from app.graphs.nodes.pick_item import _FAMILY_LABEL_KO
+    from app.infrastructure.repositories.brand_node_cache import resolve_brand_names
+    from app.infrastructure.repositories.category_family import SMALL_LEATHER_GOODS_TERMS, garment_query_en
+    from app.providers.database import DatabaseProvider
+
+    names = resolve_brand_names(req["brand"]) or [req["brand"]]
+    # 존재 판정은 검색과 같은 성별로 — 남성 유저의 "팔로마 울 가방"(여성 전용)은 '없음'.
+    req_gender = ctx.get("req_gender")
+    gender = req_gender if req_gender in ("men", "women", "unisex") else _lookup_profile_gender(ctx)
+    # 가방 요청이면 bags family 에 섞인 지갑류를 판정·결과 양쪽에서 뺀다 — 9/11
+    # "마르지엘라 보스턴백"(남성)의 마르지엘라 'bags' 재고는 전부 지갑·카드지갑이었다.
+    exclude = SMALL_LEATHER_GOODS_TERMS if family == "bags" else ()
+    has = await DatabaseProvider.brand_has_family(names, family, gender, exclude)
+    # 영문 품목 힌트로 family 안에서 순위를 잡는다('보스턴백' → boston duffle bag).
+    query = garment_query_en(garment) or family
+    extra: dict[str, Any] = {"exclude_keywords": list(exclude)} if exclude else {}
+    if has is None:
+        logger.info("[bare-brand route] family check failed brand=%r family=%s → 일반 루프", req["brand"], family)
+        return None
+    # 품목어가 family 라벨보다 좁으면('보스턴백' vs 가방) '구체 품목' 요청이다.
+    family_ko = _FAMILY_LABEL_KO.get(family, garment)
+    specific = garment != family_ko
+    if has:
+        # 필터는 family 단위라 '보스턴백'을 콕 집진 못한다(가방 중 영문 힌트에 가까운 순).
+        args: dict[str, Any] = {"brand": req["brand"], "text_query": query, "category": family, **extra}
+        if lang != "ko":
+            text = f"Here are {label} {garment} picks. See anything you like?"
+        elif specific:
+            text = f"{label} {family_ko} 중에서 {garment}에 가까운 걸로 골라봤어. 마음에 드는 거 있어?"
+        else:
+            text = f"{label} {garment} 골라봤어. 마음에 드는 거 있어?"
+    elif specific:
+        # 구체 품목은 품목이 우선 — 브랜드 centroid 앵커는 텍스트를 무시하므로(신발 포함
+        # 브랜드 평균 벡터) '보스턴백'이 순위에 안 실린다. 품목 텍스트 검색으로 간다.
+        args = {"text_query": query, "category": family, **extra}
+        text = (
+            f"지금 카탈로그엔 {label} {garment} 상품이 없어. 대신 다른 브랜드 {garment} 상품을 골라봤어."
+            if lang == "ko"
+            else f"We don't carry {label} {garment} right now — here are {garment} from other brands."
+        )
+    else:
+        args = {"similar_to_brand": req["brand"], "text_query": query, "category": family, **extra}
+        text = (
+            f"지금 카탈로그엔 {label} {garment} 상품이 없어. 대신 {label} 느낌의 다른 브랜드 {garment} 상품을 골라봤어."
+            if lang == "ko"
+            else f"We don't carry {label} {garment} right now — here are {garment} from brands with a similar feel."
+        )
+    logger.info(
+        "🎯 [bare-brand route] brand=%r family=%s has=%s → %s",
+        req["brand"],
+        family,
+        has,
+        "brand+family" if has else "similar+family",
+    )
+    result = await sp_dispatch(args, ctx)
+    hist = [{"tool_name": "search_products", "args": _args_summary(args)}]
+    if result.get("error") == "awaiting_gender":
+        return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": None}
+    if not result.get("ok") or int(result.get("candidates_count") or 0) == 0:
+        logger.info("[bare-brand route] garment path empty (err=%r) → 일반 루프", result.get("error"))
+        return None
+    try:
+        await respond_dispatch({"text": text}, ctx)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[bare-brand route] respond failed: %r", exc)
+    return {"agent_iterations": 1, "agent_status": "completed", "tool_call_history": hist, "response_text": text}
 
 
 async def _run_react_loop_impl(state: WorkingState, sess: Any) -> dict[str, Any]:

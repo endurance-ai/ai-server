@@ -252,6 +252,113 @@ def resolve_brand_names_fuzzy(query: str | None) -> list[str] | None:
 # 이 토큰들을 무시한다.
 _SCAN_STOPWORDS: frozenset[str] = frozenset({"키스", "노아", "게스", "보드", "kiss", "guess", "noah"})
 
+# 2026-09-25 — 속성어(재질·패턴·색·디테일)와 겹치는 브랜드 별칭은 자유 문장에서
+# 속성이 우선한다. 사건: "스웨이드 자켓"이 별칭 '스웨이드'→SUADE 로 잡혀 맨-브랜드
+# 라우터가 SUADE 바지·티 31건을 반환(9/8, ea3150e0). 같은 충돌: 레이스→RRACE,
+# 버튼→Burton. 예외는 사용자가 "X 브랜드"라고 명시한 경우 — tool_registry 의
+# brand 슬롯 규칙('스웨이드 브랜드 제품 추천' → brand)과 같은 기준.
+# 재질·패턴 어휘는 search_service 의 _MATERIAL_NORM / _PATTERN_NORM 을 그대로
+# 쓰고(단일 소스), 거기 없는 색·디테일 단어만 여기 둔다.
+_ATTRIBUTE_WORDS_EXTRA: frozenset[str] = frozenset(
+    {
+        # colors
+        "블랙",
+        "화이트",
+        "아이보리",
+        "크림",
+        "베이지",
+        "브라운",
+        "카멜",
+        "그레이",
+        "차콜",
+        "네이비",
+        "블루",
+        "스카이블루",
+        "그린",
+        "카키",
+        "올리브",
+        "레드",
+        "버건디",
+        "와인",
+        "핑크",
+        "퍼플",
+        "라벤더",
+        "옐로우",
+        "옐로",
+        "오렌지",
+        "실버",
+        "골드",
+        "black",
+        "white",
+        "ivory",
+        "cream",
+        "beige",
+        "brown",
+        "camel",
+        "grey",
+        "gray",
+        "charcoal",
+        "navy",
+        "blue",
+        "green",
+        "khaki",
+        "olive",
+        "red",
+        "burgundy",
+        "pink",
+        "purple",
+        "yellow",
+        "orange",
+        "silver",
+        "gold",
+        # design details
+        "레이스",
+        "lace",
+        "버튼",
+        "button",
+        "셔링",
+        "프릴",
+        "리본",
+        "퀼팅",
+        "자수",
+        "스터드",
+        "프린지",
+        "러플",
+    }
+)
+_BRAND_LABEL_TOKENS: frozenset[str] = frozenset({"브랜드", "brand"})
+
+
+def is_attribute_word(token: str | None) -> bool:
+    """단일 토큰이 재질·패턴·색·디테일 속성어인지. 브랜드 별칭과 겹칠 때
+    자유 문장 스캔이 브랜드 대신 속성으로 해석하도록 쓰인다."""
+    t = re.sub(r"[^\w가-힣-]", "", (token or "").strip().lower())
+    if not t:
+        return False
+    if t in _ATTRIBUTE_WORDS_EXTRA:
+        return True
+    try:
+        from app.services.search_service import _MATERIAL_NORM, _PATTERN_NORM
+    except Exception:  # noqa: BLE001 — 어휘 로드 실패 시 추가 목록만으로 판정
+        return False
+    return t in _MATERIAL_NORM or t in _PATTERN_NORM
+
+
+def _labeled_as_brand(tokens: list[str], i: int) -> bool:
+    """tokens[i] 바로 앞/뒤에 '브랜드'가 붙었는지('스웨이드 브랜드', '브랜드 스웨이드')."""
+    for j in (i - 1, i + 1):
+        if 0 <= j < len(tokens):
+            nt = re.sub(r"[^\w가-힣]", "", tokens[j]).lower()
+            if any(nt.startswith(lbl) for lbl in _BRAND_LABEL_TOKENS):
+                return True
+    return False
+
+
+def attribute_shadows_brand(tokens: list[str], i: int) -> bool:
+    """1어절 윈도우 tokens[i] 를 브랜드로 치면 안 되는지 — 속성어이고 '브랜드'
+    명시가 없을 때 True."""
+    return is_attribute_word(tokens[i]) and not _labeled_as_brand(tokens, i)
+
 
 def scan_text_for_brand(text: str | None) -> list[str] | None:
     """자유 문장에서 알려진 브랜드를 찾아 canonical 리스트로 반환.
@@ -274,6 +381,8 @@ def scan_text_for_brand(text: str | None) -> list[str] | None:
                 continue
             cand = " ".join(tokens[i : i + span])
             if span == 1 and cand.strip().lower() in _SCAN_STOPWORDS:
+                continue
+            if span == 1 and attribute_shadows_brand(tokens, i):
                 continue
             names = resolve_brand_names(cand)
             if names and span > best_span:
@@ -311,6 +420,8 @@ def scan_text_for_brand_fuzzy(text: str | None) -> list[str] | None:
                 continue
             cand = " ".join(tokens[i : i + span])
             if span == 1 and cand.strip().lower() in _SCAN_STOPWORDS:
+                continue
+            if span == 1 and attribute_shadows_brand(tokens, i):
                 continue
             names = resolve_brand_names_fuzzy(cand)
             if names and span > best_span:
