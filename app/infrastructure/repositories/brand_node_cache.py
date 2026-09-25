@@ -360,6 +360,36 @@ def attribute_shadows_brand(tokens: list[str], i: int) -> bool:
     return is_attribute_word(tokens[i]) and not _labeled_as_brand(tokens, i)
 
 
+_BRAND_LABEL_SUFFIX_RE: Final[re.Pattern[str]] = re.compile(r"(\S)(브랜드)")
+
+
+def split_brand_label(text: str) -> str:
+    """붙여 쓴 '브랜드' 라벨을 떼어 낸다 — '스웨이드브랜드' → '스웨이드 브랜드'.
+    그래야 1어절 윈도우가 '스웨이드'로 잡히고 옆 토큰 '브랜드'가 명시 라벨로 읽힌다."""
+    return _BRAND_LABEL_SUFFIX_RE.sub(r"\1 \2", text)
+
+
+def resolve_brand_window(tokens: list[str], i: int, span: int) -> list[str] | None:
+    """tokens[i:i+span] 윈도우가 브랜드면 canonical 명, 아니면 None.
+
+    다어절 윈도우는 양 끝 토큰이 매칭 키에 실제로 기여할 때만 인정한다. 영문
+    정규화는 한글을 지우므로 'suade 바지' → 'suade' 로 SUADE 에 걸려 '바지'가
+    브랜드 토큰으로 먹혔다(품목 유실). 끝 토큰을 빼도 같은 키면 그 윈도우는 거절 —
+    더 짧은 윈도우가 잡는다."""
+    window = tokens[i : i + span]
+    names = resolve_brand_names(" ".join(window))
+    if not names or span == 1:
+        return names
+    cand = " ".join(window)
+    for norm in (normalize_brand, normalize_brand_ko):
+        key = norm(cand)
+        if key and key in _filter_index:
+            if key in (norm(" ".join(window[:-1])), norm(" ".join(window[1:]))):
+                return None
+            return names
+    return names
+
+
 def scan_text_for_brand(text: str | None) -> list[str] | None:
     """자유 문장에서 알려진 브랜드를 찾아 canonical 리스트로 반환.
 
@@ -369,7 +399,7 @@ def scan_text_for_brand(text: str | None) -> list[str] | None:
     1어절 별칭(_SCAN_STOPWORDS)은 오탐 방지로 제외. 미발견/미워밍이면 None."""
     if not text or not isinstance(text, str):
         return None
-    tokens = text.split()
+    tokens = split_brand_label(text).split()
     n = len(tokens)
     if n == 0:
         return None
@@ -384,7 +414,7 @@ def scan_text_for_brand(text: str | None) -> list[str] | None:
                 continue
             if span == 1 and attribute_shadows_brand(tokens, i):
                 continue
-            names = resolve_brand_names(cand)
+            names = resolve_brand_window(tokens, i, span)
             if names and span > best_span:
                 best_span = span
                 best_names = names
@@ -408,7 +438,7 @@ def scan_text_for_brand_fuzzy(text: str | None) -> list[str] | None:
         return exact
     if not text or not isinstance(text, str):
         return None
-    tokens = text.split()
+    tokens = split_brand_label(text).split()
     n = len(tokens)
     if n == 0:
         return None
