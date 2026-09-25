@@ -146,8 +146,8 @@ def test_detect_brand_only_has_no_family(monkeypatch):
 def _wire(monkeypatch, has: bool | None, cnt: int = 12) -> dict[str, Any]:
     seen: dict[str, Any] = {}
 
-    async def fake_has(names, family, gender=None):
-        seen["has_args"] = (names, family, gender)
+    async def fake_has(names, family, gender=None, exclude_name_terms=()):
+        seen["has_args"] = (names, family, gender, exclude_name_terms)
         return has
 
     async def fake_search(args, ctx):
@@ -226,7 +226,7 @@ async def test_family_check_uses_request_gender(monkeypatch):
     await react_loop._run_bare_brand_shortcircuit(
         _req("ZARA", "자라", "outerwear", "아우터"), _state("자라 아우터"), None, {"lang": "ko", "req_gender": "men"}
     )
-    assert seen["has_args"] == (["ZARA"], "outerwear", "men")
+    assert seen["has_args"][:3] == (["ZARA"], "outerwear", "men")
 
 
 @pytest.mark.asyncio
@@ -238,3 +238,53 @@ async def test_narrow_garment_is_described_honestly(monkeypatch):
         _req("Maison Margiela", "마르지엘라", "bags", "보스턴백"), _state("마르지엘라 보스턴백"), None, {"lang": "ko"}
     )
     assert seen["text"].startswith("마르지엘라 가방 중에서 보스턴백에 가까운")
+
+
+@pytest.mark.asyncio
+async def test_bag_request_excludes_wallets_and_uses_english_hint(monkeypatch):
+    _seed(monkeypatch, _CATALOG)
+    seen = _wire(monkeypatch, has=True)
+    await react_loop._run_bare_brand_shortcircuit(
+        _req("Maison Margiela", "마르지엘라", "bags", "보스턴백"), _state("마르지엘라 보스턴백"), None, {"lang": "ko"}
+    )
+    names, family, gender, exclude = seen["has_args"]
+    assert family == "bags"
+    assert "wallet" in exclude and "지갑" in exclude
+    assert seen["search_args"]["text_query"] == "boston duffle bag"
+    assert "wallet" in seen["search_args"]["exclude_keywords"]
+
+
+@pytest.mark.asyncio
+async def test_missing_specific_garment_searches_the_garment_not_brand_vibe(monkeypatch):
+    # 남성 마르지엘라 'bags' 재고는 지갑뿐 → 없음 → 다른 브랜드 '보스턴백'을 품목 텍스트로.
+    _seed(monkeypatch, _CATALOG)
+    seen = _wire(monkeypatch, has=False)
+    await react_loop._run_bare_brand_shortcircuit(
+        _req("Maison Margiela", "마르지엘라", "bags", "보스턴백"), _state("마르지엘라 보스턴백"), None, {"lang": "ko"}
+    )
+    args = seen["search_args"]
+    assert "similar_to_brand" not in args and "brand" not in args
+    assert args["text_query"] == "boston duffle bag"
+    assert args["category"] == "bags"
+    assert "다른 브랜드 보스턴백" in seen["text"]
+
+
+@pytest.mark.asyncio
+async def test_non_bag_family_has_no_wallet_exclusion(monkeypatch):
+    _seed(monkeypatch, _CATALOG)
+    seen = _wire(monkeypatch, has=True)
+    await react_loop._run_bare_brand_shortcircuit(
+        _req("ZARA", "자라", "outerwear", "아우터"), _state("자라 아우터"), None, {"lang": "ko"}
+    )
+    assert seen["has_args"][3] == ()
+    assert "exclude_keywords" not in seen["search_args"]
+
+
+@pytest.mark.parametrize(
+    ("token", "hint"),
+    [("보스턴백", "boston duffle bag"), ("레더자켓", "jacket"), ("가방", "bag"), ("jacket", "jacket"), ("세일", None)],
+)
+def test_garment_query_en(token, hint):
+    from app.infrastructure.repositories.category_family import garment_query_en
+
+    assert garment_query_en(token) == hint

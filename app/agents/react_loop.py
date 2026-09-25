@@ -1399,29 +1399,46 @@ async def _run_bare_brand_garment(
     from app.agents.tools.search_products import dispatch as sp_dispatch
     from app.graphs.nodes.pick_item import _FAMILY_LABEL_KO
     from app.infrastructure.repositories.brand_node_cache import resolve_brand_names
+    from app.infrastructure.repositories.category_family import SMALL_LEATHER_GOODS_TERMS, garment_query_en
     from app.providers.database import DatabaseProvider
 
     names = resolve_brand_names(req["brand"]) or [req["brand"]]
     # 존재 판정은 검색과 같은 성별로 — 남성 유저의 "팔로마 울 가방"(여성 전용)은 '없음'.
     req_gender = ctx.get("req_gender")
     gender = req_gender if req_gender in ("men", "women", "unisex") else _lookup_profile_gender(ctx)
-    has = await DatabaseProvider.brand_has_family(names, family, gender)
+    # 가방 요청이면 bags family 에 섞인 지갑류를 판정·결과 양쪽에서 뺀다 — 9/11
+    # "마르지엘라 보스턴백"(남성)의 마르지엘라 'bags' 재고는 전부 지갑·카드지갑이었다.
+    exclude = SMALL_LEATHER_GOODS_TERMS if family == "bags" else ()
+    has = await DatabaseProvider.brand_has_family(names, family, gender, exclude)
+    # 영문 품목 힌트로 family 안에서 순위를 잡는다('보스턴백' → boston duffle bag).
+    query = garment_query_en(garment) or family
+    extra: dict[str, Any] = {"exclude_keywords": list(exclude)} if exclude else {}
     if has is None:
         logger.info("[bare-brand route] family check failed brand=%r family=%s → 일반 루프", req["brand"], family)
         return None
+    # 품목어가 family 라벨보다 좁으면('보스턴백' vs 가방) '구체 품목' 요청이다.
+    family_ko = _FAMILY_LABEL_KO.get(family, garment)
+    specific = garment != family_ko
     if has:
-        args: dict[str, Any] = {"brand": req["brand"], "text_query": family, "category": family}
-        # 필터는 family 단위라 '보스턴백'을 콕 집진 못한다(가방 전체 중 가까운 순) —
-        # 품목어가 family 라벨보다 좁으면 그렇게 말한다.
-        family_ko = _FAMILY_LABEL_KO.get(family, garment)
+        # 필터는 family 단위라 '보스턴백'을 콕 집진 못한다(가방 중 영문 힌트에 가까운 순).
+        args: dict[str, Any] = {"brand": req["brand"], "text_query": query, "category": family, **extra}
         if lang != "ko":
             text = f"Here are {label} {garment} picks. See anything you like?"
-        elif garment == family_ko:
-            text = f"{label} {garment} 골라봤어. 마음에 드는 거 있어?"
-        else:
+        elif specific:
             text = f"{label} {family_ko} 중에서 {garment}에 가까운 걸로 골라봤어. 마음에 드는 거 있어?"
+        else:
+            text = f"{label} {garment} 골라봤어. 마음에 드는 거 있어?"
+    elif specific:
+        # 구체 품목은 품목이 우선 — 브랜드 centroid 앵커는 텍스트를 무시하므로(신발 포함
+        # 브랜드 평균 벡터) '보스턴백'이 순위에 안 실린다. 품목 텍스트 검색으로 간다.
+        args = {"text_query": query, "category": family, **extra}
+        text = (
+            f"지금 카탈로그엔 {label} {garment} 상품이 없어. 대신 다른 브랜드 {garment} 상품을 골라봤어."
+            if lang == "ko"
+            else f"We don't carry {label} {garment} right now — here are {garment} from other brands."
+        )
     else:
-        args = {"similar_to_brand": req["brand"], "text_query": family, "category": family}
+        args = {"similar_to_brand": req["brand"], "text_query": query, "category": family, **extra}
         text = (
             f"지금 카탈로그엔 {label} {garment} 상품이 없어. 대신 {label} 느낌의 다른 브랜드 {garment} 상품을 골라봤어."
             if lang == "ko"

@@ -130,7 +130,13 @@ class DatabaseProvider:
         return [x / n for x in acc]
 
     @classmethod
-    async def brand_has_family(cls, brand_names: list[str], family: str, gender: str | None = None) -> bool | None:
+    async def brand_has_family(
+        cls,
+        brand_names: list[str],
+        family: str,
+        gender: str | None = None,
+        exclude_name_terms: tuple[str, ...] = (),
+    ) -> bool | None:
         """브랜드(canonical 명들)에 해당 family 상품이 1개라도 있는지.
 
         맨-브랜드 라우터가 "자라 아우터"류 요청에서 쓴다 — v6 RPC 는 family 로
@@ -141,6 +147,8 @@ class DatabaseProvider:
         거르는 재고(in_stock=true)·성별(gender && [g,'unisex']) 조건도 똑같이 건다 —
         품절뿐인 품목(팔로마 울 가방 3개 전부 품절)을 '있음'으로 보면 RPC 가 다시
         family 를 버린다. gender 는 'men'/'women' 만 필터로 쓴다(그 외 None).
+        `exclude_name_terms` 는 상품명 부분일치 제외어 — 가방 요청에서 bags family 에
+        섞인 지갑류를 빼 '가방이 있는지'를 본다(검색 쪽 exclude_keywords 와 같은 목록).
 
         반환: 있음 True / 없음 False / 조회 실패 None(호출부 fail-open).
         """
@@ -161,6 +169,8 @@ class DatabaseProvider:
             )
             if gender in ("men", "women"):
                 q = q.ov("gender", [gender, "unisex"])
+            for term in exclude_name_terms:
+                q = q.not_.ilike("name", f"*{term}*")
             prod = await q.limit(1).execute()
         except Exception:
             return None

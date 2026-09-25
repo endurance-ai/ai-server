@@ -369,8 +369,94 @@ def garment_family(token: str | None) -> str | None:
     return None if fam == "other" else fam
 
 
+# 품목어 → 영문 검색어 힌트. FashionSigLIP 텍스트 인코더는 영어 기준이라 한글
+# 품목어('보스턴백')를 그대로 임베딩하면 순위가 흐트러진다. family 필터만으론
+# '가방 전체'라서 보스턴백을 앞으로 끌어올 신호가 필요하다(9/11 마르지엘라
+# 보스턴백 세션). 정확 일치 → 접미 일치 순. 없으면 None(호출부는 family 로 폴백).
+_KO_GARMENT_EN: dict[str, str] = {
+    "보스턴백": "boston duffle bag",
+    "더플백": "duffle bag",
+    "토트백": "tote bag",
+    "토트": "tote bag",
+    "크로스백": "crossbody bag",
+    "숄더백": "shoulder bag",
+    "백팩": "backpack",
+    "클러치": "clutch bag",
+    "호보백": "hobo bag",
+    "버킷백": "bucket bag",
+    "미니백": "mini bag",
+    "메신저백": "messenger bag",
+    "가방": "bag",
+    "백": "bag",
+    "아우터": "outerwear jacket coat",
+    "자켓": "jacket",
+    "재킷": "jacket",
+    "코트": "coat",
+    "트렌치코트": "trench coat",
+    "패딩": "padded puffer jacket",
+    "블루종": "blouson jacket",
+    "블레이저": "blazer",
+    "바람막이": "windbreaker",
+    "셔츠": "shirt",
+    "블라우스": "blouse",
+    "티셔츠": "t-shirt",
+    "후드": "hoodie",
+    "후디": "hoodie",
+    "후드집업": "zip-up hoodie",
+    "맨투맨": "sweatshirt",
+    "니트": "knit sweater",
+    "가디건": "cardigan",
+    "바지": "pants",
+    "팬츠": "pants",
+    "청바지": "jeans",
+    "슬랙스": "slacks trousers",
+    "스커트": "skirt",
+    "치마": "skirt",
+    "원피스": "dress",
+    "드레스": "dress",
+    "스니커즈": "sneakers",
+    "운동화": "sneakers",
+    "부츠": "boots",
+    "로퍼": "loafers",
+    "구두": "leather shoes",
+    "샌들": "sandals",
+}
+
+
+def garment_query_en(token: str | None) -> str | None:
+    """품목어 한 토큰 → 영문 검색어 힌트(없으면 None). 영문 입력은 그대로 쓴다."""
+    t = (token or "").strip().lower()
+    if not t:
+        return None
+    if t in _KO_GARMENT_EN:
+        return _KO_GARMENT_EN[t]
+    if not any("가" <= ch <= "힣" for ch in t):
+        return t
+    for key in sorted(_KO_GARMENT_EN, key=len, reverse=True):
+        if len(key) >= 2 and t.endswith(key) and len(t) > len(key):
+            return _KO_GARMENT_EN[key]
+    return None
+
+
+# 카탈로그의 `bags` family 에는 지갑·카드지갑이 섞여 있다(서브카테고리도 clutch/
+# crossbody 로 오분류 — 마르지엘라 남성 'bags' 재고 전부가 지갑류). 가방을 찾는
+# 요청에선 이 이름들을 뺀다. 사용자가 지갑 자체를 찾는 경우엔 쓰지 않는다.
+SMALL_LEATHER_GOODS_TERMS: tuple[str, ...] = (
+    "wallet",
+    "card holder",
+    "cardholder",
+    "card case",
+    "coin purse",
+    "passport",
+    "지갑",
+    "카드",
+)
+
+
 __all__ = [
     "CANONICAL_FAMILIES",
+    "SMALL_LEATHER_GOODS_TERMS",
     "garment_family",
+    "garment_query_en",
     "to_canonical_family",
 ]
