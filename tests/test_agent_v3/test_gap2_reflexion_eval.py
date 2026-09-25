@@ -63,6 +63,23 @@ async def test_empty_results_uses_fastpath_no_llm(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_zero_result_search_ignores_stale_last_results(monkeypatch):
+    """0-result search after an earlier hit: sess.last_results still holds the
+    PREVIOUS search's cards (persist_last_results skips empty sets). The turn's
+    count (0) must win → fast-path, and the stale cards never reach the LLM."""
+    spy = AsyncMock(return_value=CritiqueScore(score=0.9, retry=False))
+    monkeypatch.setattr("app.graphs.nodes.evaluator._call_llm", spy)
+
+    stale = [SimpleNamespace(brand="b", name=f"n{i}", subcategory="bag", price=10) for i in range(5)]
+    out = await _reflexion.evaluate_search_quality(_state(), _sess(stale), {_reflexion.RESULT_COUNT_KEY: 0})
+
+    spy.assert_not_awaited()
+    assert out["score"] == 0.0
+    assert out["retry_suggested"] is True
+    assert "broaden" in out["reason"]
+
+
+@pytest.mark.asyncio
 async def test_fail_open_propagated_verbatim(monkeypatch):
     """AC-2.2 — evaluator timeout fail-open (score=1.0, retry=False) passes
     through unchanged (proves no reimplementation)."""
