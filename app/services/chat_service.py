@@ -767,6 +767,43 @@ async def invoke(
     return resolved_session_id, reply
 
 
+async def _save_assistant_reply(
+    pool: AsyncConnectionPool,
+    session_id: UUID,
+    streaming: StreamingAdapter,
+    persisted: tuple[str, int] | None,
+    *,
+    skip_empty: bool,
+) -> BotReply:
+    """그래프가 만든 봇 답을 chat_messages 에 저장하고 그 reply 를 돌려준다.
+
+    반드시 그래프 task 안(검색 persist 직후)에서 호출한다. 예전엔 SSE 제너레이터가
+    이벤트를 다 흘려보낸 **뒤에** 저장했는데, 앱이 도중에 연결을 끊으면(앱 종료·
+    새 메시지 전송) StreamingResponse 가 제너레이터를 닫아 그 뒤 코드가 안 돌았다.
+    검색은 task 안에서 이미 저장돼 '검색은 있는데 답이 없는' 대화가 남았다
+    (2026-09 실유저 17명 중 5턴, 대부분 20초+ 걸리는 사진 턴). task 는 연결과
+    무관하게 끝까지 돌므로 여기서 저장하면 끊겨도 남는다.
+    """
+    reply = streaming.get_reply()
+    product_refs = None
+    if reply.cards:
+        product_refs = [
+            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
+        ]
+    assistant_content = reply.text or ""
+    if reply.closing_text:
+        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
+    if assistant_content or not skip_empty:
+        # 검색 id 를 함께 남겨 GET /messages 가 복원 시 "더보기" 버튼을 다시 만든다.
+        search_id = persisted[0] if persisted else None
+        try:
+            await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)
+        except Exception:
+            # 저장 실패가 이미 스트리밍된 답을 '실패'로 바꾸진 않는다(기록만 남김).
+            logger.exception("[chat_service] assistant message persist failed session=%s", session_id)
+    return reply
+
+
 async def invoke_streaming(
     user_id: UUID,
     text: str,
@@ -856,10 +893,11 @@ async def invoke_streaming(
     graph_exc: BaseException | None = None
     graph_result: dict | None = None
     persisted: tuple[str, int] | None = None
+    reply: BotReply | None = None
 
     @observe(name="app.chat", as_type="span")
     async def _run_graph() -> None:
-        nonlocal graph_exc, graph_result, persisted
+        nonlocal graph_exc, graph_result, persisted, reply
         # set_adapter/reset_adapter must run in the same context (task's own copy).
         # asyncio.create_task copies the context at creation time; the Token from the
         # parent context cannot be used to reset a ContextVar inside the task.
@@ -881,6 +919,7 @@ async def invoke_streaming(
             )
             if persisted is not None:
                 update_current_trace(metadata={"search_id": persisted[0]})
+            reply = await _save_assistant_reply(pool, resolved_session_id, streaming, persisted, skip_empty=False)
         except Exception as exc:
             logger.exception("[chat_service] graph invocation failed user=%s", user_id)
             graph_exc = exc
@@ -900,20 +939,9 @@ async def invoke_streaming(
         yield "error", {"detail": "AI response failed"}
         return
 
-    reply = streaming.get_reply()
-    product_refs = None
-    if reply.cards:
-        product_refs = [
-            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
-        ]
-    assistant_content = reply.text or ""
-    if reply.closing_text:
-        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
-
-    # Persist the search first so its id can be stored on the assistant message row
-    # (lets GET /messages rebuild the "더보기" button on history restore).
-    search_id = persisted[0] if persisted else None
-    await append_message(pool, resolved_session_id, "assistant", assistant_content, product_refs, search_id)
+    # 봇 답은 _run_graph 안에서 이미 저장됐다(_save_assistant_reply).
+    if reply is None:
+        reply = streaming.get_reply()
 
     if persisted is not None:
         yield "search", {"search_id": persisted[0], "total": persisted[1]}
@@ -974,10 +1002,11 @@ async def invoke_streaming_callback(
     graph_exc: BaseException | None = None
     graph_result: dict | None = None
     persisted: tuple[str, int] | None = None
+    reply: BotReply | None = None
 
     @observe(name="app.chat", as_type="span")
     async def _run_graph() -> None:
-        nonlocal graph_exc, graph_result, persisted
+        nonlocal graph_exc, graph_result, persisted, reply
         token = set_adapter(streaming)
         turn_id = _reset_app_turn(user_id, session_chat_id, thread_id, turn_no)
         try:
@@ -993,6 +1022,7 @@ async def invoke_streaming_callback(
             )
             if persisted is not None:
                 update_current_trace(metadata={"search_id": persisted[0]})
+            reply = await _save_assistant_reply(pool, session_id, streaming, persisted, skip_empty=True)
         except Exception as exc:
             logger.exception("[chat_service] callback graph invocation failed user=%s", user_id)
             graph_exc = exc
@@ -1012,21 +1042,9 @@ async def invoke_streaming_callback(
         yield "error", {"detail": "AI response failed"}
         return
 
-    reply = streaming.get_reply()
-    product_refs = None
-    if reply.cards:
-        product_refs = [
-            {"image_url": str(c.image_url), "caption": c.caption, "product_id": c.product_id} for c in reply.cards
-        ]
-    assistant_content = reply.text or ""
-    if reply.closing_text:
-        assistant_content = f"{assistant_content}\n\n{reply.closing_text}".strip()
-
-    # Persist the search first so its id can be stored on the assistant message row
-    # (lets GET /messages rebuild the "더보기" button on history restore).
-    search_id = persisted[0] if persisted else None
-    if assistant_content:
-        await append_message(pool, session_id, "assistant", assistant_content, product_refs, search_id)
+    # 봇 답은 _run_graph 안에서 이미 저장됐다(_save_assistant_reply).
+    if reply is None:
+        reply = streaming.get_reply()
 
     if persisted is not None:
         yield "search", {"search_id": persisted[0], "total": persisted[1]}
