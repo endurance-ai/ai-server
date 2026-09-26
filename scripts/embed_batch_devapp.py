@@ -3,7 +3,7 @@
 기존 `portal/ai/scripts/embed_batch_local.py` 의 dev-app 대응판.
 Supabase REST 의존을 제거하고 psycopg 로 직접 SELECT + RPC 호출.
 
-DB 의 활성 products 중 product_embeddings row 가 없고 정상 `image_url` 을 가진 항목을
+DB 의 products 중 product_embeddings row 가 없고 정상 `image_url` 을 가진 항목을
 모아 로컬 머신에서 FashionSigLIP 으로 인코딩한 뒤 provenance-guarded
 `bulk_update_product_embeddings_v2` RPC 로 일괄 upsert.
 
@@ -39,6 +39,7 @@ Apple Silicon Mac 은 MPS 자동 사용 — CPU 대비 5~10배 빠름.
     --batch-size 32         # GPU/MPS 배치 크기
     --download-workers 16   # 이미지 다운로드 동시성
     --upsert-chunk 25       # RPC 1회 upsert row 수
+    --ids-file ids.json     # 교정 대상 ID 문자열의 비어 있지 않은 JSON 배열
 
 재실행 안전 — product_embeddings anti-join과 이미지 실패 상태로 중단 지점부터 이어진다.
 다운로드 전 products.image_url/image_revision 스냅샷을 저장 RPC까지 유지하므로,
@@ -55,11 +56,13 @@ import argparse
 import io
 import json
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
@@ -74,6 +77,13 @@ UPSERT_CHUNK = 25
 UPSERT_MIN_CHUNK = 5
 IMAGE_TIMEOUT = 15.0
 RETRY_DELAY = timedelta(hours=6)
+ZARA_RETRY_DELAYS = (1.0, 3.0)
+ZARA_IMAGE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Referer": "https://www.zara.com/",
+}
 
 
 class NonImageResponseError(ValueError):
@@ -169,20 +179,49 @@ def load_model(device: str):
     return model, preprocess
 
 
-def fetch_pending(
-    conn: psycopg.Connection,
-    limit: int | None,
+def load_product_ids(path: str | Path) -> list[str]:
+    """Invalid explicit scope must never turn into a global embedding run."""
+    values = json.loads(Path(path).read_text())
+    if not isinstance(values, list) or not values:
+        raise ValueError("product ID file must contain a non-empty JSON array of decimal strings")
+    if any(
+        not isinstance(value, str)
+        or re.fullmatch(r"[1-9][0-9]{0,18}", value) is None
+        or int(value) > 9223372036854775807
+        for value in values
+    ):
+        raise ValueError("product IDs must be positive bigint decimal strings")
+    return list(dict.fromkeys(values))
+
+
+def product_scope(
     platforms: list[str] | None = None,
-) -> list[dict]:
-    """활성·대표 이미지 보유 미임베딩 products 일괄 수집."""
-    # pending = product_embeddings 에 row 가 없는 products (anti-join).
-    # 구 `products.embedding IS NULL` 센티넬은 migration 086 에서 컬럼 drop 됨 —
-    # product_embeddings(071) 가 임베딩 단일 출처라 그 부재로 pending 판별.
-    # 대표 이미지 SOT 는 products.image_url 이다. images[0] 은 호환용 mirror일 뿐
-    # 임베딩 입력을 결정하지 않는다. 품절 상품은 검색 RPC가 노출하지 않으므로 제외하고,
-    # 재입고 시 in_stock=true + embedding 부재 조건으로 자동 복귀한다.
-    # 같은 canonical URL 의 영구 실패는 격리하고 retryable 실패만 예약 시각 이후 재시도한다.
-    sql = """
+    product_ids: list[str] | None = None,
+) -> tuple[str, list[object]]:
+    """Share exact scope between selection and coverage; [] means no products."""
+    filters: list[str] = []
+    params: list[object] = []
+    if platforms is not None:
+        filters.append("AND p.platform = ANY(%s)")
+        params.append(platforms)
+    if product_ids is not None:
+        filters.append("AND p.id = ANY(%s::bigint[])")
+        params.append(product_ids)
+    return "\n".join(filters), params
+
+
+def build_pending_query(
+    platforms: list[str] | None,
+    page_limit: int,
+    after_id: str | None = None,
+    product_ids: list[str] | None = None,
+) -> tuple[str, list[object]]:
+    scope, params = product_scope(platforms, product_ids)
+    if after_id is not None:
+        scope += "\nAND p.id > %s"
+        params.append(after_id)
+    params.append(page_limit)
+    sql = f"""
         SELECT p.id,
                p.brand_node_id,
                p.image_url,
@@ -198,7 +237,6 @@ def fetch_pending(
         WHERE NOT EXISTS (
                 SELECT 1 FROM product_embeddings pe WHERE pe.product_id = p.id
               )
-          AND p.in_stock = true
           AND p.image_url ~ '^https?://'
           AND (
                 pif.product_id IS NULL
@@ -207,24 +245,77 @@ def fetch_pending(
                   AND pif.next_retry_at <= now()
                 )
               )
-        {platform_filter}
+        {scope}
         ORDER BY p.id
+        LIMIT %s
     """
-    platform_filter = ""
-    params: list[object] = []
-    if platforms:
-        platform_filter = "AND p.platform = ANY(%s)"
-        params.append(platforms)
-    if limit is not None:
-        sql += f" LIMIT {int(limit)}"
+    return sql, params
+
+
+def fetch_pending(
+    conn: psycopg.Connection,
+    limit: int | None,
+    platforms: list[str] | None = None,
+    product_ids: list[str] | None = None,
+) -> list[dict]:
+    """Keyset-page missing embeddings, including out-of-stock products."""
+    # products.image_url/image_revision remain the embedding input snapshot.
+    # Stock controls search exposure, not whether the embedding can be prepared.
+    # Existing embeddings and quarantined/not-yet-due failures stay excluded.
+    if limit is not None and limit < 1:
+        raise ValueError("limit must be positive")
+    rows: list[dict] = []
+    after_id: str | None = None
+    while limit is None or len(rows) < limit:
+        page_limit = min(PAGE_SIZE, limit - len(rows)) if limit is not None else PAGE_SIZE
+        query, params = build_pending_query(platforms, page_limit, after_id, product_ids)
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(query, params)
+            page = cur.fetchall()
+        if not page:
+            break
+        normalized = [{**row, "id": str(row["id"]), "image_revision": str(row["image_revision"])} for row in page]
+        rows.extend(normalized)
+        after_id = normalized[-1]["id"]
+        if len(page) < page_limit:
+            break
+    return rows
+
+
+def fetch_coverage(
+    conn: psycopg.Connection,
+    platforms: list[str] | None = None,
+    product_ids: list[str] | None = None,
+) -> list[dict]:
+    scope, params = product_scope(platforms, product_ids)
     with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(sql.format(platform_filter=platform_filter), params)
-        rows = cur.fetchall()
-    return [{**r, "id": str(r["id"])} for r in rows]
+        cur.execute(
+            f"""
+            SELECT p.platform,
+                   count(*) AS total,
+                   count(pe.product_id) AS embedded,
+                   round(100.0 * count(pe.product_id) / nullif(count(*), 0), 2) AS pct_embedded
+              FROM products p
+              LEFT JOIN product_embeddings pe ON pe.product_id = p.id
+             WHERE true {scope}
+             GROUP BY p.platform
+             ORDER BY total DESC
+            """,
+            params,
+        )
+        return cur.fetchall()
 
 
 def download_image(client: httpx.Client, url: str) -> Image.Image:
-    r = client.get(url, timeout=IMAGE_TIMEOUT)
+    is_zara = urlsplit(url).hostname == "static.zara.net"
+    headers = ZARA_IMAGE_HEADERS if is_zara else None
+    r = client.get(url, timeout=IMAGE_TIMEOUT, headers=headers)
+    if is_zara:
+        for delay in ZARA_RETRY_DELAYS:
+            if r.status_code not in {403, 429}:
+                break
+            time.sleep(delay)
+            r = client.get(url, timeout=IMAGE_TIMEOUT, headers=headers)
     r.raise_for_status()
     content_type = (r.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     if (
@@ -744,6 +835,13 @@ def result_exit_code(*, failed: int, stale: int, missing: int) -> int:
     return int(failed + stale + missing > 0)
 
 
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
@@ -751,17 +849,27 @@ def main() -> int:
         default=None,
         help="comma-separated platform keys to restrict embedding (for example samostuff,teak)",
     )
-    ap.add_argument("--limit", type=int, default=None, help="N 개만 처리 (테스트용)")
-    ap.add_argument("--batch-size", type=int, default=16, help="GPU/MPS 배치 크기 (default 16)")
-    ap.add_argument("--download-workers", type=int, default=8, help="이미지 다운로드 동시성 (default 8)")
+    ap.add_argument("--ids-file", default=None, help="교정 대상 ID 문자열의 JSON 배열 파일로 범위 제한")
+    ap.add_argument("--limit", type=positive_int, default=None, help="N 개만 처리 (테스트용)")
+    ap.add_argument("--batch-size", type=positive_int, default=16, help="GPU/MPS 배치 크기 (default 16)")
+    ap.add_argument("--download-workers", type=positive_int, default=8, help="이미지 다운로드 동시성 (default 8)")
     ap.add_argument(
         "--upsert-chunk",
-        type=int,
+        type=positive_int,
         default=UPSERT_CHUNK,
         help=f"RPC 1회 upsert row 수 (default {UPSERT_CHUNK})",
     )
     ap.add_argument("--dry-run", action="store_true", help="upsert 직전 중단 — 검증용")
     args = ap.parse_args()
+    platforms = None
+    if args.platform is not None:
+        platforms = list(dict.fromkeys(p.strip() for p in args.platform.split(",") if p.strip()))
+        if not platforms:
+            ap.error("--platform must contain at least one platform key")
+    try:
+        product_ids = load_product_ids(args.ids_file) if args.ids_file is not None else None
+    except (OSError, ValueError) as error:
+        ap.error(f"invalid --ids-file: {error}")
 
     dsn = os.environ.get("KIKOAI_DEVAPP_DSN")
     if not dsn:
@@ -773,17 +881,16 @@ def main() -> int:
     conn = psycopg.connect(dsn, application_name="embed_batch_devapp")
 
     try:
-        device = detect_device()
-        model, preprocess = load_model(device)
-
         print("[fetch] 미임베딩 products 조회...")
-        platforms = [p.strip() for p in args.platform.split(",") if p.strip()] if args.platform else None
-        pending = fetch_pending(conn, limit=args.limit, platforms=platforms)
+        pending = fetch_pending(conn, limit=args.limit, platforms=platforms, product_ids=product_ids)
         total = len(pending)
         print(f"[fetch] {total} 건 처리 예정")
         if total == 0:
             print("처리할 항목 없음")
             return 0
+
+        device = detect_device()
+        model, preprocess = load_model(device)
 
         # product_id → brand_node_id (동기화용, brand_node_id NULL은 자연히 제외)
         id_to_brand = {r["id"]: r["brand_node_id"] for r in pending if r["brand_node_id"] is not None}
@@ -851,23 +958,7 @@ def main() -> int:
         # migration 085 removed the dead monitoring view. Keep the batch's
         # end-of-run verification self-contained so a successful embedding run
         # cannot fail merely because that optional view no longer exists.
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
-                """
-                SELECT p.platform,
-                       count(*) AS total,
-                       count(pe.product_id) AS embedded,
-                       round(
-                           100.0 * count(pe.product_id) / nullif(count(*), 0),
-                           2
-                       ) AS pct_embedded
-                  FROM products p
-                  LEFT JOIN product_embeddings pe ON pe.product_id = p.id
-                 GROUP BY p.platform
-                 ORDER BY total DESC
-                """
-            )
-            rows = cur.fetchall()
+        rows = fetch_coverage(conn, platforms=platforms, product_ids=product_ids)
         if rows:
             print("\n[coverage 검증]")
             for row in rows:

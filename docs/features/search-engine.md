@@ -159,3 +159,19 @@ AI 서버 5xx/timeout 시 Next.js 의 `/api/find/search` 가 기존 v4 검색(`/
 `scripts/embed_batch_local.py`는 다운로드 전에 `products.image_url`과 DB 소유 `image_revision`을 함께 캡처하고 `bulk_update_product_embeddings_v2`에 `source_image_url`/`source_image_revision`으로 전달한다. RPC의 `applied`만 완료 수에 포함하며 `stale`, `missing`, 다운로드 실패와 응답에서 누락된 ID는 미완료로 보고한다. 재시도에도 최초 이미지의 URL/revision을 유지한다.
 
 이 caller를 실행하려면 `kiko.ai-app`의 migration 121이 먼저 적용되어야 한다. 기존 `product_embeddings`에서 provenance가 NULL인 벡터는 별도 복구 대상이다. direct-Postgres runner(`embed_batch_devapp.py`)도 이미지 복구 결과의 새 URL/revision을 받아 v2 writer로 저장하며, 적용된 ID만 crawl status 집계에 포함한다. 독립 AWS runner 역시 v2를 사용한다. migration 123의 직접 쓰기 권한 회수는 조건부 embedding 삭제를 사용하는 복구 도구의 전용 RPC 계약과 함께 적용해야 한다.
+
+### 대표 이미지 교정 후 선택 재임베딩
+
+```bash
+uv run python scripts/embed_batch_devapp.py \
+  --ids-file /secure/corrected-product-ids.json \
+  --platform suade,zara --limit 50 --dry-run
+```
+
+`--ids-file`은 `["123", "456"]` 형태의 **비어 있지 않은 양의 bigint 문자열 배열**이다. 숫자형 JSON, 0/음수, 범위 초과, 빈 파일/배열은 DB 접속과 모델 로딩 전에 거부한다. 중복 ID는 제거하고 기존 쉼표 구분 `--platform`과 함께 지정하면 교집합만 처리한다. 빈 플랫폼, 0 이하 limit/배치/worker/chunk도 오류다. 옵션을 둘 다 생략하면 기존처럼 전체 미임베딩 범위가 대상이므로 운영 복구에는 명시적 ID 파일을 권장한다.
+
+이 옵션은 기존 벡터를 삭제하거나 강제로 덮어쓰지 않는다. 이미지 교정은 승인된 별도 절차로 수행하고, DB 소유 image revision 및 기존값 비교를 포함해 해당 벡터가 무효화된 뒤 실행한다. 조회는 ID keyset 페이지 단위이며 완료 후 coverage도 같은 ID/플랫폼 범위만 집계한다. 이미 임베딩된 상품, 영구 실패, 재시도 시간이 오지 않은 실패는 기존처럼 제외한다. 대상이 없으면 모델을 로드하지 않는다.
+
+품절 상품도 임베딩 대상에 포함하지만 검색 노출의 재고 필터는 변경하지 않는다. Zara 이미지 호스트 `static.zara.net`에는 이미지 요청 헤더와 공식 referer를 보내고 403/429에 한해 최대 3번 요청한다. 다른 호스트나 404/5xx에는 이 재시도를 적용하지 않는다. 최종 실패는 기존 실패 분류·재시도 예약 로직에 맡긴다.
+
+`--dry-run`은 DB 변경을 하지 않지만 다운로드와 로컬 모델 인코딩은 실행한다. 테스트에서는 HTTP/DB/모델을 대체하고 실제 임베딩이나 운영 쓰기를 수행하지 않는다. URL/revision 스냅샷, v2 RPC stale 거부, 적용된 ID만 완료 집계하는 기존 계약은 유지한다.
