@@ -253,5 +253,5 @@ def test_fetch_pending_preserves_platform_filter_and_reads_image_revision() -> N
     query, params = conn.calls[0]
     assert "p.image_revision" in query
     assert "p.platform = ANY(%s)" in query
-    assert "LIMIT 2" in query
-    assert params == [["samostuff", "teak"]]
+    assert "LIMIT %s" in query
+    assert params == [["samostuff", "teak"], 2]
