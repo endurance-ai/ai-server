@@ -518,7 +518,11 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
         from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
 
         _raw_msg = (state.message.text or "") if state.message else ""
-        _detected = scan_text_for_brand(_raw_msg)
+        # "X처럼/같은/비슷한/느낌" — X 는 비교 기준이지 필터가 아니다. 핀하면 이 턴의
+        # 모든 검색이 X 로 하드필터된다(9/17 "이니어 후드집업처럼 … 룰루레몬이나
+        # 유니클로처럼" → innir 핀 → innir 남성 재고 1개 → 검색 4회 연속 0건).
+        # 기준 브랜드는 brand-similar 라우터(similar_to_brand)가 앵커로 쓴다.
+        _detected = None if _BRAND_SIMILAR_MARKER_RE.search(_raw_msg) else scan_text_for_brand(_raw_msg)
         if _detected:
             set_pinned_brand(state.chat_id, _detected)
         elif not _cb and _raw_msg.strip():
@@ -1145,6 +1149,71 @@ _BRAND_SIMILAR_MARKER_RE: Final[re.Pattern[str]] = re.compile(
 _PINNED_CHIP_RE: Final[re.Pattern[str]] = re.compile(r"^\[#\d")
 
 
+# 유사 마커·조사 — 토큰 끝에 붙은 걸 떼어 품목/필러 판정("후드집업처럼" → 후드집업).
+_SIMILAR_SUFFIXES: Final[tuple[str, ...]] = (
+    "스타일로",
+    "스타일",
+    "처럼",
+    "같은",
+    "같이",
+    "느낌의",
+    "느낌",
+    "감성",
+    "이나",
+    "으로",
+    "들",
+    "로",
+    "을",
+    "를",
+    "은",
+    "는",
+    "이",
+    "가",
+    "도",
+    "의",
+)
+_SIMILAR_FILLER: Final[frozenset[str]] = frozenset(
+    {"같은", "비슷한", "비슷", "느낌", "처럼", "스타일", "감성", "st", "옷", "브랜드", "추천해", "있을까", "알려줘"}
+)
+
+
+def _brand_similar_parts(raw: str) -> tuple[str | None, list[str]]:
+    """유사 요청 원문 → (품목어, 서술 토큰들). 브랜드 토큰·마커·필러는 버린다.
+
+    brand-similar 결정론 경로의 범위를 가른다: 서술이 없으면("이니어 같은 후드집업")
+    결정론으로 처리하고, 서술이 있으면("얇고 가벼운 … 찾고있어") LLM 루프에 맡긴다.
+    """
+    from app.infrastructure.repositories.brand_node_cache import resolve_brand_window, split_brand_label
+    from app.infrastructure.repositories.category_family import garment_family
+
+    tokens = split_brand_label(raw).split()
+    n = len(tokens)
+    brand_idx: set[int] = set()
+    for i in range(n):
+        for span in (3, 2, 1):
+            if i + span <= n and resolve_brand_window(tokens, i, span):
+                brand_idx.update(range(i, i + span))
+                break
+    garment: str | None = None
+    descriptors: list[str] = []
+    for k, tok in enumerate(tokens):
+        if k in brand_idx:
+            continue
+        t = _norm_filler(tok)
+        forms = [t] + [t[: -len(sfx)] for sfx in _SIMILAR_SUFFIXES if t.endswith(sfx) and len(t) > len(sfx)]
+        if any(f in _SIMILAR_FILLER or _is_brand_req_filler(f) for f in forms):
+            continue
+        hit = next((f for f in forms if garment_family(f)), None)
+        if hit:
+            garment = garment or hit
+            continue
+        # 브랜드 토큰에 조사가 붙은 경우("유니클로나", "룰루레몬이나")도 브랜드로 본다.
+        if any(f and resolve_brand_window([f], 0, 1) for f in forms[1:]):
+            continue
+        descriptors.append(tok)
+    return garment, descriptors
+
+
 def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
     """원문에 [카탈로그 브랜드(fuzzy)] + [유사 마커]가 있으면 seed 브랜드명을 반환.
 
@@ -1182,6 +1251,10 @@ def _detect_brand_similar_intent(state: WorkingState, sess: Any) -> str | None:
         names = scan_text_for_brand_fuzzy(raw)
         if not names:
             return None
+        # 브랜드·품목·마커·필러 외의 서술("얇고 가벼운", "찾고있어")이 있으면 결정론
+        # 경로가 그 조건을 버린다 — LLM 루프에 맡긴다(similar_to_brand + 속성을 함께 씀).
+        if _brand_similar_parts(raw)[1]:
+            return None
         return names[0]  # canonical; dispatch 가 다시 resolve 한다
     except Exception:  # noqa: BLE001 — 라우팅 보정은 부가 기능, 루프를 막지 않는다
         logger.debug("[brand-similar route] detect skipped", exc_info=True)
@@ -1198,7 +1271,22 @@ async def _run_brand_similar_shortcircuit(
 
     lang = ctx.get("lang") or session_lang(sess)
     args: dict[str, Any] = {"similar_to_brand": seed, "text_query": "clothes"}
-    logger.info("🎯 [brand-similar route] deterministic seed=%r", seed)
+    # "이니어 같은 후드집업" — 품목이 있으면 family 필터 + 영문 힌트로 건다. 없으면
+    # 전 카테고리("clothes")로 브랜드 결만 본다(기존 동작).
+    raw = (state.message.text or "") if state.message else ""
+    garment = _brand_similar_parts(raw)[0]
+    if garment:
+        from app.infrastructure.repositories.category_family import (
+            SMALL_LEATHER_GOODS_TERMS,
+            garment_family,
+            garment_query_en,
+        )
+
+        args["category"] = garment_family(garment)
+        args["text_query"] = garment_query_en(garment) or args["category"]
+        if args["category"] == "bags":  # bags family 에 섞인 지갑류 제외(맨-브랜드 경로와 동일)
+            args["exclude_keywords"] = list(SMALL_LEATHER_GOODS_TERMS)
+    logger.info("🎯 [brand-similar route] deterministic seed=%r garment=%r", seed, garment)
     result = await sp_dispatch(args, ctx)
     ok = bool(result.get("ok"))
     cnt = int(result.get("candidates_count") or 0)
