@@ -160,6 +160,8 @@ AI 서버 5xx/timeout 시 Next.js 의 `/api/find/search` 가 기존 v4 검색(`/
 
 이 caller를 실행하려면 `kiko.ai-app`의 migration 121이 먼저 적용되어야 한다. 기존 `product_embeddings`에서 provenance가 NULL인 벡터는 별도 복구 대상이다. direct-Postgres runner(`embed_batch_devapp.py`)도 이미지 복구 결과의 새 URL/revision을 받아 v2 writer로 저장하며, 적용된 ID만 crawl status 집계에 포함한다. 독립 AWS runner 역시 v2를 사용한다. migration 123의 직접 쓰기 권한 회수는 조건부 embedding 삭제를 사용하는 복구 도구의 전용 RPC 계약과 함께 적용해야 한다.
 
+direct-Postgres runner의 깨진 대표 이미지 복구는 **현재 상품의 공식 페이지가 확인한 후보만** 승격한다. DB의 `images`/`source_image_url`만으로는 소유권을 인정하지 않는다. 리다이렉트 후 상품·variant 일치, Shopify JSON의 handle, OG 블록의 상품 URL을 검증한다. 페이지 확인 불가·이미지 메타데이터 부재·대체 이미지의 일시 오류는 기존 이미지 필드를 지우지 않고 원래 대표 URL에 재시도를 예약한다. 해당 상품 URL의 404/410이나 검증된 후보의 영구 실패만 기존 terminal repair 경로로 진행한다. 범용 OG 이미지와 뒤늦게 추가된 상품 OG 필드는 서로 섞지 않는다.
+
 ### 대표 이미지 교정 후 선택 재임베딩
 
 ```bash
