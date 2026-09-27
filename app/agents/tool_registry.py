@@ -243,6 +243,8 @@ class RefineSearchResult(TypedDict, total=False):
     error: str | None
     candidates_count: int
     top_candidates: list[dict[str, Any]]
+    # 화면에 떠 있던 카드에 없던 새 상품 수. 0 이면 notice 가 "같은 결과"를 알린다.
+    new_count: int
     notice: str | None
     digest: dict[str, Any] | None
 
@@ -489,8 +491,10 @@ REGISTRY: dict[str, ToolMetadata] = {
             "      '리조트st로' / '더 그런지하게'  → mood='리조트' / mood='그런지', action='refine'\n\n"
             "  ● EXCLUDE → `exclude_brands` or `exclude_keywords` + action='exclude'.\n"
             "      '자라 빼고' / 'without Zara'  → exclude_brands=['Zara'], action='exclude'\n\n"
-            "  ● BROADEN (0-result recovery) → action='broaden'. Drop subcategory/brand filters; "
-            "    keep only core garment + color in boost_keywords.\n\n"
+            "  ● BROADEN (0-result recovery, OR '더 많이/다양하게/다른 것도/색상은 상관없이') → "
+            "action='broaden'. The tool keeps the garment type, drops brand/color/fit filters and "
+            "fills with products NOT shown yet. If the result carries notice 'unchanged', nothing new "
+            "exists — say so honestly; never claim you broadened or added picks.\n\n"
             "COMBINED EXAMPLES (the realistic case — multiple deltas in one user turn):\n"
             "  '검정 크롭 블레이저 사이드버튼 10만원 이하'\n"
             "    → action='refine', boost_keywords=['cropped', 'side-button'], "

@@ -53,6 +53,32 @@ _as_keyword_list_for_test = _as_keyword_list
 # tightening the pattern avoids the spurious DB round-trip + log noise entirely.
 _PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
+# broaden 은 필터를 풀고 더 넓게 가져온 뒤 이미 보여준 상품을 빼서 15장을 채운다.
+_BROADEN_POOL = 45
+
+
+def _cand_id(c: Any) -> str:
+    pid = c.get("id") if isinstance(c, dict) else getattr(c, "id", None)
+    if pid is None:
+        pid = c.get("product_id") if isinstance(c, dict) else getattr(c, "product_id", None)
+    return str(pid or "")
+
+
+def _prior_result_ids(ctx: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """(지금 화면의 카드 id, 이 세션에서 보여준 전체 id). 조회 실패 → 빈 집합(fail-open)."""
+    chat_id = ctx.get("chat_id")
+    if chat_id is None:
+        return set(), set()
+    try:
+        from app.infrastructure.memory.session import get_store
+
+        sess = get_store().get_or_create(int(chat_id))
+        visible = {_cand_id(c) for c in (getattr(sess, "last_results", None) or [])}
+        shown = {str(i) for i in (getattr(sess, "shown_product_ids", None) or [])}
+        return visible - {""}, shown - {""}
+    except Exception:  # noqa: BLE001
+        return set(), set()
+
 
 async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchResult:
     # 2026-08-26 — "search" pre-message 제거 (search_products 와 동일). 스피너가
@@ -100,6 +126,19 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     if refine_brand and exclude_brands:
         _ebl = {x.lower() for x in exclude_brands}
         refine_brand = [b for b in refine_brand if b.lower() not in _ebl] or None
+
+    # 2026-09-27 — broaden 이 실제로 넓힌다. 이전엔 action 이 "정보용 메타"라 직전
+    # 검색을 그대로 재실행 → 똑같은 카드인데 LLM 은 도구 설명대로 "넓혀봤어/더
+    # 담았어"라고 답했다(9월 실유저 3건: "색상은 자유롭게 봤어", "더 많이 담았어",
+    # "더 넓게 봤어"). 품목(family)은 유지하고 브랜드·색·핏·스타일 필터를 풀며,
+    # 이미 보여준 상품을 빼고 새 상품으로 채운다(아래 _BROADEN_POOL).
+    broaden = action == "broaden"
+    if broaden:
+        refine_brand = None
+        # "색상 포기하고 비슷한 디자인으로" — 직전 쿼리의 색 단어가 임베딩을 옛 색으로
+        # 당기지 않게 걷어낸다(새 색을 명시하면 아래 color 경로가 다시 싣는다).
+        base_query = _strip_color_tokens(base_query)
+    prior_visible, prior_shown = _prior_result_ids(ctx)
 
     # P0-b (2026-08-24) — 색 변주 정상화. base_query 는 직전 검색의 상품 쿼리라
     # 이전 색 단어("black cropped hoodie")를 그대로 물고 있다. color 를 새로 주면
@@ -207,7 +246,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # search (e.g. user pins a blue jeans card → still filtered to
         # "white"). args wins when the LLM explicitly supplies a colour for
         # this refine (e.g. "다른 색상").
-        if pinned_embedding is not None:
+        if pinned_embedding is not None or broaden:
             fit = args.get("fit")
             color_family = args.get("color")
         else:
@@ -219,8 +258,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # the LLM may also supply an explicit override in args (text turns
         # have no Vision letter); args wins when present.
         _args_sn = args.get("style_node_primary")
-        if pinned_embedding is not None:
-            # Pinned anchor: ignore ctx.style_node_primary (prior turn's letter).
+        if pinned_embedding is not None or broaden:
+            # Pinned anchor / broaden: ignore ctx.style_node_primary (prior turn's letter).
             # Only respect an explicit LLM override.
             style_node_primary = _args_sn if (isinstance(_args_sn, str) and _args_sn.strip()) else None
         else:
@@ -258,7 +297,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 fit=fit,
                 color_family=color_family,
                 mood=mood,
-                top_k=15,
+                top_k=_BROADEN_POOL if broaden else 15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
             )
@@ -284,7 +323,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 fit=fit,
                 color_family=color_family,
                 mood=mood,
-                top_k=15,
+                top_k=_BROADEN_POOL if broaden else 15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
             )
@@ -298,7 +337,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 fit=fit,
                 color_family=color_family,
                 mood=mood,
-                top_k=15,
+                top_k=_BROADEN_POOL if broaden else 15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
                 override_embedding=pinned_embedding,
@@ -339,6 +378,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             return bool(b) and any(x == b or x in b for x in _ebset)
 
         cands = [c for c in cands if not _brand_excluded(c)]
+
+    if broaden and prior_shown:
+        fresh = [c for c in cands if _cand_id(c) not in prior_shown]
+        # 새 상품이 너무 적으면(얇은 카탈로그) 기존 것도 뒤에 남겨 빈 화면을 피한다.
+        cands = (fresh + [c for c in cands if _cand_id(c) in prior_shown])[:15] if len(fresh) < 3 else fresh[:15]
 
     # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike (flag-gated; OFF →
     # unchanged → V2 byte-identical). Reuses the search_products helper.
@@ -415,6 +459,16 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     from app.agents.tools.search_products import _build_color_notice, _build_result_digest
 
     _notice = _build_color_notice()
+    new_count = sum(1 for c in cands if _cand_id(c) not in prior_visible)
+    result["new_count"] = new_count
+    if cands and prior_visible and new_count == 0:
+        # 화면 카드와 똑같은 셋 — "새로 골랐다/넓혔다/더 담았다"고 말하면 거짓이 된다.
+        _notice = (
+            "unchanged: this refine returned the SAME products already on screen (0 new). "
+            "Do NOT say you found, added, broadened or re-sorted picks. Tell the user honestly the "
+            "catalog has nothing new for this change, and ask what to change instead "
+            "(color, price, item type, or a different brand)."
+        )
     if _notice:
         result["notice"] = _notice
     _digest = await _build_result_digest(cands)
