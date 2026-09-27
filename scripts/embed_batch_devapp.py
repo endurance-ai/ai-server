@@ -7,8 +7,8 @@ DB 의 products 중 product_embeddings row 가 없고 정상 `image_url` 을 가
 모아 로컬 머신에서 FashionSigLIP 으로 인코딩한 뒤 provenance-guarded
 `bulk_update_product_embeddings_v2` RPC 로 일괄 upsert.
 
-`image_url` 이 대표 이미지의 단일 출처다. 영구적으로 깨진 대표 URL은 DB의 다른 이미지
-후보와 상품 페이지에서 복구하고, 원자적 repair RPC로 모든 이미지 필드를 정리한 뒤에만
+`image_url` 이 대표 이미지의 단일 출처다. 영구적으로 깨진 대표 URL은 현재 상품 페이지가
+확인한 이미지 후보로 복구하고, 원자적 repair RPC로 모든 이미지 필드를 정리한 뒤에만
 대체 이미지를 임베딩한다. 일시 오류와 복구 불가 상태는 product_image_failures 에 기록해
 같은 URL을 매 실행마다 다시 요청하지 않는다.
 
@@ -63,7 +63,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
 
 import httpx
 import psycopg
@@ -144,20 +144,72 @@ class ProductImageMetaParser(HTMLParser):
     def __init__(self, page_url: str) -> None:
         super().__init__()
         self.page_url = page_url
-        self.urls: list[str] = []
+        self.tags: list[tuple[str, str]] = []
+        self.multiple_blocks = False
+        self.inert: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {key.lower(): value for key, value in attrs if value is not None}
-        candidate: str | None = None
-        if tag.lower() == "meta" and values.get("property", "").lower() in {
-            "og:image",
-            "og:image:secure_url",
-        }:
-            candidate = values.get("content")
-        elif tag.lower() == "link" and "image_src" in values.get("rel", "").lower().split():
-            candidate = values.get("href")
-        if candidate:
-            self.urls.append(urljoin(self.page_url, candidate))
+        if tag in {"script", "style", "template", "noscript"}:
+            self.inert.append(tag)
+        if self.inert or tag != "meta":
+            return
+        key = values.get("property", values.get("name", "")).lower()
+        content = values.get("content", "").strip()
+        if not content or not key.startswith(("og:", "product:")):
+            return
+        identity = {"og:type", "og:url", "og:title"}
+        if key in identity and any(existing == key for existing, _ in self.tags):
+            last_image = max(
+                (i for i, (k, _) in enumerate(self.tags) if k in {"og:image", "og:image:secure_url"}), default=-1
+            )
+            trailing = self.tags[last_image + 1 :] if last_image >= 0 else []
+            self.tags = (
+                trailing if any(k in identity for k, _ in trailing) and not any(k == key for k, _ in trailing) else []
+            )
+            self.multiple_blocks = True
+        self.tags.append((key, content))
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.inert and self.inert[-1] == tag:
+            self.inert.pop()
+
+    @property
+    def urls(self) -> list[str]:
+        block = dict(self.tags)
+        is_product = "product" in block.get("og:type", "").lower()
+        if not is_product and "product:price:amount" not in block:
+            return []
+        identity = block.get("og:url")
+        if identity and not same_product_page(identity, self.page_url):
+            return []
+        if not identity and self.multiple_blocks:
+            return []
+        return [urljoin(self.page_url, value) for key, value in self.tags if key in {"og:image", "og:image:secure_url"}]
+
+
+def same_product_page(left: str, right: str) -> bool:
+    """Match PDP identity including variants; ignore category/tracking parameters."""
+    try:
+        a, b = urlsplit(urljoin(right, left)), urlsplit(right)
+        if any(url.scheme not in {"http", "https"} or not url.hostname for url in (a, b)):
+            return False
+        if a.hostname.removeprefix("www.") != b.hostname.removeprefix("www.") or a.port != b.port:
+            return False
+        aq, bq = parse_qs(a.query, keep_blank_values=True), parse_qs(b.query, keep_blank_values=True)
+        for key in ("variant", "sku", "pid", "goodsNo", "product_id", "idx", "id", "branduid"):
+            if aq.get(key) != bq.get(key):
+                return False
+
+        def product_no(url, query):
+            explicit = query.get("product_no")
+            match = re.search(r"/product/(?:[^/]+/)?(\d+)(?:/|$)", url.path, re.I)
+            return explicit or ([match[1]] if match else None)
+
+        an, bn = product_no(a, aq), product_no(b, bq)
+        return bool(an and an == bn) if an or bn else a.path.rstrip("/") == b.path.rstrip("/")
+    except ValueError:
+        return False
 
 
 def detect_device() -> str:
@@ -426,12 +478,20 @@ def discover_product_images(client: httpx.Client, row: dict) -> tuple[str, list[
     product_url = str(row.get("product_url") or "")
     canonical_url = str(row.get("image_url") or "")
 
-    if "cdn.shopify.com" in canonical_url:
+    if urlsplit(canonical_url).hostname == "cdn.shopify.com" and not urlsplit(product_url).query:
         try:
-            response = client.get(shopify_json_url(product_url), timeout=IMAGE_TIMEOUT)
+            endpoint = shopify_json_url(product_url)
+            response = client.get(endpoint, timeout=IMAGE_TIMEOUT)
+            if not same_product_page(str(response.url), endpoint):
+                return "retryable", []
             if response.status_code not in {404, 410}:
                 response.raise_for_status()
-                candidates = extract_shopify_images(response.json())
+                payload = response.json()
+                root = payload.get("product", payload) if isinstance(payload, dict) else {}
+                handle = unquote(urlsplit(product_url).path.rstrip("/").split("/")[-1])
+                if not isinstance(root, dict) or root.get("handle") != handle:
+                    return "retryable", []
+                candidates = extract_shopify_images(payload)
                 if candidates:
                     return "live", candidates
         except (httpx.TimeoutException, httpx.RequestError, json.JSONDecodeError):
@@ -442,12 +502,15 @@ def discover_product_images(client: httpx.Client, row: dict) -> tuple[str, list[
 
     try:
         response = client.get(product_url, timeout=IMAGE_TIMEOUT)
+        if not same_product_page(str(response.url), product_url):
+            return "retryable", []
         if response.status_code in {404, 410}:
             return "gone", []
         response.raise_for_status()
         parser = ProductImageMetaParser(str(response.url))
         parser.feed(response.text)
-        return "live", unique_http_urls(parser.urls)
+        candidates = unique_http_urls(parser.urls)
+        return ("live", candidates) if candidates else ("retryable", [])
     except (httpx.TimeoutException, httpx.RequestError):
         return "retryable", []
     except httpx.HTTPStatusError as error:
@@ -480,32 +543,8 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
         )
 
     bad_urls = {canonical}
-    db_candidates = unique_http_urls(
-        [*(row.get("images") or []), row.get("source_image_url")],
-        exclude=bad_urls,
-    )
-    live_candidates: list[str] = []
-    for candidate in db_candidates:
-        try:
-            image = download_image(client, candidate)
-            clean_images = [candidate, *[url for url in db_candidates if url != candidate and url not in bad_urls]]
-            source = row.get("source_image_url")
-            if not isinstance(source, str) or source in bad_urls:
-                source = candidate
-            return DownloadOutcome(
-                product_id=pid,
-                canonical_url=canonical,
-                canonical_revision=canonical_revision,
-                image=image,
-                repair=ImageRepair(pid, canonical, candidate, source, clean_images, sorted(bad_urls), False),
-            )
-        except Exception as error:
-            failure = classify_download_error(candidate, error)
-            if failure.disposition == "permanent":
-                bad_urls.add(candidate)
-            else:
-                live_candidates.append(candidate)
-
+    # Stored galleries may themselves be contaminated. Only the verified live
+    # product can authorize a replacement, not a successful image download.
     page_state, discovered = discover_product_images(client, row)
     if page_state == "retryable":
         retryable = ImageFailure(
@@ -524,12 +563,13 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
         )
 
     discovered_candidates = unique_http_urls(discovered, exclude=bad_urls)
+    candidate_failure: ImageFailure | None = None
     for candidate in discovered_candidates:
         try:
             image = download_image(client, candidate)
             clean_images = [
                 candidate,
-                *unique_http_urls([*discovered_candidates, *live_candidates], exclude=bad_urls | {candidate}),
+                *unique_http_urls(discovered_candidates, exclude=bad_urls | {candidate}),
             ]
             return DownloadOutcome(
                 product_id=pid,
@@ -542,13 +582,30 @@ def download_product_image(client: httpx.Client, row: dict) -> DownloadOutcome:
             failure = classify_download_error(candidate, error)
             if failure.disposition == "permanent":
                 bad_urls.add(candidate)
+            else:
+                candidate_failure = failure
+
+    if candidate_failure:
+        return DownloadOutcome(
+            product_id=pid,
+            canonical_url=canonical,
+            canonical_revision=canonical_revision,
+            failure=ImageFailure(
+                url=canonical,
+                kind=candidate_failure.kind,
+                disposition="retryable",
+                http_status=candidate_failure.http_status,
+                error=f"replacement {candidate_failure.url}: {candidate_failure.error}",
+                next_retry_at=candidate_failure.next_retry_at,
+            ),
+        )
 
     repair = ImageRepair(
         product_id=pid,
         before_url=canonical,
         replacement_url=None,
         source_image_url=None,
-        images=live_candidates,
+        images=[],
         bad_urls=sorted(bad_urls),
         mark_out_of_stock=page_state == "gone",
     )

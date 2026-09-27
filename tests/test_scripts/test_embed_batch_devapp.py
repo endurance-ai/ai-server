@@ -1,17 +1,20 @@
 import io
 
 import httpx
+import pytest
 from PIL import Image
 
 from scripts.embed_batch_devapp import (
     DownloadOutcome,
     ImageRepair,
+    ProductImageMetaParser,
     SnapshotImage,
     classify_download_error,
     download_product_image,
     extract_shopify_images,
     fetch_pending,
     persist_download_outcomes,
+    same_product_page,
     upsert,
 )
 
@@ -20,6 +23,37 @@ def image_bytes() -> bytes:
     output = io.BytesIO()
     Image.new("RGB", (4, 4), "red").save(output, format="JPEG")
     return output.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("/product/tee/12/", "https://shop.example/product/detail.html?product_no=12", True),
+        ("?product_no=12&cate_no=9", "https://shop.example/product/detail.html?product_no=12&cate_no=2", True),
+        ("?product_no=13", "https://shop.example/product/detail.html?product_no=12", False),
+        ("?variant=2", "https://shop.example/products/coat?variant=1", False),
+        ("https://other.example/products/coat", "https://shop.example/products/coat", False),
+    ],
+)
+def test_product_page_identity(left: str, right: str, expected: bool) -> None:
+    assert same_product_page(left, right) is expected
+
+
+@pytest.mark.parametrize("first_key", ["type", "url"])
+def test_product_og_block_keeps_its_own_image(first_key: str) -> None:
+    page = "https://shop.example/products/coat"
+
+    def meta(key: str, value: str) -> str:
+        return f'<meta property="og:{key}" content="{value}">'
+
+    prefix = meta("url", "/") + meta("image", "/store.jpg")
+    values = {"type": "product", "url": page}
+    second_key = "url" if first_key == "type" else "type"
+    product = meta(first_key, values[first_key]) + meta(second_key, values[second_key])
+    for suffix, expected in [("", []), (meta("image", "/own.jpg"), ["https://shop.example/own.jpg"])]:
+        parser = ProductImageMetaParser(page)
+        parser.feed(prefix + product + suffix)
+        assert parser.urls == expected
 
 
 class FakeCursor:
@@ -101,6 +135,8 @@ def test_broken_canonical_promotes_verified_gallery_image() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == canonical:
             return httpx.Response(404, request=request)
+        if request.url.path == "/products/coat.js":
+            return httpx.Response(200, json={"handle": "coat", "images": [replacement]}, request=request)
         if str(request.url) == replacement:
             return httpx.Response(
                 200,
@@ -129,6 +165,83 @@ def test_broken_canonical_promotes_verified_gallery_image() -> None:
     assert outcome.repair.images[0] == replacement
     assert outcome.repair.bad_urls == [canonical]
     assert outcome.canonical_revision == "7"
+
+
+@pytest.mark.parametrize(
+    "scenario", ["stale_gallery", "redirect", "variant_redirect", "wrong_shopify", "mixed_og", "empty_page"]
+)
+def test_unverified_replacements_never_mutate_product(scenario: str) -> None:
+    canonical = "https://cdn.example/broken.jpg"
+    if scenario == "wrong_shopify":
+        canonical = "https://cdn.shopify.com/files/broken.jpg"
+    replacement = "https://cdn.example/other.jpg"
+    product_url = "https://shop.example/products/coat"
+    if scenario == "variant_redirect":
+        product_url += "?variant=1"
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if str(request.url) == canonical:
+            return httpx.Response(404)
+        if str(request.url) == replacement:
+            return httpx.Response(200, content=image_bytes())
+        if request.url.path.endswith(".js"):
+            return httpx.Response(200, json={"handle": "other", "images": [replacement]})
+        if scenario in {"redirect", "variant_redirect"} and str(request.url) == product_url:
+            target = "/products/other" if scenario == "redirect" else "/products/coat?variant=2"
+            return httpx.Response(302, headers={"location": target})
+        if scenario in {"stale_gallery", "wrong_shopify", "empty_page"}:
+            return httpx.Response(200, text="<html>Temporarily unavailable</html>")
+        prefix = '<meta property="og:type" content="website"><meta property="og:url" content="/">'
+        image = f'<meta property="og:image" content="{replacement}">'
+        owned = '<meta property="og:type" content="product"><meta property="og:url" content="/products/coat">'
+        return httpx.Response(200, text=prefix + image + owned if scenario == "mixed_og" else owned + image)
+
+    row = {
+        "id": "42",
+        "image_url": canonical,
+        "image_revision": "7",
+        "images": [replacement],
+        "product_url": product_url,
+    }
+    with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        outcome = download_product_image(client, row)
+    assert outcome.image is None
+    assert outcome.repair is None
+    assert outcome.failure.disposition == "retryable"
+    assert outcome.failure.next_retry_at is not None
+    assert replacement not in requests
+
+
+@pytest.mark.parametrize("status", [403, 429, 503])
+def test_retryable_replacement_keeps_canonical_for_retry(status: int) -> None:
+    canonical = "https://cdn.example/broken.jpg"
+    replacement = "https://cdn.example/good.jpg"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == canonical:
+            return httpx.Response(404)
+        if str(request.url) == replacement:
+            return httpx.Response(status)
+        return httpx.Response(
+            200, text=f'<meta property="og:type" content="product"><meta property="og:image" content="{replacement}">'
+        )
+
+    row = {
+        "id": "42",
+        "image_url": canonical,
+        "image_revision": "7",
+        "images": [],
+        "product_url": "https://shop.example/products/coat",
+    }
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        outcome = download_product_image(client, row)
+    assert outcome.repair is None
+    assert outcome.failure.url == canonical
+    assert outcome.failure.disposition == "retryable"
+    assert outcome.failure.http_status == status
+    assert outcome.failure.next_retry_at is not None
 
 
 def test_missing_shopify_product_clears_image_and_marks_out_of_stock() -> None:
