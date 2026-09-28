@@ -274,9 +274,13 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tgfx = target_attrs.get("graphics")
     if tgfx and str(fmeta.get("graphics") or "").strip().lower() in tgfx:
         bonus += w.attr_graphics
+    # season 은 카테고리 확장으로 목록일 수 있다(니트 transitional → transitional·winter).
     tseason = target_attrs.get("season")
-    if tseason and str(fmeta.get("season") or "").strip().lower() in tseason:
-        bonus += w.attr_season
+    if tseason:
+        raw = fmeta.get("season")
+        cand = {str(s).strip().lower() for s in raw} if isinstance(raw, list) else {str(raw or "").strip().lower()}
+        if tseason & cand:
+            bonus += w.attr_season
     # v2.6 무드/스타일(final_tags 배열) — 쿼리 무드 ∩ 후보 무드 태그.
     # 보너스를 매칭 태그의 IDF 희귀도로 스케일(미니멀룩 등 흔한 태그≈0, 희귀 태그=풀).
     tmood = target_attrs.get("mood")

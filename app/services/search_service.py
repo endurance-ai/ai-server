@@ -526,6 +526,23 @@ _SEASON_TEXT: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# 계절 라벨 확장 — 상품 카테고리상 라벨보다 넓은 계절에 입는 경우. 니트는 VLM 이 94% 를
+# transitional 로 붙이지만 겨울에도 입는 옷이라 winter 요청에도 맞는 것으로 친다(2026-09-28
+# 결정). summer 라벨 니트(린넨·크로셰)는 그대로 둔다. DB 라벨은 건드리지 않는다.
+_SEASON_EXPAND_BY_CATEGORY: dict[tuple[str, str], tuple[str, ...]] = {
+    ("knitwear", "transitional"): ("transitional", "winter"),
+}
+
+
+def _season_labels(season: str | None, category: str | None) -> list[str] | None:
+    """상품의 v2.6 season 라벨 → rerank 가 매칭할 계절 목록(카테고리 확장 반영)."""
+    s = str(season or "").strip().lower()
+    if not s:
+        return None
+    c = str(category or "").strip().lower()
+    return list(_SEASON_EXPAND_BY_CATEGORY.get((c, s), (s,)))
+
+
 def _extract_season_from_text(text: str) -> set[str]:
     """쿼리 텍스트 → v2.6 season vocab. 계절어가 없으면 빈 집합(부스트 없음).
 
@@ -712,7 +729,8 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
             "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone', "
             "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline', "
-            "attr->>'wash', attr->>'graphics', final_tags, attr->>'season' "
+            "attr->>'wash', attr->>'graphics', final_tags, attr->>'season', "
+            "(SELECT p.category FROM public.products p WHERE p.id = product_id) "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -743,7 +761,7 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 # v2.6 스타일 무드 태그(final_tags 배열, 27 폐쇄값) → 무드 rerank 축.
                 "mood_tags": r[21],
                 # v2.6 season(summer/winter/transitional/all_season) → season rerank 축.
-                "season": r[22],
+                "season": _season_labels(r[22], r[23]),
             }
             for r in await cur.fetchall()
         }

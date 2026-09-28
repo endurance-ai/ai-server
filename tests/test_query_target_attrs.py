@@ -20,6 +20,7 @@ from app.services.search_service import (
     _extract_sleeve_from_text,
     _extract_texture_from_text,
     _query_target_attrs,
+    _season_labels,
 )
 
 
@@ -303,3 +304,21 @@ def test_season_bonus_only_for_matching_label():
     assert _attr_align_bonus(summer, w, target) == pytest.approx(0.10)
     assert _attr_align_bonus(allseason, w, target) == 0.0
     assert _attr_align_bonus(winter, w, target) == 0.0
+
+
+def test_knit_transitional_counts_as_winter():
+    """니트는 간절기 라벨이어도 겨울에 입는다 — winter 요청에도 가산."""
+    from app.scoring.personalize_rerank import RerankWeights, _attr_align_bonus
+
+    assert _season_labels("transitional", "knitwear") == ["transitional", "winter"]
+    assert _season_labels("summer", "knitwear") == ["summer"]
+    assert _season_labels("transitional", "outerwear") == ["transitional"]
+    assert _season_labels(None, "knitwear") is None
+
+    w = RerankWeights(attr_season=0.10)
+    knit = {"feature_metadata": {"season": _season_labels("transitional", "knitwear")}}
+    coat = {"feature_metadata": {"season": _season_labels("transitional", "outerwear")}}
+    assert _attr_align_bonus(knit, w, {"season": {"winter"}}) == pytest.approx(0.10)
+    assert _attr_align_bonus(knit, w, {"season": {"transitional"}}) == pytest.approx(0.10)
+    assert _attr_align_bonus(knit, w, {"season": {"summer"}}) == 0.0
+    assert _attr_align_bonus(coat, w, {"season": {"winter"}}) == 0.0
