@@ -1140,6 +1140,12 @@ def _cap_subject_id(state: WorkingState) -> int:
 _BRAND_SIMILAR_MARKER_RE: Final[re.Pattern[str]] = re.compile(
     r"같은|비슷|느낌|처럼|감성|스타일|(?<=[가-힣 ])st\b", re.IGNORECASE
 )
+# 제외·부정 마커 — "자라 빼고"·"자라 말고"·"자라 별로" 는 그 브랜드를 빼거나 싫다는 뜻이다.
+# 맨-브랜드 라우터가 이를 브랜드 검색으로 가로채면 정반대 결과가 나간다(라우팅 eval
+# delta_exclude, 2026-09-28) → LLM(refine exclude / update_taste)에 맡긴다.
+_BRAND_NEGATION_RE: Final[re.Pattern[str]] = re.compile(
+    r"^(?:빼|제외|말고|말구|싫|별로|아닌)|^(?:except|without|exclude|no|not)$", re.IGNORECASE
+)
 # 모바일 핀 상품 칩 프리픽스 "[#12345 · brand · name · ₩price]" — 이 턴은 '이 상품과
 # 비슷한'(PDP 유사상품) 의도라 search_products 의 상품 임베딩 앵커가 처리해야 한다.
 _PINNED_CHIP_RE: Final[re.Pattern[str]] = re.compile(r"^\[#\d")
@@ -1326,6 +1332,8 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
                 if i + span <= n and resolve_brand_window(tokens, i, span):
                     matched.update(range(i, i + span))
                     break
+        if any(_BRAND_NEGATION_RE.match(_norm_filler(tokens[k])) for k in range(n) if k not in matched):
+            return None
         remaining = [tokens[k] for k in range(n) if k not in matched and not _is_brand_req_filler(tokens[k])]
         # 브랜드 토큰 + 필러 외 실질 토큰이 2개 이상이면 단순 브랜드요청이 아님(비교/질문 등) → LLM.
         if len(remaining) > 1:
