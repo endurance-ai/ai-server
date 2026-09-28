@@ -1011,6 +1011,7 @@ async def run_text_only_search(
     metal_tone: str | None = None,
     wash: str | None = None,
     graphics: str | None = None,
+    season: str | None = None,
     color_family: str | None = None,
     name_query: str | None = None,
     top_k: int = 40,
@@ -1074,6 +1075,7 @@ async def run_text_only_search(
         metal_tone=metal_tone,
         wash=wash,
         graphics=graphics,
+        season=season,
         color_family=color_family,
         name_query=name_query,
         search_query=text_query,
@@ -2074,6 +2076,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 user_key=user_key,
             )
         else:
+            # 계절어는 유저 원문에서 — 에이전트 영어 쿼리에선 자주 빠진다(실측: 한국어 9개 중 6개).
+            from app.services.search_service import _extract_season_from_text
+
+            _season_hint = " ".join(sorted(_extract_season_from_text(str(ctx.get("user_msg") or "")))) or None
             cands = await run_text_only_search(
                 text_query=text_query,
                 category=category,
@@ -2102,6 +2108,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 metal_tone=metal_tone,
                 wash=wash,
                 graphics=graphics,
+                season=_season_hint,
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,

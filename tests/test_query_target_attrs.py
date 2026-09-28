@@ -322,3 +322,14 @@ def test_knit_transitional_counts_as_winter():
     assert _attr_align_bonus(knit, w, {"season": {"transitional"}}) == pytest.approx(0.10)
     assert _attr_align_bonus(knit, w, {"season": {"summer"}}) == 0.0
     assert _attr_align_bonus(coat, w, {"season": {"winter"}}) == 0.0
+
+
+def test_target_attrs_season_from_item_hint():
+    """영어 쿼리에 계절어가 없어도 dispatch 가 실은 item.season(유저 원문)으로 target."""
+    for hint in ("winter", "summer", "transitional"):
+        item = _item("jacket")
+        item.season = hint
+        assert _query_target_attrs(item)["season"] == {hint}
+    item = _item("jacket")
+    item.season = "bogus"
+    assert "season" not in _query_target_attrs(item)

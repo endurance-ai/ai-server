@@ -543,6 +543,9 @@ def _season_labels(season: str | None, category: str | None) -> list[str] | None
     return list(_SEASON_EXPAND_BY_CATEGORY.get((c, s), (s,)))
 
 
+_SEASON_VOCAB: frozenset[str] = frozenset(val for _, val in _SEASON_TEXT)
+
+
 def _extract_season_from_text(text: str) -> set[str]:
     """쿼리 텍스트 → v2.6 season vocab. 계절어가 없으면 빈 집합(부스트 없음).
 
@@ -638,8 +641,10 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
         if _v:
             out[_ax] = {_v}
 
-    # v2.6 season — 쿼리 텍스트 추출 전용(에이전트 인자 없음, mood 와 같은 이유).
-    season_vals = _extract_season_from_text(qtext)
+    # v2.6 season — 쿼리 텍스트 추출 + dispatch 가 유저 원문에서 뽑아 실어 준 item.season
+    # (이미 vocab 값이라 텍스트 추출기에 다시 넣지 않는다 — 'transitional' 은 계절어가 아님).
+    season_hint = set(str(getattr(item, "season", None) or "").lower().split()) & _SEASON_VOCAB
+    season_vals = _extract_season_from_text(qtext) | season_hint
     if season_vals:
         out["season"] = season_vals
 

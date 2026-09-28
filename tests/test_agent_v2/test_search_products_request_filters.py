@@ -173,3 +173,26 @@ async def test_dispatch_forces_request_platform_into_text_search(monkeypatch):
     assert result["ok"] is True
     assert captured["platform"] == "slowsteadyclub"
     assert captured["category"] == "knitwear"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user_msg", "season"),
+    [("겨울 니트 보여줘", "winter"), ("여름 샌들", "summer"), ("가을 자켓", "transitional"), ("검정 니트", None)],
+)
+async def test_dispatch_carries_season_from_user_msg(monkeypatch, user_msg, season):
+    """에이전트가 '겨울 니트'를 'knit sweater'로 옮기며 계절어를 버려도, 유저 원문의
+    계절어가 검색까지 실려 season 가산이 걸려야 한다(2026-09-28 실측 9개 중 6개 누락)."""
+    captured: dict[str, object] = {}
+
+    async def fake_search(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(sp, "run_text_only_search", fake_search)
+    monkeypatch.setattr(sp, "_lookup_profile_gender", lambda _ctx: "unisex")
+    monkeypatch.setattr("app.channels.pre_messages.fire_pre_message", AsyncMock())
+
+    await sp.dispatch({"text_query": "knit sweater"}, {"chat_id": 7, "user_key": "u:7", "user_msg": user_msg})
+
+    assert captured["season"] == season
