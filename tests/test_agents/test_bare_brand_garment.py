@@ -133,6 +133,13 @@ def test_detect_brand_plus_garment(monkeypatch, text, brand, family, garment):
     assert req["garment"] == garment
 
 
+@pytest.mark.parametrize("text", ["자라 빼고", "자라 말고", "자라는 빼줘", "자라 제외", "자라 별로", "no zara"])
+def test_exclusion_is_not_a_brand_request(monkeypatch, text):
+    """'자라 빼고'는 자라를 빼 달라는 말 — 브랜드 검색으로 가로채면 정반대(자라만) 결과."""
+    _seed(monkeypatch, _CATALOG)
+    assert react_loop._detect_bare_brand_request(_state(text), None) is None
+
+
 def test_detect_brand_only_has_no_family(monkeypatch):
     _seed(monkeypatch, _CATALOG)
     req = react_loop._detect_bare_brand_request(_state("자라 보여줘"), None)
