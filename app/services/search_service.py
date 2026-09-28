@@ -516,6 +516,46 @@ def _extract_sleeve_from_text(text: str) -> set[str]:
     return out
 
 
+# v2.6 season(summer/winter/transitional/all_season) — 쿼리의 계절어 → target. 정확히 그 계절
+# 라벨만 올린다 — all_season 까지 같이 올리면 계절 라벨 상품이 적은 풀("겨울 니트")에서
+# all_season 이 상단을 채웠다(2026-09-28 실측). '봄버'(bomber)·'fall' 오검출 방지 경계 포함.
+_SEASON_TEXT: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"여름|한여름|summer", re.I), "summer"),
+    (re.compile(r"겨울|한겨울|winter", re.I), "winter"),
+    (re.compile(r"봄(?!버)|가을|간절기|환절기|\bspring\b|\bautumn\b|\bfall\b", re.I), "transitional"),
+)
+
+
+# 계절 라벨 확장 — 상품 카테고리상 라벨보다 넓은 계절에 입는 경우. 니트는 VLM 이 94% 를
+# transitional 로 붙이지만 겨울에도 입는 옷이라 winter 요청에도 맞는 것으로 친다(2026-09-28
+# 결정). summer 라벨 니트(린넨·크로셰)는 그대로 둔다. DB 라벨은 건드리지 않는다.
+_SEASON_EXPAND_BY_CATEGORY: dict[tuple[str, str], tuple[str, ...]] = {
+    ("knitwear", "transitional"): ("transitional", "winter"),
+}
+
+
+def _season_labels(season: str | None, category: str | None) -> list[str] | None:
+    """상품의 v2.6 season 라벨 → rerank 가 매칭할 계절 목록(카테고리 확장 반영)."""
+    s = str(season or "").strip().lower()
+    if not s:
+        return None
+    c = str(category or "").strip().lower()
+    return list(_SEASON_EXPAND_BY_CATEGORY.get((c, s), (s,)))
+
+
+_SEASON_VOCAB: frozenset[str] = frozenset(val for _, val in _SEASON_TEXT)
+
+
+def _extract_season_from_text(text: str) -> set[str]:
+    """쿼리 텍스트 → v2.6 season vocab. 계절어가 없으면 빈 집합(부스트 없음).
+
+    라벨은 정밀도는 높고 재현율은 낮다(패딩류 winter 80% · 린넨/샌들류 summer 42%,
+    니트 94% 가 transitional) → 필터가 아니라 맞는 상품만 올리는 가산으로만 쓴다."""
+    if not text:
+        return set()
+    return {val for pat, val in _SEASON_TEXT if pat.search(text)}
+
+
 def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     """쿼리가 명시한 target 속성 → 후보 정렬 boost 축("우와 비슷하다").
 
@@ -600,6 +640,13 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
         _v = str(getattr(item, _ax, None) or "").strip().lower()
         if _v:
             out[_ax] = {_v}
+
+    # v2.6 season — 쿼리 텍스트 추출 + dispatch 가 유저 원문에서 뽑아 실어 준 item.season
+    # (이미 vocab 값이라 텍스트 추출기에 다시 넣지 않는다 — 'transitional' 은 계절어가 아님).
+    season_hint = set(str(getattr(item, "season", None) or "").lower().split()) & _SEASON_VOCAB
+    season_vals = _extract_season_from_text(qtext) | season_hint
+    if season_vals:
+        out["season"] = season_vals
 
     # v2.6 wash(데님 워싱)/graphics(로고·프린트).
     wash = str(getattr(item, "wash", None) or "").strip().lower()
@@ -687,7 +734,8 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
             "attr->>'heel_type', attr->>'heel_height', attr->>'shaft', attr->>'shoe_toe', "
             "attr->>'bag_size', attr->>'bag_structure', attr->>'frame_shape', attr->>'metal_tone', "
             "attr->'material', attr->>'pattern', attr->>'primary_color', attr->>'neckline', "
-            "attr->>'wash', attr->>'graphics', final_tags "
+            "attr->>'wash', attr->>'graphics', final_tags, attr->>'season', "
+            "(SELECT p.category FROM public.products p WHERE p.id = product_id) "
             "FROM public.product_features_v26 WHERE product_id = ANY(%s)",
             (ids,),
         )
@@ -717,6 +765,8 @@ async def _attach_feature_metadata(rows: list[dict[str, Any]]) -> None:
                 "graphics": r[20],
                 # v2.6 스타일 무드 태그(final_tags 배열, 27 폐쇄값) → 무드 rerank 축.
                 "mood_tags": r[21],
+                # v2.6 season(summer/winter/transitional/all_season) → season rerank 축.
+                "season": _season_labels(r[22], r[23]),
             }
             for r in await cur.fetchall()
         }
@@ -980,6 +1030,7 @@ async def search_service(state: PipelineState) -> PipelineState:
                 attr_nonapparel=settings.ATTR_ALIGN_NONAPPAREL_W if want_attr else 0.0,
                 attr_wash=settings.ATTR_ALIGN_WASH_W if want_attr else 0.0,
                 attr_graphics=settings.ATTR_ALIGN_GRAPHICS_W if want_attr else 0.0,
+                attr_season=settings.ATTR_ALIGN_SEASON_W if want_attr else 0.0,
             )
             if exclude_axes:
                 logger.info(

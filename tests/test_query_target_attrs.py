@@ -9,14 +9,18 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.search_service import (
     _extract_fit_from_text,
     _extract_material_from_text,
     _extract_mood_from_text,
     _extract_pattern_from_text,
+    _extract_season_from_text,
     _extract_sleeve_from_text,
     _extract_texture_from_text,
     _query_target_attrs,
+    _season_labels,
 )
 
 
@@ -257,3 +261,75 @@ def test_target_attrs_v26_axes_length_sleeve_leg():
 def test_target_attrs_length_cropped_normalizes_to_crop():
     # length vocab 중복(crop/cropped) → 'cropped' 를 'crop' 으로 정규화.
     assert _query_target_attrs(_item("cropped pants", length="cropped"))["length"] == {"crop"}
+
+
+# ── season (2026-09-28) ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("text", "season"),
+    [
+        ("여름 원피스", "summer"),
+        ("summer linen dress", "summer"),
+        ("한겨울 패딩", "winter"),
+        ("winter coat", "winter"),
+        ("가을 니트", "transitional"),
+        ("봄 자켓", "transitional"),
+        ("간절기 아우터", "transitional"),
+        ("fall jacket", "transitional"),
+    ],
+)
+def test_season_extracted(text, season):
+    assert _extract_season_from_text(text) == {season}
+
+
+@pytest.mark.parametrize("text", ["봄버 자켓", "bomber jacket", "waterfall cardigan", "검정 코트", ""])
+def test_season_not_extracted_without_season_word(text):
+    assert _extract_season_from_text(text) == set()
+
+
+def test_target_attrs_season_from_query_text():
+    assert _query_target_attrs(_item("summer dress"))["season"] == {"summer"}
+    assert "season" not in _query_target_attrs(_item("black coat"))
+
+
+def test_season_bonus_only_for_matching_label():
+    from app.scoring.personalize_rerank import RerankWeights, _attr_align_bonus
+
+    w = RerankWeights(attr_season=0.10)
+    target = {"season": {"summer"}}
+    summer = {"feature_metadata": {"season": "summer"}}
+    allseason = {"feature_metadata": {"season": "all_season"}}
+    winter = {"feature_metadata": {"season": "winter"}}
+    assert _attr_align_bonus(summer, w, target) == pytest.approx(0.10)
+    assert _attr_align_bonus(allseason, w, target) == 0.0
+    assert _attr_align_bonus(winter, w, target) == 0.0
+
+
+def test_knit_transitional_counts_as_winter():
+    """니트는 간절기 라벨이어도 겨울에 입는다 — winter 요청에도 가산."""
+    from app.scoring.personalize_rerank import RerankWeights, _attr_align_bonus
+
+    assert _season_labels("transitional", "knitwear") == ["transitional", "winter"]
+    assert _season_labels("summer", "knitwear") == ["summer"]
+    assert _season_labels("transitional", "outerwear") == ["transitional"]
+    assert _season_labels(None, "knitwear") is None
+
+    w = RerankWeights(attr_season=0.10)
+    knit = {"feature_metadata": {"season": _season_labels("transitional", "knitwear")}}
+    coat = {"feature_metadata": {"season": _season_labels("transitional", "outerwear")}}
+    assert _attr_align_bonus(knit, w, {"season": {"winter"}}) == pytest.approx(0.10)
+    assert _attr_align_bonus(knit, w, {"season": {"transitional"}}) == pytest.approx(0.10)
+    assert _attr_align_bonus(knit, w, {"season": {"summer"}}) == 0.0
+    assert _attr_align_bonus(coat, w, {"season": {"winter"}}) == 0.0
+
+
+def test_target_attrs_season_from_item_hint():
+    """영어 쿼리에 계절어가 없어도 dispatch 가 실은 item.season(유저 원문)으로 target."""
+    for hint in ("winter", "summer", "transitional"):
+        item = _item("jacket")
+        item.season = hint
+        assert _query_target_attrs(item)["season"] == {hint}
+    item = _item("jacket")
+    item.season = "bogus"
+    assert "season" not in _query_target_attrs(item)
