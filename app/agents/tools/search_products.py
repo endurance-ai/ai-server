@@ -1851,6 +1851,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 직전 검색 결과(단일 브랜드)에서 복구도 시도(보조).
     if pinned_pid is not None:
         pass  # 핀 상품 유사 = 크로스브랜드, 브랜드 핀/복구 스킵
+    elif similar_seed_names:
+        # brand-similar 는 seed 브랜드를 앵커로 쓰고 결과에서 제외한다 — 여기서 핀을
+        # 브랜드 필터로 얹으면 '그 브랜드만' ∩ '그 브랜드 제외' = 항상 0건.
+        pass
     elif brand_filter is None:
         from app.agents.last_query import get_pinned_brand
 
