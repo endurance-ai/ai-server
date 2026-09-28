@@ -340,6 +340,32 @@ async def _handle_gender_pick(state: WorkingState, sess, gender: str, breadcrumb
             logger.debug("[ingest] gender pick no-pending notice failed: %r", exc)
         return
 
+    # 2026-09-28 — 원래 툴 인자가 남아 있으면 성별만 채워 search_products.dispatch 를 그대로
+    # 다시 돈다. 브랜드·가격·색·제외 조건이 원래 검색과 똑같이 걸린다(예전 경로는 검색어·
+    # 카테고리만 써서 "자라 니트"가 성별 탭 뒤 자라 아닌 니트로 바뀌었다). dispatch 가 결과
+    # 저장·search_done·last_query 까지 처리하므로 여기선 카드만 보낸다.
+    if isinstance(pending.get("args"), dict):
+        try:
+            from app.agents.tools import search_products as sp_tool
+            from app.agents.tools.respond import send_hybrid_batch
+            from app.graphs.nodes._adapter_ctx import get_adapter
+            from app.infrastructure.memory.taste_profile import user_key_for
+
+            resume_ctx = dict(pending.get("ctx") or {})
+            resume_ctx.setdefault("chat_id", state.chat_id)
+            resume_ctx.setdefault("user_key", user_key_for(state.from_user_id, state.chat_id))
+            resume_ctx["req_gender"] = g
+            if state.req_platform:
+                resume_ctx["req_platform"] = state.req_platform
+            res = await sp_tool.dispatch(dict(pending["args"]), resume_ctx)
+            delivered = await send_hybrid_batch(get_adapter(), state.chat_id, ctx=None, offset=0)
+            breadcrumbs.append(
+                f"ingest: gender resume dispatch count={res.get('candidates_count')} delivered={delivered}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[ingest] gender resume dispatch failed: %r", exc)
+        return
+
     base_query = str(pending.get("text_query") or "").strip()
     text_query = f"{base_query} {g}".strip() if base_query else g
     try:

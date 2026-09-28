@@ -370,6 +370,23 @@ def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
     return detail
 
 
+# 성별 카드 탭 후 재검색(ingest._handle_gender_pick)이 dispatch 를 그대로 다시 돌 때 필요한 ctx.
+_GENDER_RESUME_CTX_KEYS: tuple[str, ...] = (
+    "chat_id",
+    "user_key",
+    "thread_id",
+    "lang",
+    "user_msg",
+    "text_query",
+    "vision_category",
+    "vision_subcategory",
+    "style_node_primary",
+    "req_surface",
+    "req_platform",
+    "req_price_max",
+)
+
+
 def _lookup_profile_gender(ctx: dict[str, Any]) -> str | None:
     """Read the user's PINNED gender from the taste profile (cross-session).
 
@@ -1705,6 +1722,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 # search args so the callback can resume without re-typing.
                 from app.agents import pending_gender
 
+                # 2026-09-28 — 원래 툴 인자(args)와 dispatch 가 읽는 ctx 를 통째로 남긴다.
+                # 예전엔 text_query/category/top_k 만 남겨, 카드 탭 후 재검색에서 브랜드·
+                # 가격·색·제외 조건이 전부 사라졌다("자라 니트" → 성별 탭 → 자라 아닌 니트).
+                # ingest 는 성별만 채워 이 dispatch 를 그대로 다시 돈다.
                 pending_gender.set_pending(
                     ctx.get("chat_id"),
                     {
@@ -1714,6 +1735,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                         # dropped an explicit category on pure-text turns).
                         "category": args.get("category") or ctx.get("vision_category"),
                         "top_k": int(args.get("top_k") or 15),
+                        "args": dict(args),
+                        "ctx": {k: ctx[k] for k in _GENDER_RESUME_CTX_KEYS if ctx.get(k) is not None},
                     },
                 )
                 sent = await _send_gender_card(ctx, lang=ctx.get("lang") or "en")
