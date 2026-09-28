@@ -1,0 +1,111 @@
+{
+ "mode": "isolated",
+ "sha": "b0cb1f1",
+ "measured_at": "2026-09-28T12:13:20+00:00",
+ "n_cases": 44,
+ "runs": 3,
+ "results": {
+  "claude-haiku-4-5": {
+   "acc_mean": 80.3,
+   "runs": [
+    75.0,
+    84.1,
+    81.8
+   ],
+   "by_cat": {
+    "brand": "18/30",
+    "clarify": "18/18",
+    "delta": "14/18",
+    "oos": "9/9",
+    "pivot": "7/12",
+    "respond": "15/15",
+    "safety": "9/9",
+    "situation": "7/12",
+    "websearch": "9/9"
+   },
+   "fails": {
+    "brand_bare_1": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_2": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_3": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_4": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "delta_more": [
+     "get_recent_history",
+     "get_recent_history",
+     "get_recent_history"
+    ],
+    "delta_detail": [
+     "get_recent_history",
+     "refine_search",
+     "refine_search"
+    ],
+    "pivot_garment2": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "pivot_occasion": [
+     "ask_user_clarification",
+     "search_products",
+     "ask_user_clarification"
+    ],
+    "tpo_wedding": [
+     "ask_user_clarification",
+     "respond",
+     "ask_user_clarification"
+    ],
+    "tpo_travel": [
+     "respond",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ],
+    "tpo_date": [
+     "respond",
+     "search_products",
+     "ask_user_clarification"
+    ]
+   }
+  },
+  "claude-sonnet-4-5": {
+   "acc_mean": 98.5,
+   "runs": [
+    97.7,
+    100.0,
+    97.7
+   ],
+   "by_cat": {
+    "brand": "30/30",
+    "clarify": "18/18",
+    "delta": "18/18",
+    "oos": "9/9",
+    "pivot": "10/12",
+    "respond": "15/15",
+    "safety": "9/9",
+    "situation": "12/12",
+    "websearch": "9/9"
+   },
+   "fails": {
+    "pivot_garment2": [
+     "ask_user_clarification",
+     "search_products",
+     "ask_user_clarification"
+    ]
+   }
+  }
+ }
+}

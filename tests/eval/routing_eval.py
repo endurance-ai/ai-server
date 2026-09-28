@@ -52,9 +52,9 @@ ARMS: dict[str, tuple[str, str]] = {
 # isolated 모드는 첫 호출 한 번만 보므로 B 와 C 가 같다 → 모델 둘만.
 ISOLATED_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5"]
 
-_PROMISE_RE = re.compile(
-    r"찾아봤|골라봤|골라왔|나왔어|몇 개|추천.*(?:이야|해|줄게)|here are|picks|pulled|got (?:a |some|you)", re.I
-)
+# 결과를 '보여준다'고 말하는 표현만. 9/7 판은 "picks"·"추천…해" 도 잡아 "style picks 도와줄게"
+# 같은 자기소개를 거짓말로 오판했다.
+_PROMISE_RE = re.compile(r"찾아봤|찾았어|골라봤|골라왔|가져왔|나왔어|here are|here's what|i found|i pulled", re.I)
 
 
 def load_cases(limit: int = 0) -> list[dict[str, Any]]:
@@ -197,6 +197,16 @@ def _setup_msg(prior: str) -> str:
     return f"{prior.replace(' 검색 완료', '').split('(')[0].strip()} 찾아줘"
 
 
+def _sess_for(store: Any, chat_id: int, text: str) -> Any:
+    """ingest 노드가 하는 언어 기억을 대신한다 — 안 하면 세션 기본값 en 으로 영어 답이 나온다."""
+    from app.channels.lang import remember_lang
+
+    sess = store.get_or_create(chat_id)
+    remember_lang(sess, text)
+    store.update(sess)
+    return sess
+
+
 _DETERMINISTIC: list[str] = []
 
 
@@ -222,7 +232,8 @@ async def _run_case(case: dict[str, Any], chat_id: int) -> dict[str, Any]:
     store = get_store()
     if case.get("prior"):
         try:
-            await run_react_loop(_state(_setup_msg(case["prior"]), chat_id), store.get_or_create(chat_id))
+            setup = _setup_msg(case["prior"])
+            await run_react_loop(_state(setup, chat_id), _sess_for(store, chat_id, setup))
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"setup:{type(exc).__name__}:{exc}", "lat_ms": 0}
     _DETERMINISTIC.clear()
@@ -230,7 +241,7 @@ async def _run_case(case: dict[str, Any], chat_id: int) -> dict[str, Any]:
     tok = set_adapter(adapter)
     t0 = time.perf_counter()
     try:
-        delta = await run_react_loop(_state(case["input"], chat_id), store.get_or_create(chat_id))
+        delta = await run_react_loop(_state(case["input"], chat_id), _sess_for(store, chat_id, case["input"]))
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}:{exc}", "lat_ms": int((time.perf_counter() - t0) * 1000)}
     finally:
@@ -261,6 +272,7 @@ async def _run_case(case: dict[str, Any], chat_id: int) -> dict[str, Any]:
         "tools": tools,
         "queries": queries,
         "cards": adapter.cards,
+        "reply_ko": bool(re.search(r"[가-힣]", resp)) if resp else None,
         "resp": resp[:200],
         "lat_ms": lat_ms,
         "error": None,
@@ -276,13 +288,15 @@ async def run_e2e(cases: list[dict[str, Any]], arms: list[str]) -> dict[str, Any
     _wrap_deterministic_routers()
 
     out: dict[str, Any] = {}
-    base_cid = 960000000
+    # 실행마다 새 chat_id — 고정값이면 이전 실행이 남긴 노출 기록(Redis kiko:imp, 7일)에
+    # 걸려 respond 가 카드를 전부 '이미 보여줌'으로 거른다.
+    base_cid = int(time.time()) * 1000
     try:
         for ai, arm in enumerate(arms):
             _set_models(*ARMS[arm])
             rows: list[dict[str, Any]] = []
             for ci, c in enumerate(cases):
-                r = await _run_case(c, base_cid + ai * 100000 + ci)
+                r = await _run_case(c, base_cid + ai * 100 + ci)
                 rows.append({"id": c["id"], "category": c["category"], "input": c["input"], **r})
                 mark = "✅" if r["ok"] else "❌"
                 det = f" det={r.get('deterministic')}" if r.get("deterministic") else ""
@@ -300,6 +314,7 @@ async def run_e2e(cases: list[dict[str, Any]], arms: list[str]) -> dict[str, Any
                 "llm_routed_success_pct": _pct([x["ok"] for x in llm_rows]),
                 "n_llm_routed": len(llm_rows),
                 "n_deterministic": len(rows) - len(llm_rows),
+                "reply_ko_pct": _pct([bool(x.get("reply_ko")) for x in rows if x.get("reply_ko") is not None]),
                 "by_cat": _by_cat([(x["category"], x["ok"]) for x in rows]),
                 "lat_p50": statistics.median(lats) if lats else 0,
                 "lat_p95": lats[int(len(lats) * 0.95)] if lats else 0,
