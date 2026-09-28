@@ -160,3 +160,36 @@ def test_session_lang_demo_mode_forces_ko(monkeypatch):
 def test_module_constants():
     assert lang.LANG_KO == "ko"
     assert lang.LANG_EN == "en"
+
+
+# ── 한국어 세션은 영어 '문장'일 때만 영어로 전환 (2026-09-28, 9월 실유저 3턴) ─────
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Auralee",  # 브랜드명만
+        "y2k top",  # 품목어
+        "black oversized hoodie",  # 명사 나열
+        "https://pin.it/3hAxuZl6O   Take a look! 📌",  # 핀터레스트 공유 시트 문구
+        "https://pin.it/abc Check out this Pin",
+    ],
+)
+def test_korean_session_keeps_korean_for_non_sentences(text):
+    sess = SimpleNamespace(lang=LANG_KO)
+    assert remember_lang(sess, text) == LANG_KO
+    assert sess.lang == LANG_KO
+
+
+@pytest.mark.parametrize(
+    "text", ["show me some black hoodies", "can you find a linen shirt", "find me this https://pin.it/x"]
+)
+def test_korean_session_switches_on_english_sentence(text):
+    sess = SimpleNamespace(lang=LANG_KO)
+    assert remember_lang(sess, text) == LANG_EN
+
+
+def test_english_session_unchanged_by_rule():
+    sess = SimpleNamespace(lang=LANG_EN)
+    assert remember_lang(sess, "Auralee") == LANG_EN
+    assert remember_lang(sess, "안녕") == LANG_KO
