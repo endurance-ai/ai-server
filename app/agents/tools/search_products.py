@@ -1591,6 +1591,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             pinned_pid = int(_pid_match.group(1))
         except (TypeError, ValueError):
             pinned_pid = None
+    if pinned_pid is None:
+        # 칩 없는 새 검색 = 새 화제 → 앞서 고정한 상품 앵커를 버린다(다음 "위에 제품"이
+        # 한참 전 칩을 가리키지 않게). 지시어 턴은 react_loop 가 칩을 다시 붙여 여기 안 온다.
+        from app.agents.last_query import clear_last_anchor
+
+        clear_last_anchor(ctx.get("chat_id"))
     if pinned_pid is not None:
         try:
             from app.providers.database import DatabaseProvider
