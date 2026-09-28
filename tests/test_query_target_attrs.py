@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.search_service import (
     _extract_fit_from_text,
     _extract_material_from_text,
     _extract_mood_from_text,
     _extract_pattern_from_text,
+    _extract_season_from_text,
     _extract_sleeve_from_text,
     _extract_texture_from_text,
     _query_target_attrs,
@@ -257,3 +260,46 @@ def test_target_attrs_v26_axes_length_sleeve_leg():
 def test_target_attrs_length_cropped_normalizes_to_crop():
     # length vocab 중복(crop/cropped) → 'cropped' 를 'crop' 으로 정규화.
     assert _query_target_attrs(_item("cropped pants", length="cropped"))["length"] == {"crop"}
+
+
+# ── season (2026-09-28) ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("text", "season"),
+    [
+        ("여름 원피스", "summer"),
+        ("summer linen dress", "summer"),
+        ("한겨울 패딩", "winter"),
+        ("winter coat", "winter"),
+        ("가을 니트", "transitional"),
+        ("봄 자켓", "transitional"),
+        ("간절기 아우터", "transitional"),
+        ("fall jacket", "transitional"),
+    ],
+)
+def test_season_extracted(text, season):
+    assert _extract_season_from_text(text) == {season}
+
+
+@pytest.mark.parametrize("text", ["봄버 자켓", "bomber jacket", "waterfall cardigan", "검정 코트", ""])
+def test_season_not_extracted_without_season_word(text):
+    assert _extract_season_from_text(text) == set()
+
+
+def test_target_attrs_season_from_query_text():
+    assert _query_target_attrs(_item("summer dress"))["season"] == {"summer"}
+    assert "season" not in _query_target_attrs(_item("black coat"))
+
+
+def test_season_bonus_only_for_matching_label():
+    from app.scoring.personalize_rerank import RerankWeights, _attr_align_bonus
+
+    w = RerankWeights(attr_season=0.10)
+    target = {"season": {"summer"}}
+    summer = {"feature_metadata": {"season": "summer"}}
+    allseason = {"feature_metadata": {"season": "all_season"}}
+    winter = {"feature_metadata": {"season": "winter"}}
+    assert _attr_align_bonus(summer, w, target) == pytest.approx(0.10)
+    assert _attr_align_bonus(allseason, w, target) == 0.0
+    assert _attr_align_bonus(winter, w, target) == 0.0

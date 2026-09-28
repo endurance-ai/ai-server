@@ -358,6 +358,9 @@ class Settings(BaseSettings):
     # graphics(none/logo/graphic/text/allover). v1.1 미보유 신규축.
     ATTR_ALIGN_WASH_W: float = 0.12
     ATTR_ALIGN_GRAPHICS_W: float = 0.10
+    # 2026-09-28 — v2.6 season(summer/winter/transitional/all_season). 쿼리 계절어("여름 원피스")
+    # 에 맞는 라벨만 가산. 라벨 재현율이 낮아(니트 94% transitional) 감점·필터로는 안 쓴다.
+    ATTR_ALIGN_SEASON_W: float = 0.10
     # 무드/스타일(product_features_v26.final_tags, 27 폐쇄값: 미니멀룩/그런지/스트릿/
     # Y2K/고프코어…). 예전엔 mood arg 가 하드필터였으나 (0매치 fail-open 랜덤 +
     # 근접무드 배제 + 필터 후 무드-blind 정렬) 전환 최악(윤영 지형도 6~11%) → 하드

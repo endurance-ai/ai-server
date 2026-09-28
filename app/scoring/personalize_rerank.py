@@ -125,6 +125,8 @@ class RerankWeights:
     # v2.6 wash(데님 워싱)/graphics(로고·프린트) — 스칼라.
     attr_wash: float = 0.0
     attr_graphics: float = 0.0
+    # v2.6 season — 스칼라(summer/winter/transitional/all_season).
+    attr_season: float = 0.0
 
 
 # Gender-lean tokens used by brand_nodes.attributes.gender_lean
@@ -272,6 +274,9 @@ def _attr_align_bonus(c: dict[str, Any], w: RerankWeights, target_attrs: dict[st
     tgfx = target_attrs.get("graphics")
     if tgfx and str(fmeta.get("graphics") or "").strip().lower() in tgfx:
         bonus += w.attr_graphics
+    tseason = target_attrs.get("season")
+    if tseason and str(fmeta.get("season") or "").strip().lower() in tseason:
+        bonus += w.attr_season
     # v2.6 무드/스타일(final_tags 배열) — 쿼리 무드 ∩ 후보 무드 태그.
     # 보너스를 매칭 태그의 IDF 희귀도로 스케일(미니멀룩 등 흔한 태그≈0, 희귀 태그=풀).
     tmood = target_attrs.get("mood")
