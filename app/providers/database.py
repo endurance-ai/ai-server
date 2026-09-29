@@ -86,6 +86,30 @@ class DatabaseProvider:
         return cls._parse_vector(rows[0].get("embedding"))
 
     @classmethod
+    async def find_in_stock_products_by_name(cls, name: str, *, limit: int = 5) -> list[dict[str, Any]]:
+        """상품명이 `name` 과 대소문자만 다르고 같은 재고 상품 (PostgREST ilike, 와일드카드 없음).
+
+        사용자가 카드의 상품명을 그대로 적은 턴("Lace Long-Sleeve Blouse 찾아줘")에서
+        그 상품을 찾는 용도. idx_products_name_trgm(GIN trgm) 이 ilike 를 가속한다.
+        반환: [{id, name, brand, category}] / 실패 → []. 호출부는 fail-open.
+        """
+        if not name or any(ch in name for ch in "*%_"):
+            return []
+        try:
+            client = await cls.get_client()
+            res = (
+                await client.from_("products")
+                .select("id,name,brand,category")
+                .ilike("name", name)
+                .eq("in_stock", True)
+                .limit(limit)
+                .execute()
+            )
+        except Exception:
+            return []
+        return list(res.data or [])
+
+    @classmethod
     async def get_brand_centroid_embedding(cls, brand_names: list[str], *, limit: int = 300) -> list[float] | None:
         """브랜드 상품 이미지 임베딩(product_embeddings)의 centroid(평균) 벡터.
 

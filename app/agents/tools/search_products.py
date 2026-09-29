@@ -41,6 +41,70 @@ logger = logging.getLogger(__name__)
 # "그 #1 같은 거" doesn't spuriously trigger a product_id fetch.
 _PINNED_PID_RE = re.compile(r"^\[#(\d+)")
 
+# 2026-09-29 — 상품명 직접 지목. 핀(칩)을 쓰지 않고 카드의 상품명을 그대로 적어 보내는
+# 턴이 있다: "Lace Long-Sleeve Blouse 찾아줘"(9/27), "FIT JERSEY [BLACK]랑 비슷한 스타일
+# 찾아줘"(9/21). 에이전트는 두 턴 모두 이름을 버리고 속성 검색만 했고, 9/27 은 앞 턴
+# 사진에서 가져온 color_family=grey 게이트가 검정인 그 상품을 아예 걸러냈다. 원문에서
+# 영문 상품명 구간을 뽑아 직전 카드 → 재고 카탈로그 순으로 '이름이 정확히 같은' 상품을
+# 찾고, "비슷한" 류 표현이 붙으면 핀과 같은 유사상품 앵커로, 아니면 name_query 로 보낸다.
+_NAMED_SPAN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 '’&.\-/\[\]()]*[A-Za-z0-9\])]")
+_SIMILAR_MARKERS = ("비슷", "같은", "같이", "느낌", "스타일", "st ", "similar", "like ")
+
+
+def _named_product_span(raw_msg: str) -> str | None:
+    """원문에서 상품명 후보(가장 긴 영문 · 숫자 구간)를 뽑는다.
+
+    한 단어 영문('Auralee', 'y2k')은 브랜드명 · 유행어일 때가 많아 상품명으로 보지
+    않는다. 두 단어 이상이거나 대괄호 옵션 표기('[BLACK]')가 있을 때만 후보로 낸다.
+    후보여도 카탈로그에 이름이 정확히 같은 상품이 있을 때만 동작한다.
+    """
+    if not isinstance(raw_msg, str) or _PINNED_PID_RE.search(raw_msg):
+        return None
+    spans = [m.group(0).strip() for m in _NAMED_SPAN_RE.finditer(raw_msg)]
+    span = max(spans, key=len, default="")
+    if len(span) < 6 or (len(span.split()) < 2 and "[" not in span):
+        return None
+    return span
+
+
+def _wants_similar(raw_msg: str) -> bool:
+    low = f"{raw_msg.lower()} "
+    return any(m in low for m in _SIMILAR_MARKERS)
+
+
+async def _resolve_named_product(span: str, ctx: dict[str, Any]) -> dict[str, Any] | None:
+    """상품명 구간과 이름이 정확히 같은(대소문자 무시) 상품을 찾는다.
+
+    직전 턴 카드(`sess.last_results`)를 먼저 보고, 없으면 재고 카탈로그를 조회한다.
+    같은 이름이 여러 브랜드에 있으면 어느 상품인지 모르므로 None. 절대 raise 안 함.
+    """
+    key = span.casefold()
+    try:
+        chat_id = ctx.get("chat_id")
+        if chat_id is not None:
+            from app.infrastructure.memory.session import get_store
+
+            sess = get_store().get_or_create(int(chat_id))
+            fields = ("id", "name", "brand", "category")
+            for c in getattr(sess, "last_results", None) or []:
+                d = c if isinstance(c, dict) else {k: getattr(c, k, None) for k in fields}
+                if str(d.get("name") or "").strip().casefold() == key and d.get("id") is not None:
+                    return {k: d.get(k) for k in fields}
+    except Exception as exc:  # noqa: BLE001 — 직전 카드 조회 실패는 카탈로그 조회로 넘어간다
+        logger.debug("[named-product] last_results lookup skipped: %r", exc)
+    try:
+        from app.providers.database import DatabaseProvider
+
+        rows = await DatabaseProvider.find_in_stock_products_by_name(span)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[named-product] catalog lookup failed: %r", exc)
+        return None
+    rows = [r for r in rows if str(r.get("name") or "").strip().casefold() == key]
+    if not rows or len({str(r.get("brand") or "").casefold() for r in rows}) != 1:
+        return None
+    return rows[0]
+
+
 # RFC 2606 `.invalid` TLD — provably non-resolvable. Used ONLY to satisfy the
 # required RecommendRequest.image_url field on the text-only path. It is NEVER
 # sent to Modal (embed_step is bypassed; the text embedding is injected via
@@ -1591,6 +1655,44 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
             pinned_pid = int(_pid_match.group(1))
         except (TypeError, ValueError):
             pinned_pid = None
+    # 2026-09-29 — 상품명 직접 지목(_named_product_span 주석). "비슷한" 류면 핀과 같은
+    # 유사상품 앵커로 합류하고, 아니면 named_product 로 남겨 아래에서 name_query 로 쓴다.
+    named_product: dict[str, Any] | None = None
+    # ctx.text_query 는 앞 턴 사진의 Vision 검색어로 바뀌어 있을 수 있어(9/27 처럼 사진
+    # 다음 턴) 사용자 원문 user_msg 를 본다.
+    _user_msg = str(ctx.get("user_msg") or raw_msg or "")
+    if pinned_pid is None and not has_image:
+        _span = _named_product_span(_user_msg)
+        if _span:
+            named_product = await _resolve_named_product(_span, ctx)
+            if named_product is not None and not named_product.get("category"):
+                # 직전 카드(Candidate)에는 category 가 없어 상품 자신의 카테고리를 조회한다.
+                try:
+                    from app.providers.database import DatabaseProvider
+
+                    named_product["category"] = await DatabaseProvider.get_product_category(int(named_product["id"]))
+                except Exception:  # noqa: BLE001 — 없으면 args.category 로 폴백
+                    pass
+            if named_product is not None:
+                similar = _wants_similar(_user_msg)
+                logger.info(
+                    "🏷️ [named-product] %r → id=%s brand=%r (%s)",
+                    _span,
+                    named_product.get("id"),
+                    named_product.get("brand"),
+                    "similar anchor" if similar else "name_query",
+                )
+                if similar:
+                    try:
+                        pinned_pid = int(named_product["id"])
+                    except (TypeError, ValueError, KeyError):
+                        pinned_pid = None
+                    named_product = None
+                elif named_product.get("name"):
+                    # 검색 문장도 상품명 자체로 바꾼다. 에이전트의 속성 문장("grey fitted
+                    # long sleeve crew neck lace blouse")을 그대로 두면 family 게이트(tops)
+                    # 안에서 그 상품이 6위로 밀렸다(9/29 dev 실측). 상품명이면 1위.
+                    text_query = str(named_product["name"]).strip()
     if pinned_pid is not None:
         try:
             from app.providers.database import DatabaseProvider
@@ -1793,6 +1895,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         # Pinned anchor: 이전 Vision 턴의 subcategory 를 새 anchor 에 누출하지
         # 않는다 (fit/color 클리어와 동일한 원칙 — refine_search PR #112).
         subcategory = None
+    elif named_product is not None:
+        # 이름으로 지목한 상품 자체의 카테고리를 쓴다. 앞 턴 Vision 의 category ·
+        # subcategory 가 새어 들어와 그 상품을 게이트로 거르지 않게 한다(9/27 실사례).
+        category = named_product.get("category") or args.get("category")
+        subcategory = None
     else:
         # 2026-07-15 배선 수정: 순수 텍스트 턴은 vision_category 가 None 이라
         # LLM `category` arg 가 family gate 에 전혀 닿지 않았다 (gender 재검색
@@ -1825,6 +1932,12 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     graphics = args.get("graphics")
     # 특정 상품/모델 지목 시 상품명 trigram 매칭어 (예: '2021M', 'trompe l’oeil').
     name_query = str(args.get("name_query") or "").strip() or None
+    if named_product is not None:
+        # 원문의 상품명을 그대로 이름 채널에 태우고, 색 하드게이트는 끈다. 9/27 에는
+        # 앞 턴 사진에서 온 color_family=grey 가 검정인 그 상품을 걸러냈다. 지목한
+        # 상품의 색은 상품 자신이 정답이라 요청 색 게이트가 필요 없다.
+        name_query = str(named_product.get("name") or "").strip() or name_query
+        color_family = None
 
     # 2026-07-16 — 구조화 gender (v6 p_gender 하드 필터). 위의 gender
     # resolution 블록이 모든 경로에서 최종 토큰을 text_query 에 남기므로
