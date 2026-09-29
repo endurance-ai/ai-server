@@ -1,0 +1,3401 @@
+{
+ "summary": {
+  "code": {
+   "n": 50,
+   "errors": 0,
+   "brand_none": {
+    "exact_hit": 0.32,
+    "same_token_hit": 0.36
+   },
+   "brand_text": {
+    "exact_hit": 0.5,
+    "same_token_hit": 0.6
+   },
+   "brand_name": {
+    "exact_hit": 0.8,
+    "same_token_hit": 0.86
+   },
+   "nobrand_none": {
+    "exact_hit": 0.02,
+    "same_token_hit": 0.02
+   },
+   "nobrand_text": {
+    "exact_hit": 0.12,
+    "same_token_hit": 0.18
+   },
+   "nobrand_name": {
+    "exact_hit": 0.7,
+    "same_token_hit": 0.78
+   }
+  },
+  "word": {
+   "n": 50,
+   "errors": 0,
+   "brand_none": {
+    "exact_hit": 0.52,
+    "same_token_hit": 0.64
+   },
+   "brand_text": {
+    "exact_hit": 0.64,
+    "same_token_hit": 0.76
+   },
+   "brand_name": {
+    "exact_hit": 0.84,
+    "same_token_hit": 0.94
+   },
+   "nobrand_none": {
+    "exact_hit": 0.04,
+    "same_token_hit": 0.06
+   },
+   "nobrand_text": {
+    "exact_hit": 0.12,
+    "same_token_hit": 0.18
+   },
+   "nobrand_name": {
+    "exact_hit": 0.68,
+    "same_token_hit": 0.86
+   }
+  },
+  "all": {
+   "n": 100,
+   "errors": 0,
+   "brand_none": {
+    "exact_hit": 0.42,
+    "same_token_hit": 0.5
+   },
+   "brand_text": {
+    "exact_hit": 0.57,
+    "same_token_hit": 0.68
+   },
+   "brand_name": {
+    "exact_hit": 0.82,
+    "same_token_hit": 0.9
+   },
+   "nobrand_none": {
+    "exact_hit": 0.03,
+    "same_token_hit": 0.04
+   },
+   "nobrand_text": {
+    "exact_hit": 0.12,
+    "same_token_hit": 0.18
+   },
+   "nobrand_name": {
+    "exact_hit": 0.69,
+    "same_token_hit": 0.82
+   }
+  }
+ },
+ "rows": [
+  {
+   "kind": "code",
+   "id": "806630",
+   "brand": "산산기어",
+   "name": "BREEZE 2IN1 SHORTS",
+   "category": "bottoms",
+   "subcategory": "shorts",
+   "tok": "2in1",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "816265",
+   "brand": "엠하우스",
+   "name": "마일드 텐셀 카프리t (11color)",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "11color",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "922237",
+   "brand": "언더마이카",
+   "name": "RANDOM KEYRING SET (2PCS 1SET)",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "1set",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "805434",
+   "brand": "99%IS-",
+   "name": "OUR D1SPOSABLE MASK (99PCS)",
+   "category": "other",
+   "subcategory": null,
+   "tok": "99pcs",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "705932",
+   "brand": "adidas",
+   "name": "adidas Paris (Cwhite/Cblack/Gum3)",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "gum3",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "812462",
+   "brand": "AMIMENT",
+   "name": "12ST ORDER- color reversible jumper ( sky blue ) 2월3일예약배송",
+   "category": "outerwear",
+   "subcategory": null,
+   "tok": "12st",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "616232",
+   "brand": "ANDERSSON BELL",
+   "name": "UNISEX NERO TRAINER aaa519u(SILVER/BROWN)",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "tok": "aaa519u",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "521442",
+   "brand": "Another Office",
+   "name": "Scape 3Button Jacket (Shetland-Check)",
+   "category": "outerwear",
+   "subcategory": "wool-jacket",
+   "tok": "3button",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "814452",
+   "brand": "ASURA",
+   "name": "2WAYS NOVA BAG (BEIGE)",
+   "category": "bags",
+   "subcategory": "crossbody",
+   "tok": "2ways",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "571057",
+   "brand": "Cayl",
+   "name": "Cool Pants / Black /P0000EWG",
+   "category": "bottoms",
+   "subcategory": "pants",
+   "tok": "p0000ewg",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "835647",
+   "brand": "Chinti & Parker",
+   "name": "Cashmere Shampoo 500ml",
+   "category": "accessories",
+   "subcategory": "scarf",
+   "tok": "500ml",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "727995",
+   "brand": "CHIYAGI THE STORE",
+   "name": "Online exclusive - Flutter 10ml",
+   "category": "other",
+   "subcategory": null,
+   "tok": "10ml",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "735064",
+   "brand": "Cold Culture",
+   "name": "4THE WORLD HOODIE SHADY BLUE",
+   "category": "tops",
+   "subcategory": "hoodie",
+   "tok": "4the",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "659653",
+   "brand": "COLN",
+   "name": "6lack jeans",
+   "category": "bottoms",
+   "subcategory": "jeans",
+   "tok": "6lack",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "882820",
+   "brand": "DEINET",
+   "name": "5WAY ZIPPER NOIR BAG IN BLACK",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "5way",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "874015",
+   "brand": "Eireve",
+   "name": "PETITE CROSS HAIRCLIP SET (3PCS)",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "3pcs",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "901481",
+   "brand": "ESPIONAGE",
+   "name": "282nd AHC Heavyweight Tee Off White",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "282nd",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "650251",
+   "brand": "GLOWNY",
+   "name": "[21th] G BABY TEE (CHOCO)",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "21th",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "483912",
+   "brand": "GOYOWEAR",
+   "name": "25FW MEN'S ACTIVE HALF TIGHTS (BLACK)",
+   "category": "activewear",
+   "subcategory": "athletic-shorts",
+   "tok": "25fw",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "712854",
+   "brand": "Jaded London",
+   "name": "2K13 Moto Panelled Colossus Jeans",
+   "category": "bottoms",
+   "subcategory": "jeans",
+   "tok": "2k13",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "765415",
+   "brand": "JAMES PERSE",
+   "name": "Multi Stripe Area Rug 8Ft X 10Ft - Natural/Black Stripe",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "10ft",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "661973",
+   "brand": "JCAESAR",
+   "name": "JCAESAR L001 Growing Downward Perfume",
+   "category": "other",
+   "subcategory": null,
+   "tok": "l001",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "838539",
+   "brand": "Juun.J",
+   "name": "500D 나일론 뉴스보이백 - 블랙",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "500d",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "444087",
+   "brand": "JW Anderson",
+   "name": "50mm suede platform mules",
+   "category": "shoes",
+   "subcategory": "mules",
+   "tok": "50mm",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "830677",
+   "brand": "KHAITE",
+   "name": "KHAITE x Oliver Peoples 1969C in Vintage DTB",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "1969c",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "760186",
+   "brand": "Lemaire",
+   "name": "CLIP BELT 15MM IN LEATHER",
+   "category": "accessories",
+   "subcategory": "belt",
+   "tok": "15mm",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "823303",
+   "brand": "LVIR",
+   "name": "LVIR 22PS LOOK #2",
+   "category": "other",
+   "subcategory": null,
+   "tok": "22ps",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "876504",
+   "brand": "MISEKISEOUL",
+   "name": "Comme la 5pannel cap CHARCOAL",
+   "category": "headwear",
+   "subcategory": "cap",
+   "tok": "5pannel",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "677261",
+   "brand": "New Balance",
+   "name": "U204lnpa (Shoreline Blue)",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "tok": "u204lnpa",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "868282",
+   "brand": "New Era",
+   "name": "Rugrats 35th Anniversary Forever Young 59FIFTY A-Frame Fitted Hat",
+   "category": "headwear",
+   "subcategory": "hat",
+   "tok": "35th",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "653834",
+   "brand": "NOIRER",
+   "name": "[38size 예약배송 7월 24일] 수피마 코튼 럭스 크롭 티셔츠 (브라운)",
+   "category": "tops",
+   "subcategory": "crop-top",
+   "tok": "38size",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "617392",
+   "brand": "Nokwol",
+   "name": "W Endorphin Speed 5 White/Mutant S11007-97",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "s11007",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "809743",
+   "brand": "NOMANUAL",
+   "name": "23FW GRAPHIC BADGES (3 IN 1)",
+   "category": "other",
+   "subcategory": null,
+   "tok": "23fw",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "644921",
+   "brand": "NON BLANK",
+   "name": "6BTN 브릿지 코트_MEDIUM GREY",
+   "category": "outerwear",
+   "subcategory": "overcoat",
+   "tok": "6btn",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "827429",
+   "brand": "Omirad",
+   "name": "Omirad ON78 Graphic Long-Sleeve Cotton Tee",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "on78",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "864815",
+   "brand": "PLEASENOFOLLOW",
+   "name": "25Vintage Washing Boots-Cut Denim (Light Blue)",
+   "category": "shoes",
+   "subcategory": "boots",
+   "tok": "25vintage",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "750507",
+   "brand": "PREMIATA",
+   "name": "Stevend 8487m",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "8487m",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "773485",
+   "brand": "Rick Owens",
+   "name": "RU02E1333_TB_34 | GETH JEANS",
+   "category": "bottoms",
+   "subcategory": "jeans",
+   "tok": "ru02e1333",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "737455",
+   "brand": "Scuffers",
+   "name": "7Pocket Blue Pants",
+   "category": "bottoms",
+   "subcategory": null,
+   "tok": "7pocket",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "662551",
+   "brand": "SOCIOSHOP",
+   "name": "South2 West8 Cotton Shirt",
+   "category": "tops",
+   "subcategory": "shirt",
+   "tok": "west8",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "907015",
+   "brand": "the pink",
+   "name": "[여리핏/컬러맛집/두가지옵션] 소냐 폭닥 베이직 니트 가디건 (14color)",
+   "category": "outerwear",
+   "subcategory": null,
+   "tok": "14color",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "729812",
+   "brand": "Twojeys",
+   "name": "2Jeys Green Cap",
+   "category": "headwear",
+   "subcategory": "cap",
+   "tok": "2jeys",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "875729",
+   "brand": "U.C.O (UNICO)",
+   "name": "[VINTAGE] Bangle 033 - 3TYPE",
+   "category": "jewelry",
+   "subcategory": "bracelet",
+   "tok": "3type",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "923751",
+   "brand": "URAGO",
+   "name": "Essential half t-shirt_7colors",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "7colors",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "733209",
+   "brand": "VICINITY",
+   "name": "AKIMBO LOWS \"460RS\"",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "460rs",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "869583",
+   "brand": "Victoria Beckham",
+   "name": "Dorian Frame Belt Jumbo 40mm Shiny Calf Leather",
+   "category": "accessories",
+   "subcategory": "belt",
+   "tok": "40mm",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "847518",
+   "brand": "VIKTOR & ROLF",
+   "name": "SPICEBOMB DARK LEATHER EAU DE PARFUM 150ML",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "150ml",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "code",
+   "id": "815654",
+   "brand": "Worthwhile Movement",
+   "name": "McLaren 570S CAP (Orange)",
+   "category": "headwear",
+   "subcategory": "cap",
+   "tok": "570s",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "695329",
+   "brand": "Years Ago",
+   "name": "6pocket Washed Comfort Pants (Denim Ver.), Indigo",
+   "category": "bottoms",
+   "subcategory": "jeans",
+   "tok": "6pocket",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "code",
+   "id": "579592",
+   "brand": "ZIZEMUSEUM",
+   "name": "212E WIDE CARGO TUCK PANTS (BLACK)",
+   "category": "bottoms",
+   "subcategory": "cargo-pants",
+   "tok": "212e",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "815952",
+   "brand": "엠하우스",
+   "name": "[morae]하나비 크로스 슬리브리스 (5color)",
+   "category": "tops",
+   "subcategory": "tank-top",
+   "tok": "morae",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "609183",
+   "brand": "킨더살몬",
+   "name": "Dining Shirt White (KUWAMURA JAPAN)",
+   "category": "tops",
+   "subcategory": "shirt",
+   "tok": "kuwamura",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "616320",
+   "brand": "ANDERSSON BELL",
+   "name": "(WOMEN) NEW OLGA HAIRY KNIT ZIP-UP JACKET awa537w(GREY)",
+   "category": "outerwear",
+   "subcategory": "jacket",
+   "tok": "olga",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "656652",
+   "brand": "ANIV",
+   "name": "EMBO WAPPEN LEATHER JACKET BLACK",
+   "category": "outerwear",
+   "subcategory": "leather-jacket",
+   "tok": "wappen",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "814484",
+   "brand": "ASURA",
+   "name": "HAILEY TASSEL CARDIGAN (SKY BLUE)",
+   "category": "knitwear",
+   "subcategory": "cardigan",
+   "tok": "hailey",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "711009",
+   "brand": "Birrot",
+   "name": "BIRROT CAP",
+   "category": "headwear",
+   "subcategory": "cap",
+   "tok": "birrot",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "855942",
+   "brand": "BMUET(TE)",
+   "name": "스트리트 갤러리 SONG 우먼 블랙 슬리브리스",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "song",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "727472",
+   "brand": "Cayl",
+   "name": "CAYL X MAKETOHIKE DIA2 V3.1",
+   "category": "other",
+   "subcategory": null,
+   "tok": "maketohike",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "760922",
+   "brand": "CFCL",
+   "name": "MILAN RIB CHESTER COAT",
+   "category": "outerwear",
+   "subcategory": null,
+   "tok": "chester",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "727999",
+   "brand": "CHIYAGI THE STORE",
+   "name": "222 Tear",
+   "category": "other",
+   "subcategory": null,
+   "tok": "tear",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "767752",
+   "brand": "Chopova Lowena",
+   "name": "Ambrose Bag",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "ambrose",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "659687",
+   "brand": "COLN",
+   "name": "clam silver open ring",
+   "category": "jewelry",
+   "subcategory": "ring",
+   "tok": "clam",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "623016",
+   "brand": "East Pacific Trade",
+   "name": "Full Signiture Cap (Navy)",
+   "category": "headwear",
+   "subcategory": "cap",
+   "tok": "signiture",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "873988",
+   "brand": "Eireve",
+   "name": "GRAPHIC TIGHTS (GENTLE WAVES)",
+   "category": "bottoms",
+   "subcategory": "leggings",
+   "tok": "gentle",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "584572",
+   "brand": "ERER",
+   "name": "Truecker jacket Sky blue",
+   "category": "outerwear",
+   "subcategory": "jacket",
+   "tok": "truecker",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "901387",
+   "brand": "ESPIONAGE",
+   "name": "Washed Sheepskin Car Coat Black (Vegetable Leather)",
+   "category": "outerwear",
+   "subcategory": "overcoat",
+   "tok": "sheepskin",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "661087",
+   "brand": "Fabrégat",
+   "name": "Avatar Denim Pants (Indigo Blue)",
+   "category": "bottoms",
+   "subcategory": "jeans",
+   "tok": "avatar",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "754669",
+   "brand": "Gimaguas",
+   "name": "Stela Cardigan",
+   "category": "knitwear",
+   "subcategory": "cardigan",
+   "tok": "stela",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "483876",
+   "brand": "GOYOWEAR",
+   "name": "24FW SNUGGLE GOOSE DOWN JACKET (KHAKI)",
+   "category": "outerwear",
+   "subcategory": "down-jacket",
+   "tok": "snuggle",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "606287",
+   "brand": "HERETIC",
+   "name": "COLOR PALETTE T-SHIRT / white",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "palette",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "677491",
+   "brand": "innir",
+   "name": "261 Octa Tricot Double layer Bag (Black)",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "octa",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "765252",
+   "brand": "JAMES PERSE",
+   "name": "Y/OSEMITE Quilted Blanket - Tent/Beige",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "tent",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "893263",
+   "brand": "Jamie Haller",
+   "name": "The Ledger in Cigaro",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "ledger",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "838261",
+   "brand": "Juun.J",
+   "name": "BOYISH 와플 반팔 티셔츠 - 블루",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "boyish",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "749900",
+   "brand": "Khrisjoy",
+   "name": "HOODIE CROP DOUBLE POCKETS STRASS",
+   "category": "tops",
+   "subcategory": "hoodie",
+   "tok": "strass",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "452201",
+   "brand": "Maharishi",
+   "name": "Maharishi 7350 Chimera Panther Tour Short Sleeve Tee - White",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "panther",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "585501",
+   "brand": "MMM",
+   "name": "MMM Signature Logo Sweat Shirts_Mellange",
+   "category": "tops",
+   "subcategory": "sweatshirt",
+   "tok": "mellange",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "654911",
+   "brand": "MONDAY EDITION",
+   "name": "Product : Lovelight Heart Silver Necklace",
+   "category": "jewelry",
+   "subcategory": "necklace",
+   "tok": "lovelight",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "451969",
+   "brand": "New Balance",
+   "name": "New Balance P400 - Nightwatch Green / Midnight Violet",
+   "category": "tops",
+   "subcategory": "shirt",
+   "tok": "nightwatch",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "853643",
+   "brand": "Nokwol",
+   "name": "Nubia Bangle",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "nubia",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "809997",
+   "brand": "NOS COULEURS",
+   "name": "ANDY WARHOL T-SHIRT BEIGE",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "andy",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "575723",
+   "brand": "NOTHINGEVERYTHING",
+   "name": "HANDMADE PLASTIC BAG IN BLACK",
+   "category": "bags",
+   "subcategory": "tote",
+   "tok": "plastic",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "898035",
+   "brand": "NUAKLE",
+   "name": "(m) Aran cable knit_cinnamon",
+   "category": "knitwear",
+   "subcategory": "sweater",
+   "tok": "cinnamon",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "649316",
+   "brand": "OHESHIO",
+   "name": "DOT BUG PATCHY T-SHIRT, BLACK",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "patchy",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "820934",
+   "brand": "OSOI",
+   "name": "SPELLING BAG (S) [TENNISBALL GREEN]",
+   "category": "bags",
+   "subcategory": null,
+   "tok": "tennisball",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "864771",
+   "brand": "PLEASENOFOLLOW",
+   "name": "Bono patch Sweat Hoodie Zip Up (Green)",
+   "category": "tops",
+   "subcategory": "hoodie",
+   "tok": "bono",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "773411",
+   "brand": "Rick Owens",
+   "name": "RU02F4826_LOO_09 | CREEPER GABE",
+   "category": "shoes",
+   "subcategory": null,
+   "tok": "creeper",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "522755",
+   "brand": "ROUGHSIDE",
+   "name": "[ROUGH SIDE] POINTER JACKET (DARK NAVY) *HAVATI EXCLUSIVE",
+   "category": "outerwear",
+   "subcategory": "jacket",
+   "tok": "pointer",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "812046",
+   "brand": "SOONSU",
+   "name": "(2nd Re-stock) Sequins Layer Dress (Beige)",
+   "category": "dresses",
+   "subcategory": null,
+   "tok": "sequins",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "586132",
+   "brand": "SUADE",
+   "name": "SOLO RUCK SACK [CHARCOAL GRAY]",
+   "category": "bags",
+   "subcategory": "backpack",
+   "tok": "ruck",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "610716",
+   "brand": "TEKET",
+   "name": "Mindsweep L/S Tee Blue",
+   "category": "tops",
+   "subcategory": "t-shirt",
+   "tok": "mindsweep",
+   "brand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "640912",
+   "brand": "THE MYSTERIOUS HOTEL",
+   "name": "[11차] WESTERN BELT BAG renew",
+   "category": "bags",
+   "subcategory": "belt-bag",
+   "tok": "renew",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "738254",
+   "brand": "threetimes",
+   "name": "Marshmallow fold wallet",
+   "category": "accessories",
+   "subcategory": null,
+   "tok": "marshmallow",
+   "brand_none": {
+    "exact": false,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": false,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "892405",
+   "brand": "Tkees",
+   "name": "Aqua - Blue Rush",
+   "category": "shoes",
+   "subcategory": "flip-flops",
+   "tok": "rush",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "874977",
+   "brand": "U.C.O (UNICO)",
+   "name": "Cubic Angora Madoros Hat - 4COLOR",
+   "category": "headwear",
+   "subcategory": "hat",
+   "tok": "madoros",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "905335",
+   "brand": "UNAFFECTED ESSENTIAL",
+   "name": "REVERSED HOODIE DOWN JUMPER",
+   "category": "tops",
+   "subcategory": "hoodie",
+   "tok": "reversed",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": false
+   }
+  },
+  {
+   "kind": "word",
+   "id": "869198",
+   "brand": "Victoria Beckham",
+   "name": "Arden Bomber Jacket In Black",
+   "category": "outerwear",
+   "subcategory": "bomber",
+   "tok": "arden",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "857236",
+   "brand": "YAHNSISI",
+   "name": "KARA NICOLE",
+   "category": "tops",
+   "subcategory": "blouse",
+   "tok": "kara",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "586732",
+   "brand": "YEEL",
+   "name": "BACK CHARACTER HOODIE ZIP-UP BLACK",
+   "category": "tops",
+   "subcategory": "hoodie",
+   "tok": "character",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": true,
+    "same_token": true
+   }
+  },
+  {
+   "kind": "word",
+   "id": "579553",
+   "brand": "ZIZEMUSEUM",
+   "name": "VELVET BING BONG TRAINING HOODY (BLUE)",
+   "category": "activewear",
+   "subcategory": null,
+   "tok": "bing",
+   "brand_none": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_text": {
+    "exact": true,
+    "same_token": true
+   },
+   "brand_name": {
+    "exact": true,
+    "same_token": true
+   },
+   "nobrand_none": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_text": {
+    "exact": false,
+    "same_token": false
+   },
+   "nobrand_name": {
+    "exact": false,
+    "same_token": true
+   }
+  }
+ ],
+ "meta": {
+  "mode": "name",
+  "top_k": 15,
+  "attr_align": true,
+  "w_text": 0.3,
+  "pool": 100,
+  "seed": 0.29,
+  "image_tag": null,
+  "generated_at": "2026-09-29 13:17:03",
+  "elapsed_s": 354.4
+ }
+}
