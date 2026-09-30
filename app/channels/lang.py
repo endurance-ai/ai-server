@@ -27,6 +27,29 @@ _URL_TOKEN_RE = re.compile(
 LANG_KO = "ko"
 LANG_EN = "en"
 
+# 한국어 세션을 영어로 바꾸려면 '영어 문장'이어야 한다 — 기능어(대명사·조동사·전치사 등)가
+# 하나 이상 있고 단어가 2개 이상. 브랜드명("Auralee")·품목어("y2k top", "black oversized
+# hoodie")는 한국어 유저도 영문으로 치므로 언어 신호가 아니다(9월 실유저 3턴이 이렇게
+# 영어로 전환됨).
+_EN_FUNCTION_WORDS = frozenset(
+    "i me my you your we us it this that these those the a an is are am was were be do does did "
+    "can could would will should please show find give want need looking look for with and or "
+    "what which how where any some something anything help thanks thank hi hello hey".split()
+)
+_LATIN_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z'-]*")
+# 공유 시트가 링크에 자동으로 붙이는 문구 — 유저가 쓴 말이 아니다(9월 "https://pin.it/… Take a
+# look! 📌" 로 한국어 세션이 영어로 바뀜).
+_SHARE_BOILERPLATE_RE = re.compile(
+    r"take a look!?|check (?:this|it) out!?|check out this pin!?|look what i found(?: on pinterest)?!?|"
+    r"found (?:this|it) on pinterest!?|saw this on pinterest!?",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_english_sentence(text: str) -> bool:
+    words = [w.lower() for w in _LATIN_WORD_RE.findall(text)]
+    return len(words) >= 2 and any(w in _EN_FUNCTION_WORDS for w in words)
+
 
 # Explicit language-switch triggers. Beats the Hangul-detection default so a
 # Korean sentence asking for English ("영어로 말해줘") flips the sticky lang to
@@ -120,6 +143,12 @@ def remember_lang(sess: Any, text: str | None) -> str:
     if tokens and all(_URL_TOKEN_RE.match(t) for t in tokens):
         return prior
     lang = detect_lang(stripped)
+    # 한국어 세션 → 영어 전환은 영어 문장일 때만. 링크·공유 시트 문구("Take a look! 📌")는
+    # 유저가 쓴 말이 아니고, 브랜드·품목어만 친 메시지도 신호가 아니다.
+    if prior == LANG_KO and lang == LANG_EN:
+        rest = _SHARE_BOILERPLATE_RE.sub(" ", " ".join(t for t in tokens if not _URL_TOKEN_RE.match(t)))
+        if not _looks_like_english_sentence(rest):
+            return prior
     try:
         setattr(sess, "lang", lang)
     except Exception:  # noqa: BLE001
