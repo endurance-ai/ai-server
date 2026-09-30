@@ -17,6 +17,7 @@ after a restart just falls back to the current message).
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from typing import Any
 
@@ -156,7 +157,43 @@ def get_recent_searches(chat_id: Any) -> list[dict[str, Any]]:
     return list(reversed(dq)) if dq else []
 
 
+# chat_id -> (상품 칩 원문, 저장 시각). 모바일 상품 칩 "[#646333 · Stüssy · … · ₩135,850]"
+# 은 그 턴에만 붙어, 다음 턴 "더 비슷하게"·"위에 제품"이 무엇을 가리키는지 잃었다(9월 실유저
+# 2세션). react_loop 가 칩 턴에 저장하고, 칩 없는 지시어 턴에 원문 앞에 다시 붙인다.
+_LAST_ANCHOR: dict[int, tuple[str, float]] = {}
+_ANCHOR_TTL_S = 1800.0
+
+
+def set_last_anchor(chat_id: Any, chip: str | None) -> None:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return
+    if chip:
+        _LAST_ANCHOR[cid] = (chip, time.time())
+    else:
+        _LAST_ANCHOR.pop(cid, None)
+
+
+def get_last_anchor(chat_id: Any) -> str | None:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return None
+    hit = _LAST_ANCHOR.get(cid)
+    if not hit:
+        return None
+    chip, ts = hit
+    if time.time() - ts > _ANCHOR_TTL_S:
+        _LAST_ANCHOR.pop(cid, None)
+        return None
+    return chip
+
+
+def clear_last_anchor(chat_id: Any) -> None:
+    set_last_anchor(chat_id, None)
+
+
 def _reset_all_for_tests() -> None:
+    _LAST_ANCHOR.clear()
     _LAST.clear()
     _LAST_BRAND.clear()
     _PINNED_BRAND.clear()

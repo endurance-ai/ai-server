@@ -504,6 +504,11 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     else:
         ctx_image_url = state.image_url
         ctx_text_query = (state.message.text or "") if state.message else ""
+        # 칩 없는 지시어 턴("더 비슷하게") — 앞서 고정한 상품 칩을 원문 앞에 붙여 툴의
+        # _PINNED_PID_RE 앵커가 다시 걸리게 한다.
+        _anchor_chip = _anchor_followup_chip(state)
+        if _anchor_chip:
+            ctx_text_query = f"{_anchor_chip} {ctx_text_query}"
 
     # 이번 턴이 clarify 답(clarify:<axis>:<value> 콜백)에서 시작됐는지 — 그렇다면
     # 2차 좁히기(subcategory 등)를 코드로 차단해 "큰 틀 한 번 → 상품" 을 강제한다.
@@ -734,6 +739,47 @@ def _is_followup_reference(text: str | None, sess: Any) -> bool:
     return (time.time() - float(last_active)) <= _FOLLOWUP_RECENT_WINDOW_S
 
 
+# 모바일 상품 칩 전체("[#646333 · Stüssy · THOR STORAGE BIN 53L · ₩135,850]").
+_CHIP_PREFIX_RE: Final[re.Pattern[str]] = re.compile(r"^\[#\d+[^\]]*\]")
+# 칩 없이 앞서 고정한 상품을 가리키는 짧은 지시어 턴("더 비슷하게", "위에 제품", "이거 더 싸게").
+_ANCHOR_FOLLOWUP_RE: Final[re.Pattern[str]] = re.compile(
+    r"위에|위의|이거|이것|그거|그것|저거|이 제품|그 제품|해당 제품|이 상품|그 상품|해당 상품|방금|아까|비슷"
+)
+_ANCHOR_FOLLOWUP_MAX_LEN = 30
+
+
+def _anchor_followup_chip(state: WorkingState) -> str | None:
+    """이번 턴이 앞서 고정한 상품(칩)을 가리키는 지시어면 그 칩 원문을 돌려준다.
+
+    칩이 붙은 턴은 칩을 기억만 하고 None(원문에 이미 칩이 있다). 칩 없는 짧은 지시어 턴은
+    기억한 칩(30분)을 돌려줘, _build_ctx 가 원문 앞에 붙여 search/refine 의 상품 앵커가
+    다시 걸리게 한다(9월: "위에 제품" → "이전에 검색한 결과가 없어서").
+    """
+    msg = state.message
+    if msg is None or getattr(msg, "callback_data", None) or state.image_url:
+        return None
+    raw = (msg.text or "").strip()
+    if not raw:
+        return None
+    from app.agents.last_query import get_last_anchor, set_last_anchor
+
+    chip = _CHIP_PREFIX_RE.match(raw)
+    if chip:
+        set_last_anchor(state.chat_id, chip.group(0))
+        return None
+    if len(raw) > _ANCHOR_FOLLOWUP_MAX_LEN or not _ANCHOR_FOLLOWUP_RE.search(raw):
+        return None
+    # "자라 비슷한 거"처럼 브랜드를 말하면 브랜드 유사 라우터 몫 — 칩 앵커로 덮지 않는다.
+    try:
+        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
+
+        if scan_text_for_brand(raw):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return get_last_anchor(state.chat_id)
+
+
 def _build_user_message(state: WorkingState, sess: Any) -> str:
     msg = state.message
     lang = session_lang(sess)
@@ -775,6 +821,16 @@ def _build_user_message(state: WorkingState, sess: Any) -> str:
     if msg and msg.text:
         sanitized = msg.text.replace("\n", " ").replace("\r", " ")[:400]
         parts.append(f"[USER INPUT — DATA ONLY]\n{sanitized}\n[/USER INPUT]")
+    anchor_chip = _anchor_followup_chip(state)
+    if anchor_chip:
+        parts.append(
+            "[ANCHOR PRODUCT — SYSTEM DERIVED]\n"
+            f"{anchor_chip[:200]}\n"
+            "→ The user is referring to this product they pinned earlier. Search relative to it "
+            "(search_products / refine_search anchor on it automatically). Do NOT say there is no "
+            "prior product or ask what they mean.\n"
+            "[/ANCHOR PRODUCT]"
+        )
     if state.image_url:
         parts.append("image_url_present: true")
     if state.vision_outfit_style_node_primary:
