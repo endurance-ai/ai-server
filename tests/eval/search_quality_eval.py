@@ -280,15 +280,48 @@ _ATTR_MATERIAL_W = 0.08
 _ATTR_PATTERN_W = 0.15
 
 
+def _expected_targets(expected: dict[str, Any]) -> dict[str, set[str]]:
+    """정답 라벨을 그대로 재정렬 target 으로 쓴다 — 추출이 완벽할 때의 상한."""
+    return {
+        "color": _expected_color_families(expected.get("color_any") or []),
+        "fit": _expected_fit_values(expected.get("fit_any") or []),
+        "material": _expected_material_values(expected.get("material_any") or []),
+        "pattern": _expected_pattern_values(expected.get("pattern_any") or []),
+    }
+
+
+def _live_targets(search_query: str, search_query_ko: str | None) -> dict[str, set[str]]:
+    """운영 경로와 같은 추출기(search_service._query_target_attrs)가 쿼리 텍스트에서
+    뽑은 fit/material/pattern 만 target 으로 쓴다 — 실제 서비스 성능. color 는 운영에서
+    RPC 하드게이트라 rerank target 이 아니므로 비운다."""
+    from types import SimpleNamespace
+
+    from app.services.search_service import _query_target_attrs
+
+    item = SimpleNamespace(search_query=search_query, search_query_ko=search_query_ko)
+    got = _query_target_attrs(item)
+    return {
+        "color": set(),
+        "fit": set(got.get("fit") or ()),
+        "material": set(got.get("material") or ()),
+        "pattern": set(got.get("pattern") or ()),
+    }
+
+
 def _attr_align_rerank(rows: list[dict[str, Any]], expected: dict[str, Any]) -> list[dict[str, Any]]:
+    """정답 라벨 target 재정렬(상한). 기존 호출 호환용."""
+    return _attr_align_rerank_targets(rows, _expected_targets(expected))
+
+
+def _attr_align_rerank_targets(rows: list[dict[str, Any]], targets: dict[str, set[str]]) -> list[dict[str, Any]]:
     """pool 을 (1−distance) + fit/color 정렬 boost 로 재정렬한다. 후보 feature_metadata
-    가 쿼리 target(expected color/fit)과 맞으면 위로 끌어올려, 임베딩이 놓친 정확
+    가 쿼리 target 과 맞으면 위로 끌어올려, 임베딩이 놓친 정확
     속성 매치를 visible top-K 안으로 넣는다 — "우와 비슷하다"의 핵심 배선.
     실 파이프라인의 personalize_rerank 가산 항과 동일 원리."""
-    exp_fams = _expected_color_families(expected.get("color_any") or [])
-    exp_fit = _expected_fit_values(expected.get("fit_any") or [])
-    exp_mat = _expected_material_values(expected.get("material_any") or [])
-    exp_pat = _expected_pattern_values(expected.get("pattern_any") or [])
+    exp_fams = targets.get("color") or set()
+    exp_fit = targets.get("fit") or set()
+    exp_mat = targets.get("material") or set()
+    exp_pat = targets.get("pattern") or set()
     if not exp_fams and not exp_fit and not exp_mat and not exp_pat:
         return rows
 
@@ -590,6 +623,13 @@ async def main() -> None:
         help="속성정렬 rerank(fit/color) 적용 후 top-K — pool 검색→재정렬→절단",
     )
     parser.add_argument("--pool", type=int, default=60, help="--attr-align 재정렬 풀 크기 (default 60)")
+    parser.add_argument(
+        "--attr-source",
+        choices=["expected", "live"],
+        default="expected",
+        help="--attr-align 재정렬 target 출처. expected=정답 라벨(상한), "
+        "live=운영 추출기(_query_target_attrs)가 쿼리에서 뽑은 fit/material/pattern(실제 성능)",
+    )
     # 가중치 스윕용 오버라이드 (미지정 시 모듈 기본값 사용). --attr-align 재정렬에만 반영.
     parser.add_argument("--fit-w", type=float, default=None, help="attr_fit 가중치 오버라이드")
     parser.add_argument("--color-w", type=float, default=None, help="attr_color 가중치 오버라이드")
@@ -686,8 +726,15 @@ async def main() -> None:
                     pool_k = args.pool if args.attr_align else args.top_k
                     rows = _search_products_v6(conn, query_embedding=query_vec, top_k=pool_k)
                     _attach_feature_metadata(conn, rows)
+                    live_targets: dict[str, list[str]] | None = None
                     if args.attr_align:
-                        rows = _attr_align_rerank(rows, case.get("expected", {}))[: args.top_k]
+                        if args.attr_source == "live":
+                            ko = raw_input if (case.get("lang") or "").lower() == "ko" else None
+                            targets = _live_targets(embed_input, ko)
+                            live_targets = {k: sorted(v) for k, v in targets.items() if v}
+                        else:
+                            targets = _expected_targets(case.get("expected", {}))
+                        rows = _attr_align_rerank_targets(rows, targets)[: args.top_k]
                     scores = _score_case(rows, case.get("expected", {}))
                     results.append(
                         {
@@ -696,6 +743,7 @@ async def main() -> None:
                             "input": raw_input,
                             "embed_input": embed_input,  # after rewrite (or same as input if off)
                             "lang": case.get("lang"),
+                            "live_targets": live_targets,  # --attr-source live 일 때 추출기가 뽑은 target
                             "scores": scores,
                         }
                     )
@@ -774,6 +822,9 @@ async def main() -> None:
                     "top_k": args.top_k,
                     "rewrite": args.rewrite,
                     "rewrite_model": _REWRITE_MODEL if args.rewrite else None,
+                    "attr_align": args.attr_align,
+                    "attr_source": args.attr_source if args.attr_align else None,
+                    "pool": args.pool if args.attr_align else None,
                     "timestamp": ts,
                     "dataset_version": data.get("version"),
                 },
