@@ -364,3 +364,48 @@ async def test_respond_idempotent_on_retry(monkeypatch):
         assert adapter.send_card.await_count == 2
     finally:
         set_store(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("shown", "expected"), [({"p0", "p1"}, 2), ({"p0"}, 1)])
+async def test_fresh_search_all_already_shown_reshows(monkeypatch, shown, expected):
+    """결과가 전부 이미 본 상품이면 0장 대신 다시 보여 준다 — 텍스트("골라봤어")는
+    카드보다 먼저 나가므로 0장이면 거짓말. 일부만 겹치면 새 것만(피로 방지 유지)."""
+    from app.agents.tools import respond as respond_tool
+    from app.agents.tools.search_products import CARDS_READY_KEY
+
+    async def is_logged(_chat_id, pid):
+        return pid in shown
+
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.is_logged", is_logged)
+    sess = _session_with_results(2)
+    set_store(_FakeStore(sess))
+    try:
+        adapter = MagicMock()
+        adapter.send_text = AsyncMock()
+        adapter.send_card = AsyncMock(return_value=1001)
+        monkeypatch.setattr("app.graphs.nodes._adapter_ctx.get_adapter", lambda: adapter)
+
+        res = await respond_tool.dispatch({"text": "골라봤어!"}, {"chat_id": 42, CARDS_READY_KEY: True})
+
+        assert res["cards_sent"] == expected
+    finally:
+        set_store(None)
+
+
+@pytest.mark.asyncio
+async def test_pager_does_not_reshow_seen(monkeypatch):
+    """'더보기' 페이저(offset=None)는 새 검색이 아니다 — 다 본 뒤 같은 카드를 되풀이하지 않는다."""
+    from app.agents.tools import respond as respond_tool
+
+    async def is_logged(_chat_id, _pid):
+        return True
+
+    monkeypatch.setattr("app.infrastructure.cache.chat_state.is_logged", is_logged)
+    set_store(_FakeStore(_session_with_results(2)))
+    try:
+        adapter = MagicMock()
+        adapter.send_card = AsyncMock(return_value=1001)
+        assert await respond_tool.send_hybrid_batch(adapter, 42, ctx=None, offset=None) == 0
+    finally:
+        set_store(None)
