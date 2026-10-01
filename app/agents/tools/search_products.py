@@ -434,6 +434,23 @@ def pipeline_exc_detail(exc: BaseException, *, include_host: bool) -> str:
     return detail
 
 
+# 성별 카드 탭 후 재검색(ingest._handle_gender_pick)이 dispatch 를 그대로 다시 돌 때 필요한 ctx.
+_GENDER_RESUME_CTX_KEYS: tuple[str, ...] = (
+    "chat_id",
+    "user_key",
+    "thread_id",
+    "lang",
+    "user_msg",
+    "text_query",
+    "vision_category",
+    "vision_subcategory",
+    "style_node_primary",
+    "req_surface",
+    "req_platform",
+    "req_price_max",
+)
+
+
 def _lookup_profile_gender(ctx: dict[str, Any]) -> str | None:
     """Read the user's PINNED gender from the taste profile (cross-session).
 
@@ -1693,6 +1710,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                     # long sleeve crew neck lace blouse")을 그대로 두면 family 게이트(tops)
                     # 안에서 그 상품이 6위로 밀렸다(9/29 dev 실측). 상품명이면 1위.
                     text_query = str(named_product["name"]).strip()
+    if pinned_pid is None:
+        # (상품명 지목 처리 뒤 — 상품명 "비슷한" 앵커면 pinned_pid 가 있어 지우지 않는다.)
+        # 칩 없는 새 검색 = 새 화제 → 앞서 고정한 상품 앵커를 버린다(다음 "위에 제품"이
+        # 한참 전 칩을 가리키지 않게). 지시어 턴은 react_loop 가 칩을 다시 붙여 여기 안 온다.
+        from app.agents.last_query import clear_last_anchor
+
+        clear_last_anchor(ctx.get("chat_id"))
     if pinned_pid is not None:
         try:
             from app.providers.database import DatabaseProvider
@@ -1807,6 +1831,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 # search args so the callback can resume without re-typing.
                 from app.agents import pending_gender
 
+                # 2026-09-28 — 원래 툴 인자(args)와 dispatch 가 읽는 ctx 를 통째로 남긴다.
+                # 예전엔 text_query/category/top_k 만 남겨, 카드 탭 후 재검색에서 브랜드·
+                # 가격·색·제외 조건이 전부 사라졌다("자라 니트" → 성별 탭 → 자라 아닌 니트).
+                # ingest 는 성별만 채워 이 dispatch 를 그대로 다시 돈다.
                 pending_gender.set_pending(
                     ctx.get("chat_id"),
                     {
@@ -1816,6 +1844,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                         # dropped an explicit category on pure-text turns).
                         "category": args.get("category") or ctx.get("vision_category"),
                         "top_k": int(args.get("top_k") or 15),
+                        "args": dict(args),
+                        "ctx": {k: ctx[k] for k in _GENDER_RESUME_CTX_KEYS if ctx.get(k) is not None},
                     },
                 )
                 sent = await _send_gender_card(ctx, lang=ctx.get("lang") or "en")

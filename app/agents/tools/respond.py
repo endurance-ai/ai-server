@@ -819,19 +819,18 @@ async def send_hybrid_batch(
         if await _is_already_shown(c):
             continue
         eligible_pos.append((start + i, c))
-    # 260907 — refine 거짓말 방지: refine(cheaper/color 로 좁힌 셋)이 직전에 이미
-    # 보여준 것과 겹치면 cross-turn dedup 이 전부 걸러 dense_count>0 인데 card_sent 0
-    # → respond 텍스트("몇 개 나왔어")가 거짓이 된다(실트레이스 17:27 블레이저 refine).
-    # refine 은 "그 좁힌 셋을 지금 보여줘"가 의도라 재-노출이 옳다 → dedup 없이 재충전.
-    # 단 fresh 새 검색의 억제(260611: 겹치면 0장)는 유지 — REFINE_TURN_KEY 로 구분.
-    from app.agents.tools.search_products import REFINE_TURN_KEY
-
-    if not eligible_pos and is_fresh_search and ctx is not None and ctx.get(REFINE_TURN_KEY):
+    # 거짓말 방지 — 이번 검색 결과가 전부 이미 보여준 상품이면 cross-turn dedup 이 전부
+    # 걸러 카드 0장인데, 텍스트("골라봤어")는 카드 전송 전에 이미 나간 뒤라 거짓이 된다.
+    # 260907 에 refine 만 예외였고, 2026-09-28 새 검색(search_products·맨-브랜드 라우터·
+    # 성별 카드 재검색)으로 넓혔다 — 결과가 적은 검색을 되풀이하면 0장이 됐다(라우팅 eval
+    # "아크네 가디건" 1건 → 재실행 시 0장). 일부만 겹치면 지금처럼 새 것만 보여 준다
+    # (피로 방지 유지). 페이저(offset=None)는 새 검색이 아니라 제외.
+    if not eligible_pos and is_fresh_search:
         for i, c in enumerate(all_candidates[start:]):
             if _has_plausible_image(c):
                 eligible_pos.append((start + i, c))
         if eligible_pos:
-            logger.info("[tool.respond] refine dedup→0; re-showing %d (거짓말 방지)", len(eligible_pos))
+            logger.info("[tool.respond] fresh dedup→0; re-showing %d (거짓말 방지)", len(eligible_pos))
     # 앱(SSE StreamingAdapter)은 미디어그룹 없이 카드별로 스트리밍하므로 텔레그램
     # 앨범 10장 제약과 무관 — 어댑터가 `album_size`(int) 를 노출하면 그 값을 쓴다
     # (앱은 2열 그리드라 한 배치에 더 많이). 미노출/비-int(테스트 MagicMock 등)는

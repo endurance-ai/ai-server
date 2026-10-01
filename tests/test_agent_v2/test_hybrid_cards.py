@@ -469,7 +469,7 @@ async def test_cards_more_logs_only_new_batch_no_double_log(monkeypatch):
 @pytest.mark.asyncio
 async def test_new_search_suppresses_previously_shown_products(monkeypatch):
     """260611 UX dedup — a product shown in search #1 MUST be suppressed when it
-    appears again in a SUBSEQUENT search (whether fresh or refine), to prevent
+    appears again in a SUBSEQUENT search alongside unseen ones, to prevent
     repeated MUSED/Mardi/ZARA fatigue across `crit:more` / new search turns.
 
     Inverts the prior `test_new_search_relogs_product_shown_in_previous_search`
@@ -498,17 +498,18 @@ async def test_new_search_suppresses_previously_shown_products(monkeypatch):
         await respond_tool.dispatch({"text": "first"}, {"chat_id": 42, CARDS_READY_KEY: True})
         assert logged_pids == [["p0", "p1", "p2"]]
 
-        # Search #2 (NEW search, fresh offset==0) with the SAME pids → must
-        # deliver 0 (all filtered as previously-shown) → log_impressions NOT
-        # called again because there's nothing to deliver.
+        # Search #2 (NEW search, fresh offset==0) overlapping p0..p2 plus new
+        # p3, p4 → only the unseen p3, p4 are delivered (fatigue dedup holds).
+        # 2026-09-28: when EVERY result was already shown, the batch is re-shown
+        # instead of sending 0 cards under a "골라봤어" text — covered by
+        # test_respond_cards.py::test_fresh_search_all_already_shown_reshows.
         from app.infrastructure.cache import chat_state as _cs
 
         await _cs.set_cursor(42, 0)
-        set_store(_FakeStore(_session_with_results(3)))
+        set_store(_FakeStore(_session_with_results(5)))
         res = await respond_tool.dispatch({"text": "second"}, {"chat_id": 42, CARDS_READY_KEY: True})
-        assert res["cards_sent"] == 0
-        # No second logging — products were filtered upstream.
-        assert logged_pids == [["p0", "p1", "p2"]]
+        assert res["cards_sent"] == 2
+        assert logged_pids == [["p0", "p1", "p2"], ["p3", "p4"]]
     finally:
         set_store(None)
 
