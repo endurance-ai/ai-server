@@ -138,6 +138,32 @@ async def test_similar_to_named_card_anchors_on_that_product(monkeypatch, _mock_
     assert _captured_search["name_query"] is None
 
 
+@pytest.mark.asyncio
+async def test_named_product_becomes_anchor_for_next_turn(monkeypatch, _mock_embed_text, _captured_search, _session):
+    """10/1 운영 재현: Stüssy 칩 → "FIT JERSEY [BLACK]랑 비슷한" → "위에 제품"이 Stüssy 를 가리킴.
+    상품명으로 지목한 상품이 다음 턴 기준 상품(칩)이 돼야 한다."""
+    from app.agents import last_query
+
+    last_query.set_last_anchor(8, "[#646333 · Stüssy · THOR STORAGE BIN 53L · ₩135,850]")
+    _session.last_results = [SimpleNamespace(id="855565", name="FIT JERSEY [BLACK]", brand="SUADE")]
+    monkeypatch.setattr(
+        "app.providers.database.DatabaseProvider.find_in_stock_products_by_name", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        "app.providers.database.DatabaseProvider.get_product_embedding", AsyncMock(return_value=_ANCHOR_VEC)
+    )
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.get_product_category", AsyncMock(return_value="tops"))
+
+    msg = "FIT JERSEY [BLACK]랑 비슷한 스타일 찾아줘"
+    ctx = {"chat_id": 8, "user_key": "u:8", "image_url": "", "text_query": msg, "user_msg": msg}
+    await sp.dispatch({"text_query": "black fitted top"}, ctx)
+
+    chip = last_query.get_last_anchor(8)
+    assert chip == "[#855565 · SUADE · FIT JERSEY (BLACK)]"
+    assert sp._PINNED_PID_RE.search(chip).group(1) == "855565"
+    last_query.clear_last_anchor(8)
+
+
 @pytest.mark.parametrize(
     "user_msg",
     [
