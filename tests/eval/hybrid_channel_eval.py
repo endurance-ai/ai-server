@@ -191,7 +191,7 @@ def _fetch_features(conn: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
         return {pid: (fm or {}) for pid, fm in cur.fetchall()}
 
 
-async def _run_attr(conn: Any) -> dict[str, Any]:
+async def _run_attr(conn: Any, w_texts: list[float] | None = None) -> dict[str, Any]:
     from matrix import get_patterns
 
     from app.core.config import settings
@@ -212,8 +212,16 @@ async def _run_attr(conn: Any) -> dict[str, Any]:
         return {"pattern": pid, "en": v["en"], "ids": [i for i in (_cand_id(c) for c in cands) if i]}
 
     out: dict[str, Any] = {}
-    for label, flag in (("image_only", False), ("hybrid", True)):
+    # w_texts 를 주면 블렌드 텍스트 가중을 바꿔 가며 잰다(비율 스윕). 기준선으로 v6 이미지 단독도 같이.
+    arms: list[tuple[str, bool, float | None]] = [("image_only", False, None)]
+    if w_texts:
+        arms += [(f"w_text={w:g}", True, w) for w in w_texts]
+    else:
+        arms.append(("hybrid", True, None))
+    default_w = settings.SEARCH_HYBRID_W_TEXT
+    for label, flag, w in arms:
         settings.SEARCH_HYBRID_ENABLED = flag
+        settings.SEARCH_HYBRID_W_TEXT = default_w if w is None else w
         rows = await asyncio.gather(*[one(pid, v) for pid, v in queries])
         feats = _fetch_features(conn, sorted({i for r in rows for i in r["ids"]}))
         for r in rows:
@@ -332,6 +340,11 @@ async def main() -> None:
     ap.add_argument("mode", choices=["attr", "name"])
     ap.add_argument("--per-kind", type=int, default=50, help="name 모드: 코드/단어 토큰별 표본 수")
     ap.add_argument(
+        "--w-text",
+        default=None,
+        help="attr 모드: 블렌드 텍스트 가중 스윕 (예: 0,0.1,0.2,0.3,0.5,0.7,1). 생략 시 배포값 하나만",
+    )
+    ap.add_argument(
         "--attr-align",
         choices=["on", "off"],
         default="on",
@@ -353,14 +366,15 @@ async def main() -> None:
 
     t0 = time.time()
     with psycopg.connect(settings.DB_DSN) as conn:
-        result = await (_run_attr(conn) if args.mode == "attr" else _run_name(conn, args.per_kind))
+        w_texts = [float(x) for x in args.w_text.split(",")] if args.w_text else None
+        result = await (_run_attr(conn, w_texts) if args.mode == "attr" else _run_name(conn, args.per_kind))
 
     image_tag = subprocess.run(["sh", "-c", "echo ${IMAGE_TAG:-}"], capture_output=True, text=True).stdout.strip()
     result["meta"] = {
         "mode": args.mode,
         "top_k": TOP_K,
         "attr_align": settings.ATTR_ALIGN_ENABLED,
-        "w_text": settings.SEARCH_HYBRID_W_TEXT,
+        "w_text": args.w_text or settings.SEARCH_HYBRID_W_TEXT,
         "pool": settings.SEARCH_HYBRID_POOL,
         "seed": SEED,
         "image_tag": image_tag or None,
