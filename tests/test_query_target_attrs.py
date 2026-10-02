@@ -172,6 +172,17 @@ def test_extract_material_none_when_absent():
     assert _extract_material_from_text("elegant midi dress") == set()
 
 
+def test_target_attrs_nylon_and_polyester_count_as_same_material():
+    # 사진으로 구분이 안 돼 VLM 이 나일론 바람막이를 polyester 로도 태깅한다(2026-10-02 실측).
+    assert _query_target_attrs(_item("nylon windbreaker"))["material"] == {"nylon", "polyester"}
+    assert _query_target_attrs(_item("폴리에스터 바람막이"))["material"] == {"polyester", "nylon"}
+    assert _query_target_attrs(_item("", fabric="nylon"))["material"] == {"nylon", "polyester"}
+
+
+def test_target_attrs_other_materials_not_expanded():
+    assert _query_target_attrs(_item("linen shirt"))["material"] == {"linen"}
+
+
 # ── pattern 추출 ────────────────────────────────────────────────────────────
 
 
