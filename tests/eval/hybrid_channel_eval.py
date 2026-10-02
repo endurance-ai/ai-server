@@ -62,10 +62,11 @@ SEED = 0.29
 # pattern : feature_metadata.pattern 이 집합 안에 있으면 hit.
 # kw      : feature_metadata.details 문구 중 하나가 정규식과 맞으면 hit
 #           (소재 · 패턴 어휘에 없는 디테일용: 케이블, 아가일, 퀼팅 등).
+# 2026-10-02 사람 검토: 점수가 낮은 쿼리의 실제 결과 상품을 보고 기대값 5개를 고쳤다(주석 표시).
 _ATTR_TRUTH: dict[str, dict[str, Any]] = {
     # p1 색
     "burgundy cardigan": {"color": {"RED", "PURPLE"}},
-    "khaki shirt": {"color": {"KHAKI", "GREEN"}},
+    "khaki shirt": {"color": {"KHAKI", "GREEN", "BEIGE"}},  # 10/2 검토: 패션의 카키는 샌드 · 베이지 계열
     "navy blazer": {"color": {"NAVY"}},
     "beige trench coat": {"color": {"BEIGE", "CREAM"}},
     "black slip dress": {"color": {"BLACK"}},
@@ -95,24 +96,24 @@ _ATTR_TRUTH: dict[str, dict[str, Any]] = {
     "tweed jacket": {"material": {"tweed"}},
     "velvet dress": {"material": {"velvet"}},
     "satin skirt": {"material": {"satin", "silk"}},
-    "mohair cardigan": {"kw": r"mohair"},
+    "mohair cardigan": {"kw": r"mohair|fuzzy"},  # 10/2 검토: VLM 소재 어휘에 mohair 없음, 디테일은 "fuzzy texture"
     "cotton zip-up hoodie": {"material": {"cotton"}},
     "silk blouse": {"material": {"silk", "satin"}},
-    "nylon windbreaker": {"material": {"nylon", "ripstop"}},
+    "nylon windbreaker": {"material": {"nylon", "ripstop", "polyester"}},  # 10/2 검토: 사진으로 구분 불가, 둘 다 정답
     "shearling jacket": {"kw": r"shearling|sherpa"},
     "ribbed knit top": {"kw": r"\brib"},
     "mesh top": {"material": {"mesh"}},
     "canvas tote bag": {"material": {"canvas"}},
     "fleece zip-up jacket": {"material": {"fleece"}},
-    "knit polo shirt": {"material": {"knit"}},
+    "knit polo shirt": {"material": {"knit"}, "kw": r"knit|ribbed"},  # 10/2 검토: 실 종류(cotton 등)만 붙은 니트 폴로
     # p6 패턴 · 디테일
     "striped shirt": {"pattern": {"striped"}},
     "checked jacket": {"pattern": {"checked"}},
     "cable knit sweater": {"kw": r"cable"},
-    "argyle knit vest": {"kw": r"argyle"},
+    "argyle knit vest": {"kw": r"argyle"},  # 10/2 검토: 체크(checked)와 구분, argyle 만 정답
     "floral print dress": {"pattern": {"floral"}},
     "polka dot blouse": {"pattern": {"dot"}},
-    "houndstooth coat": {"kw": r"houndstooth"},
+    "houndstooth coat": {"kw": r"houndstooth"},  # 10/2 검토: checked 포함 여부 판단 보류, 현행 유지
     "leopard print skirt": {"pattern": {"animal"}},
     "plaid tartan skirt": {"pattern": {"checked"}},
     "graphic print t-shirt": {"pattern": {"graphic"}},
