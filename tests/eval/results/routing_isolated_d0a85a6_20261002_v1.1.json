@@ -1,0 +1,116 @@
+{
+ "mode": "isolated",
+ "sha": "unknown",
+ "measured_at": "2026-10-02T08:44:20+00:00",
+ "n_cases": 44,
+ "runs": 3,
+ "results": {
+  "claude-haiku-4-5": {
+   "acc_mean": 75.0,
+   "runs": [
+    77.3,
+    72.7,
+    75.0
+   ],
+   "by_cat": {
+    "brand": "17/30",
+    "clarify": "18/18",
+    "delta": "15/18",
+    "oos": "9/9",
+    "pivot": "6/12",
+    "respond": "15/15",
+    "safety": "9/9",
+    "situation": "1/12",
+    "websearch": "9/9"
+   },
+   "fails": {
+    "brand_bare_1": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_2": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_3": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_bare_4": [
+     "respond",
+     "respond",
+     "respond"
+    ],
+    "brand_indie_2": [
+     "search_products",
+     "respond",
+     "search_products"
+    ],
+    "delta_more": [
+     "get_recent_history",
+     "get_recent_history",
+     "get_recent_history"
+    ],
+    "pivot_garment2": [
+     "ask_user_clarification",
+     "respond",
+     "respond"
+    ],
+    "pivot_occasion": [
+     "respond",
+     "respond",
+     "ask_user_clarification"
+    ],
+    "tpo_wedding": [
+     "search_products",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ],
+    "tpo_travel": [
+     "ask_user_clarification",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ],
+    "tpo_date": [
+     "ask_user_clarification",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ],
+    "tpo_office": [
+     "ask_user_clarification",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ]
+   }
+  },
+  "claude-sonnet-4-5": {
+   "acc_mean": 97.7,
+   "runs": [
+    97.7,
+    97.7,
+    97.7
+   ],
+   "by_cat": {
+    "brand": "30/30",
+    "clarify": "18/18",
+    "delta": "18/18",
+    "oos": "9/9",
+    "pivot": "9/12",
+    "respond": "15/15",
+    "safety": "9/9",
+    "situation": "12/12",
+    "websearch": "9/9"
+   },
+   "fails": {
+    "pivot_garment2": [
+     "ask_user_clarification",
+     "ask_user_clarification",
+     "ask_user_clarification"
+    ]
+   }
+  }
+ }
+}
