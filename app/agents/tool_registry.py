@@ -486,7 +486,7 @@ REGISTRY: dict[str, ToolMetadata] = {
             "      Always include action='refine' alongside style detail boosts.\n\n"
             "  ● COLOR SWAP → `color` (English color word). Use action='color_swap'.\n"
             "      '파란색으로' / 'in blue'  → color='blue', action='color_swap'\n\n"
-            "  ● MOOD → `mood` (직전 결과를 특정 스타일 무드로 좁힘, HARD 필터). 한글 27 폐쇄값 "
+            "  ● MOOD → `mood` (직전 결과에서 그 스타일 무드 상품의 순위를 올림, 필터 아님). 한글 27 폐쇄값 "
             "(search_products.mood 와 동일: 그런지·리조트·핫걸·올드머니룩·Y2K·코케트 …).\n"
             "      '리조트st로' / '더 그런지하게'  → mood='리조트' / mood='그런지', action='refine'\n\n"
             "  ● EXCLUDE → `exclude_brands` or `exclude_keywords` + action='exclude'.\n"
