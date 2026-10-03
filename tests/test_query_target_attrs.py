@@ -362,3 +362,61 @@ def test_fit_arg_out_of_vocab_without_text_fit_is_dropped():
 def test_fit_arg_in_vocab_still_wins_over_text(arg, expected):
     out = _query_target_attrs(_item("oversized coat", fit=arg))
     assert out["fit"] == expected
+
+
+# ── 축별 인자 표기 정규화 (2026-10-03 사람 검토) ──────────────────────────────
+# dev DB 9/1~10/2 search_products 인자에서 카탈로그 값과 표기만 달라 가산이 0이던 값들.
+
+
+def _item_v26(search_query: str = "", **kw) -> SimpleNamespace:
+    base = _item(search_query)
+    for k in ("surface", "texture", "design_details", "season", "wash", "graphics", "mood"):
+        setattr(base, k, None)
+    for k, v in kw.items():
+        setattr(base, k, v)
+    return base
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("crew-neck", "crew"), ("scoop-neck", "scoop"), ("notch-collar", "collared"), ("high-neck", "mock")],
+)
+def test_neckline_arg_spelling_maps_to_catalog(raw, expected):
+    assert _query_target_attrs(_item_v26("top", neckline=raw))["neckline"] == {expected}
+
+
+def test_sleeve_three_quarter_hyphen_maps_to_underscore():
+    assert _query_target_attrs(_item_v26("blouse", sleeve_length="three-quarter"))["sleeve_length"] == {"three_quarter"}
+
+
+def test_leg_bootcut_maps_to_flare():
+    assert _query_target_attrs(_item_v26("jeans", leg_shape="bootcut"))["leg_shape"] == {"flare"}
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("button-front", "buttoned"), ("shirring", "ruched")])
+def test_design_details_spelling_maps_to_catalog(raw, expected):
+    assert _query_target_attrs(_item_v26("dress", design_details=raw))["design_details"] == {expected}
+
+
+@pytest.mark.parametrize("raw", ["raglan", "zip", "celestial", "drape"])
+def test_design_details_out_of_vocab_is_dropped(raw):
+    assert "design_details" not in _query_target_attrs(_item_v26("top", design_details=raw))
+
+
+def test_material_lace_moves_to_texture():
+    out = _query_target_attrs(_item_v26("black blouse", fabric="lace"))
+    assert "lace" in out["texture"]
+    assert "lace" not in out.get("material", set())
+
+
+def test_fit_straight_moves_to_leg_shape():
+    # 9/8 운영 호출 재현
+    out = _query_target_attrs(_item_v26("black high-rise straight wool trousers women", fit="straight"))
+    assert out["leg_shape"] == {"straight"}
+    assert "fit" not in out
+
+
+def test_design_distressed_moves_to_texture():
+    out = _query_target_attrs(_item_v26("jeans", design_details="distressed"))
+    assert "distressed" in out["texture"]
+    assert "design_details" not in out
