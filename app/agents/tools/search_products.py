@@ -451,6 +451,20 @@ _GENDER_RESUME_CTX_KEYS: tuple[str, ...] = (
 )
 
 
+def _anchor_chip_for(product: dict[str, Any]) -> str | None:
+    """상품 → 모바일 칩과 같은 꼴 "[#id · brand · name]". 이름 속 대괄호("FIT JERSEY [BLACK]")는
+    칩 경계(']')와 섞이지 않게 괄호로 바꾼다."""
+    pid = product.get("id")
+    if pid is None or not str(pid).isdigit():
+        return None
+    parts = [f"#{pid}"]
+    for key in ("brand", "name"):
+        v = str(product.get(key) or "").strip().replace("[", "(").replace("]", ")")
+        if v:
+            parts.append(v)
+    return "[" + " · ".join(parts) + "]"
+
+
 def _lookup_profile_gender(ctx: dict[str, Any]) -> str | None:
     """Read the user's PINNED gender from the taste profile (cross-session).
 
@@ -1675,6 +1689,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 2026-09-29 — 상품명 직접 지목(_named_product_span 주석). "비슷한" 류면 핀과 같은
     # 유사상품 앵커로 합류하고, 아니면 named_product 로 남겨 아래에서 name_query 로 쓴다.
     named_product: dict[str, Any] | None = None
+    # 상품명으로 지목한 상품 — 다음 턴 "위에 제품"·"더 비슷하게"가 이 상품을 가리키게 칩 형태로 기억.
+    _named_anchor_chip: str | None = None
     # ctx.text_query 는 앞 턴 사진의 Vision 검색어로 바뀌어 있을 수 있어(9/27 처럼 사진
     # 다음 턴) 사용자 원문 user_msg 를 본다.
     _user_msg = str(ctx.get("user_msg") or raw_msg or "")
@@ -1691,6 +1707,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 except Exception:  # noqa: BLE001 — 없으면 args.category 로 폴백
                     pass
             if named_product is not None:
+                _named_anchor_chip = _anchor_chip_for(named_product)
                 similar = _wants_similar(_user_msg)
                 logger.info(
                     "🏷️ [named-product] %r → id=%s brand=%r (%s)",
@@ -1717,6 +1734,13 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         from app.agents.last_query import clear_last_anchor
 
         clear_last_anchor(ctx.get("chat_id"))
+    if _named_anchor_chip:
+        # 상품명 지목(찾기·"비슷한" 모두)은 그 상품을 새 기준으로 — 안 하면 직전 칩(다른 상품)이
+        # 남아 "위에 제품"이 엉뚱한 상품을 가리켰다(10/1 운영: Stüssy 칩 → "FIT JERSEY 비슷한"
+        # → "위에 제품"이 Stüssy 로 검색).
+        from app.agents.last_query import set_last_anchor
+
+        set_last_anchor(ctx.get("chat_id"), _named_anchor_chip)
     if pinned_pid is not None:
         try:
             from app.providers.database import DatabaseProvider
