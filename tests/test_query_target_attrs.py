@@ -110,7 +110,18 @@ def test_mood_arg_out_of_vocab_is_mapped_or_dropped():
     assert q("Workwear Casual") == {"워크웨어"}
     assert q("아슬레저") == {"애슬레저/요가"}
     assert q("Y2K") == {"y2k"}
-    assert q("dating") == set()
+    assert q("dating") == set()  # 상황이지 무드가 아님(사람 검토)
+    assert q("비즈니스 캐주얼") == set()
+    assert q("키치") == set()
+    # 2026-10-03 사람 검토로 추가한 매핑
+    assert q("sensual feminine") == {"핫걸", "란제리코어", "코케트"}
+    assert q("romantic") == {"코케트", "발레코어"}
+    assert q("dark avant-garde") == {"다크웨어", "해체주의"}
+
+
+def test_dark_alone_is_not_darkwear():
+    # 'dark' 단독은 색 표현이라 다크웨어로 잡지 않는다.
+    assert _extract_mood_from_text("dark green coat") == set()
 
 
 def test_mood_arg_out_of_vocab_does_not_block_text_mood():
