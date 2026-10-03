@@ -385,6 +385,7 @@ _MOOD_LEXICON: tuple[tuple[str, str], ...] = (
     ("lingerie", "란제리코어"),
     ("애슬레저", "애슬레저/요가"),
     ("athleisure", "애슬레저/요가"),
+    ("아슬레저", "애슬레저/요가"),  # 에이전트 mood 인자 실측 표기(2026-09-11)
     ("코티지코어", "코티지코어"),
     ("cottagecore", "코티지코어"),
     ("클러빙", "나이트클러빙"),
@@ -424,6 +425,25 @@ _MOOD_LEXICON: tuple[tuple[str, str], ...] = (
     # _PATTERN_NORM 으로 라우팅(윤영 2026-09-05: "밀리터리면 카모가 대표, 워크웨어
     # 단독 아님"). '카고'는 garment(카탈로그 속성축 없음)라 text_query 로 처리.
 )
+
+
+def _normalize_mood_arg(raw: str) -> set[str]:
+    """에이전트 mood 인자 → 27 폐쇄 태그 집합. 정확한 태그면 그대로, 아니면 무드 사전으로 매핑.
+
+    툴 설명서가 "27개 중 정확히 하나"를 요구해도, 9/1~10/3 무드 인자 43회 중 24회가
+    사전 밖 값이었다("미니멀", "minimalist", "streetwear", "Workwear Casual", "dating").
+    그대로 쓰면 맞는 상품이 0개라 무드 가산이 조용히 사라진다. 매핑도 안 되면 빈 집합.
+    """
+    from app.scoring.personalize_rerank import MOOD_TAGS
+
+    if not raw:
+        return set()
+    if raw in MOOD_TAGS:
+        return {raw}
+    mapped = _extract_mood_from_text(raw)
+    if not mapped:
+        logger.info("[search] mood arg %r 는 무드 태그에도 사전에도 없어 무시(텍스트 추출만 사용)", raw)
+    return mapped
 
 
 def _extract_mood_from_text(text: str) -> set[str]:
@@ -572,8 +592,10 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     # 구조화 mood arg 우선, 없으면 쿼리 텍스트에서 추출(에이전트가 mood 를 거의
     # 안 채우는 실측: 30일 2건 → 텍스트 추출이 실질 발화 경로). 한글 소문자화는
     # 무해(candidate 측도 동일 정규화).
+    # 2026-10-03 — 인자는 태그로 정규화하고, 텍스트 추출과 합친다. 예전엔 인자가 있으면
+    # 텍스트 추출을 건너뛰어, 사전 밖 인자("dating")가 텍스트의 무드까지 막았다.
     mood = str(getattr(item, "mood", None) or "").strip().lower()
-    mood_vals = ({mood} if mood else set()) or _extract_mood_from_text(qtext)
+    mood_vals = _normalize_mood_arg(mood) | _extract_mood_from_text(qtext)
     if mood_vals:
         out["mood"] = set(mood_vals)
 

@@ -99,6 +99,26 @@ def test_query_target_attrs_mood_from_text():
     assert out.get("mood") == {"고프코어"}
 
 
+def test_mood_arg_out_of_vocab_is_mapped_or_dropped():
+    # 운영 실측(9/1~10/3 무드 인자 43회 중 24회 사전 밖): 근접 표기는 태그로 매핑, 나머지는 버림.
+    def q(mood, text=""):
+        return _query_target_attrs(SimpleNamespace(search_query=text, mood=mood)).get("mood", set())
+
+    assert q("미니멀") == {"미니멀룩"}
+    assert q("minimalist") == {"미니멀룩"}
+    assert q("streetwear") == {"스트릿"}
+    assert q("Workwear Casual") == {"워크웨어"}
+    assert q("아슬레저") == {"애슬레저/요가"}
+    assert q("Y2K") == {"y2k"}
+    assert q("dating") == set()
+
+
+def test_mood_arg_out_of_vocab_does_not_block_text_mood():
+    # 예전엔 인자가 있으면 텍스트 추출을 건너뛰어, "dating" 이 텍스트의 미니멀룩까지 막았다.
+    out = _query_target_attrs(SimpleNamespace(search_query="minimal blouse women", mood="dating"))
+    assert out.get("mood") == {"미니멀룩"}
+
+
 def test_extract_mood_lovely_multi_tag():
     # 러블리/걸리시 → 코케트 + 발레코어(데이터 근거 멀티태그). 모리걸 제외.
     assert _extract_mood_from_text("러블리한 원피스") == {"코케트", "발레코어"}
