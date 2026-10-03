@@ -333,3 +333,32 @@ def test_target_attrs_season_from_item_hint():
     item = _item("jacket")
     item.season = "bogus"
     assert "season" not in _query_target_attrs(item)
+
+
+# ── fit 인자가 카탈로그 어휘 밖일 때 (2026-10-03) ─────────────────────────────
+# dev DB 9/1~10/2 search_products fit 인자 36건 중 2건이 "straight"(카탈로그 fit
+# 어휘에 없음, leg_shape 어휘). 예전엔 인자가 있으면 텍스트 추출을 건너뛰어,
+# 아무 상품과도 일치하지 않는 "straight" 하나만 target 으로 남았다.
+
+
+def test_fit_arg_out_of_vocab_falls_back_to_text():
+    # 9/3 운영 호출 재현: fit="straight", 문장에 cropped 가 있음
+    out = _query_target_attrs(
+        _item("high-rise cropped straight-leg flat-front olive cotton trousers women", fit="straight")
+    )
+    assert out.get("fit") == {"cropped"}
+
+
+def test_fit_arg_out_of_vocab_without_text_fit_is_dropped():
+    # 9/8 운영 호출 재현: 문장에도 fit 단어가 없으면 fit 축 target 없음
+    out = _query_target_attrs(_item("black high-rise straight wool trousers women", fit="straight"))
+    assert "fit" not in out
+
+
+@pytest.mark.parametrize(
+    ("arg", "expected"),
+    [("fitted", {"slim", "skinny"}), ("boxy", {"oversized", "relaxed", "boxy"}), ("longline", {"longline"})],
+)
+def test_fit_arg_in_vocab_still_wins_over_text(arg, expected):
+    out = _query_target_attrs(_item("oversized coat", fit=arg))
+    assert out["fit"] == expected

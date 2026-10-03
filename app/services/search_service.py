@@ -290,6 +290,28 @@ _MATERIAL_KO_ITEMS = [(k, v) for k, v in _MATERIAL_NORM.items() if not k.isascii
 _PATTERN_KO_ITEMS = [(k, v) for k, v in _PATTERN_NORM.items() if not k.isascii()]
 
 
+# product_features.feature_metadata.fit 값(dev DB 2026-10-03 조회, "n/a" 제외).
+_FIT_VOCAB: frozenset[str] = frozenset(
+    {"regular", "relaxed", "slim", "longline", "oversized", "cropped", "skinny", "boxy"}
+)
+
+
+def _normalize_fit_arg(raw: str) -> set[str]:
+    """에이전트 fit 인자 → fit vocab 집합. `_FIT_NORM` 표기면 매핑, vocab 값이면 그대로.
+
+    둘 다 아니면("straight" 는 leg_shape 어휘) 빈 집합을 돌려 호출부가 텍스트 추출로
+    넘어가게 하고, 빈도를 볼 수 있게 로그를 남긴다.
+    """
+    if not raw:
+        return set()
+    if raw in _FIT_NORM:
+        return set(_FIT_NORM[raw])
+    if raw in _FIT_VOCAB:
+        return {raw}
+    logger.info("[search] fit arg %r 는 fit 어휘에 없어 무시(텍스트 추출만 사용)", raw)
+    return set()
+
+
 def _extract_fit_from_text(text: str) -> set[str]:
     """쿼리 텍스트에서 fit 토큰 추출 → canonical fit vocab 집합.
 
@@ -578,8 +600,9 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
         out["mood"] = set(mood_vals)
 
     # fit — 구조화 인자 우선, 없으면 쿼리 텍스트에서 추출.
+    # 2026-10-03 — 카탈로그 어휘 밖 인자("straight")는 버리고 텍스트 추출로 넘긴다.
     fit = str(getattr(item, "fit", None) or "").strip().lower()
-    fit_vals = (_FIT_NORM.get(fit) or ({fit} if fit else set())) or _extract_fit_from_text(qtext)
+    fit_vals = _normalize_fit_arg(fit) or _extract_fit_from_text(qtext)
     if fit_vals:
         out["fit"] = set(fit_vals)
 
