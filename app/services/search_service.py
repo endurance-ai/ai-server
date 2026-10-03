@@ -218,6 +218,16 @@ _MATERIAL_NORM: dict[str, str] = {
 }
 
 
+# 사진으로 구분이 안 되고, 찾는 사람에게도 같은 소재로 받아들여지는 묶음. 한쪽을 찾으면
+# 다른 쪽 상품도 소재 가산을 받는다. 2026-10-02 dev 실측: "nylon windbreaker" 상위 15개는
+# 전부 바람막이였는데 VLM 이 절반을 polyester 로 태깅해 나일론 상품만 가산을 받았다.
+# 사람 검토로 "나일론을 찾으면 폴리에스터도 추천해도 된다"고 정했다.
+_MATERIAL_EQUIV: dict[str, frozenset[str]] = {
+    "nylon": frozenset({"polyester"}),
+    "polyester": frozenset({"nylon"}),
+}
+
+
 # 영/한 pattern 표현 → feature_metadata.pattern canonical 토큰
 # (2026-08 dev 실측: solid/graphic/striped/checked/floral/logo/dot/animal/
 # colorblock/camo/heathered/abstract). solid 는 카탈로그 ~75% 라 target 에서
@@ -589,6 +599,8 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if fab:
         mat_vals.add(_MATERIAL_NORM.get(fab, fab))
     mat_vals |= _extract_material_from_text(qtext)
+    for m in list(mat_vals):
+        mat_vals |= _MATERIAL_EQUIV.get(m, frozenset())
     if mat_vals:
         out["material"] = mat_vals
 
