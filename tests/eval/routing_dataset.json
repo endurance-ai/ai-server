@@ -1,6 +1,6 @@
 {
-  "version": "1.0",
-  "description": "라우팅 44케이스. 2026-09-07 모델 티어링 결정(fea09f4)에 쓴 세션 스크래치 스크립트의 CASES를 그대로 옮겼다(2026-09-28). expect_tools=허용 첫 도구('respond'=도구 없이 답), forbid_tools=호출되면 실패, cards_expected=E2E에서 카드가 나와야 하는 케이스.",
+  "version": "1.1",
+  "description": "라우팅 44케이스. 2026-09-07 모델 티어링 결정(fea09f4)에 쓴 세션 스크래치 스크립트의 CASES를 그대로 옮겼다(2026-09-28). expect_tools=허용 첫 도구('respond'=도구 없이 답), forbid_tools=호출되면 실패, cards_expected=E2E에서 카드가 나와야 하는 케이스. 2026-10-02 v1.1 정답 정리(사람 검토): 셀럽 스타일(ws_celeb2)은 웹검색만 정답으로 ws_celeb1 과 통일, 상황형(tpo_travel/date/office)은 되묻기를 빼고 검색만 정답으로 tpo_wedding 과 통일, pivot_brand1(산드로)은 재고 0이라 카드 필요를 뺌(검색으로 갈아타고 없다고 답하면 성공).",
   "cases": [
     {
       "id": "brand_bare_1",
@@ -139,8 +139,7 @@
       "category": "websearch",
       "input": "로제 사복 느낌 코디",
       "expect_tools": [
-        "web_search",
-        "search_products"
+        "web_search"
       ],
       "forbid_tools": [],
       "cards_expected": false
@@ -260,7 +259,7 @@
       "forbid_tools": [
         "refine_search"
       ],
-      "cards_expected": true
+      "cards_expected": false
     },
     {
       "id": "pivot_occasion",
@@ -428,8 +427,7 @@
       "category": "situation",
       "input": "제주도 여행룩 뭐 입지",
       "expect_tools": [
-        "search_products",
-        "ask_user_clarification"
+        "search_products"
       ],
       "forbid_tools": [
         "web_search"
@@ -441,8 +439,7 @@
       "category": "situation",
       "input": "소개팅룩 추천해줘",
       "expect_tools": [
-        "search_products",
-        "ask_user_clarification"
+        "search_products"
       ],
       "forbid_tools": [
         "web_search"
@@ -454,8 +451,7 @@
       "category": "situation",
       "input": "출근할 때 입을 만한 거",
       "expect_tools": [
-        "search_products",
-        "ask_user_clarification"
+        "search_products"
       ],
       "forbid_tools": [
         "web_search"
