@@ -490,6 +490,99 @@ def _selected_vision_search_query(state: WorkingState, sess: Any) -> str:
     return ""
 
 
+# 원문 브랜드 핀 전용 오탐 가드 (2026-10-17). 별칭 캐시에는 일반 단어와 겹치는 키가
+# 있어 자유 문장을 스캔하면 엉뚱한 브랜드가 하드필터로 걸렸다. 상품명 지목 e2e 측정
+# (P2 실패 44건 중 15건)에서 확인: 'in'→IS-NESS, 'the'→Tag Heuer Eyewear,
+# '2'→Dsquared2, 'la'→Femme LA, 'Off White'→Off-White, 'NERO'→Nero, '갤러리'→1011GALLERY.
+# 캐시 자체는 그대로 두고(명시 brand 인자 · 라우터 경로는 영향 없음) 핀을 걸 때만 거른다.
+# 한글 2글자 브랜드(자라 · 푸마 · 디젤 · 아미)는 실제 브랜드라 길이 제한은 영문 · 숫자 창에만 건다.
+_PIN_EN_STOPWORDS: Final[frozenset[str]] = frozenset(
+    {
+        "a", "an", "the", "in", "on", "at", "of", "for", "to", "and", "or", "with", "by", "from",
+        "x", "vs", "la", "le", "les", "de", "du", "des", "el", "il", "my", "me", "it", "is", "no",
+        "new", "off", "all", "one", "two", "set", "pack", "size", "free", "top", "item", "style",
+    }
+)  # fmt: skip
+# 영어 색은 is_attribute_word 가 이미 판정한다. 여기엔 상품명에 자주 섞이는 외국어 색과
+# 색 수식어만 둔다.
+_PIN_COLOR_WORDS: Final[frozenset[str]] = frozenset(
+    {
+        "nero", "noir", "blanc", "bianco", "rosso", "rouge", "verde", "vert", "bleu", "blu",
+        "gris", "grigio", "oro", "argento", "sky", "light", "dark", "deep", "pale", "neon", "multi", "mint",
+    }
+)  # fmt: skip
+# 한글 별칭 키가 브랜드명의 일부(숫자 · 영문을 뺀 나머지)로만 만들어진 일반 단어.
+# 예: 브랜드 '1011갤러리' 의 한글 키 정규화가 숫자를 지워 '갤러리'만 남았다.
+_PIN_KO_GENERIC: Final[frozenset[str]] = frozenset(
+    {"갤러리", "스튜디오", "스토어", "아카이브", "하우스", "클럽", "컴퍼니", "에디션", "오피스", "랩", "샵", "마켓"}
+)
+
+
+def _pin_window_rejected(window: list[str]) -> bool:
+    """원문 스캔 창(1~3어절)이 핀으로 걸면 안 되는 일반 표현인지."""
+    from app.infrastructure.repositories.brand_node_cache import (
+        _filter_index,
+        is_attribute_word,
+        normalize_brand,
+        normalize_brand_ko,
+    )
+
+    toks = [re.sub(r"[^0-9a-z가-힣]", "", t.lower()) for t in window]
+    toks = [t for t in toks if t]
+    if not toks:
+        return True
+    joined = "".join(toks)
+    if not re.search(r"[가-힣]", joined) and len(joined) <= 2:
+        return True
+    if all(t.isdigit() for t in toks):
+        return True
+    if all(t in _PIN_EN_STOPWORDS or t in _PIN_COLOR_WORDS or is_attribute_word(t) for t in toks):
+        return True
+    if len(toks) == 1 and joined in _PIN_KO_GENERIC:
+        return True
+    # 한 키로만 매칭된 경우 그 키 자체를 본다. 영문 키 정규화는 한글을 지워 '5만원' → '5',
+    # '2월' → '2' 가 되고, 한글 키 정규화는 숫자를 지워 '1011갤러리' → '갤러리' 가 된다.
+    text = " ".join(window)
+    en_key, ko_key = normalize_brand(text), normalize_brand_ko(text)
+    by_en, by_ko = bool(en_key) and en_key in _filter_index, bool(ko_key) and ko_key in _filter_index
+    if by_en and not by_ko and (len(en_key) <= 2 or en_key.isdigit()):
+        return True
+    return by_ko and not by_en and ko_key in _PIN_KO_GENERIC
+
+
+def _scan_brand_for_pin(text: str | None) -> list[str] | None:
+    """scan_text_for_brand 와 같은 창 탐색에 `_pin_window_rejected` 를 더한 핀 전용 스캔.
+
+    거부된 창은 건너뛰기만 하므로 같은 문장 안의 진짜 브랜드("글로니 in black")는 그대로 잡힌다."""
+    from app.infrastructure.repositories.brand_node_cache import (
+        _SCAN_STOPWORDS,
+        attribute_shadows_brand,
+        resolve_brand_window,
+        split_brand_label,
+    )
+
+    if not text or not isinstance(text, str):
+        return None
+    tokens = split_brand_label(text).split()
+    best_span = 0
+    best_names: list[str] | None = None
+    for i in range(len(tokens)):
+        for span in (3, 2, 1):
+            if i + span > len(tokens):
+                continue
+            if span == 1 and tokens[i].strip().lower() in _SCAN_STOPWORDS:
+                continue
+            if span == 1 and attribute_shadows_brand(tokens, i):
+                continue
+            if _pin_window_rejected(tokens[i : i + span]):
+                continue
+            names = resolve_brand_window(tokens, i, span)
+            if names and span > best_span:
+                best_span = span
+                best_names = names
+    return best_names
+
+
 def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     """Tool dispatch context — passed alongside args to every tool."""
     # When an item has been selected from the picker, clear image_url and
@@ -520,14 +613,13 @@ def _build_ctx(state: WorkingState, sess: Any) -> dict[str, Any]:
     # 없는 fresh 텍스트 쿼리(새 화제)면 핀을 지운다. 콜백 턴에 브랜드 없으면 유지.
     try:
         from app.agents.last_query import clear_pinned_brand, set_pinned_brand
-        from app.infrastructure.repositories.brand_node_cache import scan_text_for_brand
 
         _raw_msg = (state.message.text or "") if state.message else ""
         # "X처럼/같은/비슷한/느낌" — X 는 비교 기준이지 필터가 아니다. 핀하면 이 턴의
         # 모든 검색이 X 로 하드필터된다(9/17 "이니어 후드집업처럼 … 룰루레몬이나
         # 유니클로처럼" → innir 핀 → innir 남성 재고 1개 → 검색 4회 연속 0건).
         # 기준 브랜드는 brand-similar 라우터(similar_to_brand)가 앵커로 쓴다.
-        _detected = None if _BRAND_SIMILAR_MARKER_RE.search(_raw_msg) else scan_text_for_brand(_raw_msg)
+        _detected = None if _BRAND_SIMILAR_MARKER_RE.search(_raw_msg) else _scan_brand_for_pin(_raw_msg)
         if _detected:
             set_pinned_brand(state.chat_id, _detected)
         elif not _cb and _raw_msg.strip():
