@@ -87,6 +87,7 @@ docker compose up -d                                 # 로컬 스택 (AI 서버�
 - **커밋 전 필수**: `uv run ruff check . && uv run ruff format --check .` → `uv run pytest` 순서로 실행. 모두 통과한 뒤 커밋.
 - **PR 올리기 전 필수**: `uv run ruff check . && uv run ruff format --check . && uv run pytest` 를 순서대로 실행해 모두 통과한 뒤 PR 생성. 하나라도 실패하면 PR 올리지 않는다.
 - 기존부터 실패하던 테스트(Windows 인코딩/경로 이슈 등)는 별도 확인 후 PR 설명에 명시.
+- **근거·평가·머지 규칙**: `.claude/rules/kiko/evidence-and-eval.md` (수치 조건 표기, 상한/커버리지 구분, 평가 재현성, PR까지만 하고 머지는 사람). 절차는 스킬 `kiko-eval` · `kiko-doc-audit` · `kiko-ops-trace`, 검수는 에이전트 `doc-auditor`.
 
 ## 코딩 컨벤션
 
