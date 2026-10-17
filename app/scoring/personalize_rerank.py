@@ -75,6 +75,8 @@ _MOOD_DF_SNAPSHOT: dict[str, float] = {
     "란제리코어": 0.0211,
     "애슬레저/요가": 0.0197,
 }
+# 27 폐쇄 무드 태그(소문자). 에이전트 mood 인자 정규화의 기준(search_service._normalize_mood_arg).
+MOOD_TAGS: frozenset[str] = frozenset(_MOOD_DF_SNAPSHOT)
 # df→가중 정규화 앵커: df≥60%(무정보)→0, df≤5%(변별)→1.0. 사이는 log 스케일 선형.
 _MOOD_IDF_LO = math.log(1.0 / 0.60)
 _MOOD_IDF_HI = math.log(1.0 / 0.05)
