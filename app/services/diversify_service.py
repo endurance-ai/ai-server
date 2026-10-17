@@ -103,7 +103,24 @@ async def diversify_service(state: PipelineState) -> PipelineState:
     drops_vibe = 0
     drops_silhouette = 0
 
-    for c in state.raw_candidates:
+    # 상품명으로 지목한 상품은 캡 · dedup 을 거치지 않고 맨 앞에 둔다. 같은 이름 · 같은 변형의
+    # 다른 행은 아래 dedup 이 이 상품을 기준으로 걸러낸다.
+    pin_first_id = str(getattr(req, "pin_first_id", None) or "")
+    candidates = state.raw_candidates
+    if pin_first_id:
+        pinned = next((c for c in candidates if str(c.get("id") or "") == pin_first_id), None)
+        if pinned is not None:
+            candidates = [c for c in candidates if c is not pinned]
+            out.append(pinned)
+            seen_ids.add(pin_first_id)
+            if pinned.get("canonical_variant_id") is not None:
+                seen_canonical_variants.add(str(pinned.get("canonical_variant_id")))
+            _pb = (pinned.get("brand") or "").lower()
+            _pn = " ".join(str(pinned.get("name") or "").lower().split())
+            if _pb and _pn:
+                seen_content.add((_pb, _pn, str(pinned.get("price") or "")))
+
+    for c in candidates:
         pid = c.get("id")
         if pid and pid in seen_ids:
             drops_dup += 1

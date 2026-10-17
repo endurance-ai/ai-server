@@ -1115,6 +1115,7 @@ async def run_text_only_search(
     override_embedding: list[float] | None = None,
     relax_diversity: bool = False,
     web_max: bool = False,
+    pin_first_id: str | None = None,
 ) -> list[Any]:
     """Text-only search — reuses the EXISTING search_step + diversify_step.
 
@@ -1186,6 +1187,7 @@ async def run_text_only_search(
         style_node=style_node,
         relax_diversity=relax_diversity,
         web_max=web_max,
+        pin_first_id=pin_first_id,
     )
     state = PipelineState(request=req, user_key=user_key)
     # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes
@@ -1950,9 +1952,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         # 않는다 (fit/color 클리어와 동일한 원칙 — refine_search PR #112).
         subcategory = None
     elif named_product is not None:
-        # 이름으로 지목한 상품 자체의 카테고리를 쓴다. 앞 턴 Vision 의 category ·
-        # subcategory 가 새어 들어와 그 상품을 게이트로 거르지 않게 한다(9/27 실사례).
-        category = named_product.get("category") or args.get("category")
+        # 이름으로 지목한 상품은 카테고리 게이트를 끈다. 앞 턴 Vision 의 category 가 새는 문제
+        # (9/27)뿐 아니라, 상품 자신의 category 를 넘겨도 쿼리 쪽 family 매핑과 RPC 의
+        # category_canonical 매핑이 달라 그 상품이 걸러졌다(10/17 측정: activewear 상품이
+        # bottoms 게이트에 걸림). 범위는 아래에서 그 상품의 브랜드 필터로 좁힌다.
+        category = None
         subcategory = None
     else:
         # 2026-07-15 배선 수정: 순수 텍스트 턴은 vision_category 가 None 이라
@@ -2006,6 +2010,10 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # brand-similar 활성 시 brand 하드필터는 무시(둘 다 오면 similar 우선) — seed
     # 를 필터로 걸면 exclude 와 충돌해 빈 결과가 난다.
     brand_filter = None if similar_seed_names else _resolve_brand_filter(args.get("brand"))
+    # 상품명으로 지목한 상품이 있으면 브랜드는 그 상품의 브랜드다. LLM brand 인자나 원문 핀이
+    # 다른 브랜드를 잡으면 그 상품이 RPC 단계에서 빠졌다(10/17 측정: P2 실패 44건 중 19건).
+    if named_product is not None:
+        brand_filter = _resolve_brand_filter(str(named_product.get("brand") or ""))
 
     # 260908 — 핀 상품 유사("[#id · TAEY …] 비슷한 거")는 '이 상품과 비슷한'=크로스
     # 브랜드 유사상품(PDP 유사)이 의도다. 상품 임베딩 앵커(pinned_pid)가 있으면 brand
@@ -2020,6 +2028,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 직전 검색 결과(단일 브랜드)에서 복구도 시도(보조).
     if pinned_pid is not None:
         pass  # 핀 상품 유사 = 크로스브랜드, 브랜드 핀/복구 스킵
+    elif named_product is not None:
+        pass  # 지목 상품의 브랜드로 이미 정했다 — 원문 핀 · 오추측 교정 스킵
     elif similar_seed_names:
         # brand-similar 는 seed 브랜드를 앵커로 쓰고 결과에서 제외한다 — 여기서 핀을
         # 브랜드 필터로 얹으면 '그 브랜드만' ∩ '그 브랜드 제외' = 항상 0건.
@@ -2283,10 +2293,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 color_family=color_family,
                 name_query=name_query,
                 top_k=top_k,
-                style_node_primary=style_node_primary,
+                style_node_primary=None if named_product is not None else style_node_primary,
                 user_key=user_key,
                 override_embedding=pinned_embedding,
                 web_max=is_web,
+                pin_first_id=str(named_product["id"]) if named_product is not None else None,
             )
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): surface HTTP status (+host in log) so Modal cold-start /
