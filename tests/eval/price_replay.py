@@ -31,7 +31,9 @@ if _PP:
     sys.path[:] = [p for p in sys.path if p != "/app"]
     sys.path.insert(0, _PP)
 
-CHAT_BASE = 9_180_000_000
+# 실행마다 다른 chat_id 를 쓴다. 세션은 Postgres(ai.user_session)에 남아, 같은 id 로 두 모드를
+# 돌리면 나중 실행이 먼저 실행의 직전 결과 · 노출 기록을 물려받는다(2026-10-18 첫 측정에서 발생).
+CHAT_BASE = int(os.environ.get("CHAT_BASE") or (9_180_000_000 + (int(time.time()) % 1_000_000) * 100))
 
 _EXPORT_SQL = """
 select json_agg(t) from (
