@@ -322,6 +322,79 @@ def _normalize_fit_arg(raw: str) -> set[str]:
     return set()
 
 
+# 에이전트 인자 표기 → 카탈로그 어휘 (2026-10-18). 인자는 정확한 문자열로 후보 속성과 비교되는데
+# 에이전트는 하이픈 · 동의어 표기를 써서 가산이 안 걸렸다(dev 9/1~10/2 search_products: neckline
+# 9건 중 7건, leg_shape 11건 중 6건, sleeve_length 28건 중 4건, design_details 13건 중 10건,
+# material lace 5건). 오른쪽 값은 dev DB 에 실제로 있는 값만 쓴다(neckline 은 v1.1
+# feature_metadata, 나머지는 product_features_v26.attr, 2026-10-18 조회). 표에 없으면 그대로 둔다.
+_NECKLINE_ARG_NORM: dict[str, tuple[str, ...]] = {
+    "crew-neck": ("crew",),
+    "crewneck": ("crew",),
+    "round": ("crew",),
+    "round-neck": ("crew",),
+    "scoop-neck": ("scoop",),
+    "v": ("v-neck",),
+    "vneck": ("v-neck",),
+    "mock-neck": ("mock",),
+    "mockneck": ("mock",),
+    "high-neck": ("mock", "turtleneck"),
+    "turtle-neck": ("turtleneck",),
+    "collar": ("collared",),
+    "notch-collar": ("collared",),
+    "shirt-collar": ("collared",),
+    "boat-neck": ("boat",),
+    "hood": ("hooded",),
+    "off-the-shoulder": ("off-shoulder",),
+    "off-shoulder": ("off-shoulder",),
+    "halter-neck": ("halter",),
+    "square-neck": ("square",),
+}
+_SLEEVE_ARG_NORM: dict[str, tuple[str, ...]] = {
+    "three-quarter": ("three_quarter",),
+    "3/4": ("three_quarter",),
+    "long-sleeve": ("long",),
+    "short-sleeve": ("short",),
+}
+# bootcut 은 카탈로그 어휘에 없다. 무릎 아래가 퍼지는 실루엣이라 flare 로 보낸다.
+_LEG_ARG_NORM: dict[str, tuple[str, ...]] = {
+    "bootcut": ("flare",),
+    "boot-cut": ("flare",),
+    "flared": ("flare",),
+    "wide-leg": ("wide",),
+    "straight-leg": ("straight",),
+}
+_DESIGN_ARG_NORM: dict[str, tuple[str, ...]] = {
+    "button-front": ("buttoned",),
+    "buttons": ("buttoned",),
+    "button": ("buttoned",),
+    "shirring": ("ruched",),
+    "shirred": ("ruched",),
+    "gathered": ("ruched",),
+    "cut-out": ("cutout",),
+    "lace-up": ("lace_up",),
+    "raw-edge": ("raw_edge",),
+    "pleated": ("pleated_detail",),
+    "pleats": ("pleated_detail",),
+    "belt": ("belted",),
+}
+# 다른 축 어휘로 온 값. lace 는 material 이 아니라 texture, distressed 는 design 이 아니라 texture.
+_TO_TEXTURE: dict[str, str] = {"lace": "lace", "ribbed": "ribbed", "distressed": "distressed"}
+
+
+def _axis_arg_key(raw: str) -> str:
+    return re.sub(r"[\s_]+", "-", raw.strip().lower())
+
+
+def _normalize_axis_arg(raw: str, table: dict[str, tuple[str, ...]]) -> set[str]:
+    """에이전트 인자 → 카탈로그 어휘 집합. 표에 없으면 소문자 원값 하나."""
+    if not raw:
+        return set()
+    key = _axis_arg_key(raw)
+    if key in table:
+        return set(table[key])
+    return {raw.strip().lower()}
+
+
 def _extract_fit_from_text(text: str) -> set[str]:
     """쿼리 텍스트에서 fit 토큰 추출 → canonical fit vocab 집합.
 
@@ -652,7 +725,11 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     # material — 구조화 fabric + 쿼리 텍스트 추출(합집합).
     mat_vals: set[str] = set()
     fab = str(getattr(item, "fabric", None) or "").strip().lower()
-    if fab:
+    # texture 어휘로 온 소재 인자(lace 등)는 texture 로 보낸다.
+    texture_from_args: set[str] = set()
+    if fab in _TO_TEXTURE:
+        texture_from_args.add(_TO_TEXTURE[fab])
+    elif fab:
         mat_vals.add(_MATERIAL_NORM.get(fab, fab))
     mat_vals |= _extract_material_from_text(qtext)
     for m in list(mat_vals):
@@ -670,9 +747,9 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
         out["pattern"] = pat_vals
 
     # neckline — 구조화 인자(item.neckline)만(텍스트 추출기 없음). feature_metadata.neckline 정렬.
-    neck = str(getattr(item, "neckline", None) or "").strip().lower()
-    if neck:
-        out["neckline"] = {neck}
+    neck_vals = _normalize_axis_arg(str(getattr(item, "neckline", None) or ""), _NECKLINE_ARG_NORM)
+    if neck_vals:
+        out["neckline"] = neck_vals
 
     # v2.6 축(length/sleeve_length/leg_shape) — 명시 arg 로만. _attach_feature_metadata 가
     # product_features_v26.attr 값을 feature_metadata 에 머지해 둔다. length 'cropped'→
@@ -680,13 +757,14 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     length = str(getattr(item, "length", None) or "").strip().lower()
     if length:
         out["length"] = {"crop" if length == "cropped" else length}
-    sleeve = str(getattr(item, "sleeve_length", None) or "").strip().lower()
-    sleeve_vals = ({sleeve} if sleeve else set()) | _extract_sleeve_from_text(qtext)
+    sleeve_vals = _normalize_axis_arg(
+        str(getattr(item, "sleeve_length", None) or ""), _SLEEVE_ARG_NORM
+    ) | _extract_sleeve_from_text(qtext)
     if sleeve_vals:
         out["sleeve_length"] = sleeve_vals
-    leg = str(getattr(item, "leg_shape", None) or "").strip().lower()
-    if leg:
-        out["leg_shape"] = {leg}
+    leg_vals = _normalize_axis_arg(str(getattr(item, "leg_shape", None) or ""), _LEG_ARG_NORM)
+    if leg_vals:
+        out["leg_shape"] = leg_vals
 
     # v2.6 스타일 디테일축 — surface(스칼라)/texture/design_details. _attach_feature_metadata
     # 가 v26.attr 에서 머지(texture/design_details 는 배열 그대로).
@@ -694,12 +772,16 @@ def _query_target_attrs(item: Any) -> dict[str, set[str]]:
     if surface:
         out["surface"] = {surface}
     texture = str(getattr(item, "texture", None) or "").strip().lower()
-    texture_vals = ({texture} if texture else set()) | _extract_texture_from_text(qtext)
+    design = str(getattr(item, "design_details", None) or "").strip().lower()
+    if design in _TO_TEXTURE:
+        texture_from_args.add(_TO_TEXTURE[design])
+        design = ""
+    texture_vals = ({texture} if texture else set()) | texture_from_args | _extract_texture_from_text(qtext)
     if texture_vals:
         out["texture"] = texture_vals
-    design = str(getattr(item, "design_details", None) or "").strip().lower()
-    if design:
-        out["design_details"] = {design}
+    design_vals = _normalize_axis_arg(design, _DESIGN_ARG_NORM)
+    if design_vals:
+        out["design_details"] = design_vals
 
     # v2.6 비어패럴 조건부축(신발/가방/안경/주얼리) — 공유 리스트로 일괄 세팅.
     from app.scoring.personalize_rerank import NONAPPAREL_SCALAR_AXES
