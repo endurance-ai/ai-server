@@ -2439,9 +2439,17 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
     # 브랜드가 새지 않게 한다. pinned anchor 턴은 last_query 와 동일하게 제외.
     if pinned_embedding is None:
         try:
-            from app.agents.last_query import set_last_brand
+            from app.agents.last_query import set_last_brand, set_last_filters
 
             set_last_brand(ctx.get("chat_id"), brand_filter)
+            # 품목 · 색 · 핏도 같은 이유로 보관 → refine 이 이어받는다(last_query._LAST_FILTERS).
+            set_last_filters(
+                ctx.get("chat_id"),
+                category=category,
+                subcategory=subcategory,
+                color_family=color_family,
+                fit=fit,
+            )
         except Exception:  # noqa: BLE001
             pass
 

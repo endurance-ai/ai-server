@@ -236,10 +236,19 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # we use the pinned product's own category and clear the brand
         # style-node letter from the prior turn (per-product letter not
         # currently stored — None falls through to no style gate).
+        # 2026-10-18 — 텍스트 턴의 ctx 에는 vision_category 가 없어(사진 턴 전용) refine 이
+        # 직전 검색의 품목 게이트를 잃었다. 직전 search_products 가 남긴 조건을 이어받는다.
+        from app.agents.last_query import get_last_filters, set_last_filters
+
+        last_filters = {} if pinned_embedding is not None else get_last_filters(ctx.get("chat_id"))
         if pinned_embedding is not None:
             category = pinned_category or ctx.get("vision_category")
+            subcategory = None
         else:
-            category = ctx.get("vision_category")
+            category = ctx.get("vision_category") or last_filters.get("category")
+            subcategory = ctx.get("vision_subcategory") or (
+                last_filters.get("subcategory") if not ctx.get("vision_category") else None
+            )
         # 260701 — Pinned anchor also clears fit / color_family. They were
         # set by the previous turn's Vision/text search ("white knit" →
         # ctx.color_family="white") and would otherwise narrow the anchored
@@ -250,8 +259,24 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             fit = args.get("fit")
             color_family = args.get("color")
         else:
-            fit = ctx.get("fit")
-            color_family = args.get("color") or ctx.get("color_family")
+            # ctx 에는 fit / color_family 키가 없다(_build_ctx 가 만들지 않음). 직전 검색값을 쓴다.
+            # color_swap 인데 새 색이 없으면 옛 색을 다시 걸지 않는다.
+            fit = ctx.get("fit") or last_filters.get("fit")
+            inherit_color = action != "color_swap"
+            color_family = (
+                args.get("color")
+                or ctx.get("color_family")
+                or (last_filters.get("color_family") if inherit_color else None)
+            )
+        if pinned_embedding is None:
+            # 이 refine 의 조건을 다음 refine 이 이어받는다(넓히기로 푼 조건은 풀린 채로).
+            set_last_filters(
+                ctx.get("chat_id"),
+                category=category,
+                subcategory=subcategory,
+                color_family=color_family,
+                fit=fit,
+            )
         # SPEC-SEARCH-V6-STYLE-WIRING — refine turns reuse the Vision letter
         # that the original search already established (kept in ctx for the
         # whole chat turn by react_loop._build_ctx). text-only follow-up:
@@ -331,6 +356,7 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             cands = await run_text_only_search(
                 text_query=text_query,
                 category=category,
+                subcategory=subcategory,
                 gender=refine_gender,
                 brand_filter=refine_brand,
                 platform=platform,
@@ -428,7 +454,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 len(rescue_cands),
             )
             cands = rescue_cands
-    _ = action  # action is informational metadata, not used for filtering
+    # action 은 broaden(조건 해제 · 넓게 가져오기 · 본 상품 제외)과 color_swap(옛 색 상속 안 함)에서
+    # 동작을 바꾼다. 나머지 값(refine / cheaper / exclude)은 인자 조합으로만 처리한다.
 
     # Persist FULL refined candidates so `respond` renders real cards
     # internally (parity with search_products; LLM never serializes cards).
