@@ -884,6 +884,10 @@ async def search_service(state: PipelineState) -> PipelineState:
         category_for_gate = sub_family
 
     gender_norm = _resolve_gender(req)
+    # 가격 경계 → RPC 하드 필터 (2026-10-18). 완화 재시도도 같은 params 를 복사하므로
+    # 가격은 어느 단계에서도 풀리지 않는다.
+    price_min = req.price_filter.min_price if req.price_filter else None
+    price_max = req.price_filter.max_price if req.price_filter else None
 
     # SPEC-SEARCH-HYBRID-001 — 순수 텍스트 쿼리(state.hybrid_text)이고 플래그 ON 이면
     # 이미지⊕텍스트 임베딩 블렌드 RPC 로 라우팅. 그 외(사진/blended/pinned-anchor,
@@ -903,6 +907,8 @@ async def search_service(state: PipelineState) -> PipelineState:
             w_text=settings.SEARCH_HYBRID_W_TEXT,
             pool=settings.SEARCH_HYBRID_POOL,
             name_query=(str(getattr(req.item, "name_query", None) or "").strip() or None),
+            min_price=price_min,
+            max_price=price_max,
         )
         _do_search = SearchRepository.search_hybrid
         rpc_name = "search_products_hybrid_v1"
@@ -916,6 +922,8 @@ async def search_service(state: PipelineState) -> PipelineState:
             subcategory=sub_norm,
             gender=gender_norm,
             platform=req.platform,
+            min_price=price_min,
+            max_price=price_max,
         )
         _do_search = SearchRepository.search
         rpc_name = "search_products_v6"

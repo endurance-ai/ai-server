@@ -91,26 +91,42 @@ async def test_characterize_rpc_v6_full_params(fixed_embed, rpc_capture):
     }
 
 
-# ── (b) price_filter set — DROPPED under v6 (no price param at all) ─────────
-async def test_characterize_rpc_v6_ignores_price_filter(fixed_embed, rpc_capture):
+# ── (b) price_filter set — v6 가격 하드 필터 (2026-10-18) ────────────────
+# 예전에는 v6 에 가격 인자가 없어 price_filter 를 버렸다. 이제 p_min_price /
+# p_max_price 로 넘긴다. 값이 있는 쪽만 키를 넣는다(SQL 배포 전 옛 함수에 새 키를
+# 보내면 가격 없는 검색까지 실패하므로).
+_BASE_V6_KEYS = {
+    "query_embedding",
+    "p_style_node_id",
+    "p_category",
+    "p_subcategory",
+    "p_brand_names",
+    "p_color_family",
+    "p_gender",
+    "p_limit",
+    "p_platform",
+}
+
+
+async def test_characterize_rpc_v6_maps_price_filter(fixed_embed, rpc_capture):
     pf = PriceFilter(minPrice=10000, maxPrice=50000)
     fn_name, params = await _capture_params(_req(price_filter=pf), fixed_embed, rpc_capture)
     assert fn_name == "search_products_v6"
-    # v6 has NO price param — price_filter must not leak into the RPC dict.
-    assert "price_min" not in params
-    assert "price_max" not in params
-    assert set(params.keys()) == {
-        "query_embedding",
-        "p_style_node_id",
-        "p_category",
-        "p_subcategory",
-        "p_brand_names",
-        # SPEC-SEARCH-V6-COLOR added — 7-key param dict (was 6).
-        "p_color_family",
-        "p_gender",
-        "p_limit",
-        "p_platform",
-    }
+    assert params["p_min_price"] == 10000
+    assert params["p_max_price"] == 50000
+    assert set(params.keys()) == _BASE_V6_KEYS | {"p_min_price", "p_max_price"}
+
+
+async def test_characterize_rpc_v6_max_price_only(fixed_embed, rpc_capture):
+    pf = PriceFilter(maxPrice=50000)
+    _, params = await _capture_params(_req(price_filter=pf), fixed_embed, rpc_capture)
+    assert params["p_max_price"] == 50000
+    assert "p_min_price" not in params
+
+
+async def test_characterize_rpc_v6_no_price_sends_no_price_keys(fixed_embed, rpc_capture):
+    _, params = await _capture_params(_req(), fixed_embed, rpc_capture)
+    assert set(params.keys()) == _BASE_V6_KEYS
 
 
 # ── (c) brand_filter set — mapped verbatim to p_brand_names ────────────────

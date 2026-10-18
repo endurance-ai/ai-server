@@ -19,8 +19,17 @@ AI 서버가 `search_products_v6` RPC 응답 행을 diversify 에 넘기기 전�
 | `p_brand_names` | `text[]` | `NULL` | 브랜드 필터 (없으면 NULL) |
 | `p_limit` | `integer` | `50` | 반환 후보 수 (`SEARCH_DEFAULT_K`) |
 | `p_platform` | `text` | `NULL` | 판매처 exact 필터. null이면 전체 검색. 편집샵 범위에서는 category fallback도 이 필터 안에서 유지 |
+| `p_min_price` | `integer` | `NULL` | 가격 하한(원, 경계 포함). 값이 있을 때만 키를 보낸다 (2026-10-18) |
+| `p_max_price` | `integer` | `NULL` | 가격 상한(원, 경계 포함). 값이 있을 때만 키를 보낸다 (2026-10-18) |
 
-**v5에서 제거된 파라미터**: `query_text`, `gender_filter`, `subcategory_filter`, `price_min`, `price_max`, `tags_filter`, `k`, `rrf_k` — v6 RPC에 존재하지 않음.
+**v5에서 제거된 파라미터**: `query_text`, `gender_filter`, `subcategory_filter`, `price_min`, `price_max`, `tags_filter`, `k`, `rrf_k`. 가격은 2026-10-18에 `p_min_price` / `p_max_price` 이름으로 다시 들어왔다.
+
+**가격 파라미터 (`search_products_v6`, `search_products_hybrid_v1` 공통)**
+
+- 출처: `RecommendRequest.price_filter`. 에이전트 경로에서는 LLM 인자 `min_price` / `max_price`, 상한이 없으면 모바일 필터 슬라이더 `req_price_max`.
+- 모든 rung · CTE 에서 다른 하드 필터와 같은 자리에서 거르고 완화 재시도에서도 풀지 않는다.
+- 가격 조건이 있을 때만 함수 안에서 `hnsw.iterative_scan = relaxed_order` 를 켠다(트랜잭션 로컬). 끄면 HNSW 가 `ef_search`(40) 개만 꺼낸 뒤 가격으로 걸러 후보가 크게 줄어든다.
+- 가격 키가 없을 때는 키를 보내지 않는다. SQL 이 배포되기 전 옛 함수에 새 키를 보내면 PostgREST 가 함수를 찾지 못해(PGRST202) 가격 없는 검색까지 실패하기 때문이다.
 
 RPC 이름 리터럴 `"search_products_v6"` 는 `search_repository.py` 의 `_RPC_NAME` 상수에 단일 소스로 존재 (REQ-AI-002).
 

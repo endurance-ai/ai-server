@@ -648,6 +648,26 @@ def persist_last_results(ctx: dict[str, Any], cands: list[Any]) -> int:
         return 0
 
 
+def price_bound(v: Any) -> int | None:
+    """LLM 인자(문자열 · 실수 가능)나 슬라이더 값을 원 단위 정수로. 0 이하 · 해석 불가는 None."""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _price_filter(min_price: int | None, max_price: int | None) -> Any:
+    """RecommendRequest.price_filter 값. 둘 다 없으면 None (RPC 에 가격 키를 안 보낸다)."""
+    if min_price is None and max_price is None:
+        return None
+    from app.models.request import PriceFilter
+
+    return PriceFilter(minPrice=min_price, maxPrice=max_price)
+
+
 def apply_price_filter(
     cands: list[Any],
     min_price: float | None,
@@ -1112,6 +1132,8 @@ async def run_text_only_search(
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
     override_embedding: list[float] | None = None,
     relax_diversity: bool = False,
     web_max: bool = False,
@@ -1186,6 +1208,7 @@ async def run_text_only_search(
         style_node=style_node,
         relax_diversity=relax_diversity,
         web_max=web_max,
+        price_filter=_price_filter(min_price, max_price),
     )
     state = PipelineState(request=req, user_key=user_key)
     # SPEC-SEARCH-HYBRID-001: a pure text query (no image-vector anchor) routes
@@ -1265,6 +1288,8 @@ async def run_multi_query_search(
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
 ) -> list[Any]:
     """상황/TPO 쿼리 확장 (2026-07-16 Phase 4a).
 
@@ -1288,6 +1313,8 @@ async def run_multi_query_search(
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=max_price,
             )
             for q in queries
         ],
@@ -1340,6 +1367,8 @@ async def run_blended_search(
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
 ) -> list[Any]:
     """Multi-turn blended search (Level 1 image-first refinement).
 
@@ -1381,6 +1410,8 @@ async def run_blended_search(
             top_k=top_k,
             style_node_primary=style_node_primary,
             user_key=user_key,
+            min_price=min_price,
+            max_price=max_price,
         )
 
     modifier_vec = await EmbedProvider.embed_text(modifier_query)
@@ -1405,6 +1436,7 @@ async def run_blended_search(
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
+        price_filter=_price_filter(min_price, max_price),
     )
     state = PipelineState(request=req, user_key=user_key)
     state.embedding = blended
@@ -1473,6 +1505,8 @@ async def run_smart_blended_search(
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
 ) -> list[Any]:
     """Intent-aware multi-turn search (Level 2 advanced).
 
@@ -1531,6 +1565,8 @@ async def run_smart_blended_search(
             top_k=top_k,
             style_node_primary=style_node_primary,
             user_key=user_key,
+            min_price=min_price,
+            max_price=max_price,
         )
 
     # 2) Classify intent. On any failure → free_form (alpha=0.5 weighted sum).
@@ -1584,6 +1620,7 @@ async def run_smart_blended_search(
         image_url=_TEXT_ONLY_SENTINEL,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
+        price_filter=_price_filter(min_price, max_price),
     )
     state = PipelineState(request=req, user_key=user_key)
     state.embedding = query_vec
@@ -1623,6 +1660,8 @@ async def run_image_search(
     top_k: int = 40,
     style_node_primary: str | None = None,
     user_key: str | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
 ) -> list[Any]:
     """Photo-pick path — full existing `run_pipeline` (image embedding → v6 RPC).
 
@@ -1655,6 +1694,7 @@ async def run_image_search(
         image_url=image_url,
         final_limit=max(1, int(top_k)),
         style_node=style_node,
+        price_filter=_price_filter(min_price, max_price),
     )
     resp = await run_pipeline(req, user_key=user_key)
     return list(getattr(resp, "results", None) or getattr(resp, "candidates", None) or [])
@@ -2184,6 +2224,11 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
         )
         multi_queries = None
 
+    # 가격 경계는 RPC 하드 필터로 넘긴다(2026-10-18). 예전처럼 상위 50개를 받은 뒤
+    # 거르면 그 안에 싼 상품이 없을 때 0건이 된다. 상한이 없으면 모바일 필터 슬라이더값.
+    min_price = price_bound(args.get("min_price"))
+    max_price = price_bound(effective_max_price(args.get("max_price"), ctx))
+
     try:
         if multi_queries is not None:
             logger.info("🔍 [tool.search_products] situation multi-query: %r", multi_queries)
@@ -2195,6 +2240,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=max_price,
             )
         elif has_image:
             # Photo-pick: real resolved image drives the v6 query embedding.
@@ -2214,6 +2261,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=max_price,
             )
         elif origin_url and pinned_embedding is None:
             # Intent-aware Level 2 advanced blending (PR June 2026):
@@ -2245,6 +2294,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=max_price,
             )
         else:
             # 계절어는 유저 원문에서 — 에이전트 영어 쿼리에선 자주 빠진다(실측: 한국어 9개 중 6개).
@@ -2285,6 +2336,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                 top_k=top_k,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=max_price,
                 override_embedding=pinned_embedding,
                 web_max=is_web,
             )
@@ -2363,6 +2416,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
                     top_k=top_k,
                     user_key=user_key,
                     override_embedding=centroid,
+                    min_price=min_price,
+                    max_price=max_price,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[bare-brand+similar] similar search failed: %r", exc)
@@ -2409,11 +2464,9 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> SearchProductsR
 
         cands = [c for c in cands if not _brand_excluded(c)]
 
-    # User-supplied price bounds (KRW, integer 원). Applied AFTER vector
-    # ranking + dislike discount so cosine ordering is preserved. The ceiling
-    # falls back to the per-request mobile filter slider when the LLM didn't
-    # supply an explicit max_price.
-    cands = apply_price_filter(cands, args.get("min_price"), effective_max_price(args.get("max_price"), ctx))
+    # 가격은 위 RPC 에서 이미 걸렀다. 여기서는 RPC 를 거치지 않은 후보(유사 브랜드
+    # 병합 등)까지 같은 경계를 지키도록 한 번 더 거른다.
+    cands = apply_price_filter(cands, min_price, max_price)
 
     # 웹 홍보 랜딩 최소 카드 보장(surface=web_explore) — 절대 빈약하게 두지 않는다.
     # <MIN 이면: 결과가 있으면 그 카드들의 이미지 임베딩 centroid 로 유사 상품 백필,

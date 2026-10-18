@@ -49,6 +49,15 @@ def embedding_to_pgvector(values: list[float]) -> str:
     return "[" + ",".join(f"{v:.7f}" for v in values) + "]"
 
 
+def _with_price(params: dict[str, Any], min_price: int | None, max_price: int | None) -> dict[str, Any]:
+    """가격 경계(원, 경계 포함)를 RPC 키로 붙인다. 없는 쪽은 키 자체를 넣지 않는다."""
+    if min_price is not None:
+        params["p_min_price"] = int(min_price)
+    if max_price is not None:
+        params["p_max_price"] = int(max_price)
+    return params
+
+
 class SearchRepository:
     """Wraps the `search_products_v6` RPC. Sole owner of the RPC name +
     param mapping (REQ-AI-002, SPEC-SEARCH-V6-001)."""
@@ -64,6 +73,8 @@ class SearchRepository:
         subcategory: str | None = None,
         gender: str | None = None,
         platform: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_v6` RPC param dict (SPEC-SEARCH-V6-001).
 
@@ -88,8 +99,10 @@ class SearchRepository:
             (search_service)는 반드시 `subcategory_vocab.normalize_subcategory`
             를 통과한 canonical 토큰 또는 None 만 넘긴다 (여기서 재정규화
             하지 않음 — 이중 정규화 방지).
-          - There is no v6 RPC price param and no client-side price filter
-            (user-confirmed) → price_min/price_max retired.
+          - `p_min_price` / `p_max_price` (2026-10-18): 가격 하드 필터. 예전에는
+            RPC 가 가격을 몰라 상위 p_limit 를 받은 뒤 앱에서 걸렀고, 그 안에 싼
+            상품이 없으면 0건이 됐다. 값이 있을 때만 키를 넣는다 — SQL 배포 전
+            옛 함수에 새 키를 보내면 가격 없는 검색까지 PGRST202 로 실패하므로.
           - `p_style_node_id` is the v6 RPC's FILTER 1 — a brand-level
             taxonomy filter (`brand_nodes.primary_style_node_id`). Callers
             supply the Vision-derived letter (`A`..`U`) via `style_node_code`;
@@ -106,7 +119,7 @@ class SearchRepository:
             so unlike subcategory this is safe to hard-filter on.
         This mapping exists ONLY here (single source — REQ-AI-002).
         """
-        return {
+        params = {
             "query_embedding": embedding_to_pgvector(embedding),
             "p_style_node_id": _style_code_to_id(style_node_code),
             # v6 family gate: always exactly one of the 20 canonical lowercase
@@ -126,6 +139,7 @@ class SearchRepository:
             "p_limit": settings.SEARCH_DEFAULT_K,
             "p_platform": platform,
         }
+        return _with_price(params, min_price, max_price)
 
     @staticmethod
     def build_params_hybrid(
@@ -141,6 +155,8 @@ class SearchRepository:
         w_text: float,
         pool: int,
         name_query: str | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
     ) -> dict[str, Any]:
         """Construct the `search_products_hybrid_v1` RPC param dict (SPEC-SEARCH-HYBRID-001).
 
@@ -151,7 +167,7 @@ class SearchRepository:
         RPC computes both the image- and text-space cosine distances over the
         two-kNN union and orders by the min-max-normalized blend.
         """
-        return {
+        params = {
             "query_embedding": embedding_to_pgvector(embedding),
             "p_style_node_id": _style_code_to_id(style_node_code),
             "p_category": to_canonical_family(category),
@@ -166,6 +182,7 @@ class SearchRepository:
             "p_limit": settings.SEARCH_DEFAULT_K,
             "p_platform": platform,
         }
+        return _with_price(params, min_price, max_price)
 
     @staticmethod
     async def search_hybrid(params: dict[str, Any]) -> list[dict[str, Any]]:

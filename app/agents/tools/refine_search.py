@@ -29,6 +29,7 @@ from app.agents.tools.search_products import (
     effective_max_price,
     persist_last_results,  # noqa: F401 — used in non-DEMO path; DEMO block re-imports locally
     pipeline_exc_detail,
+    price_bound,
     run_image_search,
     run_smart_blended_search,
     run_text_only_search,
@@ -219,8 +220,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
     # Translate action → price clamp / drops. The ceiling falls back to the
     # per-request mobile filter slider (ctx.req_price_max) when the LLM didn't
     # supply an explicit max_price for this refine.
-    max_price = effective_max_price(args.get("max_price"), ctx)
-    min_price = None if args.get("drop_min_price") else args.get("min_price")
+    max_price = price_bound(effective_max_price(args.get("max_price"), ctx))
+    min_price = None if args.get("drop_min_price") else price_bound(args.get("min_price"))
 
     try:
         # SPEC-SEARCH-V6-001 family-gate plumbing fix (mirrors search_products):
@@ -287,48 +288,55 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
         # 이전 턴의 gender-pinned product query)에서 gender 토큰을 역파싱.
         # 없으면 None(필터 off). 'unisex' 는 service 가 None 으로 매핑.
         refine_gender = _query_gender(text_query or "") or _query_gender(base_query or "")
-        if has_image:
-            cands = await run_image_search(
-                image_url=str(ctx_image),
-                text_query=text_query,
-                category=category,
-                gender=refine_gender,
-                platform=platform,
-                fit=fit,
-                color_family=color_family,
-                mood=mood,
-                top_k=_BROADEN_POOL if broaden else 15,
-                style_node_primary=style_node_primary,
-                user_key=user_key,
-            )
-        elif origin_url:
-            # Intent-aware Level 2 advanced blending — vector arithmetic for
-            # color_swap/fit_change, intent-tuned weighted-sum otherwise.
-            # Prior outfit context anchors the FROM-attribute extraction.
-            prior_ctx_parts = [
-                str(base_query or text_query or ""),
-                str(category or ""),
-                str(fit or ""),
-                str(color_family or ""),
-            ]
-            prior_ctx = " ".join(p for p in prior_ctx_parts if p).strip()
-            cands = await run_smart_blended_search(
-                origin_url=origin_url,
-                modifier_query=text_query,
-                chat_id=ctx.get("chat_id"),
-                prior_outfit_context=prior_ctx or None,
-                category=category,
-                gender=refine_gender,
-                platform=platform,
-                fit=fit,
-                color_family=color_family,
-                mood=mood,
-                top_k=_BROADEN_POOL if broaden else 15,
-                style_node_primary=style_node_primary,
-                user_key=user_key,
-            )
-        else:
-            cands = await run_text_only_search(
+
+        # 가격은 RPC 하드 필터로 넘긴다(2026-10-18). 아래 결과 부족 구제가 상한만 올려
+        # 같은 검색을 다시 부르므로 검색 분기를 함수로 묶는다.
+        async def _fetch(ceiling: int | None) -> list[Any]:
+            if has_image:
+                return await run_image_search(
+                    image_url=str(ctx_image),
+                    text_query=text_query,
+                    category=category,
+                    gender=refine_gender,
+                    platform=platform,
+                    fit=fit,
+                    color_family=color_family,
+                    mood=mood,
+                    top_k=_BROADEN_POOL if broaden else 15,
+                    style_node_primary=style_node_primary,
+                    user_key=user_key,
+                    min_price=min_price,
+                    max_price=ceiling,
+                )
+            if origin_url:
+                # Intent-aware Level 2 advanced blending — vector arithmetic for
+                # color_swap/fit_change, intent-tuned weighted-sum otherwise.
+                # Prior outfit context anchors the FROM-attribute extraction.
+                prior_ctx_parts = [
+                    str(base_query or text_query or ""),
+                    str(category or ""),
+                    str(fit or ""),
+                    str(color_family or ""),
+                ]
+                prior_ctx = " ".join(p for p in prior_ctx_parts if p).strip()
+                return await run_smart_blended_search(
+                    origin_url=origin_url,
+                    modifier_query=text_query,
+                    chat_id=ctx.get("chat_id"),
+                    prior_outfit_context=prior_ctx or None,
+                    category=category,
+                    gender=refine_gender,
+                    platform=platform,
+                    fit=fit,
+                    color_family=color_family,
+                    mood=mood,
+                    top_k=_BROADEN_POOL if broaden else 15,
+                    style_node_primary=style_node_primary,
+                    user_key=user_key,
+                    min_price=min_price,
+                    max_price=ceiling,
+                )
+            return await run_text_only_search(
                 text_query=text_query,
                 category=category,
                 gender=refine_gender,
@@ -340,11 +348,15 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 top_k=_BROADEN_POOL if broaden else 15,
                 style_node_primary=style_node_primary,
                 user_key=user_key,
+                min_price=min_price,
+                max_price=ceiling,
                 override_embedding=pinned_embedding,
                 # 특정 상품 앵커 "더 비슷하게" — diversify 다양성 캡을 풀어
                 # PDP 유사상품처럼 순수 유사도 상단이 살아남게 한다(윤영 P1).
                 relax_diversity=pinned_embedding is not None,
             )
+
+        cands = await _fetch(max_price)
     except Exception as exc:  # noqa: BLE001
         # P1-6 (260521): shared enrichment helper. Host in log only (internal
         # infra — security 260522); status code kept in Result.error.
@@ -360,65 +372,55 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
             top_candidates=[],
         )
 
-    # Apply exclude_keywords client-side as a thin filter (best-effort).
-    if exclude_kw:
-        ek = {k.lower() for k in exclude_kw}
-        cands = [c for c in cands if not any(k in (getattr(c, "title", "") or "").lower() for k in ek)]
+    def _narrow(cands: list[Any]) -> list[Any]:
+        """검색 결과에 제외 키워드 · 제외 브랜드 · 넓히기 · 비선호를 적용한다. 구제 재검색도 같은 단계를 거친다."""
+        # Apply exclude_keywords client-side as a thin filter (best-effort).
+        if exclude_kw:
+            ek = {k.lower() for k in exclude_kw}
+            cands = [c for c in cands if not any(k in (getattr(c, "title", "") or "").lower() for k in ek)]
 
-    # exclude_brands client-side drop (parity with search_products D2). Fixes the
-    # prior no-op: the LLM passes action='exclude' + exclude_brands=['Zara'] but
-    # the list was never applied anywhere. Drop candidates whose brand matches an
-    # excluded brand (case-insensitive exact OR substring).
-    if exclude_brands:
-        _ebset = {b.lower() for b in exclude_brands}
+        # exclude_brands client-side drop (parity with search_products D2). Fixes the
+        # prior no-op: the LLM passes action='exclude' + exclude_brands=['Zara'] but
+        # the list was never applied anywhere. Drop candidates whose brand matches an
+        # excluded brand (case-insensitive exact OR substring).
+        if exclude_brands:
+            _ebset = {b.lower() for b in exclude_brands}
 
-        def _brand_excluded(c: Any) -> bool:
-            b = (c.get("brand") if isinstance(c, dict) else getattr(c, "brand", "")) or ""
-            b = str(b).lower()
-            return bool(b) and any(x == b or x in b for x in _ebset)
+            def _brand_excluded(c: Any) -> bool:
+                b = (c.get("brand") if isinstance(c, dict) else getattr(c, "brand", "")) or ""
+                b = str(b).lower()
+                return bool(b) and any(x == b or x in b for x in _ebset)
 
-        cands = [c for c in cands if not _brand_excluded(c)]
+            cands = [c for c in cands if not _brand_excluded(c)]
 
-    if broaden and prior_shown:
-        fresh = [c for c in cands if _cand_id(c) not in prior_shown]
-        # 새 상품이 너무 적으면(얇은 카탈로그) 기존 것도 뒤에 남겨 빈 화면을 피한다.
-        cands = (fresh + [c for c in cands if _cand_id(c) in prior_shown])[:15] if len(fresh) < 3 else fresh[:15]
+        if broaden and prior_shown:
+            fresh = [c for c in cands if _cand_id(c) not in prior_shown]
+            # 새 상품이 너무 적으면(얇은 카탈로그) 기존 것도 뒤에 남겨 빈 화면을 피한다.
+            cands = (fresh + [c for c in cands if _cand_id(c) in prior_shown])[:15] if len(fresh) < 3 else fresh[:15]
 
-    # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike (flag-gated; OFF →
-    # unchanged → V2 byte-identical). Reuses the search_products helper.
-    cands = apply_dislike_discount(ctx, cands)
+        # SPEC-AGENT-V3-REACT Gap4 — merge cross-thread dislike (flag-gated; OFF →
+        # unchanged → V2 byte-identical). Reuses the search_products helper.
+        cands = apply_dislike_discount(ctx, cands)
+        return cands
 
-    # Price bounds — reuse the shared helper from search_products so both
-    # entry points apply identical semantics (KRW integer 원, missing-price
-    # rows dropped when ANY bound is set). 2026-05-20: previously discarded
-    # ("informational only in α") — now wired through to actual filtering.
+    cands = _narrow(cands)
+
+    # Price bounds — RPC 가 이미 걸렀고(2026-10-18), 같은 경계로 한 번 더 거른다
+    # (KRW integer 원, 경계 포함, 가격 없는 행 제외).
     #
-    # Weak-result rescue (SPEC-AGENT-V2-REACT follow-up, 2026-07-04):
-    # a price clamp on a sparse catalog slice frequently drops candidates to
-    # 0-1. Keep the pre-filter set so we can relax `max_price` ONCE and
-    # re-filter without paying another embed+RPC round-trip. Langfuse trace
-    # 14279b4a: "더 저렴한 카고팬츠" → refine returned 0 → agent apologized
-    # instead of trying a looser price. The prompt-level rule (see
-    # `_PROACTIVE_DIRECTIVE`) tells the LLM to retry; this is the code-level
-    # safety net for when the LLM doesn't follow it.
-    _pre_filter_cands = list(cands)
+    # Weak-result rescue (SPEC-AGENT-V2-REACT follow-up, 2026-07-04): Langfuse
+    # trace 14279b4a "더 저렴한 카고팬츠" → refine 0건 → 에이전트가 더 넓은 가격을
+    # 시도하지 않고 사과했다. 프롬프트 규칙(`_PROACTIVE_DIRECTIVE`)과 별개로 코드에서
+    # 상한을 +25% 올려 한 번 더 검색한다. 예전에는 받은 후보 안에서 다시 걸렀지만
+    # 이제 후보가 이미 가격으로 걸러져 오므로 올린 상한으로 RPC 를 다시 부른다.
     cands = apply_price_filter(cands, min_price, max_price)
-    if len(cands) < 3 and max_price is not None and _pre_filter_cands:
-        # Bump the ceiling +25%, but no lower than the smallest available
-        # price in the pre-filter set (guarantees at least one row clears).
-        try:
-            _prices = [
-                int(getattr(c, "price", 0) or 0) for c in _pre_filter_cands if int(getattr(c, "price", 0) or 0) > 0
-            ]
-            _min_available = min(_prices) if _prices else None
-        except (TypeError, ValueError):
-            _min_available = None
+    if len(cands) < 3 and max_price is not None:
         bumped = int(max_price * 1.25)
-        if _min_available is not None and _min_available > bumped:
-            # Even the cheapest row is above +25%; use its price as the
-            # ceiling so the rescue always yields ≥1 result.
-            bumped = _min_available
-        rescue_cands = apply_price_filter(_pre_filter_cands, min_price, bumped)
+        try:
+            rescue_cands = apply_price_filter(_narrow(await _fetch(bumped)), min_price, bumped)
+        except Exception as exc:  # noqa: BLE001 — 구제 실패는 원래 결과를 그대로 낸다
+            logger.warning("[tool.refine_search] price rescue search failed: %r", exc)
+            rescue_cands = []
         if len(rescue_cands) > len(cands):
             logger.info(
                 "🔍 [tool.refine_search] weak result (%d) → price rescue %s → %s (rescued %d cands)",
