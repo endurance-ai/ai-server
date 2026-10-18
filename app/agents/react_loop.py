@@ -518,8 +518,11 @@ _PIN_KO_GENERIC: Final[frozenset[str]] = frozenset(
 )
 
 
-def _pin_window_rejected(window: list[str]) -> bool:
-    """원문 스캔 창(1~3어절)이 핀으로 걸면 안 되는 일반 표현인지."""
+def _pin_window_rejected(window: list[str], *, labeled: bool = False) -> bool:
+    """원문 스캔 창(1~3어절)이 핀으로 걸면 안 되는 일반 표현인지.
+
+    `labeled` 는 창 바로 앞뒤에 '브랜드' 라벨이 붙은 경우다('스웨이드 브랜드'). 사용자가 브랜드라고
+    밝혔으므로 불용어 · 색 · 속성어 규칙은 건너뛴다(scan_text_for_brand 의 라벨 예외와 같다)."""
     from app.infrastructure.repositories.brand_node_cache import (
         _filter_index,
         is_attribute_word,
@@ -536,7 +539,7 @@ def _pin_window_rejected(window: list[str]) -> bool:
         return True
     if all(t.isdigit() for t in toks):
         return True
-    if all(t in _PIN_EN_STOPWORDS or t in _PIN_COLOR_WORDS or is_attribute_word(t) for t in toks):
+    if not labeled and all(t in _PIN_EN_STOPWORDS or t in _PIN_COLOR_WORDS or is_attribute_word(t) for t in toks):
         return True
     if len(toks) == 1 and joined in _PIN_KO_GENERIC:
         return True
@@ -556,6 +559,7 @@ def _scan_brand_for_pin(text: str | None) -> list[str] | None:
     거부된 창은 건너뛰기만 하므로 같은 문장 안의 진짜 브랜드("글로니 in black")는 그대로 잡힌다."""
     from app.infrastructure.repositories.brand_node_cache import (
         _SCAN_STOPWORDS,
+        _labeled_as_brand,
         attribute_shadows_brand,
         resolve_brand_window,
         split_brand_label,
@@ -574,7 +578,8 @@ def _scan_brand_for_pin(text: str | None) -> list[str] | None:
                 continue
             if span == 1 and attribute_shadows_brand(tokens, i):
                 continue
-            if _pin_window_rejected(tokens[i : i + span]):
+            labeled = _labeled_as_brand(tokens, i) or _labeled_as_brand(tokens, i + span - 1)
+            if _pin_window_rejected(tokens[i : i + span], labeled=labeled):
                 continue
             names = resolve_brand_window(tokens, i, span)
             if names and span > best_span:
@@ -1543,14 +1548,17 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
         if _BRAND_SIMILAR_MARKER_RE.search(raw):
             return None
         from app.infrastructure.repositories.brand_node_cache import (
+            _labeled_as_brand,
             attribute_shadows_brand,
             resolve_brand_window,
-            scan_text_for_brand,
             split_brand_label,
         )
         from app.infrastructure.repositories.category_family import garment_family
 
-        names = scan_text_for_brand(raw)
+        # 핀과 같은 오탐 가드를 쓴다(2026-10-18). 거르지 않은 스캔은 'y2k top' 의 'top' 을
+        # 브랜드 별칭으로 잡아 The Open Product 브랜드 검색으로 보냈다(dev 60일 고유 발화
+        # 241건 중 라우팅 17건, 오탐 1건).
+        names = _scan_brand_for_pin(raw)
         if not names:
             return None
         tokens = split_brand_label(raw).split()
@@ -1565,7 +1573,12 @@ def _detect_bare_brand_request(state: WorkingState, sess: Any) -> dict[str, Any]
             for span in (3, 2, 1):
                 if span == 1 and attribute_shadows_brand(tokens, i):
                     continue
-                if i + span <= n and resolve_brand_window(tokens, i, span):
+                if i + span > n:
+                    continue
+                labeled = _labeled_as_brand(tokens, i) or _labeled_as_brand(tokens, i + span - 1)
+                if _pin_window_rejected(tokens[i : i + span], labeled=labeled):
+                    continue
+                if resolve_brand_window(tokens, i, span):
                     matched.update(range(i, i + span))
                     break
         if any(_BRAND_NEGATION_RE.match(_norm_filler(tokens[k])) for k in range(n) if k not in matched):

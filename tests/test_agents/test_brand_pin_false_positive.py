@@ -32,6 +32,8 @@ _CATALOG = {
     "글로니": ["GLOWNY"],
     "자라": ["ZARA"],
     "The Row": ["The Row"],
+    "SUADE": ["SUADE"],
+    "스웨이드": ["SUADE"],
 }
 
 
@@ -76,7 +78,51 @@ def test_common_words_do_not_pin(text):
         ("Dsquared2 청바지", ["Dsquared2"]),
         ("1011갤러리 티셔츠", ["1011GALLERY"]),
         ("글로니 in black", ["GLOWNY"]),
+        # '브랜드' 라벨을 붙이면 속성어 별칭도 브랜드다(라벨 없는 '스웨이드 자켓'은 소재).
+        ("스웨이드 브랜드 보여줘", ["SUADE"]),
+        ("브랜드 스웨이드", ["SUADE"]),
     ],
 )
 def test_real_brands_still_pin(text, expected):
     assert react_loop._scan_brand_for_pin(text) == expected
+
+
+# ── 결정론 맨-브랜드 라우터 (2026-10-18) ────────────────────────────────────
+# 라우터는 거르지 않은 스캔을 써서 'y2k top' 의 'top' 을 브랜드로 보고 브랜드 검색으로
+# 보냈다(dev 60일 고유 user_text 241건 중 라우팅 17건, 오탐 1건).
+
+
+def _router_state(text: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(image_url=None, message=SimpleNamespace(text=text, callback_data=None))
+
+
+@pytest.fixture
+def _with_top_alias(monkeypatch):
+    filt = dict(brand_node_cache._filter_index)
+    for key in _surface_keys("top"):
+        filt.setdefault(key, []).append("The Open Product")
+    monkeypatch.setattr(brand_node_cache, "_filter_index", filt)
+
+
+@pytest.mark.parametrize("text", ["y2k top", "black top", "jacket in black", "5만원 이하 니트"])
+def test_router_ignores_common_words(_with_top_alias, text):
+    assert react_loop._detect_bare_brand_request(_router_state(text), None) is None
+
+
+def test_router_keeps_brand_and_treats_top_as_garment(_with_top_alias):
+    r = react_loop._detect_bare_brand_request(_router_state("글로니 top"), None)
+    assert r is not None
+    assert r["brand"] == "GLOWNY"
+    assert r["label"] == "글로니"
+    assert r["text_query"] == "top"
+
+
+def test_router_still_routes_plain_brand(_with_top_alias):
+    r = react_loop._detect_bare_brand_request(_router_state("자라 아우터"), None)
+    assert r is not None and r["brand"] == "ZARA" and r["garment"] == "아우터"
+
+
+def test_unlabeled_attribute_word_does_not_pin():
+    assert react_loop._scan_brand_for_pin("스웨이드 자켓") is None
