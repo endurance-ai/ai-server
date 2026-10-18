@@ -1,0 +1,560 @@
+[
+ {
+  "id": 26155,
+  "thread_id": "163957a5-9271-492f-95d9-d5362e706af6",
+  "created_at": "2026-08-20T17:31:06.212023+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 150000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 0}",
+  "prev_args": null
+ },
+ {
+  "id": 26160,
+  "thread_id": "163957a5-9271-492f-95d9-d5362e706af6",
+  "created_at": "2026-08-20T17:31:09.03348+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"broaden\", \"max_price\": 200000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 1}",
+  "prev_args": null
+ },
+ {
+  "id": 26183,
+  "thread_id": "4aef29e9-d7d2-4d6c-aa92-671bb8dff678",
+  "created_at": "2026-08-20T17:32:25.38768+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 150000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 1}",
+  "prev_args": null
+ },
+ {
+  "id": 26194,
+  "thread_id": "00e24ba1-19b7-478a-a17b-0b8297fa2303",
+  "created_at": "2026-08-20T17:32:38.806397+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 300000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 2}",
+  "prev_args": null
+ },
+ {
+  "id": 29375,
+  "thread_id": "ff02edef-8254-4fc3-82b9-2deb9291650f",
+  "created_at": "2026-08-26T17:30:26.757933+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 200000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"SKIMS, Norba, 샵아모멘토 +4\", \"colors\": [\"black\"], \"mostly\": \"leggings\", \"materials\": [\"other\"], \"price_krw\": \"5,566–190,000\"}, \"candidates_count\": 13}",
+  "prev_args": "{\"category\": \"leggings\", \"text_query\": \"black leggings women\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 29620,
+  "thread_id": "6a1a2358-8be0-41b2-b96c-61d4b4ddd5c4",
+  "created_at": "2026-08-26T17:48:29.763447+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"SKIMS, Jaded London, EASTLOGUE +1\", \"colors\": [\"black\"], \"mostly\": \"tank-top\", \"materials\": [\"cotton\", \"other\"], \"price_krw\": \"47,200–99,000\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"fit\": \"fitted\", \"category\": \"shirt\", \"text_query\": \"fitted long sleeve shirt\"}"
+ },
+ {
+  "id": 29629,
+  "thread_id": "308443f6-4cfa-4794-89f3-725705b3e3f1",
+  "created_at": "2026-08-26T17:48:53.073408+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"LOSSYROW, BITTER CELLS, Dunst +2\", \"colors\": [\"cream\", \"white\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\", \"polyester\"], \"price_krw\": \"19,800–72,540\"}, \"candidates_count\": 8}",
+  "prev_args": null
+ },
+ {
+  "id": 29646,
+  "thread_id": "a5fb2a2d-995f-48b4-a8aa-290557bd6b0d",
+  "created_at": "2026-08-26T17:49:12.093344+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"NOIRER, EASTLOGUE, NOCLE +4\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\", \"silk\"], \"price_krw\": \"27,600–89,300\"}, \"candidates_count\": 9}",
+  "prev_args": null
+ },
+ {
+  "id": 29688,
+  "thread_id": "f64af0c6-c9cb-42a0-992c-bdf37aee50ce",
+  "created_at": "2026-08-26T18:29:18.578823+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 150000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"oversized\", \"brands\": \"Cold Culture, Years Ago, TAEY +3\", \"colors\": [\"navy\", \"blue\"], \"mostly\": \"hoodie\", \"materials\": [\"cotton\"], \"price_krw\": \"47,400–134,200\"}, \"candidates_count\": 11}",
+  "prev_args": null
+ },
+ {
+  "id": 29708,
+  "thread_id": "8532972c-18be-43df-8c8c-929c98e86209",
+  "created_at": "2026-08-26T18:30:53.155092+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"skinny\", \"brands\": \"SKIMS, OROGEE, Heidi Klein +2\", \"colors\": [\"blue\"], \"mostly\": \"bikini\", \"materials\": [\"polyester\", \"other\"], \"price_krw\": \"29,300–79,100\"}, \"candidates_count\": 8}",
+  "prev_args": null
+ },
+ {
+  "id": 29784,
+  "thread_id": "ffe85a12-33f2-438b-bc1c-3dc03b8b1819",
+  "created_at": "2026-08-26T18:40:46.144404+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 150000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"SKIMS, Cold Culture, Jaded London +2\", \"colors\": [\"grey\"], \"mostly\": \"hoodie\", \"materials\": [\"fleece\", \"cotton\"], \"price_krw\": \"82,500–143,400\"}, \"candidates_count\": 10}",
+  "prev_args": "{\"category\": \"hoodie\", \"text_query\": \"grey hoodie\", \"color_family\": \"grey\"}"
+ },
+ {
+  "id": 29818,
+  "thread_id": "9a66912a-6234-4c2c-9af0-a545f12da220",
+  "created_at": "2026-08-26T18:43:27.954903+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Jaded London, VICINITY\", \"colors\": [\"grey\"], \"mostly\": \"hoodie\", \"materials\": [\"cotton\"], \"price_krw\": \"82,500–83,000\"}, \"candidates_count\": 2}",
+  "prev_args": "{\"category\": \"hoodie\", \"text_query\": \"grey hoodie\", \"color_family\": \"grey\"}"
+ },
+ {
+  "id": 29931,
+  "thread_id": "31d4afc0-4e60-4b70-983a-7ca960e135fb",
+  "created_at": "2026-08-26T20:15:24.423016+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 260000.0, \"boost_keywords\": \"list[1]\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"ASYMMETRY, TREEMINGBIRD, ERER +4\", \"colors\": [\"black\", \"blue\"], \"materials\": [\"denim\", \"cotton\"], \"price_krw\": \"92,400–248,000\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"category\": \"jacket\", \"text_query\": \"fringe jacket\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 30697,
+  "thread_id": "96f21850-d83b-4597-94d8-4e44f809728b",
+  "created_at": "2026-08-27T17:56:39.720859+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 30000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"MAU SOLEUM, WOULDBE\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"30,000–34,000\"}, \"candidates_count\": 2}",
+  "prev_args": "{\"fit\": \"fitted\", \"category\": \"top\", \"text_query\": \"black fitted top women\", \"sub_queries\": \"[\\\"black wide pants women\\\", \\\"black long coat women\\\"]\", \"color_family\": \"black\", \"style_node_primary\": \"U\"}"
+ },
+ {
+  "id": 30832,
+  "thread_id": "aa23bb5b-c46a-4951-8279-b3ae0a2462ca",
+  "created_at": "2026-08-27T21:10:51.310327+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"hoodie\", \"max_price\": 50000.0, \"text_query\": \"black hoodie men\"}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 0}",
+  "prev_args": null
+ },
+ {
+  "id": 31611,
+  "thread_id": "e593dc7c-fd15-4483-9bc0-e950395d1def",
+  "created_at": "2026-08-30T12:00:11.776167+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 300000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"HAVERSACK\", \"colors\": [\"black\"], \"materials\": [\"leather\", \"other\"], \"price_krw\": \"245,715\"}, \"candidates_count\": 1}",
+  "prev_args": "{\"category\": \"boots\", \"text_query\": \"black lace-up studded ankle boots\", \"boost_keywords\": \"list[1]\", \"style_node_primary\": \"I\"}"
+ },
+ {
+  "id": 31658,
+  "thread_id": "e593dc7c-fd15-4483-9bc0-e950395d1def",
+  "created_at": "2026-08-30T12:06:25.264897+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 500000.0, \"boost_keywords\": \"list[1]\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"YUJI, George Cox\", \"colors\": [\"black\"], \"materials\": [\"leather\"], \"price_krw\": \"398,000–449,000\"}, \"candidates_count\": 3}",
+  "prev_args": "{\"category\": \"boots\", \"text_query\": \"black lace-up studded ankle boots\", \"boost_keywords\": \"list[1]\", \"style_node_primary\": \"I\"}"
+ },
+ {
+  "id": 32075,
+  "thread_id": "450aefb6-a066-4896-ac10-0655d797957f",
+  "created_at": "2026-08-31T13:37:26.490767+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Bergwerk Seoul, AUTUMN\", \"colors\": [\"black\", \"beige\"], \"mostly\": \"trench-coat\", \"materials\": [\"cotton\", \"wool\"], \"price_krw\": \"73,000–119,000\"}, \"candidates_count\": 3}",
+  "prev_args": "{\"category\": \"trench-coat\", \"text_query\": \"short trench coat\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 32462,
+  "thread_id": "5120205c-198e-4180-8e9b-e0a1c7000ac3",
+  "created_at": "2026-08-31T18:35:15.668069+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 300000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"cropped\", \"brands\": \"Loadingroom, TREEMINGBIRD, AUBOUR +3\", \"colors\": [\"black\"], \"mostly\": \"denim-jacket\", \"materials\": [\"denim\"], \"price_krw\": \"39,500–289,000\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"category\": \"jacket\", \"material\": \"denim\", \"text_query\": \"brush denim jacket\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 34196,
+  "thread_id": "6078ec76-94d0-42b3-8dfd-67be6700bf7f",
+  "created_at": "2026-09-04T17:10:26.156668+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 600000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"LABEL ARCHIVE, YUJI, 피노키 PINOKI +3\", \"colors\": [\"black\"], \"mostly\": \"derby\", \"materials\": [\"leather\"], \"price_krw\": \"164,000–598,000\"}, \"candidates_count\": 6}",
+  "prev_args": "{\"category\": \"derby\", \"shoe_toe\": \"square\", \"text_query\": \"derby shoes men\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 34321,
+  "thread_id": "4f6fc9f4-9df0-4600-934d-ecdc4154e808",
+  "created_at": "2026-09-04T18:18:55.642402+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 130000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"17end, NOCLE, LUNDY +1\", \"colors\": [\"blue\"], \"mostly\": \"jeans\", \"materials\": [\"denim\", \"cotton\"], \"price_krw\": \"77,400–158,000\"}, \"candidates_count\": 5}",
+  "prev_args": "{\"category\": \"jeans\", \"text_query\": \"jeans\"}"
+ },
+ {
+  "id": 34357,
+  "thread_id": "c5456f7c-d497-4149-889e-564ea147c8fd",
+  "created_at": "2026-09-04T19:59:30.445707+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 400000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"TONYWACK, Omirad\", \"colors\": [\"brown\", \"black\"], \"mostly\": \"suede-jacket\", \"materials\": [\"suede\"], \"price_krw\": \"166,000–395,000\"}, \"candidates_count\": 4}",
+  "prev_args": "{\"category\": \"jacket\", \"material\": \"suede\", \"text_query\": \"suede jacket men\"}"
+ },
+ {
+  "id": 34383,
+  "thread_id": "c5456f7c-d497-4149-889e-564ea147c8fd",
+  "created_at": "2026-09-04T20:00:13.963271+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 200000.0, \"min_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 0}",
+  "prev_args": "{\"category\": \"jacket\", \"material\": \"suede\", \"text_query\": \"suede jacket men\"}"
+ },
+ {
+  "id": 34709,
+  "thread_id": "21d29e9d-646f-44cf-801d-f9368990d112",
+  "created_at": "2026-09-06T21:13:18.156669+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"jeans\", \"max_price\": 140000.0, \"text_query\": \"black brown jeans\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"longline\", \"brands\": \"17end\", \"mostly\": \"pants\", \"materials\": [\"cotton\"], \"price_krw\": \"135,000\"}, \"candidates_count\": 9}",
+  "prev_args": null
+ },
+ {
+  "id": 34782,
+  "thread_id": "26cde617-2f60-4cc4-bf77-4d5aff1aa452",
+  "created_at": "2026-09-06T22:59:17.543392+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"Uniqlo, HERETIC, OCTETTE +1\", \"colors\": [\"brown\"], \"materials\": [\"cotton\", \"knit\"], \"price_krw\": \"21,307–76,800\"}, \"candidates_count\": 6}",
+  "prev_args": "{\"fit\": \"regular\", \"texture\": \"ribbed\", \"category\": \"blouse\", \"neckline\": \"crew-neck\", \"text_query\": \"short-sleeve button-front crew-neck ribbed-knit burgundy wine regular-fit blouse women\", \"color_family\": \"burgundy\", \"sleeve_length\": \"short\", \"design_details\": \"button-front\"}"
+ },
+ {
+  "id": 34798,
+  "thread_id": "26cde617-2f60-4cc4-bf77-4d5aff1aa452",
+  "created_at": "2026-09-06T22:59:51.745012+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"OCTETTE, AMIMENT, CHICKS +5\", \"colors\": [\"red\", \"purple\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"21,000–58,000\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"fit\": \"regular\", \"texture\": \"ribbed\", \"category\": \"blouse\", \"neckline\": \"crew-neck\", \"text_query\": \"short-sleeve button-front crew-neck ribbed-knit burgundy wine regular-fit blouse women\", \"color_family\": \"burgundy\", \"sleeve_length\": \"short\", \"design_details\": \"button-front\"}"
+ },
+ {
+  "id": 34809,
+  "thread_id": "26cde617-2f60-4cc4-bf77-4d5aff1aa452",
+  "created_at": "2026-09-06T23:00:06.864068+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"AMIMENT, OCTETTE, CHICKS +5\", \"colors\": [\"red\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"21,000–58,000\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"fit\": \"regular\", \"texture\": \"ribbed\", \"category\": \"blouse\", \"neckline\": \"crew-neck\", \"text_query\": \"short-sleeve button-front crew-neck ribbed-knit burgundy wine regular-fit blouse women\", \"color_family\": \"burgundy\", \"sleeve_length\": \"short\", \"design_details\": \"button-front\"}"
+ },
+ {
+  "id": 34822,
+  "thread_id": "d5f459f0-9ecf-443e-8e46-392e8d1f5626",
+  "created_at": "2026-09-06T23:00:52.91024+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"vest\", \"max_price\": 250000.0, \"text_query\": \"fitted vest\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"Birrot\", \"colors\": [\"red\"], \"mostly\": \"tank-top\", \"materials\": [\"polyester\"], \"price_krw\": \"214,000\"}, \"candidates_count\": 1}",
+  "prev_args": null
+ },
+ {
+  "id": 34929,
+  "thread_id": "d5f459f0-9ecf-443e-8e46-392e8d1f5626",
+  "created_at": "2026-09-06T23:09:35.961731+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 76800.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"Mom.seoul, KHAKIPOINT, Notfoursix +1\", \"colors\": [\"brown\", \"black\"], \"mostly\": \"pants\", \"materials\": [\"other\", \"cotton\"], \"price_krw\": \"57,000–89,600\"}, \"candidates_count\": 6}",
+  "prev_args": "{\"category\": \"set\", \"text_query\": \"autumn matching set women\", \"style_node_primary\": \"A\"}"
+ },
+ {
+  "id": 35261,
+  "thread_id": "4e3b55dd-7126-4707-a86d-bd2a75dc4a79",
+  "created_at": "2026-09-07T17:27:11.523708+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 200000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"AUTUMN, CELLETTE, Magnet Archive +2\", \"colors\": [\"black\"], \"mostly\": \"blazer\", \"materials\": [\"wool\", \"cotton\"], \"price_krw\": \"30,400–159,000\"}, \"candidates_count\": 5}",
+  "prev_args": "{\"mood\": \"비즈니스 캐주얼\", \"text_query\": \"business casual blazer\"}"
+ },
+ {
+  "id": 35414,
+  "thread_id": "c19f93f8-0642-4d76-b094-9fff99d3f75d",
+  "created_at": "2026-09-07T17:39:12.245403+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"NIEEH, whoisshe\", \"mostly\": \"t-shirt\", \"materials\": [\"cotton\", \"other\"], \"price_krw\": \"64,400–67,000\"}, \"candidates_count\": 5}",
+  "prev_args": "{\"text_query\": \"blouse women\"}"
+ },
+ {
+  "id": 35430,
+  "thread_id": "c19f93f8-0642-4d76-b094-9fff99d3f75d",
+  "created_at": "2026-09-07T17:39:48.129695+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 60000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"LOSSYROW, OCTETTE\", \"colors\": [\"beige\", \"blue\"], \"materials\": [\"cotton\", \"silk\"], \"price_krw\": \"33,200–44,400\"}, \"candidates_count\": 3}",
+  "prev_args": "{\"text_query\": \"blouse women\"}"
+ },
+ {
+  "id": 35562,
+  "thread_id": "c19f93f8-0642-4d76-b094-9fff99d3f75d",
+  "created_at": "2026-09-07T17:49:09.645382+09:00",
+  "tool": "search_products",
+  "args": "{\"material\": \"cotton silk\", \"max_price\": 40000.0, \"min_price\": 30000.0, \"text_query\": \"top\", \"color_family\": \"beige blue\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"LOSSYROW, KYOD\", \"colors\": [\"blue\", \"grey\"], \"mostly\": \"jeans\", \"materials\": [\"cotton\"], \"price_krw\": \"33,200–38,000\"}, \"notice\": \"no_exact_color: ZERO items match color=BEIGE BLUE for this query; the results are closest-style alternatives in OTHER colors. You MUST tell the user that BEIGE BLUE is essentially unavailable for this style and that these are similar look-alikes instead — do NOT claim the picks are BEIGE BLUE.\", \"candidates_count\": 2}",
+  "prev_args": "{\"text_query\": \"blouse women\"}"
+ },
+ {
+  "id": 35907,
+  "thread_id": "bb770c52-7db5-431a-9850-2a31dece8840",
+  "created_at": "2026-09-07T22:05:25.452287+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"knit\", \"max_price\": 100000.0, \"text_query\": \"autumn knit\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"SUADE, LUNDY, Worthwhile Movement +1\", \"colors\": [\"black\"], \"mostly\": \"sweater\", \"materials\": [\"knit\", \"cotton\"], \"price_krw\": \"71,200–99,000\"}, \"candidates_count\": 4}",
+  "prev_args": null
+ },
+ {
+  "id": 35921,
+  "thread_id": "3bae0e4c-63f7-4215-9841-b5eeb1309337",
+  "created_at": "2026-09-07T22:05:36.489897+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"top\", \"max_price\": 100000.0, \"text_query\": \"autumn long sleeve top\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"NOIRER, SKIMS, EASTLOGUE +9\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\", \"other\"], \"price_krw\": \"27,600–86,400\"}, \"candidates_count\": 18}",
+  "prev_args": null
+ },
+ {
+  "id": 37597,
+  "thread_id": "5db696ef-9973-4336-b548-dc2852c217af",
+  "created_at": "2026-09-09T15:23:52.732143+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"refine\", \"max_price\": 1000000.0, \"min_price\": 100000.0, \"boost_keywords\": \"list[1]\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"MONDAY EDITION\", \"colors\": [\"white\", \"green\"], \"mostly\": \"earrings\", \"materials\": [\"metal\"], \"price_krw\": \"164,736–361,361\"}, \"candidates_count\": 2}",
+  "prev_args": "{\"category\": \"earrings\", \"text_query\": \"star moon earrings\", \"design_details\": \"celestial\"}"
+ },
+ {
+  "id": 37603,
+  "thread_id": "5db696ef-9973-4336-b548-dc2852c217af",
+  "created_at": "2026-09-09T15:23:56.661295+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"refine\", \"max_price\": 1000000.0, \"min_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"MONDAY EDITION\", \"colors\": [\"white\", \"green\"], \"mostly\": \"earrings\", \"materials\": [\"metal\"], \"price_krw\": \"164,736–361,361\"}, \"candidates_count\": 2}",
+  "prev_args": "{\"category\": \"earrings\", \"text_query\": \"star moon earrings\", \"design_details\": \"celestial\"}"
+ },
+ {
+  "id": 37843,
+  "thread_id": "7fbe852b-2f3b-4890-83c2-0052b30d9ef8",
+  "created_at": "2026-09-10T10:56:58.404756+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 500000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"Kiko Kostadinov\", \"colors\": [\"black\", \"grey\"], \"mostly\": \"trousers\", \"materials\": [\"wool\", \"polyester\"], \"price_krw\": \"561,600–589,680\"}, \"candidates_count\": 3}",
+  "prev_args": "{\"brand\": \"kiko kostadinov\", \"category\": \"clothing\", \"text_query\": \"men\"}"
+ },
+ {
+  "id": 37855,
+  "thread_id": "7fbe852b-2f3b-4890-83c2-0052b30d9ef8",
+  "created_at": "2026-09-10T10:57:10.123962+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 400000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"candidates_count\": 0}",
+  "prev_args": "{\"brand\": \"kiko kostadinov\", \"category\": \"clothing\", \"text_query\": \"men\"}"
+ },
+ {
+  "id": 38307,
+  "thread_id": "a18f44db-9a97-42ab-9915-9616862652f6",
+  "created_at": "2026-09-12T01:19:53.792942+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 200000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"PLEASENOFOLLOW\", \"colors\": [\"blue\", \"black\"], \"materials\": [\"denim\", \"cotton\"], \"price_krw\": \"71,100–197,100\"}, \"candidates_count\": 14}",
+  "prev_args": "{\"category\": \"pants\", \"text_query\": \"pants women\", \"similar_to_brand\": \"PLEASENOFOLLOW\"}"
+ },
+ {
+  "id": 39362,
+  "thread_id": "5a9d3a90-3a45-42f3-b7a5-881dd7f29516",
+  "created_at": "2026-09-20T14:47:27.10039+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 900000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"Horlisun, GOLDWIN, NOMANUAL +4\", \"colors\": [\"blue\", \"black\"], \"mostly\": \"down-jacket\", \"materials\": [\"polyester\", \"nylon\"], \"price_krw\": \"143,600–900,000\"}, \"candidates_count\": 15}",
+  "prev_args": "{\"category\": \"outerwear\", \"text_query\": \"heavy outerwear\"}"
+ },
+ {
+  "id": 39386,
+  "thread_id": "5748f11c-ca01-435e-a9c8-dac8b09dbcd8",
+  "created_at": "2026-09-20T14:56:05.65299+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 1000000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"James Coward, 샵아모멘토, Juun.J +2\", \"colors\": [\"brown\"], \"mostly\": \"jacket\", \"pattern\": \"striped\", \"materials\": [\"wool\", \"cotton\"], \"price_krw\": \"270–860,000\"}, \"candidates_count\": 7}",
+  "prev_args": null
+ },
+ {
+  "id": 40028,
+  "thread_id": "155cf632-9e8d-44d2-b9b3-9607aa514405",
+  "created_at": "2026-09-21T02:34:15.662727+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\", \"sleeve_length\": \"long\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Uniqlo, NOIRER, INSILENCE WOMEN +6\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"23,400–99,000\"}, \"candidates_count\": 19}",
+  "prev_args": null
+ },
+ {
+  "id": 40057,
+  "thread_id": "34bc95ff-9f73-4c7c-a442-222bfdc34a51",
+  "created_at": "2026-09-21T02:34:40.950732+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\", \"sleeve_length\": \"long\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Uniqlo, NOIRER, INSILENCE WOMEN +6\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"23,400–99,000\"}, \"candidates_count\": 19}",
+  "prev_args": null
+ },
+ {
+  "id": 40086,
+  "thread_id": "9fd440ad-6e8c-4eb1-b244-ebc9280741ed",
+  "created_at": "2026-09-21T02:34:45.274301+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\", \"sleeve_length\": \"long\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Uniqlo, NOIRER, INSILENCE WOMEN +6\", \"colors\": [\"black\"], \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"23,400–99,000\"}, \"candidates_count\": 19}",
+  "prev_args": null
+ },
+ {
+  "id": 41024,
+  "thread_id": "57a6120c-81a7-4770-b7f8-d13ef9593383",
+  "created_at": "2026-09-21T22:21:29.210582+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"DEINET, BITTER CELLS, KIJIKO +2\", \"colors\": [\"grey\", \"pink\"], \"mostly\": \"pullover\", \"materials\": [\"knit\"], \"price_krw\": \"61,000–97,200\"}, \"candidates_count\": 8}",
+  "prev_args": "{\"category\": \"sweater\", \"graphics\": \"graphic\", \"text_query\": \"graphic sweater women\", \"color_family\": \"blue\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 41041,
+  "thread_id": "57a6120c-81a7-4770-b7f8-d13ef9593383",
+  "created_at": "2026-09-21T22:21:52.756102+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 80000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"cropped\", \"brands\": \"MOIFAIRE\", \"colors\": [\"blue\"], \"mostly\": \"hoodie\", \"materials\": [\"cotton\"], \"price_krw\": \"98,100\"}, \"candidates_count\": 1}",
+  "prev_args": "{\"category\": \"sweater\", \"graphics\": \"graphic\", \"text_query\": \"graphic sweater women\", \"color_family\": \"blue\", \"boost_keywords\": \"list[1]\"}"
+ },
+ {
+  "id": 41066,
+  "thread_id": "f0e78844-93ec-47bf-9f03-b1ddb646b414",
+  "created_at": "2026-09-22T13:41:44.422209+09:00",
+  "tool": "search_products",
+  "args": "{\"fit\": \"oversized\", \"category\": \"cardigan\", \"material\": \"knit\", \"max_price\": 45000.0, \"min_price\": 25000.0, \"text_query\": \"beige oversized knit cardigan\", \"color_family\": \"beige\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"oversized\", \"brands\": \"the pink, a'poem, Magnet Archive +5\", \"colors\": [\"cream\", \"beige\"], \"mostly\": \"cardigan\", \"materials\": [\"knit\"], \"price_krw\": \"19,000–5,550,000\"}, \"candidates_count\": 10}",
+  "prev_args": null
+ },
+ {
+  "id": 41870,
+  "thread_id": "10b9946e-0d52-46ad-b27f-9d766316c9bf",
+  "created_at": "2026-09-28T14:11:00.361755+09:00",
+  "tool": "search_products",
+  "args": "{\"fit\": \"oversized\", \"category\": \"trench-coat\", \"max_price\": 199000.0, \"min_price\": 100000.0, \"text_query\": \"beige oversized trench coat\", \"color_family\": \"beige\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"ZARA, AUTUMN, Bergwerk Seoul +5\", \"colors\": [\"beige\"], \"mostly\": \"trench-coat\", \"materials\": [\"cotton\"], \"price_krw\": \"107,100–198,000\"}, \"candidates_count\": 12}",
+  "prev_args": null
+ },
+ {
+  "id": 41892,
+  "thread_id": "3f8fcc11-eb95-4ae3-a718-ad3ae8d92912",
+  "created_at": "2026-09-28T14:11:39.797312+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"cardigan\", \"max_price\": 50000.0, \"text_query\": \"navy knit cardigan men\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"ASPESI, Barrie, Years Ago +4\", \"colors\": [\"navy\"], \"mostly\": \"cardigan\", \"materials\": [\"wool\", \"knit\"], \"price_krw\": \"1,250–686,000\"}, \"candidates_count\": 10}",
+  "prev_args": null
+ },
+ {
+  "id": 41912,
+  "thread_id": "87311f12-4a79-4e44-8d43-f610963af90d",
+  "created_at": "2026-09-28T15:55:31.11482+09:00",
+  "tool": "search_products",
+  "args": "{\"mood\": \"워크웨어\", \"category\": \"trousers\", \"material\": \"wool\", \"leg_shape\": \"wide\", \"max_price\": 100000.0, \"text_query\": \"navy wide trousers\", \"color_family\": \"navy\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"Magnet Archive, ZARA, Harriet Allure +3\", \"colors\": [\"navy\"], \"mostly\": \"trousers\", \"materials\": [\"cotton\"], \"price_krw\": \"340–99,900\"}, \"candidates_count\": 10}",
+  "prev_args": null
+ },
+ {
+  "id": 42005,
+  "thread_id": "f5ba9af8-e45f-4497-bd4b-45a26858c359",
+  "created_at": "2026-09-28T18:31:21.014951+09:00",
+  "tool": "refine_search",
+  "args": "{\"color\": \"navy\", \"action\": \"refine\", \"max_price\": 200000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"YUPPE, LOSSYROW, Opening Project +3\", \"colors\": [\"navy\"], \"materials\": [\"other\", \"cotton\"], \"price_krw\": \"63,700–156,000\"}, \"candidates_count\": 6}",
+  "prev_args": "{\"category\": \"dress\", \"text_query\": \"elegant midi dress\", \"sub_queries\": \"[\\\"slingback heels\\\", \\\"structured clutch\\\"]\"}"
+ },
+ {
+  "id": 42315,
+  "thread_id": "9136a356-f048-4bc1-82f9-587f1e12eb4c",
+  "created_at": "2026-10-01T16:09:15.591606+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\", \"sleeve_length\": \"long\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"Uniqlo, LOSSYROW, BITTER CELLS +5\", \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"19,900–78,000\"}, \"candidates_count\": 17}",
+  "prev_args": null
+ },
+ {
+  "id": 42341,
+  "thread_id": "e1c2eb8c-f02c-4de6-87ad-f143aa80cbef",
+  "created_at": "2026-10-01T16:09:19.898468+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"t-shirt\", \"max_price\": 100000.0, \"text_query\": \"long sleeve t-shirt\", \"sleeve_length\": \"long\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"slim\", \"brands\": \"Uniqlo, LOSSYROW, BITTER CELLS +5\", \"mostly\": \"t-shirt\", \"materials\": [\"cotton\"], \"price_krw\": \"19,900–78,000\"}, \"candidates_count\": 17}",
+  "prev_args": null
+ },
+ {
+  "id": 42564,
+  "thread_id": "e6648bd1-db6e-43f0-8786-e7da1137a2a8",
+  "created_at": "2026-10-04T13:11:03.020466+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"bag\", \"material\": \"leather\", \"max_price\": 390000.0, \"text_query\": \"black leather shoulder bag\", \"color_family\": \"black\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"ORYANY, Bergwerk Seoul, Nothing Written +6\", \"colors\": [\"black\"], \"mostly\": \"shoulder-bag\", \"materials\": [\"leather\"], \"price_krw\": \"25,000–380,000\"}, \"candidates_count\": 20}",
+  "prev_args": null
+ },
+ {
+  "id": 42594,
+  "thread_id": "ebd713b4-176c-4d66-b867-f63dc91cc8c8",
+  "created_at": "2026-10-04T13:11:41.354661+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"tote bag\", \"max_price\": 195000.0, \"text_query\": \"black tote bag\", \"color_family\": \"black\", \"bag_structure\": \"structured\", \"style_node_primary\": \"C\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"Nothing Written, LEFACE, Lemaire +3\", \"colors\": [\"black\"], \"mostly\": \"tote\", \"materials\": [\"leather\", \"canvas\"], \"price_krw\": \"620–179,000\"}, \"candidates_count\": 11}",
+  "prev_args": null
+ },
+ {
+  "id": 42785,
+  "thread_id": "77b8edb9-0a69-4181-ad21-2bfab4888fc0",
+  "created_at": "2026-10-06T19:26:36.379992+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"bag\", \"material\": \"leather\", \"max_price\": 300000.0, \"text_query\": \"black leather shoulder bag\", \"color_family\": \"black\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"ORYANY, Bergwerk Seoul, NIEEH +6\", \"colors\": [\"black\"], \"mostly\": \"shoulder-bag\", \"materials\": [\"leather\"], \"price_krw\": \"25,000–289,000\"}, \"candidates_count\": 21}",
+  "prev_args": null
+ },
+ {
+  "id": 42922,
+  "thread_id": "c47a2f43-e112-4434-8561-4299ed35aecd",
+  "created_at": "2026-10-06T19:29:56.699149+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"bag\", \"max_price\": 130000.0, \"text_query\": \"black tote bag\", \"color_family\": \"black\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"CHICKS, Nothing Written, Eriist +2\", \"colors\": [\"black\"], \"mostly\": \"tote\", \"materials\": [\"leather\", \"canvas\"], \"price_krw\": \"22,000–238,000\"}, \"candidates_count\": 10}",
+  "prev_args": null
+ },
+ {
+  "id": 43575,
+  "thread_id": "3e642f94-f8d0-4bd7-833f-7ce374c5ef34",
+  "created_at": "2026-10-12T15:17:39.676688+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"jacket\", \"max_price\": 250000.0, \"text_query\": \"neon puffer jacket\", \"boost_keywords\": \"list[1]\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"brands\": \"the pink, BITTER CELLS, ID Vintage +5\", \"colors\": [\"black\", \"pink\"], \"mostly\": \"down-jacket\", \"materials\": [\"polyester\"], \"price_krw\": \"24,900–179,400\"}, \"candidates_count\": 12}",
+  "prev_args": null
+ },
+ {
+  "id": 43597,
+  "thread_id": "ec9a65ed-2d7a-4bae-a1c6-883d3e9cbbe9",
+  "created_at": "2026-10-12T15:19:08.114581+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"jacket\", \"max_price\": 150000.0, \"text_query\": \"casual jacket\", \"style_node_primary\": \"A\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"regular\", \"brands\": \"CELLETTE, BITTER CELLS, NOMANUAL +5\", \"mostly\": \"jacket\", \"materials\": [\"cotton\"], \"price_krw\": \"80,367–139,000\"}, \"candidates_count\": 13}",
+  "prev_args": null
+ },
+ {
+  "id": 43715,
+  "thread_id": "9b7ce724-f723-4f3e-8b6c-7301da109ef2",
+  "created_at": "2026-10-12T15:23:23.028607+09:00",
+  "tool": "search_products",
+  "args": "{\"category\": \"hoodie\", \"max_price\": 150000.0, \"text_query\": \"hoodie\", \"boost_keywords\": \"list[1]\", \"style_node_primary\": \"C\"}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"relaxed\", \"brands\": \"innir, OCTETTE, aetoa +1\", \"colors\": [\"black\"], \"mostly\": \"hoodie\", \"materials\": [\"cotton\", \"knit\"], \"price_krw\": \"39,500–135,000\"}, \"candidates_count\": 7}",
+  "prev_args": null
+ },
+ {
+  "id": 44513,
+  "thread_id": "f3fcb2f1-e9f1-4035-8e3d-a92fd49c4a71",
+  "created_at": "2026-10-13T18:02:26.597485+09:00",
+  "tool": "refine_search",
+  "args": "{\"action\": \"cheaper\", \"max_price\": 100000.0}",
+  "res": "{\"ok\": true, \"error\": null, \"digest\": {\"fit\": \"longline\", \"brands\": \"NOIRER, bluesf, Dunst\", \"colors\": [\"black\", \"blue\"], \"mostly\": \"shirt\", \"materials\": [\"cotton\", \"polyester\"], \"price_krw\": \"39,200–92,700\"}, \"candidates_count\": 4}",
+  "prev_args": "{\"category\": \"shirt\", \"text_query\": \"minimal casual shirt\", \"style_node_primary\": \"C\"}"
+ }
+]
