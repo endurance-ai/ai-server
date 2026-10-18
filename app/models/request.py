@@ -86,6 +86,9 @@ class RecommendRequest(BaseModel):
     # 모바일 3 대신 SEARCH_WEB_BRAND_CAP(8)로 완화하되 완전 해제는 아님(한 브랜드
     # 도배 방지). relax_diversity(=캡 사실상 off)와 구분되는 중간 완화.
     web_max: bool = Field(default=False, alias="webMax")
+    # 사용자가 상품명을 그대로 적어 지목한 상품 id. diversify 가 이 상품을 캡 없이 맨 앞에 둔다.
+    # 지목한 상품이 브랜드 · 무드 캡이나 같은 이름 dedup 에 걸려 빠지던 문제(2026-10-17 측정) 대응.
+    pin_first_id: str | None = Field(default=None, alias="pinFirstId")
 
     @field_validator("image_url")
     @classmethod

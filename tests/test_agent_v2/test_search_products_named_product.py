@@ -45,6 +45,8 @@ def _captured_search(monkeypatch):
         captured["color_family"] = item.color_family
         captured["name_query"] = item.name_query
         captured["search_query"] = item.search_query
+        captured["brand_filter"] = state.request.brand_filter
+        captured["pin_first_id"] = state.request.pin_first_id
         state.raw_candidates = [{"id": "p1", "name": "X", "brand": "Y", "distance": 0.2}]
         return state
 
@@ -102,8 +104,12 @@ async def test_exact_product_name_goes_to_name_query_without_color_gate(
     # 검색 문장도 에이전트의 속성 문장이 아니라 상품명으로 바뀐다(성별 토큰은 뒤에 붙을 수 있음)
     assert str(_captured_search["search_query"]).startswith("lace long-sleeve blouse")
     assert _captured_search["color_family"] is None
-    assert _captured_search["category"] == "tops"
+    # 카테고리 게이트는 끄고(쿼리 family 매핑과 RPC 매핑이 달라 그 상품을 거르던 문제),
+    # 범위는 그 상품의 브랜드로 좁힌다. 지목 상품은 다양화 캡 없이 맨 앞에 둔다.
+    # category=None 은 텍스트 검색에서 'apparel'(family other)로 채워져 RPC 게이트가 걸리지 않는다.
+    assert _captured_search["category"] == "apparel"
     assert _captured_search["subcategory"] is None
+    assert _captured_search["pin_first_id"] == "448669"
 
 
 @pytest.mark.asyncio
@@ -216,3 +222,40 @@ async def test_no_catalog_match_keeps_agent_args(monkeypatch, _mock_embed_text, 
     assert res["ok"] is True
     assert _captured_search["name_query"] is None
     assert _captured_search["color_family"] == "black"
+
+
+@pytest.mark.asyncio
+async def test_named_product_brand_overrides_wrong_brand_and_pin(
+    monkeypatch, _mock_embed_text, _captured_search, _session
+):
+    """10/17 측정 재현: 'Romare Coat in Army Melange' → 원문 핀이 'in' 을 IS-NESS 로 잡고,
+    LLM 도 엉뚱한 brand 를 넣으면 그 상품이 RPC 에서 빠졌다. 지목 상품의 브랜드로 고정한다."""
+    from app.infrastructure.repositories import brand_node_cache
+    from app.infrastructure.repositories.brand_node_cache import _surface_keys
+
+    filt: dict[str, list[str]] = {}
+    for surface, names in {"KHAITE": ["KHAITE"], "IS-NESS": ["IS-NESS"]}.items():
+        for key in _surface_keys(surface):
+            filt.setdefault(key, []).extend(names)
+    monkeypatch.setattr(brand_node_cache, "_filter_index", filt)
+    monkeypatch.setattr(brand_node_cache, "_acronym_index", {})
+    monkeypatch.setattr("app.agents.last_query.get_pinned_brand", lambda chat_id: ["IS-NESS"])
+    find = AsyncMock(
+        return_value=[{"id": 700001, "name": "Romare Coat in Army Melange", "brand": "KHAITE", "category": "outerwear"}]
+    )
+    monkeypatch.setattr("app.providers.database.DatabaseProvider.find_in_stock_products_by_name", find)
+
+    ctx = {
+        "chat_id": 8,
+        "user_key": "u:8",
+        "image_url": "",
+        "text_query": "",
+        "user_msg": "Romare Coat in Army Melange 찾아줘",
+    }
+    args = {"text_query": "army melange coat", "brand": "IS-NESS", "category": "coat"}
+    res = await sp.dispatch(args, ctx)
+
+    assert res["ok"] is True
+    assert _captured_search["brand_filter"] == ["KHAITE"]
+    assert _captured_search["category"] == "apparel"
+    assert _captured_search["pin_first_id"] == "700001"
