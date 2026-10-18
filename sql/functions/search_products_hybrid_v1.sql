@@ -30,6 +30,11 @@
 --   node)는 v6 와 동일 시맨틱으로 두 kNN CTE 에 각각 적용한다. gender 3단 다리도
 --   v6 와 동일(feature_metadata.gender → products.gender → fail-open).
 --
+-- 가격(p_min_price / p_max_price, 2026-10-18): 예전에는 RPC 가 가격을 모르고 앱에서
+--   결과를 거른 뒤 버렸다. 유사도 상위 50개에 싼 상품이 없으면 '5만원 이하 니트'가
+--   0건이 됐다. 이제 세 CTE(img/txt/nam) 모두에서 다른 게이트와 같은 자리에서 거른다.
+--   경계 포함, price NULL 행은 조건이 있을 때 빠진다(앱 apply_price_filter 와 동일).
+--
 -- product_features(text_embedding) 미보유 상품(카탈로그의 ~4%)은 텍스트 랭킹
 --   대상이 아니고 최종 union JOIN 에서 빠진다 — 하이브리드는 enrich 완료 상품만
 --   대상으로 한다(의도된 스코프). 이미지 단독 리콜이 필요하면 v6 를 쓴다.
@@ -67,7 +72,9 @@ CREATE OR REPLACE FUNCTION public.search_products_hybrid_v1(
   p_w_name        double precision DEFAULT 0.35,  -- 이름 매치 부스트 가중 (distance 에서 차감)
   p_pool          integer DEFAULT 100,            -- 공간별 kNN 풀 크기
   p_limit         integer DEFAULT 50,
-  p_platform      text DEFAULT NULL::text
+  p_platform      text DEFAULT NULL::text,
+  p_min_price     integer DEFAULT NULL::integer,  -- 가격 하한 (원, 포함)
+  p_max_price     integer DEFAULT NULL::integer   -- 가격 상한 (원, 포함)
 )
  RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, distance double precision, degraded boolean)
  LANGUAGE plpgsql
@@ -87,6 +94,16 @@ BEGIN
     END IF;
   END IF;
 
+  -- 가격 조건이 있으면 HNSW 를 반복 스캔으로 돌린다. 기본(off)이면 인덱스가
+  -- ef_search(40) 개만 꺼낸 뒤 가격으로 거르므로 '5만원 이하'처럼 넓은 조건에서도
+  -- 후보가 한 자릿수로 줄어든다(dev 실측: 가격만 건 kNN 6행). relaxed_order 는 조건을
+  -- 만족하는 행이 LIMIT 만큼 찰 때까지(최대 hnsw.max_scan_tuples) 인덱스를 더 읽는다.
+  -- 순서가 약간 어긋날 수 있지만 아래 dd/nn 에서 정확한 거리로 다시 정렬한다.
+  -- is_local=true 라 이 트랜잭션(PostgREST 요청 1건) 안에서만 유효하다.
+  IF p_min_price IS NOT NULL OR p_max_price IS NOT NULL THEN
+    PERFORM set_config('hnsw.iterative_scan', 'relaxed_order', true);
+  END IF;
+
   RETURN QUERY
   WITH img AS (
     -- 이미지 공간 kNN (idx_product_embeddings_hnsw, halfvec_cosine_ops)
@@ -102,6 +119,8 @@ BEGIN
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_platform IS NULL OR p.platform = p_platform)
+      AND (p_min_price IS NULL OR p.price >= p_min_price)
+      AND (p_max_price IS NULL OR p.price <= p_max_price)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
@@ -121,6 +140,8 @@ BEGIN
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_platform IS NULL OR p.platform = p_platform)
+      AND (p_min_price IS NULL OR p.price >= p_min_price)
+      AND (p_max_price IS NULL OR p.price <= p_max_price)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])
@@ -141,6 +162,8 @@ BEGIN
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_platform IS NULL OR p.platform = p_platform)
+      AND (p_min_price IS NULL OR p.price >= p_min_price)
+      AND (p_max_price IS NULL OR p.price <= p_max_price)
       AND (p_style_node_id IS NULL OR bn.primary_style_node_id = p_style_node_id)
       AND (p_color_family IS NULL OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (p_gender IS NULL OR p.gender && ARRAY[p_gender, 'unisex'])

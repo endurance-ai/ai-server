@@ -63,6 +63,11 @@
 -- 되돌려야 한다면: 104 를 DROP 하고 p.gender 에 NULL 이 다시 생길 수 있는
 --    상태로 가는 경우에만 3단 다리가 필요해진다.
 
+-- ── 가격 필터 (`p_min_price` / `p_max_price`, 2026-10-18) ─────────────────
+-- 예전에는 RPC 가 가격을 모르고 AI 서버가 결과를 받은 뒤 걸렀다. 유사도 상위 p_limit
+-- 안에 조건에 맞는 상품이 없으면 결과가 0건이 됐다. 이제 다른 하드 필터와 같은 자리
+-- (모든 rung)에서 거르고, 어느 rung 에서도 완화하지 않는다. 경계 포함, NULL 이면 off.
+--
 BEGIN;
 
 -- ── 모든 search_products_v6 오버로드 제거 (옛 6-인자 포함) ──────────────────
@@ -90,7 +95,9 @@ CREATE OR REPLACE FUNCTION public.search_products_v6(
   p_color_family  text DEFAULT NULL::text,  -- 16 canonical family (BLACK/GREY/…)
   p_gender        text DEFAULT NULL::text,  -- NEW: 'men'|'women' (unisex 상품은 항상 포함)
   p_limit         integer DEFAULT 30,
-  p_platform      text DEFAULT NULL::text
+  p_platform      text DEFAULT NULL::text,
+  p_min_price     integer DEFAULT NULL::integer,  -- 가격 하한 (원, 포함)
+  p_max_price     integer DEFAULT NULL::integer   -- 가격 상한 (원, 포함)
 )
  RETURNS TABLE(id bigint, brand text, name text, price integer, image_url text, product_url text, platform text, subcategory text, canonical_variant_id bigint, distance double precision, degraded boolean)
  LANGUAGE plpgsql
@@ -110,6 +117,14 @@ BEGIN
     IF v_target_family IS NULL THEN
       v_target_family := 'other';
     END IF;
+  END IF;
+
+  -- 가격 조건이 있으면 HNSW 반복 스캔 (search_products_hybrid_v1.sql 과 같은 이유).
+  -- 기본(off)이면 인덱스가 ef_search(40) 개만 꺼낸 뒤 가격으로 걸러 후보가 줄어든다.
+  -- relaxed_order 로 꺼낸 행은 순서가 약간 어긋날 수 있어 각 rung 의 ORDER BY 가
+  -- 정확한 거리로 다시 정렬한다. is_local=true 라 이 요청 트랜잭션 안에서만 유효하다.
+  IF p_min_price IS NOT NULL OR p_max_price IS NOT NULL THEN
+    PERFORM set_config('hnsw.iterative_scan', 'relaxed_order', true);
   END IF;
 
   -- ── rung 1 count: EXACT node + family gate ────────────────────────
@@ -133,6 +148,8 @@ BEGIN
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_platform IS NULL OR p.platform = p_platform)
+      AND (p_min_price IS NULL OR p.price >= p_min_price)
+      AND (p_max_price IS NULL OR p.price <= p_max_price)
       AND (p_color_family IS NULL
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (
@@ -166,6 +183,8 @@ BEGIN
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
         AND (p_platform IS NULL OR p.platform = p_platform)
+        AND (p_min_price IS NULL OR p.price >= p_min_price)
+        AND (p_max_price IS NULL OR p.price <= p_max_price)
         AND (p_color_family IS NULL
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
@@ -196,6 +215,8 @@ BEGIN
     AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
     AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
     AND (p_platform IS NULL OR p.platform = p_platform)
+    AND (p_min_price IS NULL OR p.price >= p_min_price)
+    AND (p_max_price IS NULL OR p.price <= p_max_price)
     AND (p_color_family IS NULL
          OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
     AND (
@@ -226,6 +247,8 @@ BEGIN
         AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
         AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
         AND (p_platform IS NULL OR p.platform = p_platform)
+        AND (p_min_price IS NULL OR p.price >= p_min_price)
+        AND (p_max_price IS NULL OR p.price <= p_max_price)
         AND (p_color_family IS NULL
              OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
         AND (
@@ -262,6 +285,8 @@ BEGIN
       AND (p_subcategory IS NULL OR p.subcategory = p_subcategory)
       AND (p_brand_names IS NULL OR bn.brand_name = ANY(p_brand_names))
       AND (p_platform IS NULL OR p.platform = p_platform)
+      AND (p_min_price IS NULL OR p.price >= p_min_price)
+      AND (p_max_price IS NULL OR p.price <= p_max_price)
       AND (p_color_family IS NULL
            OR pf.feature_metadata->>'primary_color' = UPPER(p_color_family))
       AND (
