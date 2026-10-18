@@ -12,6 +12,7 @@ search_products).
 
 from __future__ import annotations
 
+import json
 import re
 
 # LLM(특히 kimi-k2.5)이 boost_keywords 에 실제 키워드 대신 스키마 타입 표기를
@@ -85,6 +86,25 @@ def strip_color_tokens(query: str) -> str:
     return " ".join(kept).strip()
 
 
+def parse_json_list(s: str) -> list[str] | None:
+    """`'["cropped", "high-neck"]'` 처럼 JSON 배열을 문자열로 보낸 값을 리스트로 푼다.
+
+    LLM 이 boost_keywords 를 리스트 대신 JSON 문자열로 보내면 원소 하나짜리 리스트로
+    감싸져 검색 문장에 괄호째 붙었다(dev search_done 9/1~10/13 refine 76건 중 37건,
+    새 검색 286건 중 15건). JSON 배열이 아니면 None 을 돌려 기존 처리에 맡긴다.
+    """
+    t = s.strip()
+    if not (t.startswith("[") and t.endswith("]")):
+        return None
+    try:
+        parsed = json.loads(t)
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [str(x).strip() for x in parsed if x is not None and str(x).strip()]
+
+
 def as_keyword_list(v: object) -> list[str]:
     """Defensive cast for `boost_keywords` / `exclude_keywords` args.
 
@@ -105,10 +125,22 @@ def as_keyword_list(v: object) -> list[str]:
     if v is None:
         return []
     if isinstance(v, str):
+        parsed = parse_json_list(v)
+        if parsed is not None:
+            return [x for x in parsed if not _is_placeholder(x)]
         s = v.strip()
         return [s] if s and not _is_placeholder(s) else []
     if isinstance(v, (list, tuple)):
-        return [str(x) for x in v if x and not _is_placeholder(str(x))]
+        out: list[str] = []
+        for x in v:
+            if not x:
+                continue
+            # 리스트 안에 JSON 문자열이 한 덩어리로 들어온 경우도 푼다.
+            parsed = parse_json_list(x) if isinstance(x, str) else None
+            for item in parsed if parsed is not None else [str(x)]:
+                if item and not _is_placeholder(item):
+                    out.append(item)
+        return out
     return []
 
 

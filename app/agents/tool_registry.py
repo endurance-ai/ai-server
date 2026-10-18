@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from app.agents.tools._keyword_utils import parse_json_list
+
 __all__ = [
     "REGISTRY",
     "ToolMetadata",
@@ -729,6 +731,12 @@ def validate_args(tool_name: str, args: dict[str, Any]) -> tuple[bool, str | Non
             if isinstance(v, list):
                 continue
             if isinstance(v, str):
+                # JSON 배열 문자열('["a", "b"]')은 리스트로 푼다(2026-10-18). 감싸기만 하면
+                # 괄호째 검색 문장에 붙는다.
+                parsed = parse_json_list(v)
+                if parsed is not None:
+                    args[key] = parsed
+                    continue
                 # Lone non-empty string → 1-element list. Empty string drops the
                 # field entirely (LLM occasionally sends "" as a no-op).
                 stripped = v.strip()
