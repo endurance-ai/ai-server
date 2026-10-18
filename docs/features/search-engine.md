@@ -24,7 +24,9 @@ search_products_v6(
   p_subcategory     text    DEFAULT NULL,  -- always NULL (products.subcategory 100% NULL)
   p_brand_names     text[]  DEFAULT NULL,  -- optional brand filter
   p_limit           integer DEFAULT 50,    -- top-K
-  p_platform        text    DEFAULT NULL   -- optional edit-shop retailer scope
+  p_platform        text    DEFAULT NULL,  -- optional edit-shop retailer scope
+  p_min_price       integer DEFAULT NULL,  -- 가격 하한(원, 포함). 2026-10-18
+  p_max_price       integer DEFAULT NULL   -- 가격 상한(원, 포함). 2026-10-18
 ) RETURNS TABLE (
   id          bigint,          -- products.id (bigint; PostgREST may return int or str)
   brand       text,
@@ -63,6 +65,14 @@ query_embedding → cosine distance (HNSW pgvector)
 `p_platform`이 지정된 편집샵 검색은 모든 fallback rung에서 판매처를 유지한다. 유효한
 family category가 해당 판매처에 없으면 category를 해제해 다른 품목을 채우지 않고 빈
 결과를 반환한다. `p_brand_names`와 category 조건은 platform 조건과 AND로 결합된다.
+
+### 가격 필터 (2026-10-18)
+
+예전에는 RPC 가 가격을 몰라 상위 `p_limit` 를 받은 뒤 AI 서버(`apply_price_filter`)에서 걸렀다. 유사도 상위 50개 안에 조건에 맞는 상품이 없으면 카탈로그에 있어도 0건이 됐다. 지금은 `p_min_price` / `p_max_price` 로 RPC 안에서 거른다.
+
+- 가격 조건이 있을 때만 `hnsw.iterative_scan = relaxed_order` 를 켠다. 이 설정이 없으면 HNSW 가 `ef_search`(40) 개만 꺼낸 뒤 가격으로 걸러 후보가 한 자릿수까지 줄어든다.
+- `apply_price_filter` 는 남겨 두었다. RPC 를 거치지 않는 후보(유사 브랜드 병합 등)에도 같은 경계를 지키기 위해서다.
+- `refine_search` 의 결과 부족 구제(3개 미만)는 상한을 25% 올려 RPC 를 다시 부른다.
 
 ### text query path (v6)
 
