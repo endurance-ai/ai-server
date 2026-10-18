@@ -178,3 +178,43 @@ def test_strip_color_tokens_empty_and_no_color():
 def test_color_words_covers_common_families():
     for c in ("black", "white", "pink", "navy", "beige", "khaki"):
         assert c in COLOR_WORDS
+
+
+# ─── JSON 배열 문자열 (2026-10-18) ──────────────────────────────────────────
+# LLM 이 boost_keywords 를 '["cropped", "high-neck"]' 처럼 JSON 문자열로 보내면 원소
+# 하나짜리 리스트로 감싸져 검색 문장이 'black leather jacket women ["cropped", "high-neck"]'
+# 가 됐다(dev search_done 9/1~10/13 refine 76건 중 37건, 새 검색 286건 중 15건).
+
+
+def test_validate_parses_json_array_string_boost_keywords():
+    args = {"boost_keywords": '["cropped", "high-neck"]'}
+    ok, err = validate_args("refine_search", args)
+    assert ok is True, err
+    assert args["boost_keywords"] == ["cropped", "high-neck"]
+
+
+def test_validate_parses_json_array_string_exclude_brands():
+    args = {"exclude_brands": '["ZARA"]'}
+    ok, err = validate_args("search_products", args)
+    assert ok is True, err
+    assert args["exclude_brands"] == ["ZARA"]
+
+
+def test_validate_keeps_bracketless_string_wrapped():
+    args = {"boost_keywords": "[draft] cropped"}
+    ok, _ = validate_args("refine_search", args)
+    assert ok
+    assert args["boost_keywords"] == ["[draft] cropped"]
+
+
+def test_cast_parses_json_array_string_and_nested_element():
+    assert _as_keyword_list_for_test('["vibrant", "bright"]') == ["vibrant", "bright"]
+    assert _as_keyword_list_for_test(['["no-hood", "stand-collar"]']) == ["no-hood", "stand-collar"]
+
+
+def test_validated_json_string_does_not_leak_brackets_into_query():
+    args = {"boost_keywords": '["cropped", "high-neck"]'}
+    validate_args("refine_search", args)
+    q = _dedup_join("black leather jacket women", _as_keyword_list_for_test(args["boost_keywords"]))
+    assert q == "black leather jacket women cropped high-neck"
+    assert "[" not in q and '"' not in q
