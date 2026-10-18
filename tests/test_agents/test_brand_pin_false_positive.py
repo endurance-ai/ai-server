@@ -106,7 +106,7 @@ def _with_top_alias(monkeypatch):
     monkeypatch.setattr(brand_node_cache, "_filter_index", filt)
 
 
-@pytest.mark.parametrize("text", ["y2k top", "black top", "jacket in black", "5만원 이하 니트"])
+@pytest.mark.parametrize("text", ["y2k top", "black top", "jacket in black", "5만원 이하 니트", "off white sneakers"])
 def test_router_ignores_common_words(_with_top_alias, text):
     assert react_loop._detect_bare_brand_request(_router_state(text), None) is None
 
