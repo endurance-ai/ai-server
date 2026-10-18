@@ -63,7 +63,17 @@ def load_cases(limit: int = 0) -> list[dict[str, Any]]:
 
 
 def route_ok(case: dict[str, Any], tool: str) -> bool:
+    """첫 도구 채점. isolated 모드는 첫 호출만 관찰하므로 금지 도구도 첫 도구만 본다."""
     return tool in case["expect_tools"] and tool not in case["forbid_tools"]
+
+
+def forbid_ok(case: dict[str, Any], tools: list[str]) -> bool:
+    """e2e: 턴 안에서 호출된 도구 중 금지 도구가 하나도 없어야 한다.
+
+    데이터셋 정의는 "forbid_tools=호출되면 실패"인데, 2026-10-18 이전 e2e 는 첫 도구만 봐서
+    두 번째 이후에 부른 금지 도구(예: 검색 뒤 web_search)를 통과시켰다.
+    """
+    return not any(t in case["forbid_tools"] for t in tools)
 
 
 def _pct(oks: list[bool]) -> float:
@@ -254,6 +264,7 @@ async def _run_case(case: dict[str, Any], chat_id: int) -> dict[str, Any]:
     resp = (delta.get("response_text") or " ".join(adapter.texts) or "").strip()
     delivered = adapter.cards > 0
     r_ok = route_ok(case, first)
+    f_ok = forbid_ok(case, tools)
     c_ok = (not case["cards_expected"]) or delivered
     promised = bool(_PROMISE_RE.search(resp))
     h_ok = (not promised) or delivered
@@ -263,8 +274,9 @@ async def _run_case(case: dict[str, Any], chat_id: int) -> dict[str, Any]:
         if h.get("tool_name") in ("search_products", "refine_search")
     ]
     return {
-        "ok": r_ok and c_ok and h_ok,
+        "ok": r_ok and f_ok and c_ok and h_ok,
         "route_ok": r_ok,
+        "forbid_ok": f_ok,
         "cards_ok": c_ok,
         "honest_ok": h_ok,
         "deterministic": _DETERMINISTIC[0] if _DETERMINISTIC else None,
@@ -302,7 +314,8 @@ async def run_e2e(cases: list[dict[str, Any]], arms: list[str]) -> dict[str, Any
                 det = f" det={r.get('deterministic')}" if r.get("deterministic") else ""
                 print(
                     f"  {mark} {arm} [{c['category']:9s}] {c['id']:16s} tool={r.get('first_tool')} "
-                    f"route={r.get('route_ok')} cards={r.get('cards_ok')} honest={r.get('honest_ok')}{det} "
+                    f"route={r.get('route_ok')} forbid={r.get('forbid_ok')} "
+                    f"cards={r.get('cards_ok')} honest={r.get('honest_ok')}{det} "
                     f"{r.get('error') or ''}",
                     flush=True,
                 )
@@ -311,6 +324,7 @@ async def run_e2e(cases: list[dict[str, Any]], arms: list[str]) -> dict[str, Any
             out[arm] = {
                 "success_pct": _pct([x["ok"] for x in rows]),
                 "route_pct": _pct([bool(x.get("route_ok")) for x in rows]),
+                "forbid_pct": _pct([bool(x.get("forbid_ok")) for x in rows]),
                 "llm_routed_success_pct": _pct([x["ok"] for x in llm_rows]),
                 "n_llm_routed": len(llm_rows),
                 "n_deterministic": len(rows) - len(llm_rows),
