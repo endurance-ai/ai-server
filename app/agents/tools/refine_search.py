@@ -454,7 +454,8 @@ async def dispatch(args: dict[str, Any], ctx: dict[str, Any]) -> RefineSearchRes
                 len(rescue_cands),
             )
             cands = rescue_cands
-    _ = action  # action is informational metadata, not used for filtering
+    # action 은 broaden(조건 해제 · 넓게 가져오기 · 본 상품 제외)과 color_swap(옛 색 상속 안 함)에서
+    # 동작을 바꾼다. 나머지 값(refine / cheaper / exclude)은 인자 조합으로만 처리한다.
 
     # Persist FULL refined candidates so `respond` renders real cards
     # internally (parity with search_products; LLM never serializes cards).
