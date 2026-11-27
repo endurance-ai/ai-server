@@ -35,6 +35,15 @@ _LAST: dict[int, str] = {}
 # 상품을 뽑던 버그 대응. 수명/멀티워커 특성은 _LAST 와 동일.
 _LAST_BRAND: dict[int, list[str]] = {}
 
+# chat_id -> 직전 성공 검색의 구조화 조건(category / subcategory / color_family / fit).
+# refine 은 품목 · 색 · 핏을 ctx 에서 읽었는데, 텍스트 턴의 ctx 에는 사진 턴 값
+# (vision_category)만 있고 fit / color_family 키는 아예 없다. 그래서 "검정 가디건" 뒤
+# "더 싸게"가 품목 게이트 없이 검색됐다(2026-10-18 dev: 9/1 이후 refine 75건 중 broaden
+# 아닌 31건이 직전 검색의 category 를 잃음, 색 9건, 핏 4건). 수명/멀티워커 특성은
+# _LAST 와 동일.
+_LAST_FILTERS: dict[int, dict[str, str]] = {}
+_FILTER_KEYS = ("category", "subcategory", "color_family", "fit")
+
 
 def _coerce_chat_id(chat_id: Any) -> int | None:
     try:
@@ -65,6 +74,7 @@ def clear_last_query(chat_id: Any) -> None:
         return
     _LAST.pop(cid, None)
     _LAST_BRAND.pop(cid, None)
+    _LAST_FILTERS.pop(cid, None)
 
 
 def set_last_brand(chat_id: Any, brands: list[str] | None) -> None:
@@ -85,6 +95,25 @@ def get_last_brand(chat_id: Any) -> list[str] | None:
     if cid is None:
         return None
     return _LAST_BRAND.get(cid)
+
+
+def set_last_filters(chat_id: Any, **filters: Any) -> None:
+    """직전 검색의 구조화 조건 보관. 값이 없는 키는 빠지고, 전부 비면 이전 값을 지운다."""
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return
+    clean = {k: str(v).strip() for k, v in filters.items() if k in _FILTER_KEYS and v and str(v).strip()}
+    if clean:
+        _LAST_FILTERS[cid] = clean
+    else:
+        _LAST_FILTERS.pop(cid, None)
+
+
+def get_last_filters(chat_id: Any) -> dict[str, str]:
+    cid = _coerce_chat_id(chat_id)
+    if cid is None:
+        return {}
+    return dict(_LAST_FILTERS.get(cid) or {})
 
 
 # chat_id -> 대화에서 감지된 sticky 브랜드 컨텍스트. `_LAST_BRAND`(직전 성공
